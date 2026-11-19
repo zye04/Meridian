@@ -130,15 +130,10 @@ void Renderer::Impl::createClouds() {
     vkCmdDispatch(cmd, kBaseNoiseSize / 4, kBaseNoiseSize / 4, kBaseNoiseSize / 4);
     buildMips3d(cmd, cloudBaseNoise.image, kBaseNoiseSize, baseLevels);
     buildMips3d(cmd, cloudDetailNoise.image, kDetailNoiseSize, detailLevels);
-    for (const Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise}) {
-      transitionImage(cmd, {image->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
-                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
-    }
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
   });
   vkDestroyPipeline(dev, noisePipeline, nullptr);
 
@@ -152,9 +147,9 @@ void Renderer::Impl::createClouds() {
   clouds.detailNoise = first + 2;
   clouds.curlNoise = first + 3;
   writeTexture(clouds.weatherMap, weatherMap.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
-  writeTexture(clouds.baseNoise, cloudBaseNoise.view, textureSampler);
-  writeTexture(clouds.detailNoise, cloudDetailNoise.view, textureSampler);
-  writeTexture(clouds.curlNoise, cloudCurlNoise.view, textureSampler);
+  writeTexture(clouds.baseNoise, cloudBaseNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
+  writeTexture(clouds.detailNoise, cloudDetailNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
+  writeTexture(clouds.curlNoise, cloudCurlNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 void Renderer::Impl::destroyClouds() {
