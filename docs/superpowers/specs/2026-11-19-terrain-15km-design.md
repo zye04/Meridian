@@ -188,8 +188,8 @@ that this world doesn't need.
   only, so hills feed the Hi-Z pyramid and occlude objects behind them.
 - **Outside the crop.** The heightfield is sampled with mirrored repeat,
   so hills continue without seams; aerial perspective hides the
-  repetition. The quadtree root covers ~160 km (enough for the ~130 km
-  horizon seen from the summit; coarse levels cost almost nothing).
+  repetition. The quadtree root is level 16 (~524 km half-size), covering the
+  horizon up to ~20 km altitude; coarse levels cost almost nothing.
   Placement (M2+) stays inside the crop. Walking past the edge is allowed.
 - **Curvature (user picked on 2026-11-19): a display warp.** The world
   stays flat; only rasterized positions bend. Every rasterized vertex

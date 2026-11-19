@@ -25,13 +25,21 @@ before re-researching anything.
 ```bash
 cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
-./build/game/game                                # interactive (WASD, mouse, Esc)
+flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 ```
+
+Every run of the game binary (interactive, capture, perf; Debug or
+Release) goes through `flock /tmp/meridian-gpu.lock`, because two Claude
+instances may render in parallel and GPU timings would collide. Hold it
+only for the run, never for builds. Examples below omit the prefix.
+
+Controls: WASD, mouse, Esc. Fly mode: Space/Ctrl up/down, 30 m/s,
+Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 1.4 m/s (Shift 5 m/s), no vertical keys.
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):
@@ -249,10 +257,12 @@ images are shared between them, and barriers account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; above ~20 km altitude the
-  terrain's root square (1049 km) ends inside the horizon; the
-  terrain's detail displacement (near the camera) casts no shadows (the
-  march tests the bilinear heightfield).
+  leaks partial Vulkan state if it throws; the terrain's detail
+  displacement (+-0.3 m, near the camera) casts no shadows (the march tests
+  the bilinear heightfield); the sunset view (3 degree sun) makes the march
+  cost ~1.15 ms; shadow rays are limited to 20 km; placed vegetation
+  doesn't exist yet (M2); the terrain quadtree root is level 16 (~524 km
+  half-size), covering the horizon up to ~20 km altitude.
   RT shadows trace full-detail BLAS while the raster draws LOD
   clusters; shadow rays start the cluster's simplification error above the
   surface to avoid acne (virtualized geometry slice 2 traces the clusters

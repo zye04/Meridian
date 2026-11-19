@@ -20,9 +20,13 @@ constexpr float kMoveSpeed = 30.0f;
 constexpr float kSprintMultiplier = 5.0f;
 constexpr float kMouseSensitivity = 0.002f;
 constexpr float kMaxPitch = 1.55f;
+constexpr float kWalkSpeed = 1.4f;
+constexpr float kWalkSprintSpeed = 5.0f;
+constexpr float kEyeHeight = 1.7f;
 
+// walkOn: the eye follows the ground at eye height, WASD stays horizontal.
 void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
-                     float deltaSeconds) {
+                     float deltaSeconds, const meridian::Heightfield *walkOn) {
   using meridian::Key;
 
   meridian::MouseDelta mouse = window.mouseDelta();
@@ -30,12 +34,16 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
   camera.pitch = std::clamp(camera.pitch - mouse.y * kMouseSensitivity,
                             -kMaxPitch, kMaxPitch);
 
+  // Walking uses the yaw-only heading so pitch never shrinks the vector.
+  const meridian::Vec3 forward =
+      walkOn ? meridian::Vec3{std::sin(camera.yaw), 0.0f, -std::cos(camera.yaw)}
+             : camera.forward();
   meridian::Vec3 move;
   if (window.isKeyDown(Key::W)) {
-    move = move + camera.forward();
+    move = move + forward;
   }
   if (window.isKeyDown(Key::S)) {
-    move = move - camera.forward();
+    move = move - forward;
   }
   if (window.isKeyDown(Key::D)) {
     move = move + camera.right();
@@ -43,22 +51,25 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
   if (window.isKeyDown(Key::A)) {
     move = move - camera.right();
   }
-  if (window.isKeyDown(Key::Space)) {
-    move.y += 1.0f;
+  if (!walkOn) {
+    if (window.isKeyDown(Key::Space)) {
+      move.y += 1.0f;
+    }
+    if (window.isKeyDown(Key::LeftControl)) {
+      move.y -= 1.0f;
+    }
   }
-  if (window.isKeyDown(Key::LeftControl)) {
-    move.y -= 1.0f;
+  if (meridian::length(move) > 0.0f) {
+    const bool sprint = window.isKeyDown(Key::LeftShift);
+    float speed = walkOn ? (sprint ? kWalkSprintSpeed : kWalkSpeed)
+                         : (sprint ? kMoveSpeed * kSprintMultiplier : kMoveSpeed);
+    camera.position =
+        camera.position + meridian::normalize(move) * (speed * deltaSeconds);
   }
-  if (meridian::length(move) == 0.0f) {
-    return;
+  if (walkOn) {
+    camera.position.y =
+        walkOn->heightAt(camera.position.x, camera.position.z) + kEyeHeight;
   }
-
-  float speed = kMoveSpeed;
-  if (window.isKeyDown(Key::LeftShift)) {
-    speed *= kSprintMultiplier;
-  }
-  camera.position =
-      camera.position + meridian::normalize(move) * (speed * deltaSeconds);
 }
 
 // Loads one cooked Poly Haven ground texture set from assets/terrain/<id>/.
@@ -310,6 +321,8 @@ int main(int argc, char **argv) {
   int frames = 0;
   float gpuMsSum = 0.0f;
   int totalFrames = 0;
+  bool walking = false;
+  bool fWasDown = false;
 
   while (!window.shouldClose() &&
          (interactive || totalFrames < options.frames)) {
@@ -326,7 +339,13 @@ int main(int argc, char **argv) {
     }
 
     if (interactive) {
-      updateFlyCamera(camera, window, deltaSeconds);
+      const bool fDown = window.isKeyDown(meridian::Key::F);
+      if (fDown && !fWasDown) {
+        walking = !walking;
+      }
+      fWasDown = fDown;
+      updateFlyCamera(camera, window, deltaSeconds,
+                      walking ? &terrain : nullptr);
     }
     ++totalFrames;
     if (options.cameraVelocity) {

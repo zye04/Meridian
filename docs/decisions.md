@@ -497,3 +497,25 @@ foliage that survives simplification).
   Laplacian ratio motion/still 0.914, previously 0.904 (0.918 with the old
   hashes, so the content re-roll moves it too); the start's full-ground
   view 0.957 (0.966 before; different needles/soil layout).
+
+## M1 wrap-up: walk mode and measurements (2026-11-19)
+
+- **Walk mode:** `F` toggles walk/fly. Walking keeps the eye 1.7 m above
+  `Heightfield::heightAt` (bilinear, mirrored outside the crop, so it also
+  works past the edge), moves horizontally at 1.4 m/s (Shift: 5 m/s), and
+  ignores Space/Ctrl. Fly mode is unchanged. There is no CLI flag:
+  interactive only.
+- **Measured** (Release, 2560x1440 fullscreen, RTX 4080, median of 5
+  capture runs, 0 validation errors in all 25; ms per frame):
+
+| View | Total | Top passes (scene early / next) |
+|---|---|---|
+| ground `1119 1355.9 -431 -1.55 -0.25` | 1.78 | 1.20 / pyramid 0.25, taa 0.14 |
+| open `1119 1356 -431 -1.55 -0.02` | 1.72 | 1.13 / pyramid 0.25, taa 0.13 |
+| overview `1119 4354 -431 -1.55 -0.35` | 2.99 | 2.64 / taa 0.12, terrain select 0.06 |
+| summit `-359 1408.7 -465 1.57 0` | 1.91 | 1.54 / taa 0.11, terrain select 0.08 |
+| corner `7000 1288.2 7000 -1.55 -0.25` | 2.61 | 2.02 / pyramid 0.26, taa 0.14 |
+
+  The terrain raster and its shadow march sit in scene early; everything
+  else is under 0.3 ms. The 3 degree sunset view (the costliest march,
+  ~1.15 ms) was not re-measured here.
