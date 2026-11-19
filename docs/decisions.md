@@ -206,7 +206,9 @@ foliage that survives simplification).
   builds a Nanite-style DAG per primitive (128-triangle clusters,
   permissive simplification weighted by normals, UV seams protected),
   cached as `<name>.clusters` beside the glTF (keyed by a hash of the
-  loaded geometry; one code path instead of a cooker step). Writing our own
+  loaded geometry and versioned with the meshoptimizer pin; one code path
+  instead of a cooker step). The cache is only an accelerator: a damaged
+  one is validated away and rebuilt, an unwritable one only warns. Writing our own
   builder bought nothing for slice 1; slice 3 changes its simplifier for
   foliage.
   - https://github.com/zeux/meshoptimizer/blob/v1.0/demo/clusterlod.h

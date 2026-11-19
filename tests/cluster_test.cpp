@@ -167,3 +167,31 @@ TEST_CASE("truncated or missing cluster cache is rejected") {
   std::filesystem::remove(file);
   CHECK_FALSE(readClusterCache(file, 7));
 }
+
+TEST_CASE("a cluster cache that can't be written throws and leaves nothing") {
+  // A directory in the way makes the final rename fail.
+  const auto file = cacheFile("meridian_blocked.clusters");
+  std::filesystem::create_directory(file);
+  CHECK_THROWS(writeClusterCache(file, 1, {buildClusterLod(bumpyGrid(4))}));
+  CHECK_FALSE(std::filesystem::exists(file.string() + ".partial"));
+  std::filesystem::remove(file);
+}
+
+TEST_CASE("damaged cluster hierarchies are invalid") {
+  const MeshData mesh = bumpyGrid(20);
+  const ClusterLod lod = buildClusterLod(mesh);
+  CHECK(validClusterLod(lod, mesh.vertices.size()));
+  CHECK_FALSE(validClusterLod(lod, mesh.vertices.size() / 2));
+
+  ClusterLod local = lod;
+  local.triangles[0] = 255;
+  CHECK_FALSE(validClusterLod(local, mesh.vertices.size()));
+
+  ClusterLod range = lod;
+  range.clusters.back().firstTriangle = static_cast<uint32_t>(range.triangles.size());
+  CHECK_FALSE(validClusterLod(range, mesh.vertices.size()));
+
+  ClusterLod size = lod;
+  size.clusters[0].vertexCount = 129;
+  CHECK_FALSE(validClusterLod(size, mesh.vertices.size()));
+}

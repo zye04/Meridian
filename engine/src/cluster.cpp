@@ -15,9 +15,12 @@ namespace meridian {
 namespace {
 
 constexpr size_t kMaxClusterTriangles = 128;
+// mesh.mesh's max_vertices; clodDefaultConfig caps clusters at it too.
+constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
-// Bump when the build settings or Cluster's layout change.
-constexpr uint32_t kCacheVersion = 1;
+// Bump the high half when the build settings or Cluster's layout change; the
+// low half follows the meshoptimizer pin, whose output may change.
+constexpr uint32_t kCacheVersion = (2u << 16) | MESHOPTIMIZER_VERSION;
 
 template <typename T> void writeArray(std::ofstream &out, const std::vector<T> &v) {
   const uint64_t count = v.size();
@@ -106,6 +109,7 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
                        const std::vector<ClusterLod> &lods) {
   // Written aside and renamed, so a crash never leaves a half file behind.
   const std::filesystem::path partial = file.string() + ".partial";
+  std::error_code error;
   {
     std::ofstream out(partial, std::ios::binary | std::ios::trunc);
     out.write(kCacheMagic, sizeof(kCacheMagic));
@@ -119,10 +123,15 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
       writeArray(out, lod.triangles);
     }
     if (!out) {
+      std::filesystem::remove(partial, error);
       throw std::runtime_error("cannot write " + partial.string());
     }
   }
-  std::filesystem::rename(partial, file);
+  std::filesystem::rename(partial, file, error);
+  if (error) {
+    std::filesystem::remove(partial, error);
+    throw std::runtime_error("cannot write " + file.string());
+  }
 }
 
 std::optional<std::vector<ClusterLod>>
@@ -153,6 +162,23 @@ readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
     }
   }
   return lods;
+}
+
+bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
+  for (const Cluster &c : lod.clusters) {
+    if (c.vertexCount > kMaxClusterVertices || c.triangleCount > kMaxClusterTriangles ||
+        uint64_t{c.firstVertex} + c.vertexCount > lod.vertices.size() ||
+        (uint64_t{c.firstTriangle} + c.triangleCount) * 3 > lod.triangles.size()) {
+      return false;
+    }
+    for (uint32_t t = 0; t < c.triangleCount * 3; ++t) {
+      if (lod.triangles[c.firstTriangle * 3 + t] >= c.vertexCount) {
+        return false;
+      }
+    }
+  }
+  return std::all_of(lod.vertices.begin(), lod.vertices.end(),
+                     [&](uint32_t v) { return v < meshVertexCount; });
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,

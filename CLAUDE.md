@@ -178,8 +178,9 @@ images are shared between them, and barriers account for that.
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
-  next to the glTF, keyed by a hash of the loaded geometry; the first load
-  after a change prints "Building clusters" and rewrites it.
+  next to the glTF, keyed by a hash of the loaded geometry and versioned
+  with meshoptimizer; the first load after a change prints "Building
+  clusters" and rewrites it (an unwritable cache only warns).
 - Known gaps: blended instances are drawn at full detail with no culling
   (every instance, every frame; harmless while no scattered model is
   blended); masked-geometry RT shadows are not visually verified yet; TAA

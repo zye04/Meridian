@@ -68,4 +68,8 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
 std::optional<std::vector<ClusterLod>>
 readClusterCache(const std::filesystem::path &file, uint64_t sourceKey);
 
+// Whether every cluster stays inside its own arrays, the mesh shader's
+// limits and the mesh's vertices: a damaged cache must not reach the GPU.
+bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount);
+
 } // namespace meridian

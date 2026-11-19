@@ -275,6 +275,8 @@ uint64_t geometryKey(const std::vector<MeshData> &meshes) {
     }
   };
   for (const MeshData &mesh : meshes) {
+    const uint64_t counts[] = {mesh.vertices.size(), mesh.indices.size()};
+    mix(counts, sizeof(counts));
     mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
     mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
   }
@@ -287,7 +289,12 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
   const uint64_t key = geometryKey(meshes);
   std::filesystem::path cache = gltf;
   cache.replace_extension(".clusters");
-  if (auto cached = readClusterCache(cache, key); cached && cached->size() == meshes.size()) {
+  auto cached = readClusterCache(cache, key);
+  bool valid = cached && cached->size() == meshes.size();
+  for (size_t i = 0; valid && i < meshes.size(); ++i) {
+    valid = validClusterLod((*cached)[i], meshes[i].vertices.size());
+  }
+  if (valid) {
     for (size_t i = 0; i < meshes.size(); ++i) {
       meshes[i].clusters = std::move((*cached)[i]);
     }
@@ -299,7 +306,12 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
     mesh.clusters = buildClusterLod(mesh);
     lods.push_back(mesh.clusters);
   }
-  writeClusterCache(cache, key, lods);
+  // The cache only saves time: a model still loads where it can't be written.
+  try {
+    writeClusterCache(cache, key, lods);
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "warning: %s\n", error.what());
+  }
 }
 
 } // namespace
