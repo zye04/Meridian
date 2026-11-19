@@ -21,7 +21,6 @@ namespace {
 // Two frames in flight: the CPU records frame N+1 while the GPU renders N.
 constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
-constexpr VkClearColorValue kSkyColor = {{0.30f, 0.50f, 0.80f, 1.0f}};
 
 struct Buffer {
   VkBuffer buffer = VK_NULL_HANDLE;
@@ -36,10 +35,17 @@ struct GpuMesh {
   uint32_t indexCount = 0;
 };
 
-// Must match SceneBuffer in the shaders.
+// Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
+  Vec3 sunDirection;
+  float pad0 = 0.0f;
+  Vec3 sunColor;
+  float pad1 = 0.0f;
+  Vec3 skyColor;
+  float pad2 = 0.0f;
 };
+static_assert(sizeof(SceneData) == 112);
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
@@ -579,7 +585,8 @@ MeshId Renderer::uploadMesh(const MeshData &data) {
   return {static_cast<uint32_t>(impl_->meshes.size() - 1)};
 }
 
-void Renderer::draw(const Camera &camera, std::span<const DrawItem> items) {
+void Renderer::draw(const Camera &camera, const Lighting &lighting,
+                    std::span<const DrawItem> items) {
   VkDevice dev = impl_->device.device;
 
   int width = 0;
@@ -624,6 +631,9 @@ void Renderer::draw(const Camera &camera, std::span<const DrawItem> items) {
 
   SceneData scene;
   scene.viewProjection = camera.projection(aspect) * camera.view();
+  scene.sunDirection = lighting.sunDirection;
+  scene.sunColor = lighting.sunColor;
+  scene.skyColor = lighting.skyColor;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -665,7 +675,8 @@ void Renderer::draw(const Camera &camera, std::span<const DrawItem> items) {
   colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  colorAttachment.clearValue.color = kSkyColor;
+  colorAttachment.clearValue.color = {
+      {lighting.skyColor.x, lighting.skyColor.y, lighting.skyColor.z, 1.0f}};
 
   VkRenderingAttachmentInfo depthAttachment{};
   depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

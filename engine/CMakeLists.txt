@@ -22,6 +22,7 @@ foreach(source ${SHADER_SOURCES})
     COMMAND Vulkan::glslc --target-env=vulkan1.3 -O
             ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${output}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source}
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/common.glsl
     VERBATIM)
   list(APPEND SHADER_OUTPUTS ${output})
 endforeach()

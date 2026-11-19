@@ -65,6 +65,7 @@ int main() {
       renderer.uploadMesh(meridian::generateTerrain({}));
   std::vector<meridian::DrawItem> scene = {{terrain}};
 
+  meridian::Lighting lighting;
   meridian::Camera camera;
   camera.position = {0.0f, 300.0f, 700.0f};
   camera.pitch = -0.35f;
@@ -88,7 +89,7 @@ int main() {
     }
 
     updateFlyCamera(camera, window, deltaSeconds);
-    renderer.draw(camera, scene);
+    renderer.draw(camera, lighting, scene);
 
     ++frames;
     if (now - fpsStart >= std::chrono::seconds(1)) {
