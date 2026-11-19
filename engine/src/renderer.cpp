@@ -11,6 +11,34 @@
 
 namespace meridian {
 
+namespace {
+
+void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
+                     VkImageLayout to) {
+  VkImageMemoryBarrier2 barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+  barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  barrier.dstAccessMask =
+      VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
+  barrier.oldLayout = from;
+  barrier.newLayout = to;
+  barrier.image = image;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
+  barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+
+  VkDependencyInfo dependency{};
+  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  dependency.imageMemoryBarrierCount = 1;
+  dependency.pImageMemoryBarriers = &barrier;
+
+  vkCmdPipelineBarrier2(cmd, &dependency);
+}
+
+} // namespace
+
 struct Renderer::Impl {
   vkb::Instance instance;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -141,6 +169,75 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   std::cout << "Swapchain: " << impl_->swapchainImages.size() << " images, "
             << impl_->swapchain.extent.width << "x"
             << impl_->swapchain.extent.height << "\n";
+}
+
+void Renderer::draw() {
+  VkDevice dev = impl_->device.device;
+
+  vkWaitForFences(dev, 1, &impl_->renderFence, VK_TRUE, UINT64_MAX);
+  vkResetFences(dev, 1, &impl_->renderFence);
+
+  uint32_t imageIndex = 0;
+  vkAcquireNextImageKHR(dev, impl_->swapchain.swapchain, UINT64_MAX,
+                        impl_->imageAvailable, VK_NULL_HANDLE, &imageIndex);
+  VkImage image = impl_->swapchainImages[imageIndex];
+
+  VkCommandBuffer cmd = impl_->commandBuffer;
+  vkResetCommandBuffer(cmd, 0);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &beginInfo);
+
+  transitionImage(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+  VkClearColorValue color = {{0.1f, 0.2f, 0.4f, 1.0f}};
+  VkImageSubresourceRange range{};
+  range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  range.levelCount = VK_REMAINING_MIP_LEVELS;
+  range.layerCount = VK_REMAINING_ARRAY_LAYERS;
+  vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       &color, 1, &range);
+
+  transitionImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+  vkEndCommandBuffer(cmd);
+
+  VkCommandBufferSubmitInfo cmdInfo{};
+  cmdInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+  cmdInfo.commandBuffer = cmd;
+
+  VkSemaphoreSubmitInfo waitInfo{};
+  waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+  waitInfo.semaphore = impl_->imageAvailable;
+  waitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+  VkSemaphoreSubmitInfo signalInfo{};
+  signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+  signalInfo.semaphore = impl_->renderFinished[imageIndex];
+  signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+  VkSubmitInfo2 submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &waitInfo;
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &cmdInfo;
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signalInfo;
+  vkQueueSubmit2(impl_->graphicsQueue, 1, &submit, impl_->renderFence);
+
+  VkPresentInfoKHR present{};
+  present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+  present.waitSemaphoreCount = 1;
+  present.pWaitSemaphores = &impl_->renderFinished[imageIndex];
+  present.swapchainCount = 1;
+  present.pSwapchains = &impl_->swapchain.swapchain;
+  present.pImageIndices = &imageIndex;
+  vkQueuePresentKHR(impl_->graphicsQueue, &present);
 }
 
 Renderer::~Renderer() {

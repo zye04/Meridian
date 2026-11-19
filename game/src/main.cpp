@@ -7,5 +7,6 @@ int main() {
 
   while (!window.shouldClose()) {
     window.pollEvents();
+    renderer.draw();
   }
 }
