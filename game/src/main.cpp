@@ -1,3 +1,4 @@
+#include <meridian/model.h>
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
 #include <meridian/window.h>
@@ -5,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -68,6 +70,21 @@ int main() {
       renderer.uploadMesh(meridian::generateTerrain({}),
                           renderer.createMaterial(terrainMaterial));
   std::vector<meridian::DrawItem> scene = {{terrain}};
+
+  // Sample asset from tools/fetch-sample-assets.sh, a few meters in front of
+  // the starting camera.
+  const std::filesystem::path helmetPath =
+      std::filesystem::path(MERIDIAN_ASSET_DIR) / "FlightHelmet/FlightHelmet.gltf";
+  if (std::filesystem::exists(helmetPath)) {
+    meridian::Model helmet = meridian::loadGltf(renderer, helmetPath);
+    const meridian::Mat4 placement = meridian::translation({0.0f, 298.4f, 697.0f});
+    for (meridian::DrawItem item : helmet.drawItems) {
+      item.transform = placement * item.transform;
+      scene.push_back(item);
+    }
+  } else {
+    std::printf("Sample assets missing; run tools/fetch-sample-assets.sh\n");
+  }
 
   meridian::Lighting lighting;
   meridian::Camera camera;

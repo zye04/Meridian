@@ -17,7 +17,22 @@ FetchContent_Declare(basis_universal
     URL_HASH SHA256=216e49e1f4213d4bfa4afaa07527e16bac28533dddd444197d3aa19230ac130c
     EXCLUDE_FROM_ALL
     SYSTEM)
-FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator basis_universal)
+FetchContent_Declare(fastgltf
+    GIT_REPOSITORY https://github.com/spnda/fastgltf.git
+    GIT_TAG v1.0.1
+    SYSTEM)
+# MikkTSpace: the standard tangent basis that normal-map bakers use.
+FetchContent_Declare(mikktspace
+    GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
+    GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409)
+FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator basis_universal
+                           fastgltf mikktspace)
+
+add_library(mikktspace STATIC ${mikktspace_SOURCE_DIR}/mikktspace.c)
+target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
+target_compile_options(mikktspace PRIVATE -w)
+target_compile_options(fastgltf PRIVATE -w)
+target_compile_options(fastgltf_simdutf PRIVATE -w)
 # Third-party code: don't apply our warning flags to it.
 target_compile_options(basisu_encoder PRIVATE -w)
 target_include_directories(basisu_encoder SYSTEM INTERFACE
@@ -61,6 +76,7 @@ endforeach()
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_library(meridian STATIC
+    src/model.cpp
     src/renderer.cpp
     src/terrain.cpp
     src/texture.cpp
@@ -76,4 +92,6 @@ target_link_libraries(meridian PRIVATE
     Vulkan::Vulkan
     vk-bootstrap::vk-bootstrap
     GPUOpen::VulkanMemoryAllocator
-    basisu_encoder)
+    basisu_encoder
+    fastgltf
+    mikktspace)
