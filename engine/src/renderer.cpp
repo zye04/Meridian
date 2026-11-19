@@ -4,6 +4,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <VkBootstrap.h>
+#include <basisu_enc.h>
 #include <vk_mem_alloc.h>
 
 #if defined(__has_feature)
@@ -15,11 +16,13 @@
 
 #include <algorithm>
 #include <array>
-#include <optional>
+#include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -271,6 +274,23 @@ float halton(uint32_t index, uint32_t base) {
     index /= base;
   }
   return result;
+}
+
+// Counts validation errors (and prints every message, like vk-bootstrap's
+// default messenger) so automated runs can fail on them.
+std::atomic<uint32_t> validationErrors{0};
+
+VKAPI_ATTR VkBool32 VKAPI_CALL
+debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+              VkDebugUtilsMessageTypeFlagsEXT,
+              const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
+  const bool error = severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+  if (error) {
+    ++validationErrors;
+  }
+  std::fprintf(stderr, "[%s: Validation] %s\n", error ? "ERROR" : "WARNING",
+               data->pMessage);
+  return VK_FALSE;
 }
 
 void check(VkResult result, const char *what) {
@@ -592,6 +612,8 @@ struct Renderer::Impl {
 
   std::vector<GpuMesh> meshes;
 
+  std::optional<std::filesystem::path> capturePath;
+
   void createSwapchain();
   void destroySwapchain();
   void createFrames();
@@ -860,6 +882,9 @@ void Renderer::Impl::createSwapchain() {
                                VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
           .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
           .set_desired_extent(width, height)
+          // Transfer source: frames can be copied out for captures.
+          .add_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
           .build();
   if (!built) {
     throw std::runtime_error(built.error().message());
@@ -1423,7 +1448,11 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   vkb::InstanceBuilder instanceBuilder;
   instanceBuilder.set_app_name("Meridian").require_api_version(1, 3, 0);
   if (kEnableValidation) {
-    instanceBuilder.request_validation_layers().use_default_debug_messenger();
+    instanceBuilder.request_validation_layers()
+        .set_debug_callback(debugCallback)
+        .set_debug_messenger_severity(
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT);
   }
   auto instance = instanceBuilder.build();
   if (!instance) {
@@ -1767,6 +1796,12 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
 }
 
 float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
+
+void Renderer::requestCapture(const std::filesystem::path &path) {
+  impl_->capturePath = path;
+}
+
+uint32_t Renderer::validationErrorCount() const { return validationErrors; }
 
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     std::span<const DrawItem> items) {
@@ -2175,12 +2210,41 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
 
-  transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_NONE, 0});
+  // Optional capture: copy the finished frame into a CPU-readable buffer.
+  Buffer captureBuffer;
+  const bool capturing = impl_->capturePath.has_value();
+  if (capturing) {
+    captureBuffer = impl_->createBuffer(
+        VkDeviceSize{extent.width} * extent.height * 4,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_COPY_BIT,
+                          VK_ACCESS_2_TRANSFER_READ_BIT});
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {extent.width, extent.height, 1};
+    vkCmdCopyImageToBuffer(cmd, swapchainImage,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           captureBuffer.buffer, 1, &region);
+    transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                          VK_PIPELINE_STAGE_2_COPY_BIT, 0,
+                          VK_PIPELINE_STAGE_2_NONE, 0});
+  } else {
+    transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_NONE, 0});
+  }
 
   vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                        impl_->timestampPool, frameSlot * 2 + 1);
@@ -2211,6 +2275,25 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   submit.pSignalSemaphoreInfos = &signalInfo;
   check(vkQueueSubmit2(impl_->graphicsQueue, 1, &submit, frame.renderFence),
         "vkQueueSubmit2");
+
+  if (capturing) {
+    check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
+          "vkWaitForFences");
+    check(vmaInvalidateAllocation(impl_->allocator, captureBuffer.allocation, 0,
+                                  VK_WHOLE_SIZE),
+          "vmaInvalidateAllocation");
+    // The swapchain is BGRA8 sRGB, already display-encoded; PNG wants RGBA.
+    basisu::image png(extent.width, extent.height);
+    const auto *bgra = static_cast<const uint8_t *>(captureBuffer.mapped);
+    for (uint32_t i = 0; i < extent.width * extent.height; ++i) {
+      png.get_ptr()[i].set(bgra[i * 4 + 2], bgra[i * 4 + 1], bgra[i * 4], 255);
+    }
+    if (!basisu::save_png(impl_->capturePath->string(), png)) {
+      std::fprintf(stderr, "Capture failed: %s\n", impl_->capturePath->c_str());
+    }
+    impl_->destroyBuffer(captureBuffer);
+    impl_->capturePath.reset();
+  }
 
   VkPresentInfoKHR present{};
   present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;

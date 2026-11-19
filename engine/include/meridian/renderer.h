@@ -6,6 +6,7 @@
 #include <meridian/texture.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -113,6 +114,13 @@ public:
 
   // GPU time of a recent frame, measured with timestamp queries.
   float gpuFrameMs() const;
+
+  // Saves the next drawn frame (after tonemapping) as a PNG. For automated
+  // visual checks; stalls that frame until the GPU is done.
+  void requestCapture(const std::filesystem::path &path);
+
+  // Vulkan validation errors reported so far (Debug builds only).
+  uint32_t validationErrorCount() const;
 
 private:
   struct Impl;
