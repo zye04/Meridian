@@ -28,6 +28,12 @@ void buildMips3d(VkCommandBuffer cmd, VkImage image, uint32_t size, uint32_t lev
   }
 }
 
+// The cloud march resolution: [0] quarter, [1] half of the screen, rounded up.
+VkExtent2D cloudTargetExtent(VkExtent2D screen, uint32_t resolution) {
+  const uint32_t divisor = resolution == 0 ? 4 : 2;
+  return {(screen.width + divisor - 1) / divisor, (screen.height + divisor - 1) / divisor};
+}
+
 } // namespace
 
 void Renderer::Impl::createClouds() {
@@ -73,12 +79,14 @@ void Renderer::Impl::createClouds() {
   setLayoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &setLayoutInfo, nullptr, &cloudSetLayout),
         "vkCreateDescriptorSetLayout");
-  const VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4};
+  // The generator set, then one march set per resolution.
+  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4 + 2 * 2},
+                                            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * 3}};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.maxSets = 1;
-  poolInfo.poolSizeCount = 1;
-  poolInfo.pPoolSizes = &poolSize;
+  poolInfo.maxSets = 3;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
   check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &cloudPool), "vkCreateDescriptorPool");
   VkDescriptorSetAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -137,6 +145,42 @@ void Renderer::Impl::createClouds() {
   });
   vkDestroyPipeline(dev, noisePipeline, nullptr);
 
+  // Must match clouds_march.comp and clouds_composite.frag.
+  constexpr VkShaderStageFlags kMarchStages =
+      VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  const VkDescriptorSetLayoutBinding marchBindings[] = {
+      {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, kMarchStages, nullptr},
+      {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+      {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+      {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+      {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+  setLayoutInfo.bindingCount = 5;
+  setLayoutInfo.pBindings = marchBindings;
+  check(vkCreateDescriptorSetLayout(dev, &setLayoutInfo, nullptr, &cloudMarchSetLayout),
+        "vkCreateDescriptorSetLayout");
+  const VkDescriptorSetLayout marchSetLayouts[] = {cloudMarchSetLayout, cloudMarchSetLayout};
+  allocInfo.descriptorSetCount = 2;
+  allocInfo.pSetLayouts = marchSetLayouts;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, cloudMarchSets.data()),
+        "vkAllocateDescriptorSets");
+  // Sets 0 and 1 as in the scene layout (atmosphere LUTs, bindless).
+  const VkDescriptorSetLayout marchLayouts[] = {atmosphereSetLayout, materialSetLayout,
+                                                cloudMarchSetLayout};
+  const VkPushConstantRange marchPushRange{kMarchStages, 0, sizeof(PushConstants)};
+  layoutInfo.setLayoutCount = 3;
+  layoutInfo.pSetLayouts = marchLayouts;
+  layoutInfo.pPushConstantRanges = &marchPushRange;
+  check(vkCreatePipelineLayout(dev, &layoutInfo, nullptr, &cloudMarchLayout),
+        "vkCreatePipelineLayout");
+  cloudMarchPipeline = createComputePipeline(dev, "clouds_march.comp", cloudMarchLayout);
+  const VkFormat hdrFormat[] = {kHdrFormat};
+  cloudCompositePipeline = createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
+                                                        .fragmentShader = "clouds_composite.frag",
+                                                        .layout = cloudMarchLayout,
+                                                        .colorFormats = hdrFormat,
+                                                        .alphaBlend = true});
+  createCloudTargets();
+
   if (textures.size() + 4 > kMaxTextures) {
     throw std::runtime_error("texture table is full");
   }
@@ -154,6 +198,10 @@ void Renderer::Impl::createClouds() {
 
 void Renderer::Impl::destroyClouds() {
   VkDevice dev = device.device;
+  vkDestroyPipeline(dev, cloudCompositePipeline, nullptr);
+  vkDestroyPipeline(dev, cloudMarchPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, cloudMarchLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, cloudMarchSetLayout, nullptr);
   vkDestroyPipeline(dev, weatherMapPipeline, nullptr);
   vkDestroyPipelineLayout(dev, cloudLayout, nullptr);
   vkDestroyDescriptorPool(dev, cloudPool, nullptr);
@@ -191,6 +239,132 @@ void Renderer::Impl::drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame)
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+}
+
+// Called with the swapchain (the targets follow the render size) and once the
+// march sets exist; the device is idle either way.
+void Renderer::Impl::createCloudTargets() {
+  if (cloudMarchSets[0] == VK_NULL_HANDLE) {
+    return;
+  }
+  constexpr VkImageUsageFlags kUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  for (uint32_t r = 0; r < 2; ++r) {
+    const VkExtent2D size = cloudTargetExtent(renderExtent, r);
+    const VkExtent3D extent{size.width, size.height, 1};
+    cloudColor[r] = createImage(kHdrFormat, extent, kUsage, VK_IMAGE_ASPECT_COLOR_BIT);
+    cloudDepth[r] = createImage(VK_FORMAT_R32_SFLOAT, extent, kUsage, VK_IMAGE_ASPECT_COLOR_BIT);
+  }
+  submitNow([&](VkCommandBuffer cmd) {
+    for (uint32_t r = 0; r < 2; ++r) {
+      for (const Image *image : {&cloudColor[r], &cloudDepth[r]}) {
+        transitionImage(cmd, {image->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+      }
+    }
+  });
+  for (uint32_t r = 0; r < 2; ++r) {
+    const VkDescriptorImageInfo images[] = {
+        {nearestSampler, depth.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {VK_NULL_HANDLE, cloudColor[r].view, VK_IMAGE_LAYOUT_GENERAL},
+        {VK_NULL_HANDLE, cloudDepth[r].view, VK_IMAGE_LAYOUT_GENERAL},
+        {linearSampler, cloudColor[r].view, VK_IMAGE_LAYOUT_GENERAL},
+        {linearSampler, cloudDepth[r].view, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet writes[5]{};
+    for (uint32_t b = 0; b < 5; ++b) {
+      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[b].dstSet = cloudMarchSets[r];
+      writes[b].dstBinding = b;
+      writes[b].descriptorCount = 1;
+      writes[b].descriptorType = b == 1 || b == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                  : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writes[b].pImageInfo = &images[b];
+    }
+    vkUpdateDescriptorSets(device.device, 5, writes, 0, nullptr);
+  }
+}
+
+void Renderer::Impl::destroyCloudTargets() {
+  for (uint32_t r = 0; r < 2; ++r) {
+    if (cloudColor[r].image != VK_NULL_HANDLE) {
+      destroyImage(cloudColor[r]);
+      destroyImage(cloudDepth[r]);
+    }
+  }
+}
+
+// Inside the local layer or within kCloudLayerMargin of it, the march runs
+// at half resolution: clouds fill the view up close, where quarter
+// resolution would blur them.
+bool Renderer::Impl::cameraInCloudLayer(Vec3 cameraPosition) const {
+  constexpr float kCloudLayerMargin = 250.0f;
+  return cameraPosition.y > cameraCloudLayer[0] - kCloudLayerMargin &&
+         cameraPosition.y < cameraCloudLayer[1] + kCloudLayerMargin;
+}
+
+// After the late scene pass: the march (compute) into this resolution's
+// targets, then the composite over the HDR target (still a color
+// attachment). Leaves the depth image in SHADER_READ_ONLY_OPTIMAL.
+void Renderer::Impl::drawClouds(VkCommandBuffer cmd, const FrameData &frame,
+                                Vec3 cameraPosition) {
+  transitionImage(cmd, {depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  // The targets are shared by both frames in flight: wait for the previous
+  // frame's composite before overwriting them.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+
+  const uint32_t r = cameraInCloudLayer(cameraPosition) ? 1 : 0;
+  const VkDescriptorSet sets[] = {atmosphereSet, materialSet, cloudMarchSets[r]};
+  PushConstants push;
+  push.sceneBuffer = frame.sceneBuffer.address;
+  constexpr VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMarchPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMarchLayout, 0, 3, sets, 0,
+                          nullptr);
+  vkCmdPushConstants(cmd, cloudMarchLayout, kStages, 0, sizeof(push), &push);
+  const VkExtent2D size = cloudTargetExtent(renderExtent, r);
+  vkCmdDispatch(cmd, (size.width + 7) / 8, (size.height + 7) / 8, 1);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+  VkRenderingAttachmentInfo color{};
+  color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  color.imageView = hdr.view;
+  color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  VkRenderingInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  rendering.renderArea = {{0, 0}, renderExtent};
+  rendering.layerCount = 1;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachments = &color;
+  vkCmdBeginRendering(cmd, &rendering);
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(renderExtent.width);
+  viewport.height = static_cast<float>(renderExtent.height);
+  viewport.maxDepth = 1.0f;
+  const VkRect2D scissor{{0, 0}, renderExtent};
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudCompositePipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudMarchLayout, 0, 3, sets, 0,
+                          nullptr);
+  vkCmdPushConstants(cmd, cloudMarchLayout, kStages, 0, sizeof(push), &push);
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+  vkCmdEndRendering(cmd);
 }
 
 void Renderer::dumpWeatherMap(const std::filesystem::path &path) {

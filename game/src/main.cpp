@@ -361,6 +361,7 @@ struct Options {
   float timeScale = 1.0f;
   // Blends from the start weather to overcast over this many game seconds.
   std::optional<float> weatherFront;
+  bool clouds = true;
   // Saves the weather map after the last frame (debug).
   std::optional<std::filesystem::path> weatherMapPath;
 };
@@ -473,6 +474,12 @@ Options parseOptions(int argc, char **argv) {
       options.timeScale = number(i);
     } else if (arg == "--weather-front") {
       options.weatherFront = number(i);
+    } else if (arg == "--clouds") {
+      const std::string value = text(i);
+      if (value != "on" && value != "off") {
+        throw std::runtime_error("--clouds takes on or off");
+      }
+      options.clouds = value == "on";
     } else if (arg == "--dump-weather-map") {
       options.weatherMapPath = text(i);
     } else {
@@ -487,7 +494,7 @@ Options parseOptions(int argc, char **argv) {
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
                                "--windowed, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
-                               "--weather-front seconds, --dump-weather-map file.png, "
+                               "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
                                "--capture file.png|file.pfm, --frames n)");
     }
   }
@@ -558,6 +565,7 @@ int main(int argc, char **argv) {
   if (aa.method != meridian::AaMethod::Taa || options.renderScale) {
     renderer.setAntiAliasing(aa);
   }
+  renderer.setCloudsEnabled(options.clouds);
 
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
   const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";

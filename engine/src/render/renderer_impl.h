@@ -289,6 +289,20 @@ struct Renderer::Impl {
   VkDescriptorSet cloudSet = VK_NULL_HANDLE;
   VkPipelineLayout cloudLayout = VK_NULL_HANDLE;
   VkPipeline weatherMapPipeline = VK_NULL_HANDLE;
+  // Cloud march output, [0] quarter and [1] half resolution (inside the
+  // layer): luminance + transmittance and mean cloud depth, sized like the
+  // swapchain and recreated with it, always in GENERAL layout. One set per
+  // resolution (scene depth, the two images as storage and as samplers).
+  std::array<Image, 2> cloudColor;
+  std::array<Image, 2> cloudDepth;
+  VkDescriptorSetLayout cloudMarchSetLayout = VK_NULL_HANDLE;
+  std::array<VkDescriptorSet, 2> cloudMarchSets{};
+  VkPipelineLayout cloudMarchLayout = VK_NULL_HANDLE;
+  VkPipeline cloudMarchPipeline = VK_NULL_HANDLE;
+  VkPipeline cloudCompositePipeline = VK_NULL_HANDLE;
+  bool cloudsEnabled = true;
+  // Bottom and top (m) of the cloud layer at the camera, from setWeather.
+  float cameraCloudLayer[2] = {};
 
   std::vector<GpuMesh> meshes;
 
@@ -309,6 +323,10 @@ struct Renderer::Impl {
   void destroyClouds();
   void placeWeatherMap(Vec3 cameraPosition);
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
+  void createCloudTargets();
+  void destroyCloudTargets();
+  bool cameraInCloudLayer(Vec3 cameraPosition) const;
+  void drawClouds(VkCommandBuffer cmd, const FrameData &frame, Vec3 cameraPosition);
 
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect,

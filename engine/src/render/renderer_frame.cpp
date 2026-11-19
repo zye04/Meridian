@@ -493,6 +493,13 @@ void Renderer::setWeather(const Weather &weather) {
   clouds.time = static_cast<float>(
       std::fmod(weather.time() / kWeatherCellLifetime, double{kWeatherTimePeriod}));
 
+  // The layer at the camera, as cloudLayer (clouds.glsl) with the tallest
+  // towers; from last frame's position (cameraInCloudLayer's margin covers
+  // the lag).
+  const float type = std::clamp(weather.stateAt(impl_->previousCameraPosition).type, 0.0f, 1.0f);
+  impl_->cameraCloudLayer[0] = std::lerp(kStratusBottom, kCumulusBottom, type);
+  impl_->cameraCloudLayer[1] = std::lerp(kStratusTop, kCumulusTop, type);
+
   GpuWeather &gpu = impl_->weather;
   gpu.coverage = state.coverage;
   gpu.type = state.type;
@@ -505,6 +512,8 @@ void Renderer::setWeather(const Weather &weather) {
         static_cast<float>(history[i].travel - weather.travel());
   }
 }
+
+void Renderer::setCloudsEnabled(bool enabled) { impl_->cloudsEnabled = enabled; }
 
 void Renderer::requestCapture(const std::filesystem::path &path) {
   impl_->capturePath = path;
@@ -844,7 +853,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                        kDepthStages | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        kDepthStages | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                         kDepthStages,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
@@ -1007,6 +1017,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   vkCmdEndRendering(cmd);
   endPass("scene late");
+
+  if (impl_->cloudsEnabled) {
+    impl_->drawClouds(cmd, frame, camera.position);
+    endPass("clouds");
+  }
 
   // --- Upscaler: render-sized scene -> display-sized output.
 
