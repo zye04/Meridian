@@ -332,18 +332,30 @@ struct Renderer::Impl {
   VkPipeline weatherMapPipeline = VK_NULL_HANDLE;
   // Cloud march output, [0] quarter and [1] half resolution (inside the
   // layer): luminance + transmittance and mean cloud depth, sized like the
-  // swapchain and recreated with it, always in GENERAL layout. One set per
-  // resolution (scene depth, the two images as storage and as samplers).
+  // swapchain and recreated with it, always in GENERAL layout; and the
+  // temporal history of both, ping-ponged ([resolution][frame parity]).
+  // One set per resolution and parity (scene depth, the march targets, the
+  // history to read and the one to write, HDR and motion); the march,
+  // resolve and composite share the layout.
   std::array<Image, 2> cloudColor;
   std::array<Image, 2> cloudDepth;
+  std::array<std::array<Image, 2>, 2> cloudHistory;
+  std::array<std::array<Image, 2>, 2> cloudHistoryDepth;
   VkDescriptorSetLayout cloudMarchSetLayout = VK_NULL_HANDLE;
-  std::array<VkDescriptorSet, 2> cloudMarchSets{};
+  std::array<VkDescriptorSet, 4> cloudMarchSets{};
   VkPipelineLayout cloudMarchLayout = VK_NULL_HANDLE;
   VkPipeline cloudMarchPipeline = VK_NULL_HANDLE;
+  VkPipeline cloudResolvePipeline = VK_NULL_HANDLE;
   VkPipeline cloudCompositePipeline = VK_NULL_HANDLE;
   bool cloudsEnabled = true;
+  // The resolution last frame's history was resolved at (none yet: 2).
+  uint32_t cloudHistoryResolution = 2;
   // Bottom and top (m) of the cloud layer at the camera, from setWeather.
   float cameraCloudLayer[2] = {};
+  // Last frame's cloud wind offset modulo a short period, for the
+  // displacement since then.
+  float cloudWindLocal[2] = {};
+  bool cloudWindLocalValid = false;
 
   std::vector<GpuMesh> meshes;
 

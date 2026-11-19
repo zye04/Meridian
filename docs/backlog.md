@@ -43,6 +43,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | XeSS backend | Intel's upscaler; no Linux binaries | Motion-clarity spec non-goal | When Linux binaries exist and a non-NVIDIA target needs it |
 | FSR 4 backend | Better than TAA v2 on AMD RDNA 2-4 (FidelityFX SDK 2.4, MIT, Vulkan); Linux binaries unverified | Motion-clarity spec non-goal | When a non-NVIDIA target exists |
 | Grade look tuning | The game starts with a grade tuned toward the Chlorophyll Engine frames (decisions.md, "Visible quality pass"); the engine default stays identity | Motion-clarity spec; quality pass | Final look after sky occlusion, crown AO and the ground lane's terrain; the user tunes it in game (G) and the grade file is the source |
+| Clouds in the DLSS transparency mask | The cloud composite blends over HDR but leaves `transparencyMask` at 0, so DLSS would treat cloud pixels as opaque | Clouds rebase onto the render/display split, 2026-11-20 | With the DLSS module |
 
 ## Geometry and vegetation
 

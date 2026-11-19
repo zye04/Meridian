@@ -528,6 +528,19 @@ void Renderer::setWeather(const Weather &weather) {
   const Vec3 cloudOffset = weather.windOffsetModulo(kCloudWindAltitude, kCloudNoisePeriod);
   clouds.windOffset[0] = cloudOffset.x;
   clouds.windOffset[1] = cloudOffset.z;
+  // The displacement since last frame, from offsets wrapped by a short
+  // period (precise in float, reduced in double) rather than by
+  // differencing the noise offsets, which jump where they wrap.
+  constexpr double kDisplacementPeriod = 4096.0;
+  const Vec3 local = weather.windOffsetModulo(kCloudWindAltitude, kDisplacementPeriod);
+  for (int i = 0; i < 2; ++i) {
+    const float now = i == 0 ? local.x : local.z;
+    const double moved = std::remainder(double{now} - impl_->cloudWindLocal[i],
+                                        kDisplacementPeriod);
+    clouds.windDisplacement[i] = impl_->cloudWindLocalValid ? static_cast<float>(moved) : 0.0f;
+    impl_->cloudWindLocal[i] = now;
+  }
+  impl_->cloudWindLocalValid = true;
   clouds.time = static_cast<float>(
       std::fmod(weather.time() / kWeatherCellLifetime, double{kWeatherTimePeriod}));
 
@@ -1103,32 +1116,44 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // radiance where a short march toward the sun hits it. After the clouds:
   // within the 60 m fade, a cloud stands in front only inside the layer.
 
-  for (VkImage target : colorTargets) {
-    if (target == impl_->hdr.image) {
+  // The cloud composite (compute) leaves HDR and motion in GENERAL and depth in
+  // SHADER_READ_ONLY.
+  const bool clouds = impl_->cloudsEnabled;
+  for (size_t i = 0; i < colorTargets.size(); ++i) {
+    if (colorTargets[i] == impl_->hdr.image) {
       continue;
     }
-    transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
-                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    const bool written = clouds && i < 2;
+    transitionImage(cmd, {colorTargets[i], VK_IMAGE_ASPECT_COLOR_BIT,
+                          written ? VK_IMAGE_LAYOUT_GENERAL
+                                  : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          written ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+                                  : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          written ? VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
+                                  : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
   }
   transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        clouds ? VK_IMAGE_LAYOUT_GENERAL
+                               : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_GENERAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        clouds ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+                               : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        clouds ? VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
+                               : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
-  transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
-                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, kDepthStages,
-                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  if (!clouds) {
+    transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, kDepthStages,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  }
   if (impl_->effects.contactShadows) {
     ContactShadowConstants contactPush;
     contactPush.sceneBuffer = scenePush.sceneBuffer;

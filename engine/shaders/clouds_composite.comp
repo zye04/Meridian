@@ -1,0 +1,113 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "clouds_temporal.glsl"
+
+// Composites the resolved clouds over the HDR target at full resolution
+// (premultiplied: clouds + background x transmittance) and, where clouds
+// dominate the pixel, writes their motion. Reads scene depth; writes HDR
+// color and motion only. The upsample is bilateral on scene depth: each
+// low-resolution texel counts only where it agrees with this pixel's
+// surface, so silhouettes in front of clouds stay sharp and clouds never
+// bleed onto them.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0) uniform sampler2D sceneDepth;
+layout(set = 2, binding = 5, rgba16f) uniform readonly image2D resolvedColor;
+layout(set = 2, binding = 6, r32f) uniform readonly image2D resolvedDepth;
+layout(set = 2, binding = 7, rgba16f) uniform image2D hdr;
+layout(set = 2, binding = 8, rg16f) uniform writeonly image2D motion;
+
+// Cloud opacity above which the motion target gets the clouds' motion.
+const float kMotionOpacity = 0.5;
+const float kSky = 1e30;
+
+vec4 cloudSum;
+float weightSum;
+float depthSum;
+float depthWeight;
+
+// Adds a low-resolution texel as seen from this pixel's surface (distance
+// along the ray; kSky for none): a texel where geometry hid the layer says
+// nothing about the sky here, and clouds behind the surface are hidden.
+void accumulate(ivec2 texel, float weight, float sceneDistance) {
+    vec4 cloud = imageLoad(resolvedColor, texel);
+    float d = imageLoad(resolvedDepth, texel).r;
+    if (d < 0.0) {
+        if (sceneDistance == kSky) {
+            return;
+        }
+        cloud = vec4(0.0, 0.0, 0.0, 1.0);
+    } else if (d > sceneDistance) {
+        cloud = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    cloudSum += cloud * weight;
+    weightSum += weight;
+    float opacity = (1.0 - cloud.a) * weight;
+    if (d > 0.0 && opacity > 0.0) {
+        depthSum += d * opacity;
+        depthWeight += opacity;
+    }
+}
+
+void main() {
+    ivec2 size = imageSize(hdr);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+
+    // The surface's distance along this pixel's ray, from reverse-Z.
+    float sceneDistance = kSky;
+    float depth = texelFetch(sceneDepth, pixel, 0).r;
+    if (depth > 0.0) {
+        vec2 ndc = (uv * 2.0 - 1.0) / pc.scene.projectionScale;
+        sceneDistance = pc.scene.nearPlane / depth * sqrt(1.0 + dot(ndc, ndc));
+    }
+
+    ivec2 lowSize = imageSize(resolvedColor);
+    vec2 p = uv * vec2(lowSize) - 0.5;
+    ivec2 base = ivec2(floor(p));
+    vec2 f = p - vec2(base);
+    cloudSum = vec4(0.0);
+    weightSum = 0.0;
+    depthSum = 0.0;
+    depthWeight = 0.0;
+    for (int y = 0; y <= 1; ++y) {
+        for (int x = 0; x <= 1; ++x) {
+            float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
+            accumulate(clamp(base + ivec2(x, y), ivec2(0), lowSize - 1), w, sceneDistance);
+        }
+    }
+    // Sky in a gap the bilinear footprint saw only as geometry (thin gaps
+    // between silhouettes): the nearest ring of texels that saw the sky.
+    if (weightSum < 1e-3) {
+        cloudSum = vec4(0.0);
+        weightSum = 0.0;
+        depthSum = 0.0;
+        depthWeight = 0.0;
+        for (int y = -1; y <= 2; ++y) {
+            for (int x = -1; x <= 2; ++x) {
+                accumulate(clamp(base + ivec2(x, y), ivec2(0), lowSize - 1), 1.0, sceneDistance);
+            }
+        }
+    }
+    if (weightSum <= 0.0) {
+        return;
+    }
+    vec4 cloud = cloudSum / weightSum;
+    vec4 background = imageLoad(hdr, pixel);
+    imageStore(hdr, pixel, vec4(cloud.rgb + background.rgb * cloud.a, background.a));
+
+    if (1.0 - cloud.a > kMotionOpacity && depthWeight > 0.0) {
+        vec3 direction = cloudRay(uv);
+        vec4 currentClip = pc.scene.currentViewProjection * vec4(direction, 0.0);
+        vec4 previousClip = cloudPreviousClip(direction, depthSum / depthWeight);
+        imageStore(motion, pixel,
+                   vec4((previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5,
+                        0.0, 0.0));
+    }
+}
