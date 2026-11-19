@@ -99,7 +99,11 @@ sources. Check here before re-researching a topic.
   - https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_texture_transform
 - **meridian-cook** converts PNG/JPEG to KTX2 UASTC (slower pack level,
   zstd, mips; sRGB for color, renormalized normal maps) and writes a
-  standard glTF.
+  standard glTF. It cooks blended or masked materials opaque when their
+  alpha is provably 1 (base color factor alpha 1 and no base color image
+  pixel below 255): Poly Haven marks modeled leaves `BLEND` and plants
+  `MASK` with JPEG base colors, which cost a blended, unculled
+  full-detail draw or a no-op alpha test and kept leaves out of shadows.
 - **Transparency**: separate opaque/masked/blended pipelines (discard would
   disable early-Z for opaque draws), premultiplied blending so glass keeps
   full specular, no motion writes for blended surfaces, and back-to-front

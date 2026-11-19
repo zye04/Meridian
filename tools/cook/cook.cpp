@@ -11,10 +11,12 @@
 #include <fastgltf/tools.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <variant>
@@ -144,19 +146,39 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));
 
   const auto usages = imageUsages(asset);
+  std::set<size_t> opaqueImages;
   for (const auto &[index, usage] : usages) {
     fastgltf::Image &image = asset.images[index];
     std::printf("Encoding image %zu (%s)\n", index,
                 usage == Usage::Color ? "color" : usage == Usage::Normal ? "normal" : "data");
-    std::vector<uint8_t> ktx2 =
-        encodeKtx2(decode(sourceImageBytes(asset, image, input.parent_path())), usage,
-                   jobPool);
+    const basisu::image decoded =
+        decode(sourceImageBytes(asset, image, input.parent_path()));
+    if (!decoded.has_alpha()) {
+      opaqueImages.insert(index);
+    }
+    std::vector<uint8_t> ktx2 = encodeKtx2(decoded, usage, jobPool);
 
     fastgltf::sources::Vector encoded;
     encoded.bytes.resize(ktx2.size());
     std::memcpy(encoded.bytes.data(), ktx2.data(), ktx2.size());
     encoded.mimeType = fastgltf::MimeType::KTX2;
     image.data = std::move(encoded);
+  }
+
+  // Exporters often mark materials blended or masked when their alpha is 1
+  // everywhere; cooking them opaque skips needless blending and alpha tests.
+  for (fastgltf::Material &m : asset.materials) {
+    const auto &baseColor = m.pbrData.baseColorTexture;
+    const bool opaqueTexture =
+        !baseColor ||
+        opaqueImages.contains(
+            asset.textures[baseColor->textureIndex].imageIndex.value_or(SIZE_MAX));
+    if (m.alphaMode != fastgltf::AlphaMode::Opaque && opaqueTexture &&
+        m.pbrData.baseColorFactor[3] == 1.0f && m.alphaCutoff <= 1.0f) {
+      std::printf("Material %s has no transparency; cooking it opaque\n",
+                  std::string(m.name).c_str());
+      m.alphaMode = fastgltf::AlphaMode::Opaque;
+    }
   }
 
   // Point every texture at its KTX2 image through KHR_texture_basisu.
