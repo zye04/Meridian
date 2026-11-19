@@ -255,7 +255,7 @@ inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
 }
 
 // Gusts (wind.glsl): the phase advances this many noise cells per game second
-// and wraps at the noise's period along it.
+// and wraps at the noise's period along it (passed in GpuWind).
 constexpr double kGustPhaseRate = 0.25;
 constexpr double kGustPhasePeriod = 256.0;
 
@@ -270,7 +270,8 @@ struct GpuWind {
   float shearExponent = kWindShearExponent;
   float veer = kWindVeer;
   float veerAltitude = kWindVeerAltitude;
-  float pad[2] = {};
+  float gustPhasePeriod = static_cast<float>(kGustPhasePeriod);
+  float pad = 0.0f;
 };
 static_assert(sizeof(GpuWind) == 48);
 
@@ -290,6 +291,61 @@ struct GpuWeather {
   VkDeviceAddress history = 0;
 };
 static_assert(sizeof(GpuWeather) == 32);
+
+// Clouds (clouds.glsl). Layer heights above sea level (m). The weather map:
+// 512^2 texels over a 60 km window around the camera, texel-snapped.
+constexpr float kCumulusBottom = 2500.0f;
+constexpr float kCumulusTop = 4500.0f;
+constexpr float kStratusBottom = 1800.0f;
+constexpr float kStratusTop = 3000.0f;
+constexpr uint32_t kWeatherMapResolution = 512;
+constexpr double kWeatherMapSize = 60000.0;
+// The weather map and the noise volumes move with the wind at this altitude.
+constexpr float kCloudWindAltitude = 3000.0f;
+// World-space tile periods (m). Every cloud noise tiles with kCloudNoisePeriod,
+// so the wind offset is uploaded modulo it and stays precise however far the
+// air has moved.
+constexpr uint32_t kCloudNoisePeriod = 1u << 18;
+constexpr uint32_t kWeatherCell = 4096;
+constexpr uint32_t kBaseNoisePeriod = 8192;
+constexpr uint32_t kDetailNoisePeriod = 1024;
+constexpr uint32_t kCurlNoisePeriod = 4096;
+static_assert(kCloudNoisePeriod % kWeatherCell == 0 && kCloudNoisePeriod % kBaseNoisePeriod == 0 &&
+              kCloudNoisePeriod % kDetailNoisePeriod == 0 &&
+              kCloudNoisePeriod % kCurlNoisePeriod == 0);
+// Volume sizes in texels (cloud_noise.comp).
+constexpr uint32_t kBaseNoiseSize = 128;
+constexpr uint32_t kDetailNoiseSize = 32;
+constexpr uint32_t kCurlNoiseSize = 128;
+// The weather noise's time coordinate: one lattice unit per this many game
+// seconds (cells form and dissolve), periodic every kWeatherTimePeriod units.
+constexpr double kWeatherCellLifetime = 1800.0;
+constexpr uint32_t kWeatherTimePeriod = 64;
+
+// Must match Clouds in common.glsl (see clouds.glsl).
+struct GpuClouds {
+  float cumulusBottom = kCumulusBottom;
+  float cumulusTop = kCumulusTop;
+  float stratusBottom = kStratusBottom;
+  float stratusTop = kStratusTop;
+  float mapOrigin[2] = {};
+  float mapSize = static_cast<float>(kWeatherMapSize);
+  uint32_t mapResolution = kWeatherMapResolution;
+  float windOffset[2] = {};
+  float time = 0.0f;
+  float timePeriod = static_cast<float>(kWeatherTimePeriod);
+  float noisePeriod = static_cast<float>(kCloudNoisePeriod);
+  float weatherCell = static_cast<float>(kWeatherCell);
+  float baseNoisePeriod = static_cast<float>(kBaseNoisePeriod);
+  float detailNoisePeriod = static_cast<float>(kDetailNoisePeriod);
+  float curlNoisePeriod = static_cast<float>(kCurlNoisePeriod);
+  uint32_t weatherMap = 0;
+  uint32_t baseNoise = 0;
+  uint32_t detailNoise = 0;
+  uint32_t curlNoise = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(GpuClouds) == 96);
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
@@ -354,8 +410,9 @@ struct SceneData {
   GpuWind wind;
   GpuWind previousWind;
   GpuWeather weather;
+  GpuClouds clouds;
 };
-static_assert(sizeof(SceneData) == 1184);
+static_assert(sizeof(SceneData) == 1280);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

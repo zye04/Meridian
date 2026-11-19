@@ -1,0 +1,32 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+
+// The weather map, every frame, over the texel-snapped window around the
+// camera: R coverage, G type, B precipitation (weatherFromNoise). The outer
+// kWeatherMapBlendTexels blend to the coarse fallback weatherMapAt uses
+// beyond the window, so the edge is continuous.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 3, rgba8) uniform writeonly image2D weatherMap;
+
+void main() {
+    Clouds c = pc.scene.clouds;
+    int resolution = int(c.mapResolution);
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, ivec2(resolution)))) {
+        return;
+    }
+    vec2 xz = c.mapOrigin + (vec2(id) + 0.5) * (c.mapSize / float(resolution));
+    ivec2 far = resolution - 1 - id;
+    float edge = float(min(min(id.x, id.y), min(far.x, far.y)));
+    float detail = smoothstep(0.0, kWeatherMapBlendTexels, edge);
+    float n = weatherNoise(xz, kWeatherFallbackOctaves);
+    if (detail > 0.0) {
+        n = mix(n, weatherNoise(xz, kWeatherMapOctaves), detail);
+    }
+    imageStore(weatherMap, id, weatherFromNoise(xz, n));
+}

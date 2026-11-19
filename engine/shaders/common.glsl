@@ -337,8 +337,8 @@ struct Wind {
     float shearExponent;
     float veer;
     float veerAltitude;
+    float gustPhasePeriod;
     float pad0;
-    float pad1;
 };
 
 // Must match WeatherHistorySample in C++.
@@ -363,6 +363,37 @@ struct Weather {
     uint historyCount;
     uint pad0;
     WeatherHistoryBuffer history;
+};
+
+// Must match GpuClouds in C++; functions in clouds.glsl. Heights above sea
+// level (m). The weather map covers mapSize m from mapOrigin (world xz of
+// its corner). windOffset is the wind offset at the clouds' altitude modulo
+// noisePeriod, which every cloud noise period divides; time is the weather
+// noise's time coordinate modulo timePeriod. Periods in m; textures are
+// bindless indices.
+struct Clouds {
+    float cumulusBottom;
+    float cumulusTop;
+    float stratusBottom;
+    float stratusTop;
+    vec2 mapOrigin;
+    float mapSize;
+    uint mapResolution;
+    vec2 windOffset;
+    float time;
+    float timePeriod;
+    float noisePeriod;
+    float weatherCell;
+    float baseNoisePeriod;
+    float detailNoisePeriod;
+    float curlNoisePeriod;
+    uint weatherMap;
+    uint baseNoise;
+    uint detailNoise;
+    uint curlNoise;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
@@ -438,6 +469,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     Wind wind;
     Wind previousWind;
     Weather weather;
+    Clouds clouds;
 };
 
 // Largest axis scale of a transform: a conservative bound under
