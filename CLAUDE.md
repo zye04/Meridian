@@ -98,6 +98,7 @@ SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
 with the wind). Capture runs print the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
+`--clouds off` skips the cloud march and composite (A/B).
 `--dump-weather-map out.png` saves the weather map after the last frame
 (R coverage, G type, B precipitation; row 0 = north) and prints its
 window; two dumps at `--time-scale 0` and `--time-scale 60 --frames 60`
@@ -113,7 +114,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, weather, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, weather, atmosphere, scene early, pyramid, cull late, scene late, clouds, aa (the upscaler), exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -135,6 +136,13 @@ Laplacian with the still's). Placed forests (seed 1): forest edge
 canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
 placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
 the summit ridge at ~1.5 km: the open view toward the summit.
+Clouds (layer 1.8-4.5 km above sea level): fair cumulus from the
+ground `1119 1355.9 -431 -1.55 0.15`; above the layer `1119 6500 -431
+-1.55 -0.25` (pitch -0.1 looks across the weather map's 30 km edge);
+inside the layer (half-resolution march) `1119 3200 -431 -1.55 0`; the
+summit silhouette against clouds `1119 1356 -431 -1.55 0.03`; dusk
+clouds `1119 1355.9 -431 -1.55 0.15 --sun -0.7 0.035 0.7` (sun 2 deg up;
+`-0.05` for just below the horizon).
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
@@ -225,7 +233,8 @@ engine/src/render/         renderer internals:
                            sharpen.comp, their pipelines and the
                            ping-pong history
   renderer_clouds.cpp      cloud noise volumes (at load), weather map
-                           window and pass, dumpWeatherMap
+                           window and pass, dumpWeatherMap, cloud march
+                           targets (quarter/half res) and pass
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -249,7 +258,8 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            clouds.glsl (tileable noise, weatherMapAt +
                            analytic fallback, layer profiles,
                            cloudDensity), cloud_noise.comp,
-                           weather_map.comp
+                           weather_map.comp, clouds_march.comp,
+                           clouds_composite.frag
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten, leaf diffuse transmission),
@@ -305,7 +315,11 @@ the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
-to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
+to front, mesh.vert) -> clouds (clouds_march.comp at quarter
+resolution, half inside the layer or within 250 m of it: luminance with
+haze + transmittance, mean cloud depth; then clouds_composite.frag
+blends it over HDR, bilinear, skipping pixels whose surface is nearer
+than the clouds) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask (and the guides
 when `wantsGuides()`) in SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
@@ -402,7 +416,9 @@ barriers account for that.
   layout set 0 = the cloud noise and weather map storage images, set 1 =
   bindless. The bindless table also holds the cloud noise volumes as 3D
   views, read through `textures3D[]` (clouds.glsl, same binding), and
-  the weather map; all four stay in GENERAL layout.
+  the weather map; all four stay in GENERAL layout. Cloud march layout:
+  set 0 = atmosphere LUTs, set 1 = bindless, set 2 = scene depth + the
+  march targets (storage and sampled, GENERAL), one set per resolution.
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges

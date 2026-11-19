@@ -193,6 +193,9 @@ public:
   // frame's wind for motion vectors.
   void setWeather(const Weather &weather);
 
+  // On by default; off skips the cloud march and composite (for A/B).
+  void setCloudsEnabled(bool enabled);
+
   // deltaSeconds: time since the previous frame, which paces exposure
   // adaptation. Pass a fixed step for repeatable output.
   void draw(const Camera &camera, const Lighting &lighting, float deltaSeconds);
