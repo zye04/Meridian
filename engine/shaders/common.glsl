@@ -162,6 +162,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
     Terrain terrain;
+    // For occlusion culling: unjittered view and the projection's x/y scale
+    // and near plane.
+    mat4 view;
+    vec2 projectionScale;
+    float nearPlane;
+    float pad2;
 };
 
 // Shaders with their own push constants (cull.comp) define

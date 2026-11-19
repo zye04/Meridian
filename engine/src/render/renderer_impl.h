@@ -79,6 +79,9 @@ struct Renderer::Impl {
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
   VkPipeline cullPipeline = VK_NULL_HANDLE;
+  VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
+  // The depth pyramid, sampled through minSampler.
+  VkDescriptorSet cullSet = VK_NULL_HANDLE;
   // Blended instances sorted back to front each frame (reused storage).
   std::vector<std::pair<float, uint32_t>> blendedDraws;
 
@@ -94,6 +97,8 @@ struct Renderer::Impl {
   bool instancesDirty = false;
   Buffer drawCommands;
   Buffer drawCounts;
+  // Per instance: visible at the end of last frame's culling (1) or not.
+  Buffer visibility;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -186,7 +191,7 @@ struct Renderer::Impl {
   void destroyAccelerationStructure(AccelerationStructure &as);
   void buildTlas(VkCommandBuffer cmd, FrameData &frame);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
-  void cullInstances(VkCommandBuffer cmd, const FrameData &frame);
+  void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   void buildDepthPyramid(VkCommandBuffer cmd);
   void createDepthPyramid();
 

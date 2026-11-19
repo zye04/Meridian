@@ -96,12 +96,16 @@ docs/decisions.md          technique decisions with sources
 ## Frame (renderer_frame.cpp, in order)
 
 Instance table upload (when changed) -> TLAS build over all instances ->
-GPU frustum culling (cull.comp fills 4 indirect draw lists: opaque/masked x
-single/double-sided) -> atmosphere LUTs (transmittance + multi-scattering only when the
+early cull (cull.comp phase 0: instances visible last frame, frustum test
+only; fills 4 indirect draw lists: opaque/masked x single/double-sided) ->
+atmosphere LUTs (transmittance + multi-scattering only when the
 Atmosphere changes; sky-view, aerial perspective, sky irradiance every
-frame) -> scene pass into HDR RGBA16F + RG16F motion + D32 depth (sky
-fullscreen, then vkCmdDrawIndexedIndirectCount per list, then blended
-instances CPU-sorted back to front) -> TAA resolve
+frame) -> early scene pass into HDR RGBA16F + RG16F motion + D32 depth (sky
+fullscreen, then vkCmdDrawIndexedIndirectCount per list) -> depth pyramid
+(depth_pyramid.comp, min-reduced R32F) -> late cull (phase 1: every
+instance against frustum + pyramid; draws the newly visible, writes the
+per-instance visibility buffer) -> late scene pass (load; late lists, then
+blended instances CPU-sorted back to front) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> AgX
 tonemap into the swapchain. 2 frames in flight; the HDR/depth/LUT/history
 images are shared between them, and barriers account for that.
@@ -122,7 +126,8 @@ images are shared between them, and barriers account for that.
   everything else is reached through it (buffer device addresses).
   Descriptor sets: scene layout set 0 = atmosphere LUTs, set 1 = DFG LUT
   + bindless `textures[]`; post layout set 0 = HDR/motion/history (two
-  ping-pong sets).
+  ping-pong sets); pyramid layout set 0 = source + destination level (one
+  set per level); cull layout set 0 = depth pyramid (min sampler).
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
   together (static_asserts check the sizes).

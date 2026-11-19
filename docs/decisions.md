@@ -149,14 +149,37 @@ sources. Check here before re-researching a topic.
   - https://daslang.io/doc/reference/tutorials/vulkan/12_gpu_driven.html
 - Draw lists split by pipeline and cull mode (opaque/masked x single/double
   sided), so one indirect call covers each. Blended stays CPU-sorted.
-- Next, in order: a tiling ground material on the terrain; phase 2,
-  two-phase Hi-Z occlusion culling (depth pyramid; last frame's visible set
-  plus a re-test), tested on Poly Haven assets scattered over the terrain;
-  phase 3, virtualized geometry (meshlets with a cluster LOD hierarchy,
-  Nanite-style, rather than discrete LODs, so film-grade assets such as
-  multi-million-triangle trees become usable; RT needs cluster acceleration
-  structures or proxy meshes); then a 15 km world (chunked terrain with LOD
-  and streaming, large-scale scatter, GPU grass). Benchmarks for task/mesh
-  vs indirect: williscool.com.
+- Next, in order: phase 3, virtualized geometry (meshlets with a cluster
+  LOD hierarchy, Nanite-style, rather than discrete LODs, so film-grade
+  assets such as multi-million-triangle trees become usable; RT needs
+  cluster acceleration structures or proxy meshes); then a 15 km world
+  (chunked terrain with LOD and streaming, large-scale scatter, GPU
+  grass). Benchmarks for task/mesh vs indirect: williscool.com.
   - https://www.williscool.com/technical/task-mesh-benchmarking/task-mesh-benchmarking.md.html
+
+## GPU-driven rendering (phase 2, 2026-11-19)
+
+- **Two-phase Hi-Z occlusion culling** (niagara, Nanite): phase 0 draws
+  last frame's visible instances (frustum only), a min-reduced depth
+  pyramid is built from that depth, phase 1 tests every instance against
+  it, draws the newly visible and records visibility. Conservative, so no
+  popping on disocclusion; the single-pass reprojection alternative pops
+  for a frame. Shadows are unaffected (RT through the TLAS).
+- Pyramid: R32F, screen rounded down to powers of two; level 0 takes the
+  min over every pixel a texel touches (rounding makes that 1-2 unaligned
+  pixels), higher levels one fetch through a `VK_SAMPLER_REDUCTION_MODE_MIN`
+  sampler (reverse-Z: farthest = min). The sampler needs maxLod set, or
+  every lookup silently falls back to level 0 (found as a false cull).
+- Test: sphere -> screen bounds (Mara & McGuire 2013, zeux's form), level
+  = ceil(log2(span in texels)) so the bounds cover at most one texel and
+  the 2x2 fetch at their center covers them (floor, as some references
+  use, can miss an edge texel), nearest depth near/(distance - radius)
+  against the farthest occluder. Spheres crossing the near plane pass.
+- Measured (`--scatter 3000`, 1269x1388, RTX 4080): start view behind a
+  rise 1866 -> 92 drawn instances, 5.97 -> 1.44 ms; open view 1956 ->
+  1151, 7.66 -> 4.64 ms (median of 3); turned view 1868 -> 327. Images match with culling off (no pixel
+  differs by more than 15%), including while moving.
+  - https://github.com/zeux/niagara
+  - https://zeux.io/2023/01/12/approximate-projected-bounds/
+  - https://vkguide.dev/docs/gpudriven/compute_culling/
 

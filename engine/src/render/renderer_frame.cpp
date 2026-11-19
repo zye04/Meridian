@@ -37,34 +37,55 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
   instancesDirty = false;
 }
 
-// Frustum-culls every instance on the GPU and fills the indirect draw lists.
-void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame) {
-  // The draw lists are shared by both frames in flight.
-  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT, 0,
-                VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  vkCmdFillBuffer(cmd, drawCounts.buffer, 0, VK_WHOLE_SIZE, 0);
-  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+// Culls every instance on the GPU and fills one phase's indirect draw lists.
+// Phase 0 takes last frame's visible instances (frustum test only); phase 1
+// tests all of them against the depth pyramid, adds the newly visible ones
+// and records visibility for the next frame.
+void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
+                                   uint32_t phase) {
+  if (phase == 0) {
+    // The draw lists are shared by both frames in flight.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+                  0, VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    vkCmdFillBuffer(cmd, drawCounts.buffer, 0, VK_WHOLE_SIZE, 0);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  }
 
+  constexpr VkDeviceSize kListBytes = kMaxInstances * sizeof(VkDrawIndexedIndirectCommand);
   CullConstants constants;
   constants.sceneBuffer = frame.sceneBuffer.address;
-  constants.drawCommands = drawCommands.address;
-  constants.drawCounts = drawCounts.address;
+  constants.drawCommands = drawCommands.address + phase * kDrawBuckets * kListBytes;
+  constants.drawCounts = drawCounts.address + phase * kDrawBuckets * sizeof(uint32_t);
+  constants.visibility = visibility.address;
   constants.bucketCapacity = kMaxInstances;
+  constants.phase = phase;
+  constants.occlusion = occlusionCulling ? 1 : 0;
+  constants.pyramidSize[0] = static_cast<float>(depthPyramidExtent.width);
+  constants.pyramidSize[1] = static_cast<float>(depthPyramidExtent.height);
+  constants.pyramidLevels = static_cast<uint32_t>(depthPyramidLevels.size());
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1,
+                          &cullSet, 0, nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
   vkCmdDispatch(cmd, (static_cast<uint32_t>(instances.size()) + 63) / 64, 1, 1);
 
+  // Phase 1 also waits on phase 0's visibility reads before writing.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
-  const VkBufferCopy copy{0, 0, kDrawBuckets * sizeof(uint32_t)};
-  vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  if (phase == 1) {
+    const VkBufferCopy copy{0, 0, 2 * kDrawBuckets * sizeof(uint32_t)};
+    vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
+  }
 }
 
 // Reduces the scene depth into the pyramid, one level per dispatch.
@@ -230,8 +251,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
           "vmaInvalidateAllocation");
     const auto *counts = static_cast<const uint32_t *>(frame.drawCountReadback.mapped);
     impl_->drawnInstances = 0;
-    for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
-      impl_->drawnInstances += counts[bucket];
+    for (uint32_t list = 0; list < 2 * kDrawBuckets; ++list) {
+      impl_->drawnInstances += counts[list];
     }
   }
 
@@ -285,6 +306,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
+  scene.view = view;
+  scene.projectionScale[0] = projection.m[0][0];
+  scene.projectionScale[1] = projection.m[1][1];
+  scene.nearPlane = camera.nearPlane;
   scene.tlas = frame.tlas.address;
   scene.vertices = impl_->vertexPool.address;
   scene.indices = impl_->indexPool.address;
@@ -318,7 +343,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
 
   impl_->uploadInstances(cmd, frame);
   impl_->buildTlas(cmd, frame);
-  impl_->cullInstances(cmd, frame);
+  impl_->cullInstances(cmd, frame, 0);
 
   // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
 
@@ -436,33 +461,64 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
-  vkCmdBeginRendering(cmd, &sceneRendering);
-  const VkDescriptorSet sceneSets[] = {impl_->atmosphereSet, impl_->materialSet};
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          impl_->sceneLayout, 0, 2, sceneSets, 0, nullptr);
-  vkCmdSetViewport(cmd, 0, 1, &viewport);
-  vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
-  vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
-                     sizeof(scenePush), &scenePush);
-  vkCmdDraw(cmd, 3, 1, 0, 0);
-
+  // Two phases (occlusion culling): first what was visible last frame, then,
+  // tested against a depth pyramid of that, whatever has become visible.
+  constexpr VkDeviceSize kCommandSize = sizeof(VkDrawIndexedIndirectCommand);
+  auto beginScene = [&] {
+    vkCmdBeginRendering(cmd, &sceneRendering);
+    const VkDescriptorSet sceneSets[] = {impl_->atmosphereSet, impl_->materialSet};
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            impl_->sceneLayout, 0, 2, sceneSets, 0, nullptr);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                       sizeof(scenePush), &scenePush);
+    vkCmdBindIndexBuffer(cmd, impl_->indexPool.buffer, 0, VK_INDEX_TYPE_UINT32);
+  };
   // The GPU-culled indirect draw lists: opaque, then alpha-masked, each
   // single- and double-sided.
-  vkCmdBindIndexBuffer(cmd, impl_->indexPool.buffer, 0, VK_INDEX_TYPE_UINT32);
-  constexpr VkDeviceSize kCommandSize = sizeof(VkDrawIndexedIndirectCommand);
-  for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
-    const bool masked = bucket >= 2;
-    const bool doubleSided = bucket % 2 == 1;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      masked ? impl_->maskedMeshPipeline : impl_->meshPipeline);
-    vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
-    vkCmdDrawIndexedIndirectCount(
-        cmd, impl_->drawCommands.buffer, bucket * kMaxInstances * kCommandSize,
-        impl_->drawCounts.buffer, bucket * sizeof(uint32_t), kMaxInstances,
-        kCommandSize);
-  }
+  auto drawCulled = [&](uint32_t phase) {
+    for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
+      const bool masked = bucket >= 2;
+      const bool doubleSided = bucket % 2 == 1;
+      const uint32_t list = phase * kDrawBuckets + bucket;
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        masked ? impl_->maskedMeshPipeline : impl_->meshPipeline);
+      vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+      vkCmdDrawIndexedIndirectCount(
+          cmd, impl_->drawCommands.buffer, list * kMaxInstances * kCommandSize,
+          impl_->drawCounts.buffer, list * sizeof(uint32_t), kMaxInstances,
+          kCommandSize);
+    }
+  };
+
+  beginScene();
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+  drawCulled(0);
+  vkCmdEndRendering(cmd);
+
+  impl_->buildDepthPyramid(cmd);
+  impl_->cullInstances(cmd, frame, 1);
+
+  transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0, kDepthStages,
+                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT});
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+  VkRenderingAttachmentInfo lateAttachments[] = {hdrAttachment, motionAttachment};
+  lateAttachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  lateAttachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  sceneRendering.pColorAttachments = lateAttachments;
+  beginScene();
+  drawCulled(1);
 
   // Blended last, back to front, from the CPU: each surface must composite
   // over everything behind it, and there are few of them.
@@ -488,7 +544,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   }
 
   vkCmdEndRendering(cmd);
-  impl_->buildDepthPyramid(cmd);
 
   // --- Temporal resolve: scene color + history -> new history.
 

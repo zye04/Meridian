@@ -152,6 +152,15 @@ void Renderer::Impl::createDepthPyramid() {
     }
     vkUpdateDescriptorSets(device.device, 2, writes, 0, nullptr);
   }
+  const VkDescriptorImageInfo pyramidInfo{minSampler, depthPyramid.view,
+                                          VK_IMAGE_LAYOUT_GENERAL};
+  VkWriteDescriptorSet cullWrite{};
+  cullWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  cullWrite.dstSet = cullSet;
+  cullWrite.descriptorCount = 1;
+  cullWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  cullWrite.pImageInfo = &pyramidInfo;
+  vkUpdateDescriptorSets(device.device, 1, &cullWrite, 0, nullptr);
 }
 
 void Renderer::Impl::destroySwapchain() {
@@ -217,7 +226,7 @@ void Renderer::Impl::createFrames() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.drawCountReadback = createBuffer(
-        kDrawBuckets * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        2 * kDrawBuckets * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
@@ -298,6 +307,8 @@ void Renderer::Impl::createDescriptors() {
   reduction.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
   reduction.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
   samplerInfo.pNext = &reduction;
+  // Culling picks a pyramid level per instance with textureLod.
+  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
   check(vkCreateSampler(dev, &samplerInfo, nullptr, &minSampler),
         "vkCreateSampler");
   samplerInfo.pNext = nullptr;
@@ -318,13 +329,20 @@ void Renderer::Impl::createDescriptors() {
   check(vkCreateDescriptorSetLayout(dev, &pyramidLayoutInfo, nullptr,
                                     &pyramidSetLayout),
         "vkCreateDescriptorSetLayout");
+  VkDescriptorSetLayoutBinding cullBinding = pyramidBindings[0];
+  pyramidLayoutInfo.bindingCount = 1;
+  pyramidLayoutInfo.pBindings = &cullBinding;
+  check(vkCreateDescriptorSetLayout(dev, &pyramidLayoutInfo, nullptr, &cullSetLayout),
+        "vkCreateDescriptorSetLayout");
+
+  // One set per pyramid level, plus the culling pass's.
   VkDescriptorPoolSize pyramidPoolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPyramidLevels},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPyramidLevels + 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kMaxPyramidLevels},
   };
   VkDescriptorPoolCreateInfo pyramidPoolInfo{};
   pyramidPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pyramidPoolInfo.maxSets = kMaxPyramidLevels;
+  pyramidPoolInfo.maxSets = kMaxPyramidLevels + 1;
   pyramidPoolInfo.poolSizeCount = 2;
   pyramidPoolInfo.pPoolSizes = pyramidPoolSizes;
   check(vkCreateDescriptorPool(dev, &pyramidPoolInfo, nullptr, &pyramidPool),
@@ -337,6 +355,10 @@ void Renderer::Impl::createDescriptors() {
   pyramidAlloc.descriptorSetCount = kMaxPyramidLevels;
   pyramidAlloc.pSetLayouts = pyramidSetLayouts.data();
   check(vkAllocateDescriptorSets(dev, &pyramidAlloc, pyramidSets.data()),
+        "vkAllocateDescriptorSets");
+  pyramidAlloc.descriptorSetCount = 1;
+  pyramidAlloc.pSetLayouts = &cullSetLayout;
+  check(vkAllocateDescriptorSets(dev, &pyramidAlloc, &cullSet),
         "vkAllocateDescriptorSets");
 
   // Must match post.glsl.
@@ -625,18 +647,28 @@ void Renderer::Impl::createScene() {
   instanceTable =
       createBuffer(kMaxInstances * sizeof(InstanceData), kTableUsage, 0);
 
+  // Two phases of draw lists (see cullInstances).
   drawCommands = createBuffer(
-      VkDeviceSize{kDrawBuckets} * kMaxInstances *
+      VkDeviceSize{2 * kDrawBuckets} * kMaxInstances *
           sizeof(VkDrawIndexedIndirectCommand),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
   drawCounts = createBuffer(
-      kDrawBuckets * sizeof(uint32_t),
+      2 * kDrawBuckets * sizeof(uint32_t),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
           VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
+  visibility = createBuffer(
+      kMaxInstances * sizeof(uint32_t),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+  // New instances start invisible; the late culling phase picks them up.
+  submitNow([&](VkCommandBuffer cmd) {
+    vkCmdFillBuffer(cmd, visibility.buffer, 0, VK_WHOLE_SIZE, 0);
+  });
 }
 
 void Renderer::Impl::createPipelines() {
@@ -693,6 +725,8 @@ void Renderer::Impl::createPipelines() {
                                     sizeof(CullConstants)};
   VkPipelineLayoutCreateInfo cullLayoutInfo{};
   cullLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  cullLayoutInfo.setLayoutCount = 1;
+  cullLayoutInfo.pSetLayouts = &cullSetLayout;
   cullLayoutInfo.pushConstantRangeCount = 1;
   cullLayoutInfo.pPushConstantRanges = &cullPushRange;
   check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),
@@ -880,7 +914,8 @@ Renderer::~Renderer() {
   }
   for (Buffer *buffer :
        {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
-        &impl_->instanceTable, &impl_->drawCommands, &impl_->drawCounts}) {
+        &impl_->instanceTable, &impl_->drawCommands, &impl_->drawCounts,
+        &impl_->visibility}) {
     impl_->destroyBuffer(*buffer);
   }
 
@@ -937,6 +972,7 @@ Renderer::~Renderer() {
   impl_->destroySwapchain();
   vkDestroyDescriptorPool(dev, impl_->pyramidPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->pyramidSetLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->cullSetLayout, nullptr);
   vkDestroySampler(dev, impl_->minSampler, nullptr);
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->atmosphereSetLayout, nullptr);

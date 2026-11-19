@@ -180,8 +180,14 @@ struct SceneData {
   float frustumPlanes[6][4] = {};
   GpuAtmosphere atmosphere;
   GpuTerrain terrain;
+  // For occlusion culling: unjittered view and the projection's x/y scale
+  // and near plane.
+  Mat4 view;
+  float projectionScale[2] = {};
+  float nearPlane = 0.0f;
+  float pad2 = 0.0f;
 };
-static_assert(sizeof(SceneData) == 640);
+static_assert(sizeof(SceneData) == 720);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -218,10 +224,15 @@ struct CullConstants {
   VkDeviceAddress sceneBuffer = 0;
   VkDeviceAddress drawCommands = 0;
   VkDeviceAddress drawCounts = 0;
+  VkDeviceAddress visibility = 0;
   uint32_t bucketCapacity = 0;
-  uint32_t pad = 0;
+  uint32_t phase = 0;
+  uint32_t occlusion = 0;
+  uint32_t pyramidLevels = 0;
+  float pyramidSize[2] = {};
+  uint32_t pad[2] = {};
 };
-static_assert(sizeof(CullConstants) == 32);
+static_assert(sizeof(CullConstants) == 64);
 
 // TLAS instance masks: shadow rays only test shadow casters.
 constexpr uint8_t kShadowCasterMask = 0x01;
