@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Everything in M2a's Global Constraints (conventions, curvature, id space, capacities and drop counters, commit rules, no AI attribution, CLAUDE.md/decisions.md in the same commit, Debug build + tests + 0 validation errors per task, Release perf in the scratchpad, ask the user before measuring).
+- Everything in M2a's Global Constraints (conventions, curvature, id space, capacities and drop counters, commit rules, no AI attribution, CLAUDE.md/decisions.md in the same commit, Debug build + tests + 0 validation errors per task, Release perf in the scratchpad, every game run under `flock /tmp/meridian-gpu.lock`).
 - Starting radii: near 150 m, mid 2 km; hysteresis switches back at 0.9 x the boundary; partitions hold <= ~1,024 instances; sky rays: TLAS to ~20 m, far march to a few hundred meters. Starting values, replaced by measurements and recorded.
 - Missing `VK_NV_partitioned_acceleration_structure` feature or `VK_EXT_opacity_micromap` is a startup error with a clear message; no silent fallback.
 - Normal target: RGBA16F, world-space normal xyz + roughness w (DLSS RR packed guide layout). Motion vectors are written by the prepass. Nothing may depend on the prepass beyond depth, motion and normal (visibility-buffer swap later).
@@ -40,7 +40,7 @@
 
 - [ ] **Step 1:** Implement; blended surfaces keep their path after the main pass.
 - [ ] **Step 2: Verify.** With a debug clear color in the HDR target, no pixel keeps it at the default, forest-edge and interior views (no EQUAL holes, including masked and impostors). Mean difference vs the previous commit within run-to-run noise; motion capture Laplacian ratio unchanged; 0 dropped.
-- [ ] **Step 3:** Ask the user before measuring; Release median of 5 at the forest views: net cost (prepass + main) vs the single pass, recorded.
+- [ ] **Step 3:** Release (under the GPU lock), median of 5 at the forest views: net cost (prepass + main) vs the single pass, recorded.
 - [ ] **Step 4:** Commit ("Add a depth and normal prepass so each pixel shades once").
 
 ---
@@ -132,6 +132,6 @@
 **Files:**
 - Modify: `docs/decisions.md`, `CLAUDE.md` (Known gaps: leaf transmission next; remaining gap to ~7.7 ms)
 
-- [ ] **Step 1:** Ask the user to confirm no other instance is rendering. Release, 2560x1440, median of 5 at the four views (interior, forest edge with low sun, ridge, near/mid boundary): per-pass ms, sun shadow + sky visibility total, frame vs M2a's frame and vs ~7.7 ms.
+- [ ] **Step 1:** Release (under the GPU lock), 2560x1440, median of 5 at the four views (interior, forest edge with low sun, ridge, near/mid boundary): per-pass ms, sun shadow + sky visibility total, frame vs M2a's frame and vs ~7.7 ms.
 - [ ] **Step 2:** Over 16.7 ms anywhere: apply levers in order (checkerboard sky rays; smaller near radius; smaller mid radius), re-measuring after each; report every visible quality cost to the user with before/after captures.
 - [ ] **Step 3:** decisions.md: final radii, cap, OMM level, numbers, the gap left for M5. Sweep CLAUDE.md, decisions.md and specs for statements made stale (static TLAS, `terrainOccludes` boolean, unoccluded ambient, single-pass shading). Commit ("Measure M2b forest lighting and record the gap to target").

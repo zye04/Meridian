@@ -457,8 +457,8 @@ game doesn't re-bake every run.
   at the transition view (small difference, no holes, no coverage loss);
   motion capture across the transition (Laplacian ratio within noise of
   the still, no pop); 0 validation errors, 0 drops, no leaks.
-- **Measurements (Release, 2560x1440, median of 5; first ask the user to
-  confirm no other instance is rendering):** per-pass GPU ms at the forest-edge, interior and
+- **Measurements (Release, 2560x1440, median of 5; every game run under
+  `flock /tmp/meridian-gpu.lock` so no other GPU work overlaps):** per-pass GPU ms at the forest-edge, interior and
   overview views; TLAS build time and memory; load time added by
   placement, impostor bake and BLAS/TLAS builds.
 - **Recorded in `decisions.md`:** the measured forest-view frame against

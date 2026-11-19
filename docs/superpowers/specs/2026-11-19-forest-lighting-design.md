@@ -320,8 +320,8 @@ noise at disocclusions would shimmer constantly on canopy edges.
   capture Laplacian ratio unchanged.
 - **Spikes:** a fly-through capture at 50 m/s over the forest logs the
   per-frame TLAS update ms; its maximum stays under the per-frame cap.
-- **Measurements (Release, 2560x1440, median of 5; first ask the user to
-  confirm no other instance is rendering):** per-pass GPU ms at the four
+- **Measurements (Release, 2560x1440, median of 5; every game run under
+  `flock /tmp/meridian-gpu.lock` so no other GPU work overlaps):** per-pass GPU ms at the four
   views, the frame against the ~7.7 ms target and against M2a's numbers;
   TLAS memory vs M2a's static TLAS; load time added (canopy field,
   proxy bake).

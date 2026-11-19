@@ -316,8 +316,8 @@ New public header `engine/include/meridian/weather.h`:
 ~1 ms for clouds + shadow map + sky capture at 2560x1440 at the ground
 and above-the-layer views, Release, median of 5. Inside the layer
 (half-resolution tracing, a transitional state while flying through) the
-number is measured and reported separately, target <= 2 ms; measured only after asking the user that no other instance
-is rendering. Over budget: report the numbers with the levers (step
+number is measured and reported separately, target <= 2 ms. Every game run goes through
+`flock /tmp/meridian-gpu.lock` so no other GPU work overlaps. Over budget: report the numbers with the levers (step
 counts, resolution inside the layer, shadow map and capture slicing)
 before cutting anything.
 
