@@ -13,7 +13,9 @@ struct MouseDelta {
 
 class Window {
 public:
-  Window(int width, int height, const char *title);
+  // Fullscreen covers the primary monitor at its current mode; width and
+  // height then only apply if the window is later made windowed.
+  Window(int width, int height, const char *title, bool fullscreen = false);
   ~Window();
 
   Window(const Window &) = delete;

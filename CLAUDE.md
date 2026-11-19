@@ -56,8 +56,10 @@ view over the scatter `0 80.8 700 3.14 -0.05`; high overview
 - Capture only when rendered output can change, with the fewest views that
   prove the change. The capture run's output already reports validation
   errors, leaks and GPU time; don't do separate runs for those.
-- GPU ms are only comparable at the same window size. Hyprland tiling
-  changes the size, so the capture resolution varies between runs.
+- GPU ms are only comparable at the same resolution. The game runs
+  fullscreen on the primary monitor by default, so captures share one size
+  (the 1440p monitor; Hyprland's 1920x1080 FALLBACK output when it's off).
+  `--windowed` gives a tiled window, whose size varies between runs.
 - Interactive runs pick up the user's mouse; use capture runs for checks.
 - Two captures of the same view never match bit for bit (per-frame noise in
   soft shadows and TAA); compare the mean difference (~0.02/255), not exact

@@ -171,6 +171,9 @@ struct Options {
   // Poly Haven models to scatter on the ground around the start.
   int scatter = 0;
   bool occlusion = true;
+  // Fullscreen by default: consistent size for GPU timings, and the way the
+  // game is played.
+  bool fullscreen = true;
   // Frames to render before exiting; 0 runs until the window closes.
   int frames = 0;
 };
@@ -198,6 +201,8 @@ Options parseOptions(int argc, char **argv) {
       options.cameraVelocity = {number(i), number(i), number(i)};
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
+    } else if (arg == "--windowed") {
+      options.fullscreen = false;
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--scatter") {
@@ -208,6 +213,7 @@ Options parseOptions(int argc, char **argv) {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, --scatter n, --no-occlusion, "
+                               "--windowed, "
                                "--capture file.png, --frames n)");
     }
   }
@@ -228,7 +234,7 @@ int main(int argc, char **argv) {
   // Scripted runs ignore the mouse and keyboard so results are repeatable.
   const bool interactive = options.frames == 0;
 
-  meridian::Window window(1280, 720, "Meridian");
+  meridian::Window window(1280, 720, "Meridian", options.fullscreen);
   meridian::Renderer renderer(window);
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);

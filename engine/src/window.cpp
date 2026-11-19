@@ -32,14 +32,19 @@ int toGlfwKey(Key key) {
 
 } // namespace
 
-Window::Window(int width, int height, const char *title) {
+Window::Window(int width, int height, const char *title, bool fullscreen) {
   if (!glfwInit()) {
     throw std::runtime_error("glfwInit failed");
   }
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-  handle_ = glfwCreateWindow(width, height, title, nullptr, nullptr);
+  GLFWmonitor *monitor = fullscreen ? glfwGetPrimaryMonitor() : nullptr;
+  if (const GLFWvidmode *mode = monitor ? glfwGetVideoMode(monitor) : nullptr) {
+    width = mode->width;
+    height = mode->height;
+  }
+  handle_ = glfwCreateWindow(width, height, title, monitor, nullptr);
   if (!handle_) {
     glfwTerminate();
     throw std::runtime_error("glfwCreateWindow failed");
