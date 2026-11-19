@@ -48,18 +48,23 @@ ending at `--camera`) and compare with the still capture of the same view:
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry).
-They also print `GPU passes:` with GPU ms per pass (upload + tlas, cull early,
-atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
+They also print drawn terrain nodes (2048 triangles each) and `GPU passes:`
+with GPU ms per pass (upload + tlas, terrain select, cull early, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
-Useful views: the default start is eye height on the ground at (0, 700),
-looking at the sample models; ground detail `0 80.8 700 0 -0.25`; open
-view over the scatter `0 80.8 700 3.14 -0.05`; high overview
-`0 300 700 0 -0.35`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
+Useful views (Napf terrain; ground 1354.2 m at the start): the default
+start is eye height on a ridge top at (1119, -431), 1.5 km east of the
+Napf summit (-359, -465, 1406.7 m), looking at it past the sample models
+(`1119 1355.9 -431 -1.55 -0.1`); open view toward the summit
+`1119 1356 -431 -1.55 -0.02`; full-ground view `1119 1355.9 -431 -1.55
+-0.25`; LOD transitions from above `1119 1420 -431 -1.55 -0.6`; high
+overview (3000 m above the ground) `1119 4354 -431 -1.55 -0.35`; across
+the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`.
 `--scatter N` places N random Poly Haven models within 150 m of the start
 (fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
-startup ~60 s). Scatter close-up with the tree: `7.2 83 706 0 0.15`.
+startup ~60 s); over the scatter: `1119 1362 -431 -1.55 -0.25`. Debug
+startup without scatter is ~12 s (heightfield pyramid and normal map).
 
 ## Testing policy (usage matters)
 
@@ -84,13 +89,15 @@ startup ~60 s). Scatter close-up with the tree: `7.2 83 706 0 0.15`.
 
 ```
 engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
-                           createMaterial, uploadTexture, setTerrainMaterial,
+                           createMaterial, uploadTexture, setTerrain,
+                           setTerrainMaterial,
                            addInstance, draw; Lighting, Atmosphere,
                            MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf, applyUvTransform),
                            texture.h (loadKtx2),
                            cluster.h (buildClusterLod, LOD cut rule),
-                           terrain.h (generateTerrain, terrainHeight),
+                           terrain.h (Heightfield, heightAt, load/save,
+                           generateHeightfield, buildHeightPyramid),
                            window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
@@ -99,12 +106,18 @@ engine/src/render/         renderer internals:
   renderer_setup.cpp       init/teardown: swapchain, frames, descriptors,
                            pipelines, atmosphere, materials
   renderer_resources.cpp   buffers, images, BLAS, texture/material/mesh upload
+  renderer_terrain.cpp     setTerrain (height image, normal map, pyramid),
+                           CDLOD selection dispatches, terrain draw
   renderer_frame.cpp       per-frame: instance upload, TLAS, GPU culling,
                            all passes in draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, window.cpp
-engine/shaders/            GLSL; *.glsl are includes (see below)
+engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
+                           terrain.glsl (heightfield sampling + mirror,
+                           quadtree, morph, detail noise),
+                           terrain_select.comp, terrain.mesh, terrain.frag
+                           (mesh.frag with TERRAIN), terrain_normals.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook
 tests/                     doctest unit tests
@@ -114,7 +127,11 @@ docs/decisions.md          technique decisions with sources
 ## Frame (renderer_frame.cpp, in order)
 
 Instance table upload (when changed) -> TLAS build over all instances ->
-early cull (cull.comp phase 0: instances visible last frame, frustum test
+DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
+indirect dispatch per quadtree level from the root, level 14, down to 0;
+frustum test against the node's min/max-pyramid bounds; split while the
+camera is within the next finer level's range, else emit to the terrain
+draw list) -> early cull (cull.comp phase 0: instances visible last frame, frustum test
 only, emit work items of up to 64 clusters; then cluster_cull.comp,
 dispatched indirectly: Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
@@ -123,6 +140,8 @@ single/double-sided) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
 pass into HDR RGBA16F + RG16F motion + D32 depth (sky fullscreen, then
+the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
+reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
 cull (phase 1: every instance against frustum + pyramid; the newly visible
@@ -157,9 +176,17 @@ images are shared between them, and barriers account for that.
   address (plus the draw list index for mesh.mesh); everything else is
   reached through it (buffer device addresses).
   Descriptor sets: scene layout set 0 = atmosphere LUTs, set 1 = DFG LUT
-  + bindless `textures[]`; post layout set 0 = HDR/motion/history (two
+  + bindless `textures[]` (also read by terrain.mesh: the terrain's
+  R16_UNORM height image, via texelFetch so it matches `heightAt`
+  exactly, and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = HDR/motion/history (two
   ping-pong sets); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler).
+- Terrain: the heightfield's quadtree is centered on the origin (shifted
+  under one sample so level 2's 2 m vertices land on samples); level 0
+  nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges
+  double per level, vertices morph over the last 30% of their level's
+  span. Levels 0-1 (finer than the data) add up to 0.3 m of detail noise.
+  The terrain is not in the TLAS.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
   together (static_asserts check the sizes).
@@ -204,8 +231,10 @@ images are shared between them, and barriers account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; terrain is one 2 km mesh with no
-  streaming. RT shadows trace full-detail BLAS while the raster draws LOD
+  leaks partial Vulkan state if it throws; the terrain casts no shadows yet
+  (not in the TLAS) and the horizon is flat; on the Napf's steep slopes
+  the terrain material's triplanar rock costs ~1.8 ms at the open view.
+  RT shadows trace full-detail BLAS while the raster draws LOD
   clusters; shadow rays start the cluster's simplification error above the
   surface to avoid acne (virtualized geometry slice 2 traces the clusters
   themselves).

@@ -1,0 +1,108 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "terrain.glsl"
+
+// Draws the nodes terrain_select.comp chose: 16 workgroups per node, each a
+// block of 8x8 of its 32x32 quads. Vertices sample the heightfield and
+// morph toward the next coarser grid near the end of their level's range
+// (CDLOD), so neighboring levels meet without cracks. Outputs what mesh.frag
+// reads; its terrain variant computes the normal per pixel.
+
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 81, max_primitives = 128) out;
+
+layout(location = 0) out vec3 outRelativePosition[];
+layout(location = 1) out vec3 outNormal[];
+layout(location = 2) out vec4 outCurrentClip[];
+layout(location = 3) out vec4 outPreviousClip[];
+layout(location = 4) out vec2 outUv[];
+layout(location = 5) out vec4 outTangent[];
+layout(location = 6) flat out uint outMaterialIndex[];
+// How far (m) the drawn surface may deviate from the bilinear heightfield.
+layout(location = 7) flat out float outLodError[];
+
+const uint kBlockQuads = 8u;
+const uint kBlockVertices = kBlockQuads + 1u;
+
+// The vertex at grid position `grid` (node-local index `local`) as seen
+// from `camera`: morph factor and detail weight depend on the distance to
+// it, so last frame's position uses last frame's camera.
+vec3 terrainVertex(Terrain terrain, vec2 grid, uvec2 local, uint level, float quad,
+                   vec3 camera) {
+    float distanceToCamera =
+        distance(vec3(grid.x, terrainHeight(terrain, grid), grid.y), camera);
+    // Odd vertices slide onto their even neighbor: at a morph of 1 the node
+    // is the coarser level's grid.
+    vec2 p = grid - vec2(local & 1u) * (quad * terrainMorph(terrain, level, distanceToCamera));
+    float height = terrainHeight(terrain, p);
+    if (level < 2u) {
+        // Weighted by the morphed position's distance, so vertices that
+        // coincide get the same height.
+        float weight = terrainDetailWeight(
+            terrain, distance(vec3(p.x, height, p.y), camera));
+        if (weight > 0.0) {
+            height += weight * terrainDetail(p).x;
+        }
+    }
+    return vec3(p.x, height, p.y);
+}
+
+void main() {
+    SceneBuffer scene = pc.scene;
+    Terrain terrain = scene.terrain;
+    uint node = terrain.nodes.nodes[gl_WorkGroupID.x / kTerrainTasksPerNode];
+    uint block = gl_WorkGroupID.x % kTerrainTasksPerNode;
+    uvec3 n = terrainDecodeNode(node);
+    uint level = n.x;
+    float quad = terrainNodeSize(level) / float(kTerrainNodeQuads);
+    vec2 nodeOrigin = terrainRootOrigin(terrain) + vec2(n.yz) * terrainNodeSize(level);
+    uvec2 blockOrigin = uvec2(block & 3u, block >> 2) * kBlockQuads;
+
+    SetMeshOutputsEXT(kBlockVertices * kBlockVertices, 2u * kBlockQuads * kBlockQuads);
+    for (uint i = gl_LocalInvocationIndex; i < kBlockVertices * kBlockVertices; i += 32u) {
+        uvec2 local = blockOrigin + uvec2(i % kBlockVertices, i / kBlockVertices);
+        vec2 grid = nodeOrigin + vec2(local) * quad;
+        vec3 world = terrainVertex(terrain, grid, local, level, quad, scene.cameraPosition);
+        vec3 previous =
+            terrainVertex(terrain, grid, local, level, quad, scene.previousCameraPosition);
+
+        // The deviation from the bilinear heightfield: detail displacement
+        // near the camera; beyond, how far the heightfield bends away from
+        // a coarse quad (estimated at the center of the coarser grid's quad
+        // this vertex can morph into).
+        float lodError;
+        if (level < 2u) {
+            lodError = kTerrainDetailAmplitude;
+        } else {
+            vec2 corner = grid - vec2(local & 1u) * quad;
+            float a = terrainHeight(terrain, corner);
+            float b = terrainHeight(terrain, corner + vec2(2.0 * quad));
+            lodError = abs(terrainHeight(terrain, corner + vec2(quad)) - 0.5 * (a + b));
+        }
+
+        vec4 relative = vec4(world - scene.cameraPosition, 1.0);
+        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * relative;
+        outRelativePosition[i] = relative.xyz;
+        outNormal[i] = vec3(0.0, 1.0, 0.0);
+        outCurrentClip[i] = scene.currentViewProjection * relative;
+        outPreviousClip[i] = scene.previousViewProjection *
+                             vec4(previous - scene.previousCameraPosition, 1.0);
+        outUv[i] = vec2(0.0);
+        outTangent[i] = vec4(0.0);
+        outMaterialIndex[i] = 0u;
+        outLodError[i] = lodError;
+    }
+    for (uint i = gl_LocalInvocationIndex; i < 2u * kBlockQuads * kBlockQuads; i += 32u) {
+        uint q = i / 2u;
+        uint v00 = (q / kBlockQuads) * kBlockVertices + q % kBlockQuads;
+        uint v10 = v00 + 1u;
+        uint v01 = v00 + kBlockVertices;
+        // Counter-clockwise seen from above; every quad splits along the
+        // same diagonal, which the morph needs to collapse 2x2 quads into
+        // one coarser quad.
+        gl_PrimitiveTriangleIndicesEXT[i] =
+            (i & 1u) == 0u ? uvec3(v00, v01, v10) : uvec3(v10, v01, v01 + 1u);
+    }
+}

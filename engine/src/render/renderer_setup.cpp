@@ -533,13 +533,22 @@ void Renderer::Impl::createMaterialSystem() {
   samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
   check(vkCreateSampler(dev, &samplerInfo, nullptr, &textureSampler),
         "vkCreateSampler");
+  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &terrainSampler),
+        "vkCreateSampler");
 
   // Must match material.glsl and dfg_lut.comp.
   VkDescriptorSetLayoutBinding bindings[3]{};
   bindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                  VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  // The terrain mesh shader and the terrain normal map's generator read the
+  // heightfield from it too.
   bindings[1] = {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures,
-                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+                 VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_MESH_BIT_EXT |
+                     VK_SHADER_STAGE_COMPUTE_BIT,
+                 nullptr};
   bindings[2] = {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1,
                  VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
   // Textures can be added while frames using the set are in flight, and
@@ -675,6 +684,14 @@ void Renderer::Impl::createScene() {
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
+  terrainCounters = createBuffer(
+      sizeof(TerrainCounters),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+  terrainLists = createBuffer(VkDeviceSize{3} * kMaxTerrainNodes * sizeof(uint32_t),
+                              kListUsage, 0);
+  terrain.nodes = terrainLists.address + VkDeviceSize{2} * kMaxTerrainNodes * sizeof(uint32_t);
   // New instances start invisible; the late culling phase picks them up.
   submitNow([&](VkCommandBuffer cmd) {
     vkCmdFillBuffer(cmd, visibility.buffer, 0, VK_WHOLE_SIZE, 0);
@@ -719,6 +736,13 @@ void Renderer::Impl::createPipelines() {
   meshDesc.alphaBlend = true;
   blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
 
+  // The CDLOD terrain: opaque, back faces culled.
+  meshDesc.vertexShader = nullptr;
+  meshDesc.meshShader = "terrain.mesh";
+  meshDesc.fragmentShader = "terrain.frag";
+  meshDesc.alphaBlend = false;
+  terrainPipeline = createGraphicsPipeline(dev, meshDesc);
+
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
       VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -747,6 +771,17 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
   clusterCullPipeline = createComputePipeline(dev, "cluster_cull.comp", cullLayout);
+
+  VkPushConstantRange terrainPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                       sizeof(TerrainSelectConstants)};
+  VkPipelineLayoutCreateInfo terrainLayoutInfo{};
+  terrainLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  terrainLayoutInfo.pushConstantRangeCount = 1;
+  terrainLayoutInfo.pPushConstantRanges = &terrainPushRange;
+  check(vkCreatePipelineLayout(dev, &terrainLayoutInfo, nullptr, &terrainSelectLayout),
+        "vkCreatePipelineLayout");
+  terrainSelectPipeline =
+      createComputePipeline(dev, "terrain_select.comp", terrainSelectLayout);
 
   VkPushConstantRange pyramidPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                        sizeof(PyramidConstants)};
@@ -815,6 +850,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features.samplerAnisotropy = VK_TRUE;
   // Blended surfaces blend color but leave motion vectors untouched.
   features.independentBlend = VK_TRUE;
+  // The terrain normal map (RG16_SNORM) is written from a compute shader.
+  features.shaderStorageImageExtendedFormats = VK_TRUE;
 
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -941,7 +978,8 @@ Renderer::~Renderer() {
         &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,
         &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
-        &impl_->visibility}) {
+        &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
+        &impl_->terrainPyramid}) {
     impl_->destroyBuffer(*buffer);
   }
 
@@ -964,6 +1002,9 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->terrainSelectPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->terrainSelectLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);
 
   vkDestroyQueryPool(dev, impl_->timestampPool, nullptr);
@@ -985,6 +1026,9 @@ Renderer::~Renderer() {
     impl_->destroyImage(texture);
   }
   impl_->destroyImage(impl_->dfgLut);
+  impl_->destroyImage(impl_->terrainHeightImage);
+  impl_->destroyImage(impl_->terrainNormalImage);
+  vkDestroySampler(dev, impl_->terrainSampler, nullptr);
   impl_->destroyBuffer(impl_->materialBuffer);
   vkDestroyDescriptorPool(dev, impl_->materialPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->materialSetLayout, nullptr);

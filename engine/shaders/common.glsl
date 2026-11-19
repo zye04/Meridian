@@ -14,7 +14,6 @@ struct Vertex {
 
 // glTF metallic-roughness material. Must match GpuMaterial in C++.
 const uint kNoTexture = 0xFFFFFFFFu;
-const uint kMaterialTerrain = 1u;
 const uint kMaterialAlphaMask = 2u;
 
 struct Material {
@@ -168,13 +167,40 @@ struct TerrainLayer {
     float pad2;
 };
 
+layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
+    uint minMax[];
+};
+
+// Selected terrain nodes, (level, x, z) packed by terrain.glsl.
+layout(buffer_reference, std430) buffer TerrainNodeBuffer {
+    uint nodes[];
+};
+
 // Must match GpuTerrain in C++. Layers: soil, needles, rock.
 struct Terrain {
     TerrainLayer layers[3];
+    // A TerrainMaterial is set (procedural colors otherwise).
     uint enabled;
-    uint pad0;
-    uint pad1;
-    uint pad2;
+    float snowLine;
+    // Bindless textures (material.glsl): the samples (R16_UNORM, row 0 =
+    // north; height = minHeight + sample * heightScale) and the normal map
+    // (RG16_SNORM normal x and z, mipmapped, mirrored-repeat sampler).
+    uint heightTexture;
+    uint normalTexture;
+    // Min/max pyramid levels >= 1 (min | max << 16), level k starting at
+    // pyramidOffsets[k].
+    HeightPyramidBuffer pyramid;
+    TerrainNodeBuffer nodes;
+    uint pyramidOffsets[16];
+    uint pyramidLevels;
+    uint width;
+    uint height;
+    float spacing;
+    float minHeight;
+    float heightScale;
+    // Level 0's LOD range (m); each level doubles it.
+    float lodRange0;
+    uint rootLevel;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

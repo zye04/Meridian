@@ -1,0 +1,108 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "terrain.glsl"
+
+// CDLOD node selection, one dispatch per quadtree level from the root down,
+// one thread per node of that level's list. A node outside the view frustum
+// is dropped; one the camera is within the next finer level's range of is
+// split into its four children (the next level's list); any other is drawn
+// at its own level.
+
+layout(local_size_x = 64) in;
+
+// Must match TerrainCounters in C++: per level, dispatch arguments (3
+// uints each) over its input list, then each list's node count, then the
+// terrain draw's mesh task arguments.
+const uint kCounterNodeCount = 45u;
+const uint kCounterDrawTasks = 60u;
+
+// Must match DrawCounters in C++ (see cull.glsl).
+const uint kDrawCounterOverflow = 35u;
+const uint kDrawCounterTerrainNodes = 37u;
+
+layout(buffer_reference, std430) buffer CounterBuffer {
+    uint counters[];
+};
+
+// Must match TerrainSelectConstants in C++.
+layout(push_constant) uniform SelectConstants {
+    SceneBuffer scene;
+    CounterBuffer counters;
+    // Two ping-pong lists of kMaxTerrainNodes: level l reads list l & 1.
+    TerrainNodeBuffer lists;
+    CounterBuffer drawCounters;
+    uint level;
+} select;
+
+// Box given relative to the camera.
+bool boxInFrustum(vec3 lo, vec3 hi) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = select.scene.frustumPlanes[i];
+        vec3 farthest = mix(lo, hi, greaterThanEqual(plane.xyz, vec3(0.0)));
+        if (dot(plane.xyz, farthest) + plane.w < 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void main() {
+    SceneBuffer scene = select.scene;
+    Terrain terrain = scene.terrain;
+    uint level = select.level;
+    uint node;
+    if (level == terrain.rootLevel) {
+        if (gl_GlobalInvocationID.x > 0u) {
+            return;
+        }
+        node = terrainEncodeNode(level, 0u, 0u);
+    } else {
+        uint count = min(select.counters.counters[kCounterNodeCount + level], kMaxTerrainNodes);
+        if (gl_GlobalInvocationID.x >= count) {
+            return;
+        }
+        node = select.lists.nodes[(level & 1u) * kMaxTerrainNodes + gl_GlobalInvocationID.x];
+    }
+
+    uvec3 n = terrainDecodeNode(node);
+    float size = terrainNodeSize(level);
+    vec2 lo = terrainRootOrigin(terrain) + vec2(n.yz) * size;
+    vec2 hi = lo + size;
+    vec2 heights = terrainHeightBounds(terrain, lo, hi);
+    vec3 boxLo = vec3(lo.x, heights.x, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(hi.x, heights.y, hi.y) - scene.cameraPosition;
+    if (!boxInFrustum(boxLo, boxHi)) {
+        return;
+    }
+
+    float distanceToBox = length(max(max(boxLo, -boxHi), vec3(0.0)));
+    if (level > 0u && distanceToBox < terrainLodRange(terrain, level - 1u)) {
+        uint child = level - 1u;
+        for (uint i = 0u; i < 4u; ++i) {
+            uint slot = atomicAdd(select.counters.counters[kCounterNodeCount + child], 1u);
+            if (slot >= kMaxTerrainNodes) {
+                atomicAdd(select.drawCounters.counters[kDrawCounterOverflow], 1u);
+                continue;
+            }
+            // One workgroup per 64 nodes of the next level.
+            if (slot % 64u == 0u) {
+                atomicAdd(select.counters.counters[child * 3u], 1u);
+            }
+            select.lists.nodes[(child & 1u) * kMaxTerrainNodes + slot] =
+                terrainEncodeNode(child, 2u * n.y + (i & 1u), 2u * n.z + (i >> 1));
+        }
+        return;
+    }
+
+    uint slot = atomicAdd(select.drawCounters.counters[kDrawCounterTerrainNodes], 1u);
+    if (slot >= kMaxTerrainNodes) {
+        // The count is reported as drawn nodes: keep it at the capacity.
+        atomicAdd(select.drawCounters.counters[kDrawCounterTerrainNodes], uint(-1));
+        atomicAdd(select.drawCounters.counters[kDrawCounterOverflow], 1u);
+        return;
+    }
+    terrain.nodes.nodes[slot] = node;
+    atomicAdd(select.counters.counters[kCounterDrawTasks], kTerrainTasksPerNode);
+}

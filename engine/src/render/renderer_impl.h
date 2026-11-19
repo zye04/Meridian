@@ -1,5 +1,5 @@
 // Private state of meridian::Renderer, shared by renderer_setup.cpp,
-// renderer_resources.cpp and renderer_frame.cpp.
+// renderer_resources.cpp, renderer_terrain.cpp and renderer_frame.cpp.
 #pragma once
 
 #include "gpu_types.h"
@@ -74,6 +74,7 @@ struct Renderer::Impl {
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
   uint32_t droppedEntries = 0;
+  uint32_t drawnTerrainNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
 
@@ -122,6 +123,21 @@ struct Renderer::Impl {
   Buffer drawCounters;
   // Per instance: visible at the end of last frame's culling (1) or not.
   Buffer visibility;
+
+  // Terrain (renderer_terrain.cpp): the heightfield, its normal map (both
+  // in the bindless table) and min/max pyramid (empty until setTerrain),
+  // the CDLOD selection's counters (TerrainCounters) and node lists: two
+  // ping-pong selection lists, then the draw list.
+  Image terrainHeightImage;
+  Image terrainNormalImage;
+  Buffer terrainPyramid;
+  // Trilinear, anisotropic, mirrored repeat like the heightfield itself.
+  VkSampler terrainSampler = VK_NULL_HANDLE;
+  Buffer terrainCounters;
+  Buffer terrainLists;
+  VkPipelineLayout terrainSelectLayout = VK_NULL_HANDLE;
+  VkPipeline terrainSelectPipeline = VK_NULL_HANDLE;
+  VkPipeline terrainPipeline = VK_NULL_HANDLE;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -206,6 +222,10 @@ struct Renderer::Impl {
                       VmaAllocationCreateFlags flags,
                       VkDeviceSize alignment = 0);
   void destroyBuffer(Buffer &buffer);
+  Buffer uploadStorage(const void *data, VkDeviceSize bytes);
+  void writeTexture(uint32_t index, VkImageView view, VkSampler sampler);
+  void uploadTerrainHeights(const Heightfield &field);
+  void buildTerrainNormals(const Heightfield &field);
 
   AccelerationStructure
   createAccelerationStructure(VkAccelerationStructureTypeKHR type,
@@ -213,7 +233,10 @@ struct Renderer::Impl {
   void destroyAccelerationStructure(AccelerationStructure &as);
   void buildTlas(VkCommandBuffer cmd, FrameData &frame);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
+  void resetDrawCounters(VkCommandBuffer cmd);
   void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
+  void selectTerrain(VkCommandBuffer cmd, const FrameData &frame);
+  void drawTerrain(VkCommandBuffer cmd);
   void buildDepthPyramid(VkCommandBuffer cmd);
   void createDepthPyramid();
 

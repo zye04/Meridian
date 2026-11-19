@@ -156,13 +156,45 @@ struct GpuTerrainLayer {
 };
 static_assert(sizeof(GpuTerrainLayer) == 32);
 
+// CDLOD terrain quadtree (terrain.glsl): level 0 nodes are 16 m, 32x32
+// quads of 0.5 m; each level doubles. The root covers 262 km around the
+// origin. Level 0's LOD range in meters; each level's range doubles.
+constexpr uint32_t kTerrainRootLevel = 14;
+constexpr float kTerrainLodRange0 = 80.0f;
+// Capacity of each selection list and of the terrain draw list. Overflow is
+// dropped and counted in DrawCounters::overflow.
+constexpr uint32_t kMaxTerrainNodes = 8192;
+// Mesh shader workgroups per drawn node (4x4 blocks of 8x8 quads).
+constexpr uint32_t kTerrainTasksPerNode = 16;
+constexpr uint32_t kMaxHeightPyramidLevels = 16;
+
 // Must match Terrain in common.glsl. Layers: soil, needles, rock.
 struct GpuTerrain {
   GpuTerrainLayer layers[3];
+  // A TerrainMaterial is set (procedural colors otherwise).
   uint32_t enabled = 0;
-  uint32_t pad[3] = {};
+  float snowLine = TerrainMaterial{}.snowLine;
+  // Bindless texture indices: the samples (R16_UNORM, row 0 = north) and
+  // the normal map (RG16_SNORM normal x, z; mipmapped, mirrored repeat).
+  uint32_t heightTexture = 0;
+  uint32_t normalTexture = 0;
+  // Min/max pyramid levels >= 1 (min | max << 16), level k at
+  // pyramidOffsets[k].
+  VkDeviceAddress pyramid = 0;
+  // This frame's selected nodes (terrain_select.comp -> terrain.mesh).
+  VkDeviceAddress nodes = 0;
+  uint32_t pyramidOffsets[kMaxHeightPyramidLevels] = {};
+  // Stored levels: 1..pyramidLevels.
+  uint32_t pyramidLevels = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  float spacing = 0.0f;
+  float minHeight = 0.0f;
+  float heightScale = 0.0f;
+  float lodRange0 = 0.0f;
+  uint32_t rootLevel = 0;
 };
-static_assert(sizeof(GpuTerrain) == 112);
+static_assert(sizeof(GpuTerrain) == 224);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
@@ -211,7 +243,7 @@ struct SceneData {
   VkDeviceAddress clusterTriangles = 0;
   VkDeviceAddress drawLists = 0;
 };
-static_assert(sizeof(SceneData) == 832);
+static_assert(sizeof(SceneData) == 944);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -264,7 +296,9 @@ struct DrawCounters {
   uint32_t triangles;
   uint32_t overflow;
   uint32_t retestCount;
-  uint32_t pad[3];
+  // Nodes terrain_select.comp put in the terrain draw list.
+  uint32_t terrainNodes;
+  uint32_t pad[2];
 };
 static_assert(sizeof(DrawCounters) == 160);
 
@@ -306,6 +340,29 @@ struct CullConstants {
 static_assert(sizeof(CullConstants) == 64);
 constexpr uint32_t kCullRetest = 2;
 
+// Must match TerrainCounters in terrain_select.comp. Per quadtree level: the
+// dispatch arguments over that level's input list (one thread per node) and
+// its node count; then the terrain draw's mesh task arguments.
+struct TerrainCounters {
+  uint32_t dispatch[kTerrainRootLevel + 1][3];
+  uint32_t count[kTerrainRootLevel + 1];
+  uint32_t drawTasks[3];
+  uint32_t pad;
+};
+static_assert(sizeof(TerrainCounters) == 256);
+
+// Must match the push constants in terrain_select.comp.
+struct TerrainSelectConstants {
+  VkDeviceAddress sceneBuffer = 0;
+  VkDeviceAddress counters = 0;
+  // Two ping-pong selection lists of kMaxTerrainNodes entries.
+  VkDeviceAddress lists = 0;
+  VkDeviceAddress drawCounters = 0;
+  uint32_t level = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(TerrainSelectConstants) == 48);
+
 // TLAS instance masks: shadow rays only test shadow casters.
 constexpr uint8_t kShadowCasterMask = 0x01;
 constexpr uint8_t kNonCasterMask = 0x02;
@@ -339,7 +396,6 @@ static_assert(sizeof(PushConstants) == 16);
 
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
-constexpr uint32_t kMaterialTerrain = 1u;
 constexpr uint32_t kMaterialAlphaMask = 2u;
 
 struct GpuMaterial {
@@ -379,8 +435,7 @@ inline GpuMaterial toGpu(const MaterialData &m) {
   g.occlusionTexture = textureIndex(m.occlusionTexture);
   g.emissiveTexture = textureIndex(m.emissiveTexture);
   g.alphaCutoff = m.alphaCutoff;
-  g.flags = (m.terrain ? kMaterialTerrain : 0u) |
-            (m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u);
+  g.flags = m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u;
   return g;
 }
 constexpr VkShaderStageFlags kScenePushStages =

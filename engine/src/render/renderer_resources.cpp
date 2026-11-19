@@ -208,6 +208,7 @@ void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
   impl_->terrain.layers[0] = toGpu(material.soil);
   impl_->terrain.layers[1] = toGpu(material.needles);
   impl_->terrain.layers[2] = toGpu(material.rock);
+  impl_->terrain.snowLine = material.snowLine;
   impl_->terrain.enabled = 1;
 }
 

@@ -4,6 +4,9 @@
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "material.glsl"
+#ifdef TERRAIN
+#include "terrain.glsl"
+#endif
 
 layout(location = 0) in vec3 inRelativePosition;
 layout(location = 1) in vec3 inNormal;
@@ -123,6 +126,34 @@ vec4 sampleTexture(uint index, vec2 uv) {
     return texture(textures[nonuniformEXT(index)], uv);
 }
 
+#ifdef TERRAIN
+// Flat ground above the snow line, fading in over 40 m.
+float snowCover(vec3 normal) {
+    float snowLine = pc.scene.terrain.snowLine;
+    return smoothstep(snowLine, snowLine + 40.0, worldPosition.y) *
+           smoothstep(0.6, 0.8, normal.y);
+}
+
+// The heightfield's normal from the normal map, filtered (trilinear,
+// anisotropic) so distant ground doesn't alias; per pixel, because vertex
+// normals would change with the LOD. Near the camera the detail
+// displacement's slope is added.
+vec3 terrainNormal() {
+    Terrain terrain = pc.scene.terrain;
+    vec2 size = vec2(float(terrain.width), float(terrain.height));
+    vec2 uv = (worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
+    vec2 xz = texture(textures[terrain.normalTexture], uv).rg;
+    // The sampler mirrors like the heights, but a mirrored copy's slopes
+    // point the other way.
+    xz *= 1.0 - 2.0 * mod(floor(uv), 2.0);
+    vec2 slope = -xz / sqrt(max(1.0 - dot(xz, xz), 1e-4));
+    float weight = terrainDetailWeight(terrain, length(inRelativePosition));
+    if (weight > 0.0) {
+        slope += weight * terrainDetail(worldPosition.xz).yz;
+    }
+    return normalize(vec3(-slope.x, 1.0, -slope.y));
+}
+
 // Grass, rock and snow chosen by slope and height: the terrain's fallback
 // when no TerrainMaterial is set.
 Surface proceduralTerrain(vec3 normal) {
@@ -132,8 +163,7 @@ Surface proceduralTerrain(vec3 normal) {
 
     Surface s;
     s.baseColor = mix(kRock, kGrass, smoothstep(0.75, 0.9, normal.y));
-    float snow = smoothstep(150.0, 190.0, worldPosition.y) *
-                 smoothstep(0.6, 0.8, normal.y);
+    float snow = snowCover(normal);
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.alpha = 1.0;
     s.metallic = 0.0;
@@ -145,9 +175,9 @@ Surface proceduralTerrain(vec3 normal) {
 }
 
 // ---------------------------------------------------------------- Terrain
-// Scanned ground layers projected in world space (the terrain's UVs span
-// the whole mesh). Every sample uses explicit gradients so layers can be
-// skipped per pixel without breaking mip selection.
+// Scanned ground layers projected in world space. Every sample uses
+// explicit gradients so layers can be skipped per pixel without breaking
+// mip selection.
 
 struct TerrainTexel {
     vec3 baseColor;
@@ -399,8 +429,7 @@ Surface terrainSurface(vec3 normal) {
     s.occlusion = ground.occlusionRoughness.x;
     s.perceptualRoughness = ground.occlusionRoughness.y;
     s.normal = ground.normal;
-    float snow = smoothstep(150.0, 190.0, worldPosition.y) *
-                 smoothstep(0.6, 0.8, normal.y);
+    float snow = snowCover(normal);
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
     s.normal = normalize(mix(s.normal, normal, snow));
@@ -409,6 +438,8 @@ Surface terrainSurface(vec3 normal) {
     s.emissive = vec3(0.0);
     return s;
 }
+
+#endif // TERRAIN
 
 Surface materialSurface(Material m, vec3 normal) {
     Surface s;
@@ -475,20 +506,18 @@ vec3 fresnelSchlick(vec3 f0, float VoH) {
 
 void main() {
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
+#ifdef TERRAIN
+    vec3 normal = terrainNormal();
+    Surface s = pc.scene.terrain.enabled != 0u ? terrainSurface(normal)
+                                               : proceduralTerrain(normal);
+#else
     Material material = pc.scene.materials.materials[inMaterialIndex];
     vec3 normal = normalize(inNormal);
     if (!gl_FrontFacing) {
         normal = -normal;
     }
-
-    Surface s;
-    if ((material.flags & kMaterialTerrain) == 0u) {
-        s = materialSurface(material, normal);
-    } else if (pc.scene.terrain.enabled != 0u) {
-        s = terrainSurface(normal);
-    } else {
-        s = proceduralTerrain(normal);
-    }
+    Surface s = materialSurface(material, normal);
+#endif
 #ifdef ALPHA_MASK
     if (s.alpha < material.alphaCutoff) {
         discard;
@@ -530,7 +559,15 @@ void main() {
     vec3 diffuseLight = vec3(0.0);
     vec3 specularLight = vec3(0.0);
     float NoL = clamp(dot(N, L), 0.0, 1.0);
-    if (NoL > 0.0 && dot(geometricNormal, L) > 0.0) {
+#ifdef TERRAIN
+    // A coarse LOD triangle can face away from the sun where the
+    // heightfield (the shading normal) doesn't; its facing would cut the
+    // light per triangle.
+    bool facesSun = true;
+#else
+    bool facesSun = dot(geometricNormal, L) > 0.0;
+#endif
+    if (NoL > 0.0 && facesSun) {
         float visibility = sunVisibility(worldPosition, geometricNormal);
         vec3 H = normalize(V + L);
         float NoH = clamp(dot(N, H), 0.0, 1.0);

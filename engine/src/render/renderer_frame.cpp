@@ -38,6 +38,33 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
   instancesDirty = false;
 }
 
+// Clears the DrawCounters before the terrain selection and both culling
+// phases count into them. The counters, work items and draw lists (the
+// terrain's too) are shared by both frames in flight, so this first waits
+// for the previous frame's use of them.
+void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
+  memoryBarrier(cmd,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+                    VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+                0, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+  DrawCounters initial{};
+  for (auto &dispatch : initial.workDispatch) {
+    dispatch[1] = dispatch[2] = 1;
+  }
+  for (auto &lists : initial.meshTasks) {
+    for (auto &tasks : lists) {
+      tasks[1] = tasks[2] = 1;
+    }
+  }
+  initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
+  vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
 // Culls on the GPU and fills one phase's cluster draw lists. Phase 0 takes
 // last frame's visible instances (frustum test only); phase 1 tests all of
 // them against the depth pyramid, adds the newly visible ones and records
@@ -45,31 +72,6 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
 // items, which the cluster cull LOD-selects and frustum-culls.
 void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                                    uint32_t phase) {
-  if (phase == 0) {
-    // The work items, draw lists and counters are shared by both frames in
-    // flight.
-    memoryBarrier(cmd,
-                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-                      VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
-                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                  0, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    DrawCounters initial{};
-    for (auto &dispatch : initial.workDispatch) {
-      dispatch[1] = dispatch[2] = 1;
-    }
-    for (auto &lists : initial.meshTasks) {
-      for (auto &tasks : lists) {
-        tasks[1] = tasks[2] = 1;
-      }
-    }
-    initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
-    vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  }
-
   CullConstants constants;
   constants.sceneBuffer = frame.sceneBuffer.address;
   constants.workItems =
@@ -314,6 +316,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->drawnInstances = counters->instances;
     impl_->drawnTriangles = counters->triangles;
     impl_->droppedEntries = counters->overflow;
+    impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnClusters = 0;
     for (const auto &lists : counters->meshTasks) {
       for (const auto &tasks : lists) {
@@ -435,6 +438,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->uploadInstances(cmd, frame);
   impl_->buildTlas(cmd, frame);
   endPass("upload + tlas");
+  impl_->resetDrawCounters(cmd);
+  impl_->selectTerrain(cmd, frame);
+  endPass("terrain select");
   impl_->cullInstances(cmd, frame, 0);
   endPass("cull early");
 
@@ -594,6 +600,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginScene();
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
   vkCmdDraw(cmd, 3, 1, 0, 0);
+  impl_->drawTerrain(cmd);
   drawCulled(0);
   vkCmdEndRendering(cmd);
   endPass("scene early");

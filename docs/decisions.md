@@ -303,3 +303,61 @@ foliage that survives simplification).
   sub-2-cm error. Outside the grid, indices mirror like Vulkan
   MIRRORED_REPEAT on CPU and GPU alike.
 
+
+## Terrain rendering: CDLOD (2026-11-19)
+
+- **CDLOD with GPU quadtree selection** (Strugar 2009) for the Napf
+  heightfield, replacing the 2 km terrain mesh. Every node is a fixed
+  32x32-quad grid and node size doubles per level. Vertices morph toward
+  the next coarser grid near the end of their level's distance range, so
+  neighboring levels meet without cracks or T-junctions, and LOD changes
+  don't pop. Selection runs on the GPU, one indirect dispatch per
+  quadtree level from the root down (as in Far Cry 5's GPU terrain, GDC
+  2018). It frustum-tests each node's box, with heights from the min/max
+  pyramid, and splits a node while the camera is within the next finer
+  level's range. Draw: `terrain.mesh`, 16 workgroups of 8x8 quads per
+  node, first in the early scene pass, so hills occlude objects through
+  the depth pyramid.
+  - Rejected: geometry clipmaps (no adaptivity, and ring updates don't
+    fit a GPU-driven pipeline); terrain through the cluster LOD path (the
+    DAG of ~112M triangles would cost minutes and GBs to build).
+  - https://github.com/fstrugar/CDLOD
+- **Numbers:** level 0 nodes are 16 m (0.5 m quads); the root is level 14
+  (262 km), centered on the origin. Level 0's LOD range is 80 m and
+  ranges double per level. Morphing covers the last 30% of each level's
+  span. The range is 5x the node size: at 64 m (4x) the no-crack margin
+  was marginal (the L+1 neighbor could start morphing where level-L
+  nodes still reach). The quadtree is shifted under one sample spacing
+  so level 2's 2 m vertices land exactly on data samples; unshifted, the
+  grid would sit between samples and blur the data. Levels 0-1 are finer
+  than the data and add value-noise detail (wavelengths 4-0.5 m, at most
+  0.3 m), fading out by the end of level 1's range, so level >= 2
+  vertices are exactly the bilinear heightfield. Motion vectors use last
+  frame's camera for the morph and detail weight too, so morphing doesn't
+  smear under TAA.
+- **Heights and normals:** an R16_UNORM image of the samples, read with
+  `texelFetch` and the CPU's mirror rule (exactly `Heightfield::heightAt`).
+  The per-pixel normal comes from an RG16_SNORM normal map (x and z; y is
+  reconstructed): the full level is built on the GPU at load from central
+  differences, the mips are blitted, and it is sampled trilinear and
+  anisotropic through a mirrored-repeat sampler, with the slope's sign
+  flipped in mirrored copies. Distant normals are filtered, not aliased.
+  The detail noise's analytic slope is added near the camera. Reading
+  the 16 samples per pixel from a buffer instead cost 0.82 ms. The
+  min/max pyramid (levels >= 1, `min | max << 16`) stays a buffer for
+  selection and the shadow march.
+- **Measured** (Release, 2560x1440, RTX 4080, median of 5; procedural
+  shading on both sides to leave out the material): terrain select
+  0.07-0.08 ms. Select + scene early: 0.59 ms (open view) and 0.63 ms
+  (full-ground view), against 0.69-0.75 ms for the old 2 km mesh's scene
+  early. About 377-393 nodes (0.77-0.80M triangles) at eye height; 173
+  nodes (0.35M) from 3000 m. GPU memory: height image 113 MB, normal map
+  300 MB with mips, pyramid 75 MB.
+- **Known cost (content, not this technique):** the unchanged terrain
+  material costs ~1.8 ms on the Napf at the open view, against ~0.35 ms
+  on the old, mostly flat ground. The steep slopes are mostly triplanar
+  rock (12 anisotropic fetches per pixel). With the material, the open
+  view's scene early is 2.35 ms and the frame 2.7 ms.
+- Coarse LOD triangles don't gate the sun on terrain: their facing
+  differs from the per-pixel normal on steep slopes and cut the light
+  per triangle.

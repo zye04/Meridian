@@ -109,9 +109,8 @@ void addModel(meridian::Renderer &renderer, const meridian::Model &model,
 
 // Places models at random on the ground within `radius` of `center`, with a
 // fixed seed so runs repeat. Returns how many were placed.
-int scatterModels(meridian::Renderer &renderer,
-                  const meridian::TerrainSettings &terrain, meridian::Vec3 center,
-                  float radius, int count) {
+int scatterModels(meridian::Renderer &renderer, const meridian::Heightfield &terrain,
+                  meridian::Vec3 center, float radius, int count) {
   const char *ids[] = {"rock_moss_set_01", "rock_moss_set_02", "boulder_01",
                        "namaqualand_boulder_04", "tree_stump_01", "tree_stump_02",
                        "dead_tree_trunk_02", "dry_branches_medium_01", "pine_roots",
@@ -144,7 +143,7 @@ int scatterModels(meridian::Renderer &renderer,
     const float yaw = 2.0f * 3.14159265f * unit(rng);
     const float scale = 0.8f + 0.4f * unit(rng);
     // Sunk slightly so bases don't float where the ground curves.
-    const float y = meridian::terrainHeight(terrain, x, z) - 0.05f;
+    const float y = terrain.heightAt(x, z) - 0.05f;
     meridian::Mat4 placement = meridian::Mat4::identity();
     placement.m[0][0] = scale * std::cos(yaw);
     placement.m[0][2] = -scale * std::sin(yaw);
@@ -161,7 +160,7 @@ int scatterModels(meridian::Renderer &renderer,
 }
 
 // Command-line options for deterministic, automated runs, e.g.
-//   game --camera 0 300 700 0 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
+//   game --camera 1119 4354 -431 -1.55 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
   std::optional<meridian::Camera> camera;
   std::optional<meridian::Vec3> sunDirection;
@@ -245,13 +244,17 @@ int main(int argc, char **argv) {
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setLodErrorPixels(options.lodError);
 
-  const meridian::TerrainSettings terrainSettings;
-  meridian::MaterialData terrainMaterial;
-  terrainMaterial.terrain = true;
-  meridian::MeshId terrain =
-      renderer.uploadMesh(meridian::generateTerrain(terrainSettings),
-                          renderer.createMaterial(terrainMaterial));
-  renderer.addInstance(terrain, meridian::Mat4::identity());
+  // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
+  const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";
+  meridian::Heightfield terrain;
+  if (std::filesystem::exists(heightPath)) {
+    terrain = meridian::loadHeightfield(heightPath);
+  } else {
+    std::printf("Missing assets/terrain/napf.height; terrain is procedural (see "
+                "tools/fetch-sample-assets.sh)\n");
+    terrain = meridian::generateHeightfield({});
+  }
+  renderer.setTerrain(terrain);
   // Tile sizes are the scans' real-world sizes.
   const auto soil = loadTerrainLayer(renderer, "forest_ground_04", 3.15f);
   const auto needles = soil ? loadTerrainLayer(renderer, "forest_leaves_04", 1.5f)
@@ -262,29 +265,34 @@ int main(int argc, char **argv) {
     renderer.setTerrainMaterial({*soil, *needles, *rock});
   }
 
-  // Sample assets from tools/fetch-sample-assets.sh, on the ground a few
-  // meters in front of the start.
-  const meridian::Vec3 start = {0.0f, 0.0f, 700.0f};
-  auto ground = [&](float x, float z) {
-    return meridian::Vec3{x, meridian::terrainHeight(terrainSettings, x, z), z};
+  // The start: a gentle ridge top (slope under 15 degrees within 20 m)
+  // 1.5 km east of the Napf summit, looking at it. Sample assets from
+  // tools/fetch-sample-assets.sh stand on the ground a few meters ahead.
+  meridian::Camera start;
+  start.position = {1119.0f, 0.0f, -431.0f};
+  start.yaw = -1.55f;
+  start.pitch = -0.1f;
+  auto ground = [&](float forward, float right) {
+    const meridian::Vec3 p =
+        start.position + start.forward() * forward + start.right() * right;
+    return meridian::Vec3{p.x, terrain.heightAt(p.x, p.z), p.z};
   };
   if (auto helmet = loadModel(renderer, "FlightHelmet/FlightHelmet.gltf")) {
-    addModel(renderer, *helmet, meridian::translation(ground(0.0f, 697.0f)));
+    addModel(renderer, *helmet, meridian::translation(ground(3.0f, 0.0f)));
   }
   if (auto alpha = loadModel(renderer, "AlphaBlendModeTest/AlphaBlendModeTest.gltf")) {
-    addModel(renderer, *alpha, meridian::translation(ground(-3.0f, 693.0f)));
+    addModel(renderer, *alpha, meridian::translation(ground(7.0f, -3.0f)));
   }
   if (options.scatter > 0) {
-    scatterModels(renderer, terrainSettings, start, 150.0f, options.scatter);
+    scatterModels(renderer, terrain, start.position, 150.0f, options.scatter);
   }
 
   meridian::Lighting lighting;
   if (options.sunDirection) {
     lighting.sunDirection = *options.sunDirection;
   }
-  meridian::Camera camera;
-  camera.position = ground(start.x, start.z) + meridian::Vec3{0.0f, 1.7f, 0.0f};
-  camera.pitch = -0.1f;
+  meridian::Camera camera = start;
+  camera.position = ground(0.0f, 0.0f) + meridian::Vec3{0.0f, 1.7f, 0.0f};
   if (options.camera) {
     camera = *options.camera;
   }
@@ -345,10 +353,12 @@ int main(int argc, char **argv) {
 
   if (!interactive) {
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u dropped by full cull lists, %u validation errors\n",
+                "%u triangles, %u terrain nodes, %u dropped by full cull lists, "
+                "%u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
-                renderer.droppedCullEntryCount(), renderer.validationErrorCount());
+                renderer.drawnTerrainNodeCount(), renderer.droppedCullEntryCount(),
+                renderer.validationErrorCount());
     std::printf("GPU passes:");
     const char *separator = " ";
     for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {

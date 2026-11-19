@@ -1,27 +1,11 @@
 #pragma once
 
-#include <meridian/mesh.h>
-
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <vector>
 
 namespace meridian {
-
-struct TerrainSettings {
-  int resolution = 512;
-  float size = 2048.0f;
-  float maxHeight = 250.0f;
-  uint32_t seed = 1;
-};
-
-// A square grid centered on the origin, shaped by fractal value noise.
-MeshData generateTerrain(const TerrainSettings &settings);
-
-// Height of the generated mesh's surface at (x, z), for placing things on
-// the ground: exact at vertices, bilinear in between.
-float terrainHeight(const TerrainSettings &settings, float x, float z);
 
 // A regular grid of heights centered on the origin: east = +x, north = -z,
 // sample (i, j) at x = (i - (width-1)/2) * spacing and

@@ -3,6 +3,7 @@
 #include <meridian/camera.h>
 #include <meridian/math/mat4.h>
 #include <meridian/mesh.h>
+#include <meridian/terrain.h>
 #include <meridian/texture.h>
 
 #include <cstdint>
@@ -60,9 +61,6 @@ struct MaterialData {
   float alphaCutoff = 0.5f;
   // Render back faces too (thin geometry such as leaves).
   bool doubleSided = false;
-  // Shaded with the renderer's TerrainMaterial; procedural colors until one
-  // is set.
-  bool terrain = false;
 };
 
 // One ground texture set, projected in world space.
@@ -74,11 +72,14 @@ struct TerrainLayer {
   float tileSize = 2.0f; // meters per texture repeat
 };
 
-// Flat ground mixes soil and needles; steep slopes are rock.
+// Flat ground mixes soil and needles; steep slopes are rock; flat ground
+// above the snow line is snow.
 struct TerrainMaterial {
   TerrainLayer soil;
   TerrainLayer needles;
   TerrainLayer rock;
+  // Meters above sea level; snow fades in over the 40 m above it.
+  float snowLine = 4000.0f;
 };
 
 // A planet's atmosphere, in kilometers and per-kilometer coefficients.
@@ -136,7 +137,10 @@ public:
 
   MaterialId createMaterial(const MaterialData &material);
 
-  // Textures for every material marked `terrain`.
+  // The ground: a heightfield drawn with continuous LOD (CDLOD), selected on
+  // the GPU each frame. Replaces any previous terrain. Shaded with the
+  // TerrainMaterial, or procedural colors until one is set.
+  void setTerrain(const Heightfield &field);
   void setTerrainMaterial(const TerrainMaterial &material);
 
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
@@ -164,8 +168,10 @@ public:
   // Clusters and triangles of those instances drawn in a recent frame.
   uint32_t drawnClusterCount() const;
   uint32_t drawnTriangleCount() const;
-  // Work items and clusters the culling passes dropped in a recent frame
-  // because a list was full (nonzero means geometry is missing).
+  // Terrain quadtree nodes drawn in a recent frame (2048 triangles each).
+  uint32_t drawnTerrainNodeCount() const;
+  // Work items, clusters and terrain nodes the culling passes dropped in a
+  // recent frame because a list was full (nonzero means geometry is missing).
   uint32_t droppedCullEntryCount() const;
 
   // Level of detail: the largest simplification error allowed on screen, in
