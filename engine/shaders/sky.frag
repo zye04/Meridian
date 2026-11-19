@@ -1,15 +1,48 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#include "atmosphere.glsl"
 
-// Placeholder sky: a uniform color behind everything. The physically based
-// atmosphere replaces it.
+layout(location = 0) in vec3 inViewRay;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outMotion;
 
+// Keeps the sun disk inside FP16 range after pre-exposure.
+const float kMaxExposedLuminance = 60000.0;
+
 void main() {
-    outColor = vec4(pc.scene.skyLuminance * pc.scene.exposure.exposure, 1.0);
-    // Uniform color, so motion doesn't matter yet.
-    outMotion = vec2(0.0);
+    vec3 direction = normalize(inViewRay);
+    vec3 camera = atmospherePosition(pc.scene.cameraPosition);
+    float viewHeight = length(camera);
+    vec3 up = camera / viewHeight;
+    vec3 sun = pc.scene.sunDirection;
+
+    vec3 luminance = vec3(0.0);
+    if (viewHeight < pc.scene.atmosphere.topRadius) {
+        vec3 side = normalize(cross(up, direction));
+        vec3 forward = normalize(cross(side, up));
+        vec2 lightOnPlane = normalize(vec2(dot(sun, forward), dot(sun, side)) + 1e-6);
+        bool intersectsGround = raySphereIntersectNearest(
+            camera, direction, pc.scene.atmosphere.bottomRadius) >= 0.0;
+        vec2 uv = skyViewLutUv(intersectsGround, dot(direction, up), lightOnPlane.x,
+                               viewHeight);
+        luminance = textureLod(skyViewLut, uv, 0.0).rgb;
+
+        // Sun disk: its illuminance spread over its solid angle, dimmed by the
+        // atmosphere along the view ray.
+        float radius = pc.scene.sunAngularRadius;
+        if (dot(direction, sun) > cos(radius) && !intersectsGround) {
+            float solidAngle = kPi * radius * radius;
+            luminance += transmittanceToSun(viewHeight, dot(up, sun)) / solidAngle;
+        }
+    }
+
+    vec3 exposed = luminance * pc.scene.sunIlluminance * pc.scene.exposure.exposure;
+    outColor = vec4(min(exposed, vec3(kMaxExposedLuminance)), 1.0);
+
+    // The sky is infinitely far, so only camera rotation moves it.
+    vec4 currentClip = pc.scene.currentViewProjection * vec4(direction, 0.0);
+    vec4 previousClip = pc.scene.previousViewProjection * vec4(direction, 0.0);
+    outMotion = (previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5;
 }

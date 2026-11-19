@@ -8,6 +8,8 @@ struct Vec3 {
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
+
+  bool operator==(const Vec3 &) const = default;
 };
 
 inline Vec3 operator+(Vec3 a, Vec3 b) {

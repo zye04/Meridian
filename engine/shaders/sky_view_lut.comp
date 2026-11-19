@@ -1,0 +1,43 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "atmosphere.glsl"
+
+// Sky luminance around the camera for this frame, in a small LUT the sky
+// pass samples. Cheap because the sky is smooth.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D skyViewOut;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(kSkyViewLutSize)))) {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / kSkyViewLutSize;
+
+    vec3 camera = atmospherePosition(pc.scene.cameraPosition);
+    float viewHeight = length(camera);
+    float viewZenithCos;
+    float lightViewCos;
+    skyViewLutParameters(uv, viewHeight, viewZenithCos, lightViewCos);
+
+    // Work in a local frame: up is +Y and the sun lies in the XY plane.
+    vec3 up = camera / viewHeight;
+    float sunZenithCos = dot(up, pc.scene.sunDirection);
+    vec3 sunDirection = normalize(vec3(sqrt(max(1.0 - sunZenithCos * sunZenithCos, 0.0)),
+                                       sunZenithCos, 0.0));
+
+    vec3 position = vec3(0.0, viewHeight, 0.0);
+    float viewZenithSin = sqrt(max(1.0 - viewZenithCos * viewZenithCos, 0.0));
+    vec3 direction = vec3(viewZenithSin * lightViewCos, viewZenithCos,
+                          viewZenithSin * sqrt(max(1.0 - lightViewCos * lightViewCos, 0.0)));
+
+    vec3 luminance = vec3(0.0);
+    if (moveToTopAtmosphere(position, direction)) {
+        luminance = integrateScatteredLuminance(position, direction, sunDirection,
+                                                30.0, true, true, true, false, 9e6)
+                        .luminance;
+    }
+    imageStore(skyViewOut, pixel, vec4(luminance, 1.0));
+}

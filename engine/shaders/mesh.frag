@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
 #include "common.glsl"
+#include "atmosphere.glsl"
 
 layout(location = 0) in vec3 inWorldPosition;
 layout(location = 1) in vec3 inNormal;
@@ -18,7 +19,6 @@ const vec3 kGrass = vec3(0.06, 0.13, 0.03);
 const vec3 kRock = vec3(0.20, 0.18, 0.16);
 const vec3 kSnow = vec3(0.80, 0.82, 0.85);
 const float kGroundAlbedo = 0.1;
-const float kPi = 3.14159265;
 const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
 
@@ -71,7 +71,6 @@ void main() {
                  smoothstep(0.6, 0.8, normal.y);
     albedo = mix(albedo, kSnow, snow);
 
-    // Direct sun through a Lambert BRDF (albedo / pi).
     // Offset shadow rays along the true triangle normal: the smooth shading
     // normal can point below the surface and make the ray hit its own
     // triangle. Derivatives must be taken outside the branch below.
@@ -85,18 +84,40 @@ void main() {
     if (sunCosine > 0.0) {
         sunCosine *= sunVisibility(inWorldPosition, geometricNormal);
     }
-    vec3 direct = albedo / kPi * pc.scene.sunIlluminance * sunCosine;
 
-    // Hemisphere ambient: a uniform sky above, and below the light bounced
-    // off the ground (a diffuse surface lit by sun and sky).
+    // All lighting is relative to a sun illuminance of 1 (as in the
+    // atmosphere LUTs) and scaled by the real sun at the end.
+    vec3 position = atmospherePosition(inWorldPosition);
+    float height = length(position);
+    vec3 up = position / height;
+    vec3 sunAtSurface = transmittanceToSun(height, dot(up, pc.scene.sunDirection));
+    vec3 direct = albedo / kPi * sunAtSurface * sunCosine;
+
+    // Hemisphere ambient: the sky's irradiance from above, and below the light
+    // bounced off the ground (a diffuse surface lit by sun and sky).
+    vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
     vec3 groundIrradiance =
-        pc.scene.sunIlluminance * max(pc.scene.sunDirection.y, 0.0) +
-        kPi * pc.scene.skyLuminance;
-    vec3 groundLuminance = kGroundAlbedo / kPi * groundIrradiance;
-    vec3 ambient = albedo * mix(groundLuminance, pc.scene.skyLuminance,
-                                normal.y * 0.5 + 0.5);
+        kGroundAlbedo * (sunAtSurface * max(pc.scene.sunDirection.y, 0.0) + skyIrradiance);
+    vec3 ambient = albedo / kPi *
+                   mix(groundIrradiance, skyIrradiance, normal.y * 0.5 + 0.5);
 
-    outColor = vec4((direct + ambient) * pc.scene.exposure.exposure, 1.0);
+    vec3 luminance = direct + ambient;
+
+    // Aerial perspective: haze between the camera and this point.
+    float distanceKm = length(inWorldPosition - pc.scene.cameraPosition) * 0.001;
+    float slice = distanceKm / kAerialPerspectiveKmPerSlice;
+    float weight = 1.0;
+    if (slice < 0.5) {
+        // Fade in over the first half slice instead of jumping.
+        weight = clamp(slice * 2.0, 0.0, 1.0);
+        slice = 0.5;
+    }
+    float w = sqrt(slice / kAerialPerspectiveSlices);
+    vec4 haze = textureLod(aerialPerspectiveLut,
+                           vec3(gl_FragCoord.xy * pc.scene.inverseResolution, w), 0.0);
+    luminance = luminance * mix(1.0, haze.a, weight) + haze.rgb * weight;
+
+    outColor = vec4(luminance * pc.scene.sunIlluminance * pc.scene.exposure.exposure, 1.0);
 
     vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;

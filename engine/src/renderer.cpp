@@ -14,6 +14,7 @@
 #endif
 
 #include <array>
+#include <optional>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -73,6 +74,49 @@ struct GpuMesh {
   AccelerationStructure blas;
 };
 
+// Must match AtmosphereParameters in common.glsl (std430).
+struct GpuAtmosphere {
+  Vec3 rayleighScattering;
+  float bottomRadius = 0.0f;
+  Vec3 mieScattering;
+  float topRadius = 0.0f;
+  Vec3 mieExtinction;
+  float rayleighDensityExpScale = 0.0f;
+  Vec3 absorptionExtinction;
+  float mieDensityExpScale = 0.0f;
+  Vec3 groundAlbedo;
+  float miePhaseG = 0.0f;
+  float absorptionLayerWidth = 0.0f;
+  float absorption0Linear = 0.0f;
+  float absorption0Constant = 0.0f;
+  float absorption1Linear = 0.0f;
+  float absorption1Constant = 0.0f;
+  float pad[3] = {};
+};
+static_assert(sizeof(GpuAtmosphere) == 112);
+
+GpuAtmosphere toGpu(const Atmosphere &a) {
+  GpuAtmosphere g;
+  g.bottomRadius = a.bottomRadius;
+  g.topRadius = a.topRadius;
+  g.rayleighScattering = a.rayleighScattering;
+  g.rayleighDensityExpScale = -1.0f / a.rayleighScaleHeight;
+  g.mieScattering = a.mieScattering;
+  g.mieExtinction = a.mieExtinction;
+  g.mieDensityExpScale = -1.0f / a.mieScaleHeight;
+  g.miePhaseG = a.miePhaseG;
+  g.absorptionExtinction = a.ozoneAbsorption;
+  g.groundAlbedo = a.groundAlbedo;
+  // Earth's ozone: density rises linearly to a peak at 25 km, then falls
+  // linearly to zero at 40 km.
+  g.absorptionLayerWidth = 25.0f;
+  g.absorption0Linear = 1.0f / 15.0f;
+  g.absorption0Constant = -2.0f / 3.0f;
+  g.absorption1Linear = -1.0f / 15.0f;
+  g.absorption1Constant = 8.0f / 3.0f;
+  return g;
+}
+
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
@@ -82,12 +126,15 @@ struct SceneData {
   float pad0 = 0.0f;
   Vec3 sunIlluminance;
   uint32_t frameIndex = 0;
-  Vec3 skyLuminance;
+  Vec3 cameraPosition;
   float sunAngularRadius = 0.0f;
   VkDeviceAddress tlas = 0;
   VkDeviceAddress exposure = 0;
+  VkDeviceAddress skyIrradiance = 0;
+  float inverseResolution[2] = {};
+  GpuAtmosphere atmosphere;
 };
-static_assert(sizeof(SceneData) == 256);
+static_assert(sizeof(SceneData) == 384);
 
 // Must match ExposureBuffer in exposure.glsl.
 struct ExposureState {
@@ -114,6 +161,9 @@ struct PushConstants {
   VkDeviceAddress sceneBuffer = 0;
 };
 static_assert(sizeof(PushConstants) == 80);
+constexpr VkShaderStageFlags kScenePushStages = VK_SHADER_STAGE_VERTEX_BIT |
+                                                VK_SHADER_STAGE_FRAGMENT_BIT |
+                                                VK_SHADER_STAGE_COMPUTE_BIT;
 
 struct FrameData {
   VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -388,7 +438,9 @@ struct Renderer::Impl {
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
   VkFence uploadFence = VK_NULL_HANDLE;
 
-  VkPipelineLayout meshLayout = VK_NULL_HANDLE;
+  // Shared by everything that reads the scene buffer: meshes, the sky and
+  // the atmosphere compute passes.
+  VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
   VkPipeline meshPipeline = VK_NULL_HANDLE;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
@@ -402,6 +454,24 @@ struct Renderer::Impl {
   VkPipeline histogramPipeline = VK_NULL_HANDLE;
   VkPipeline exposurePipeline = VK_NULL_HANDLE;
   VkPipeline skyPipeline = VK_NULL_HANDLE;
+
+  // Atmosphere LUTs (Hillaire 2020), always in GENERAL layout: written by
+  // compute passes, sampled by the sky, terrain and later passes.
+  Image transmittanceLut;
+  Image multiScatteringLut;
+  Image skyViewLut;
+  Image aerialPerspectiveLut;
+  VkDescriptorSetLayout atmosphereSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSet atmosphereSet = VK_NULL_HANDLE;
+  VkPipeline transmittanceLutPipeline = VK_NULL_HANDLE;
+  VkPipeline multiScatteringLutPipeline = VK_NULL_HANDLE;
+  VkPipeline skyViewLutPipeline = VK_NULL_HANDLE;
+  VkPipeline aerialPerspectiveLutPipeline = VK_NULL_HANDLE;
+  VkPipeline skyIrradiancePipeline = VK_NULL_HANDLE;
+  Buffer skyIrradianceBuffer;
+  // The transmittance and multiple-scattering LUTs depend only on the
+  // atmosphere; they're rebuilt when it changes.
+  std::optional<Atmosphere> builtAtmosphere;
 
   // Auto-exposure: a luminance histogram and the adapted exposure, both
   // GPU-only. Each frame shades with the exposure the previous frame computed.
@@ -418,9 +488,12 @@ struct Renderer::Impl {
   void createDescriptors();
   void createPipelines();
   void createExposureBuffers();
+  void createAtmosphere();
 
-  Image createImage(VkFormat format, VkImageUsageFlags usage,
-                    VkImageAspectFlags aspect);
+  Image createImage(VkFormat format, VkExtent3D extent,
+                    VkImageUsageFlags usage, VkImageAspectFlags aspect);
+  Image createScreenImage(VkFormat format, VkImageUsageFlags usage,
+                          VkImageAspectFlags aspect);
   void destroyImage(Image &image);
 
   Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
@@ -569,14 +642,16 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
-// A GPU-only 2D image the size of the swapchain.
-Image Renderer::Impl::createImage(VkFormat format, VkImageUsageFlags usage,
+// A GPU-only 2D image, or 3D when extent.depth > 1.
+Image Renderer::Impl::createImage(VkFormat format, VkExtent3D extent,
+                                  VkImageUsageFlags usage,
                                   VkImageAspectFlags aspect) {
+  const bool is3d = extent.depth > 1;
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  imageInfo.imageType = VK_IMAGE_TYPE_2D;
+  imageInfo.imageType = is3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
   imageInfo.format = format;
-  imageInfo.extent = {swapchain.extent.width, swapchain.extent.height, 1};
+  imageInfo.extent = extent;
   imageInfo.mipLevels = 1;
   imageInfo.arrayLayers = 1;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -596,7 +671,7 @@ Image Renderer::Impl::createImage(VkFormat format, VkImageUsageFlags usage,
   VkImageViewCreateInfo viewInfo{};
   viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image = image.image;
-  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.viewType = is3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = format;
   viewInfo.subresourceRange.aspectMask = aspect;
   viewInfo.subresourceRange.levelCount = 1;
@@ -604,6 +679,14 @@ Image Renderer::Impl::createImage(VkFormat format, VkImageUsageFlags usage,
   check(vkCreateImageView(device.device, &viewInfo, nullptr, &image.view),
         "vkCreateImageView");
   return image;
+}
+
+Image Renderer::Impl::createScreenImage(VkFormat format,
+                                        VkImageUsageFlags usage,
+                                        VkImageAspectFlags aspect) {
+  return createImage(format,
+                     {swapchain.extent.width, swapchain.extent.height, 1},
+                     usage, aspect);
 }
 
 void Renderer::Impl::destroyImage(Image &image) {
@@ -668,18 +751,18 @@ void Renderer::Impl::createSwapchain() {
           "vkCreateSemaphore");
   }
 
-  depth = createImage(kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+  depth = createScreenImage(kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                       VK_IMAGE_ASPECT_DEPTH_BIT);
-  hdr = createImage(kHdrFormat,
+  hdr = createScreenImage(kHdrFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                         VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT);
-  motion = createImage(kMotionFormat,
+  motion = createScreenImage(kMotionFormat,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                            VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT);
   for (Image &image : history) {
-    image = createImage(kHdrFormat,
+    image = createScreenImage(kHdrFormat,
                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                         VK_IMAGE_ASPECT_COLOR_BIT);
   }
@@ -875,13 +958,34 @@ void Renderer::Impl::createDescriptors() {
   check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &postSetLayout),
         "vkCreateDescriptorSetLayout");
 
+  // Must match atmosphere.glsl and the *_lut.comp shaders: four sampled
+  // LUTs, then the same four as storage images.
+  VkDescriptorSetLayoutBinding atmosphereBindings[8]{};
+  for (uint32_t b = 0; b < 8; ++b) {
+    atmosphereBindings[b].binding = b;
+    atmosphereBindings[b].descriptorType =
+        b < 4 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    atmosphereBindings[b].descriptorCount = 1;
+    atmosphereBindings[b].stageFlags =
+        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  }
+  VkDescriptorSetLayoutCreateInfo atmosphereLayoutInfo{};
+  atmosphereLayoutInfo.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  atmosphereLayoutInfo.bindingCount = 8;
+  atmosphereLayoutInfo.pBindings = atmosphereBindings;
+  check(vkCreateDescriptorSetLayout(dev, &atmosphereLayoutInfo, nullptr,
+                                    &atmosphereSetLayout),
+        "vkCreateDescriptorSetLayout");
+
   VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 12},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 6},
   };
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.maxSets = 2;
+  poolInfo.maxSets = 3;
   poolInfo.poolSizeCount = 2;
   poolInfo.pPoolSizes = poolSizes;
   check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &descriptorPool),
@@ -895,6 +999,59 @@ void Renderer::Impl::createDescriptors() {
   allocInfo.pSetLayouts = setLayouts;
   check(vkAllocateDescriptorSets(dev, &allocInfo, postSets.data()),
         "vkAllocateDescriptorSets");
+
+  allocInfo.descriptorSetCount = 1;
+  allocInfo.pSetLayouts = &atmosphereSetLayout;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, &atmosphereSet),
+        "vkAllocateDescriptorSets");
+}
+
+void Renderer::Impl::createAtmosphere() {
+  constexpr VkFormat kLutFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+  constexpr VkImageUsageFlags kLutUsage =
+      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  // Sizes must match atmosphere.glsl. 32-bit floats: the reference notes
+  // visible artifacts with 16-bit LUTs.
+  transmittanceLut = createImage(kLutFormat, {256, 64, 1}, kLutUsage,
+                                 VK_IMAGE_ASPECT_COLOR_BIT);
+  multiScatteringLut = createImage(kLutFormat, {32, 32, 1}, kLutUsage,
+                                   VK_IMAGE_ASPECT_COLOR_BIT);
+  skyViewLut = createImage(kLutFormat, {192, 108, 1}, kLutUsage,
+                           VK_IMAGE_ASPECT_COLOR_BIT);
+  aerialPerspectiveLut = createImage(kLutFormat, {32, 32, 32}, kLutUsage,
+                                     VK_IMAGE_ASPECT_COLOR_BIT);
+  skyIrradianceBuffer = createBuffer(
+      16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+
+  const Image *luts[] = {&transmittanceLut, &multiScatteringLut, &skyViewLut,
+                         &aerialPerspectiveLut};
+  submitNow([&](VkCommandBuffer cmd) {
+    for (const Image *lut : luts) {
+      transitionImage(cmd, {lut->image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            VK_PIPELINE_STAGE_2_NONE, 0,
+                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+    }
+  });
+
+  VkDescriptorImageInfo images[8]{};
+  VkWriteDescriptorSet writes[8]{};
+  for (uint32_t b = 0; b < 8; ++b) {
+    const bool sampled = b < 4;
+    images[b] = {sampled ? linearSampler : VK_NULL_HANDLE, luts[b % 4]->view,
+                 VK_IMAGE_LAYOUT_GENERAL};
+    writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[b].dstSet = atmosphereSet;
+    writes[b].dstBinding = b;
+    writes[b].descriptorCount = 1;
+    writes[b].descriptorType = sampled ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                       : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[b].pImageInfo = &images[b];
+  }
+  vkUpdateDescriptorSets(device.device, 8, writes, 0, nullptr);
 }
 
 void Renderer::Impl::createExposureBuffers() {
@@ -933,20 +1090,22 @@ void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
   VkPushConstantRange pushRange{};
-  pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  pushRange.stageFlags = kScenePushStages;
   pushRange.size = sizeof(PushConstants);
 
-  VkPipelineLayoutCreateInfo meshLayoutInfo{};
-  meshLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  meshLayoutInfo.pushConstantRangeCount = 1;
-  meshLayoutInfo.pPushConstantRanges = &pushRange;
-  check(vkCreatePipelineLayout(dev, &meshLayoutInfo, nullptr, &meshLayout),
+  VkPipelineLayoutCreateInfo sceneLayoutInfo{};
+  sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  sceneLayoutInfo.setLayoutCount = 1;
+  sceneLayoutInfo.pSetLayouts = &atmosphereSetLayout;
+  sceneLayoutInfo.pushConstantRangeCount = 1;
+  sceneLayoutInfo.pPushConstantRanges = &pushRange;
+  check(vkCreatePipelineLayout(dev, &sceneLayoutInfo, nullptr, &sceneLayout),
         "vkCreatePipelineLayout");
 
   const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat};
   meshPipeline = createGraphicsPipeline(dev, {.vertexShader = "mesh.vert",
                                               .fragmentShader = "mesh.frag",
-                                              .layout = meshLayout,
+                                              .layout = sceneLayout,
                                               .colorFormats = sceneFormats,
                                               .depthFormat = kDepthFormat,
                                               .cullMode = VK_CULL_MODE_BACK_BIT});
@@ -970,9 +1129,20 @@ void Renderer::Impl::createPipelines() {
       createComputePipeline(dev, "histogram.comp", postLayout);
   exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
 
-  skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
+  transmittanceLutPipeline =
+      createComputePipeline(dev, "transmittance_lut.comp", sceneLayout);
+  multiScatteringLutPipeline =
+      createComputePipeline(dev, "multiscattering_lut.comp", sceneLayout);
+  skyViewLutPipeline =
+      createComputePipeline(dev, "sky_view_lut.comp", sceneLayout);
+  aerialPerspectiveLutPipeline =
+      createComputePipeline(dev, "aerial_perspective_lut.comp", sceneLayout);
+  skyIrradiancePipeline =
+      createComputePipeline(dev, "sky_irradiance.comp", sceneLayout);
+
+  skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "sky.vert",
                                              .fragmentShader = "sky.frag",
-                                             .layout = meshLayout,
+                                             .layout = sceneLayout,
                                              .colorFormats = sceneFormats,
                                              .depthFormat = kDepthFormat,
                                              .depthTest = false});
@@ -1080,6 +1250,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->createSwapchain();
   impl_->createPipelines();
   impl_->createExposureBuffers();
+  impl_->createAtmosphere();
   impl_->lastDrawTime = std::chrono::steady_clock::now();
 
   std::cout << "GPU: " << physical.value().name << "\n";
@@ -1295,8 +1466,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.sunDirection = lighting.sunDirection;
   scene.exposure = impl_->exposureBuffer.address;
   scene.sunIlluminance = lighting.sunIlluminance;
-  scene.skyLuminance = lighting.skyLuminance;
+  scene.cameraPosition = camera.position;
   scene.sunAngularRadius = lighting.sunAngularRadius;
+  scene.skyIrradiance = impl_->skyIrradianceBuffer.address;
+  scene.inverseResolution[0] = 1.0f / static_cast<float>(extent.width);
+  scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
+  scene.atmosphere = toGpu(lighting.atmosphere);
   scene.tlas = frame.tlas.address;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
@@ -1322,6 +1497,63 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   VkRect2D scissor = {{0, 0}, extent};
 
   impl_->buildTlas(cmd, frame, items);
+
+  // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
+
+  // The LUTs are shared by both frames in flight; wait for the previous
+  // frame's reads before overwriting them.
+  VkMemoryBarrier2 atmosphereBarrier{};
+  atmosphereBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  atmosphereBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  atmosphereBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  VkDependencyInfo atmosphereDependency{};
+  atmosphereDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  atmosphereDependency.memoryBarrierCount = 1;
+  atmosphereDependency.pMemoryBarriers = &atmosphereBarrier;
+  vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+
+  // From here on, each pass reads what the one before it wrote.
+  atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  atmosphereBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  atmosphereBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  atmosphereBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+
+  PushConstants scenePush;
+  scenePush.sceneBuffer = frame.sceneBuffer.address;
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          impl_->sceneLayout, 0, 1, &impl_->atmosphereSet, 0,
+                          nullptr);
+  vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                     sizeof(scenePush), &scenePush);
+
+  if (impl_->builtAtmosphere != lighting.atmosphere) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      impl_->transmittanceLutPipeline);
+    vkCmdDispatch(cmd, 256 / 8, 64 / 8, 1);
+    vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      impl_->multiScatteringLutPipeline);
+    vkCmdDispatch(cmd, 32, 32, 1);
+    vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+    impl_->builtAtmosphere = lighting.atmosphere;
+  }
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->skyViewLutPipeline);
+  vkCmdDispatch(cmd, (192 + 7) / 8, (108 + 7) / 8, 1);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->aerialPerspectiveLutPipeline);
+  vkCmdDispatch(cmd, 32 / 8, 32 / 8, 32);
+  vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->skyIrradiancePipeline);
+  vkCmdDispatch(cmd, 1, 1, 1);
+  vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
 
   // --- Scene pass: shade into the HDR target.
 
@@ -1381,15 +1613,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   sceneRendering.pDepthAttachment = &depthAttachment;
 
   vkCmdBeginRendering(cmd, &sceneRendering);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          impl_->sceneLayout, 0, 1, &impl_->atmosphereSet, 0,
+                          nullptr);
   vkCmdSetViewport(cmd, 0, 1, &viewport);
   vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-  PushConstants skyPush;
-  skyPush.sceneBuffer = frame.sceneBuffer.address;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
-  vkCmdPushConstants(cmd, impl_->meshLayout,
-                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                     0, sizeof(skyPush), &skyPush);
+  vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                     sizeof(scenePush), &scenePush);
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1402,10 +1634,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     push.model = item.transform;
     push.vertexBuffer = mesh.vertices.address;
     push.sceneBuffer = frame.sceneBuffer.address;
-    vkCmdPushConstants(cmd, impl_->meshLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT |
-                           VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                       sizeof(push), &push);
 
     vkCmdBindIndexBuffer(cmd, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
@@ -1587,12 +1817,17 @@ Renderer::~Renderer() {
 
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->skyIrradiancePipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->aerialPerspectiveLutPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->skyViewLutPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->multiScatteringLutPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->transmittanceLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->exposurePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
-  vkDestroyPipelineLayout(dev, impl_->meshLayout, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);
 
   vkDestroyQueryPool(dev, impl_->timestampPool, nullptr);
   vkDestroyFence(dev, impl_->uploadFence, nullptr);
@@ -1607,10 +1842,16 @@ Renderer::~Renderer() {
     vkDestroyCommandPool(dev, frame.commandPool, nullptr);
   }
 
+  impl_->destroyBuffer(impl_->skyIrradianceBuffer);
+  impl_->destroyImage(impl_->aerialPerspectiveLut);
+  impl_->destroyImage(impl_->skyViewLut);
+  impl_->destroyImage(impl_->multiScatteringLut);
+  impl_->destroyImage(impl_->transmittanceLut);
   impl_->destroyBuffer(impl_->exposureBuffer);
   impl_->destroyBuffer(impl_->histogramBuffer);
   impl_->destroySwapchain();
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->atmosphereSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);
   vkDestroySampler(dev, impl_->linearSampler, nullptr);
   vkDestroySampler(dev, impl_->nearestSampler, nullptr);

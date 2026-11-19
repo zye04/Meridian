@@ -1,0 +1,58 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "atmosphere.glsl"
+
+// Aerial perspective: in-scattered light and transmittance between the camera
+// and points along each view ray, in a 32^3 camera-aligned volume. Slices are
+// spaced quadratically, 4 km apart at the far end.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 7, rgba32f) uniform writeonly image3D aerialPerspectiveOut;
+
+void main() {
+    ivec3 voxel = ivec3(gl_GlobalInvocationID);
+    vec2 uv = (vec2(voxel.xy) + 0.5) / kAerialPerspectiveSlices;
+
+    // View ray through this froxel (unjittered, matching the sampling side).
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 nearPoint = inverse(pc.scene.currentViewProjection) * vec4(ndc, 1.0, 1.0);
+    vec3 direction = normalize(nearPoint.xyz / nearPoint.w - pc.scene.cameraPosition);
+
+    vec3 camera = atmospherePosition(pc.scene.cameraPosition);
+    float slice = (float(voxel.z) + 0.5) / kAerialPerspectiveSlices;
+    slice = slice * slice * kAerialPerspectiveSlices;
+    float tMax = slice * kAerialPerspectiveKmPerSlice;
+
+    // Keep froxels that would end underground just above the surface.
+    vec3 end = camera + tMax * direction;
+    float bottom = pc.scene.atmosphere.bottomRadius;
+    if (length(end) <= bottom + kPlanetRadiusOffset) {
+        end = normalize(end) * (bottom + kPlanetRadiusOffset + 0.001);
+        direction = normalize(end - camera);
+        tMax = length(end - camera);
+    }
+
+    vec3 position = camera;
+    if (length(position) >= pc.scene.atmosphere.topRadius) {
+        vec3 previous = position;
+        if (!moveToTopAtmosphere(position, direction)) {
+            imageStore(aerialPerspectiveOut, voxel, vec4(0.0, 0.0, 0.0, 1.0));
+            return;
+        }
+        float distanceToAtmosphere = length(previous - position);
+        if (tMax < distanceToAtmosphere) {
+            imageStore(aerialPerspectiveOut, voxel, vec4(0.0, 0.0, 0.0, 1.0));
+            return;
+        }
+        tMax = max(0.0, tMax - distanceToAtmosphere);
+    }
+
+    float sampleCount = max(1.0, float(voxel.z + 1) * 2.0);
+    ScatteringResult result = integrateScatteredLuminance(
+        position, direction, pc.scene.sunDirection, sampleCount, false, true, true,
+        false, tMax);
+    // Stored as luminance and mean transmittance.
+    float transmittance = dot(result.transmittance, vec3(1.0 / 3.0));
+    imageStore(aerialPerspectiveOut, voxel, vec4(result.luminance, transmittance));
+}

@@ -1,0 +1,65 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "atmosphere.glsl"
+
+// Multiple scattering as an infinite series of isotropic bounces, per height
+// and sun angle (Hillaire 2020, section 5.5). 64 threads per texel each
+// integrate one direction of the sphere; shared memory sums them.
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 64) in;
+layout(set = 0, binding = 5, rgba32f) uniform writeonly image2D multiScatteringOut;
+
+shared vec3 multiScatteringAs1Shared[64];
+shared vec3 luminanceShared[64];
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    uint sampleIndex = gl_LocalInvocationID.z;
+    AtmosphereParameters atmosphere = pc.scene.atmosphere;
+
+    vec2 uv = (vec2(pixel) + 0.5) / kMultiScatteringLutSize;
+    uv = vec2(fromSubUvsToUnit(uv.x, kMultiScatteringLutSize),
+              fromSubUvsToUnit(uv.y, kMultiScatteringLutSize));
+
+    float sunZenithCos = uv.x * 2.0 - 1.0;
+    vec3 sunDirection = vec3(0.0, sunZenithCos, sqrt(clamp(1.0 - sunZenithCos * sunZenithCos, 0.0, 1.0)));
+    float viewHeight = atmosphere.bottomRadius +
+        clamp(uv.y + kPlanetRadiusOffset, 0.0, 1.0) *
+            (atmosphere.topRadius - atmosphere.bottomRadius - kPlanetRadiusOffset);
+    vec3 position = vec3(0.0, viewHeight, 0.0);
+
+    // 8x8 directions spread uniformly over the sphere.
+    const float kSqrtSamples = 8.0;
+    float i = 0.5 + float(sampleIndex / 8u);
+    float j = 0.5 + float(sampleIndex % 8u);
+    float theta = 2.0 * kPi * i / kSqrtSamples;
+    float phi = acos(1.0 - 2.0 * j / kSqrtSamples);
+    vec3 direction = vec3(cos(theta) * sin(phi), cos(phi), sin(theta) * sin(phi));
+
+    ScatteringResult result = integrateScatteredLuminance(
+        position, direction, sunDirection, 20.0, false, false, false, true, 9e6);
+
+    const float kSphereSolidAngle = 4.0 * kPi;
+    multiScatteringAs1Shared[sampleIndex] =
+        result.multiScatteringAs1 * kSphereSolidAngle / 64.0;
+    luminanceShared[sampleIndex] = result.luminance * kSphereSolidAngle / 64.0;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (sampleIndex < stride) {
+            multiScatteringAs1Shared[sampleIndex] += multiScatteringAs1Shared[sampleIndex + stride];
+            luminanceShared[sampleIndex] += luminanceShared[sampleIndex + stride];
+        }
+        barrier();
+    }
+
+    if (sampleIndex == 0u) {
+        const float kIsotropicPhase = 1.0 / kSphereSolidAngle;
+        vec3 multiScatteringAs1 = multiScatteringAs1Shared[0] * kIsotropicPhase;
+        vec3 secondOrder = luminanceShared[0] * kIsotropicPhase;
+        // Geometric series over all scattering orders: 1 / (1 - r).
+        vec3 luminance = secondOrder / (1.0 - multiScatteringAs1);
+        imageStore(multiScatteringOut, pixel, vec4(luminance, 1.0));
+    }
+}
