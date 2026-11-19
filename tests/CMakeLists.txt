@@ -5,6 +5,6 @@ FetchContent_Declare(doctest
 FetchContent_MakeAvailable(doctest)
 
 add_executable(tests vec3_test.cpp mat4_test.cpp texture_test.cpp terrain_test.cpp
-    cluster_test.cpp)
+    cluster_test.cpp model_test.cpp)
 target_link_libraries(tests PRIVATE meridian basisu_encoder doctest::doctest_with_main)
 add_test(NAME tests COMMAND tests)

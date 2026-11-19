@@ -88,8 +88,15 @@ sources. Check here before re-researching a topic.
   Basis alone covers both encoding and transcoding.
   - https://docs.vulkan.org/samples/latest/samples/performance/texture_compression_basisu/README.html
 - **glTF via fastgltf** (2-20x faster than alternatives) with MikkTSpace
-  tangents when missing.
+  tangents when missing. `KHR_texture_transform` (required by Poly Haven
+  models that tile bark) is baked into the texture coordinates at load,
+  before tangent generation; a material whose textures disagree on the
+  transform is rejected rather than given a per-material GPU transform no
+  asset needs yet. The rotation sign follows the extension's worked
+  example and three.js; the matrix in its sample shader rotates the other
+  way (a unit test pins the example).
   - https://fastgltf.readthedocs.io/latest/overview.html
+  - https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_texture_transform
 - **meridian-cook** converts PNG/JPEG to KTX2 UASTC (slower pack level,
   zstd, mips; sRGB for color, renormalized normal maps) and writes a
   standard glTF.

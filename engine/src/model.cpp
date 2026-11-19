@@ -4,9 +4,11 @@
 #include <fastgltf/tools.hpp>
 #include <mikktspace.h>
 
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <variant>
 
@@ -116,7 +118,8 @@ std::vector<uint8_t> imageBytes(const fastgltf::Asset &asset,
 }
 
 MeshData loadPrimitive(const fastgltf::Asset &asset,
-                       const fastgltf::Primitive &primitive) {
+                       const fastgltf::Primitive &primitive,
+                       const UvTransform &uvTransform) {
   const auto positionAttribute = primitive.findAttribute("POSITION");
   if (positionAttribute == primitive.attributes.cend() ||
       !primitive.indicesAccessor) {
@@ -147,6 +150,7 @@ MeshData loadPrimitive(const fastgltf::Asset &asset,
           mesh.vertices[i].uvX = uv.x();
           mesh.vertices[i].uvY = uv.y();
         });
+    applyUvTransform(mesh, uvTransform);
   }
 
   const auto &indices = asset.accessors[*primitive.indicesAccessor];
@@ -221,6 +225,41 @@ const fastgltf::TextureInfo *textureInfo(const T &optionalInfo) {
   return optionalInfo ? &*optionalInfo : nullptr;
 }
 
+// The one transform shared by all of a material's textures.
+UvTransform materialUvTransform(const fastgltf::Material &m) {
+  const fastgltf::TextureInfo *infos[] = {
+      textureInfo(m.pbrData.baseColorTexture),
+      textureInfo(m.pbrData.metallicRoughnessTexture),
+      textureInfo(m.normalTexture), textureInfo(m.occlusionTexture),
+      textureInfo(m.emissiveTexture)};
+  std::optional<UvTransform> shared;
+  for (const fastgltf::TextureInfo *info : infos) {
+    if (!info) {
+      continue;
+    }
+    UvTransform transform;
+    if (info->transform) {
+      if (info->transform->texCoordIndex.value_or(0) != 0) {
+        throw std::runtime_error("texture transform selects another TEXCOORD set");
+      }
+      transform = {{info->transform->uvOffset.x(), info->transform->uvOffset.y()},
+                   {info->transform->uvScale.x(), info->transform->uvScale.y()},
+                   info->transform->rotation};
+    }
+    const auto same = [](const UvTransform &a, const UvTransform &b) {
+      return a.offset[0] == b.offset[0] && a.offset[1] == b.offset[1] &&
+             a.scale[0] == b.scale[0] && a.scale[1] == b.scale[1] &&
+             a.rotation == b.rotation;
+    };
+    if (shared && !same(*shared, transform)) {
+      throw std::runtime_error("material " + std::string(m.name) +
+                               " has different texture transforms per texture");
+    }
+    shared = transform;
+  }
+  return shared.value_or(UvTransform{});
+}
+
 // glTF emissive is relative; with KHR_materials_emissive_strength it can
 // exceed 1. We map 1.0 to the luminance of a bright display (1000 cd/m^2).
 constexpr float kEmissiveLuminance = 1000.0f;
@@ -265,9 +304,23 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
 
 } // namespace
 
+// The rotation sign follows the extension's worked example (and three.js);
+// the matrix in its sample shader rotates the other way.
+void applyUvTransform(MeshData &mesh, const UvTransform &t) {
+  const float c = std::cos(t.rotation);
+  const float s = std::sin(t.rotation);
+  for (Vertex &v : mesh.vertices) {
+    const float u = v.uvX * t.scale[0];
+    const float w = v.uvY * t.scale[1];
+    v.uvX = c * u + s * w + t.offset[0];
+    v.uvY = -s * u + c * w + t.offset[1];
+  }
+}
+
 Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
   fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
-                          fastgltf::Extensions::KHR_materials_emissive_strength);
+                          fastgltf::Extensions::KHR_materials_emissive_strength |
+                          fastgltf::Extensions::KHR_texture_transform);
   auto data = fastgltf::GltfDataBuffer::FromPath(path);
   if (data.error() != fastgltf::Error::None) {
     throw std::runtime_error("cannot read " + path.string());
@@ -332,7 +385,11 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
   std::vector<MeshData> primitives;
   for (const fastgltf::Mesh &mesh : asset.meshes) {
     for (const fastgltf::Primitive &primitive : mesh.primitives) {
-      primitives.push_back(loadPrimitive(asset, primitive));
+      const UvTransform uvTransform =
+          primitive.materialIndex
+              ? materialUvTransform(asset.materials[*primitive.materialIndex])
+              : UvTransform{};
+      primitives.push_back(loadPrimitive(asset, primitive, uvTransform));
     }
   }
   loadClusters(path, primitives);
