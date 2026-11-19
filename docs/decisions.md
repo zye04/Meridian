@@ -624,6 +624,12 @@ foliage that survives simplification).
   for beech and oak, 1-2 s for the others. Geometry pools grow to fit the
   scatter with all five (12.9M vertices, 51M indices, 30M + 34M cluster
   vertex references and triangles): 16M vertices, 64M indices, 48M + 48M.
+- **Tangents only where read.** `loadGltf` runs MikkTSpace only for
+  materials with a normal map, the only place `mesh.frag` reads tangents;
+  the trees' ~10M leaf triangles skip it, and Debug `--scatter 100` startup
+  dropped from 3:45 to 2:30. Tangent bytes are part of the cluster cache
+  key, so caches rebuild once; captures match exactly (0/255) against the
+  old loader with freshly built caches.
   - https://pypi.org/project/usd-core/
   - https://openusd.org/release/api/class_usd_geom_point_instancer.html
   - https://openusd.org/release/api/usd_preview_surface.html

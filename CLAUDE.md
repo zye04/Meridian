@@ -80,7 +80,7 @@ sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 Laplacian with the still's).
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
-triangles, makes Debug startup ~3.7 min); over the scatter:
+triangles, makes Debug startup ~2.5 min); over the scatter:
 `1119 1362 -431 -1.55 -0.25`; a 27 m beech (with `--scatter 100`):
 `1115.47 1366.85 -429.72 1.223 0`. Debug
 startup without scatter is ~12 s (heightfield pyramid and normal map).

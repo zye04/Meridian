@@ -25,8 +25,9 @@ void applyUvTransform(MeshData &mesh, const UvTransform &transform);
 // Loads a glTF 2.0 file (.gltf or .glb) and uploads its meshes, materials and
 // textures. Textures must be KTX2 (KHR_texture_basisu); PNG/JPEG sources are
 // converted by the asset cooker first. Missing tangents are generated with
-// MikkTSpace. A material's texture transform is baked into the texture
-// coordinates, so all its textures must share one.
+// MikkTSpace for materials with a normal map (nothing else reads them). A
+// material's texture transform is baked into the texture coordinates, so all
+// its textures must share one.
 Model loadGltf(Renderer &renderer, const std::filesystem::path &path);
 
 } // namespace meridian

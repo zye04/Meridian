@@ -119,7 +119,7 @@ std::vector<uint8_t> imageBytes(const fastgltf::Asset &asset,
 
 MeshData loadPrimitive(const fastgltf::Asset &asset,
                        const fastgltf::Primitive &primitive,
-                       const UvTransform &uvTransform) {
+                       const UvTransform &uvTransform, bool normalMap) {
   const auto positionAttribute = primitive.findAttribute("POSITION");
   if (positionAttribute == primitive.attributes.cend() ||
       !primitive.indicesAccessor) {
@@ -166,7 +166,8 @@ MeshData loadPrimitive(const fastgltf::Asset &asset,
             mesh.vertices[i].tangent[c] = t[c];
           }
         });
-  } else if (primitive.findAttribute("NORMAL") != primitive.attributes.cend() &&
+  } else if (normalMap &&
+             primitive.findAttribute("NORMAL") != primitive.attributes.cend() &&
              primitive.findAttribute("TEXCOORD_0") != primitive.attributes.cend()) {
     generateTangents(mesh);
   }
@@ -397,11 +398,12 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
   std::vector<MeshData> primitives;
   for (const fastgltf::Mesh &mesh : asset.meshes) {
     for (const fastgltf::Primitive &primitive : mesh.primitives) {
+      const fastgltf::Material *material =
+          primitive.materialIndex ? &asset.materials[*primitive.materialIndex] : nullptr;
       const UvTransform uvTransform =
-          primitive.materialIndex
-              ? materialUvTransform(asset.materials[*primitive.materialIndex])
-              : UvTransform{};
-      primitives.push_back(loadPrimitive(asset, primitive, uvTransform));
+          material ? materialUvTransform(*material) : UvTransform{};
+      primitives.push_back(loadPrimitive(asset, primitive, uvTransform,
+                                         material && material->normalTexture.has_value()));
     }
   }
   loadClusters(path, primitives);
