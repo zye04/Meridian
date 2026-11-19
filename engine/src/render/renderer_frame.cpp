@@ -85,6 +85,9 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
   if (phase == 1) {
     const VkBufferCopy copy{0, 0, 2 * kDrawBuckets * sizeof(uint32_t)};
     vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
+    // A fence wait alone doesn't make device writes visible to the host.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   }
 }
 
@@ -516,6 +519,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   lateAttachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   lateAttachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  // Nothing reads depth after the late pass.
+  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   sceneRendering.pColorAttachments = lateAttachments;
   beginScene();
   drawCulled(1);

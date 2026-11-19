@@ -59,7 +59,7 @@ worlds and the base of phase 3 (cluster culling uses the same pyramid).
   added to `SceneData` (must-match with GLSL).
 - **Controls and stats:** `Renderer::setOcclusionCulling(bool)` (game flag
   `--no-occlusion`, for A/B) and `Renderer::drawnInstanceCount()` (GPU
-  counter, read back a frame later), printed by capture runs.
+  counter, read back two frames later), printed by capture runs.
 - **Test scene:** `--scatter N` places N random Poly Haven models
   (rocks, stumps, trunk, branches, roots, fern, nettle, shrub, dandelion,
   saplings) on the ground with random yaw and scale, within a fixed

@@ -82,6 +82,9 @@ bool occluded(vec3 worldCenter, float radius) {
     if (!projectSphere(c, radius, bounds)) {
         return false;
     }
+    // The pyramid comes from jittered depth (up to half a pixel each way);
+    // one level-0 texel of margin keeps the test conservative under it.
+    bounds += vec4(-1.0, -1.0, 1.0, 1.0) / cull.pyramidSize.xyxy;
     vec2 size = (bounds.zw - bounds.xy) * cull.pyramidSize;
     // The level where the bounds span at most one texel; the 2x2 fetch at
     // their center then covers every texel they touch.

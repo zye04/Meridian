@@ -166,14 +166,15 @@ sources. Check here before re-researching a topic.
   popping on disocclusion; the single-pass reprojection alternative pops
   for a frame. Shadows are unaffected (RT through the TLAS).
 - Pyramid: R32F, screen rounded down to powers of two; level 0 takes the
-  min over every pixel a texel touches (rounding makes that 1-2 unaligned
-  pixels), higher levels one fetch through a `VK_SAMPLER_REDUCTION_MODE_MIN`
+  min over every pixel a texel touches (rounding makes a texel span 1-2
+  unaligned pixels, touching up to 3), higher levels one fetch through a `VK_SAMPLER_REDUCTION_MODE_MIN`
   sampler (reverse-Z: farthest = min). The sampler needs maxLod set, or
   every lookup silently falls back to level 0 (found as a false cull).
 - Test: sphere -> screen bounds (Mara & McGuire 2013, zeux's form), level
   = ceil(log2(span in texels)) so the bounds cover at most one texel and
   the 2x2 fetch at their center covers them (floor, as some references
-  use, can miss an edge texel), nearest depth near/(distance - radius)
+  use, can miss an edge texel), with a one-texel margin for the TAA jitter
+  in the pyramid's depth, nearest depth near/(distance - radius)
   against the farthest occluder. Spheres crossing the near plane pass.
 - Measured (`--scatter 3000`, 1269x1388, RTX 4080): start view behind a
   rise 1866 -> 92 drawn instances, 5.97 -> 1.44 ms; open view 1956 ->

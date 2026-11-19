@@ -23,8 +23,8 @@ void main() {
     float depth = 1.0;
     if (pc.level == 0u) {
         // Level 0 is the screen rounded down to powers of two, so a texel
-        // covers one to two unaligned pixels per axis: take every pixel it
-        // touches.
+        // spans 1-2 pixels per axis, unaligned (touching up to 3): take
+        // every pixel it touches.
         vec2 scale = vec2(pc.sourceSize) / vec2(pc.destinationSize);
         ivec2 first = ivec2(floor(vec2(texel) * scale));
         ivec2 last = min(ivec2(ceil(vec2(texel + 1) * scale)) - 1, pc.sourceSize - 1);
