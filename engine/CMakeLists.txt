@@ -25,8 +25,13 @@ FetchContent_Declare(fastgltf
 FetchContent_Declare(mikktspace
     GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
     GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409)
+# meshoptimizer: cluster LOD hierarchies (demo/clusterlod.h, Nanite-style).
+FetchContent_Declare(meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG v1.0
+    SYSTEM)
 FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator basis_universal
-                           fastgltf mikktspace)
+                           fastgltf mikktspace meshoptimizer)
 
 add_library(mikktspace STATIC ${mikktspace_SOURCE_DIR}/mikktspace.c)
 target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
@@ -37,6 +42,7 @@ target_compile_options(fastgltf_simdutf PRIVATE -w)
 # encoder is unusably slow in Debug, and its UB reports are upstream bugs we
 # can't act on.
 target_compile_options(basisu_encoder PRIVATE -w -O2 -fno-sanitize=all)
+target_compile_options(meshoptimizer PRIVATE -w -O2 -fno-sanitize=all)
 target_include_directories(basisu_encoder SYSTEM INTERFACE
     ${basis_universal_SOURCE_DIR}/transcoder
     ${basis_universal_SOURCE_DIR}/encoder)
@@ -76,6 +82,8 @@ get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_library(meridian STATIC
+    src/cluster.cpp
+    src/clusterlod.cpp
     src/model.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_resources.cpp
@@ -97,4 +105,8 @@ target_link_libraries(meridian PRIVATE
     GPUOpen::VulkanMemoryAllocator
     basisu_encoder
     fastgltf
-    mikktspace)
+    mikktspace
+    meshoptimizer)
+target_include_directories(meridian SYSTEM PRIVATE ${meshoptimizer_SOURCE_DIR}/demo)
+set_source_files_properties(src/clusterlod.cpp PROPERTIES
+    COMPILE_OPTIONS "-w;-O2;-fno-sanitize=all")

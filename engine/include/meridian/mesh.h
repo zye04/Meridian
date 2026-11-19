@@ -1,5 +1,6 @@
 #pragma once
 
+#include <meridian/cluster.h>
 #include <meridian/math/vec3.h>
 
 #include <cstdint>
@@ -22,6 +23,8 @@ static_assert(sizeof(Vertex) == 48);
 struct MeshData {
   std::vector<Vertex> vertices;
   std::vector<uint32_t> indices;
+  // Filled by loadGltf; meshes without clusters are built at upload.
+  ClusterLod clusters;
 };
 
 } // namespace meridian

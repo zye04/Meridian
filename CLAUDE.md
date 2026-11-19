@@ -75,6 +75,7 @@ engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            addInstance, draw; Lighting, Atmosphere,
                            MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf), texture.h (loadKtx2),
+                           cluster.h (buildClusterLod, LOD cut rule),
                            terrain.h (generateTerrain, terrainHeight),
                            window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
@@ -87,6 +88,7 @@ engine/src/render/         renderer internals:
   renderer_frame.cpp       per-frame: instance upload, TLAS, GPU culling,
                            all passes in draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
+                           cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below)
 game/src/main.cpp          scene setup, fly camera, CLI options
