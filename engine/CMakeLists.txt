@@ -12,7 +12,11 @@ FetchContent_Declare(VulkanMemoryAllocator
 FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator)
 
 set(SHADER_DIR ${CMAKE_BINARY_DIR}/shaders)
-set(SHADER_SOURCES shaders/mesh.vert shaders/mesh.frag)
+set(SHADER_SOURCES
+    shaders/mesh.vert
+    shaders/mesh.frag
+    shaders/fullscreen.vert
+    shaders/tonemap.frag)
 foreach(source ${SHADER_SOURCES})
   get_filename_component(name ${source} NAME)
   set(output ${SHADER_DIR}/${name}.spv)

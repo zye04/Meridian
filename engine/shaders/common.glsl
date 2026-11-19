@@ -16,8 +16,9 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer {
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     mat4 viewProjection;
     vec3 sunDirection;
-    vec3 sunColor;
-    vec3 skyColor;
+    float exposure;
+    vec3 sunIlluminance;
+    vec3 skyLuminance;
 };
 
 layout(push_constant) uniform PushConstants {

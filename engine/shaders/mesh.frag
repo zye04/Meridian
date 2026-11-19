@@ -11,7 +11,8 @@ layout(location = 0) out vec4 outColor;
 const vec3 kGrass = vec3(0.06, 0.13, 0.03);
 const vec3 kRock = vec3(0.20, 0.18, 0.16);
 const vec3 kSnow = vec3(0.80, 0.82, 0.85);
-const vec3 kGroundBounce = vec3(0.05, 0.05, 0.04);
+const float kGroundAlbedo = 0.1;
+const float kPi = 3.14159265;
 
 void main() {
     vec3 normal = normalize(inNormal);
@@ -21,12 +22,18 @@ void main() {
                  smoothstep(0.6, 0.8, normal.y);
     albedo = mix(albedo, kSnow, snow);
 
-    // Direct sunlight (Lambert) plus hemisphere ambient: light from the sky
-    // above and from the ground below.
-    float sun = max(dot(normal, pc.scene.sunDirection), 0.0);
-    vec3 ambient = mix(kGroundBounce, pc.scene.skyColor, normal.y * 0.5 + 0.5);
-    vec3 lit = albedo * (pc.scene.sunColor * sun + ambient);
+    // Direct sun through a Lambert BRDF (albedo / pi).
+    float sunCosine = max(dot(normal, pc.scene.sunDirection), 0.0);
+    vec3 direct = albedo / kPi * pc.scene.sunIlluminance * sunCosine;
 
-    // Linear output; the sRGB swapchain applies the gamma encoding.
-    outColor = vec4(lit, 1.0);
+    // Hemisphere ambient: a uniform sky above, and below the light bounced
+    // off the ground (a diffuse surface lit by sun and sky).
+    vec3 groundIrradiance =
+        pc.scene.sunIlluminance * max(pc.scene.sunDirection.y, 0.0) +
+        kPi * pc.scene.skyLuminance;
+    vec3 groundLuminance = kGroundAlbedo / kPi * groundIrradiance;
+    vec3 ambient = albedo * mix(groundLuminance, pc.scene.skyLuminance,
+                                normal.y * 0.5 + 0.5);
+
+    outColor = vec4((direct + ambient) * pc.scene.exposure, 1.0);
 }

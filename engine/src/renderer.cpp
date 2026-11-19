@@ -21,12 +21,26 @@ namespace {
 // Two frames in flight: the CPU records frame N+1 while the GPU renders N.
 constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+// 16-bit float keeps smooth gradients across the full HDR range.
+constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+#ifdef NDEBUG
+constexpr bool kEnableValidation = false;
+#else
+constexpr bool kEnableValidation = true;
+#endif
 
 struct Buffer {
   VkBuffer buffer = VK_NULL_HANDLE;
   VmaAllocation allocation = nullptr;
   VkDeviceAddress address = 0;
   void *mapped = nullptr;
+};
+
+struct Image {
+  VkImage image = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;
+  VkImageView view = VK_NULL_HANDLE;
 };
 
 struct GpuMesh {
@@ -39,11 +53,11 @@ struct GpuMesh {
 struct SceneData {
   Mat4 viewProjection;
   Vec3 sunDirection;
+  float exposure = 1.0f;
+  Vec3 sunIlluminance;
   float pad0 = 0.0f;
-  Vec3 sunColor;
+  Vec3 skyLuminance;
   float pad1 = 0.0f;
-  Vec3 skyColor;
-  float pad2 = 0.0f;
 };
 static_assert(sizeof(SceneData) == 112);
 
@@ -125,6 +139,111 @@ VkShaderModule loadShader(VkDevice device, const std::string &name) {
   return module;
 }
 
+struct PipelineDesc {
+  const char *vertexShader = nullptr;
+  const char *fragmentShader = nullptr;
+  VkPipelineLayout layout = VK_NULL_HANDLE;
+  VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+  VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+  VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
+};
+
+VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
+  VkShaderModule vertModule = loadShader(device, desc.vertexShader);
+  VkShaderModule fragModule = loadShader(device, desc.fragmentShader);
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = vertModule;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = fragModule;
+  stages[1].pName = "main";
+
+  // Vertices are read in the shader through a buffer address ("vertex
+  // pulling"), so the fixed-function vertex input stays empty.
+  VkPipelineVertexInputStateCreateInfo vertexInput{};
+  vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
+
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.cullMode = desc.cullMode;
+  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rasterizer.lineWidth = 1.0f;
+
+  VkPipelineMultisampleStateCreateInfo multisample{};
+  multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  // Reverse-Z: nearer surfaces have larger depth values.
+  VkPipelineDepthStencilStateCreateInfo depthStencil{};
+  depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencil.depthTestEnable = desc.depthFormat != VK_FORMAT_UNDEFINED;
+  depthStencil.depthWriteEnable = desc.depthFormat != VK_FORMAT_UNDEFINED;
+  depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+
+  VkPipelineColorBlendAttachmentState blendAttachment{};
+  blendAttachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+  VkPipelineColorBlendStateCreateInfo colorBlend{};
+  colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlend.attachmentCount = 1;
+  colorBlend.pAttachments = &blendAttachment;
+
+  // Viewport and scissor are set per frame, so a resize doesn't need a new
+  // pipeline.
+  VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                    VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dynamicState{};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = 2;
+  dynamicState.pDynamicStates = dynamicStates;
+
+  VkPipelineRenderingCreateInfo renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachmentFormats = &desc.colorFormat;
+  renderingInfo.depthAttachmentFormat = desc.depthFormat;
+
+  VkGraphicsPipelineCreateInfo pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.pNext = &renderingInfo;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = stages;
+  pipelineInfo.pVertexInputState = &vertexInput;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisample;
+  pipelineInfo.pDepthStencilState = &depthStencil;
+  pipelineInfo.pColorBlendState = &colorBlend;
+  pipelineInfo.pDynamicState = &dynamicState;
+  pipelineInfo.layout = desc.layout;
+
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                              &pipelineInfo, nullptr, &pipeline);
+  vkDestroyShaderModule(device, vertModule, nullptr);
+  vkDestroyShaderModule(device, fragModule, nullptr);
+  check(result, "vkCreateGraphicsPipelines");
+  return pipeline;
+}
+
 } // namespace
 
 struct Renderer::Impl {
@@ -145,9 +264,9 @@ struct Renderer::Impl {
   std::vector<VkSemaphore> renderFinished;
   bool swapchainOutOfDate = false;
 
-  VkImage depthImage = VK_NULL_HANDLE;
-  VmaAllocation depthAllocation = nullptr;
-  VkImageView depthView = VK_NULL_HANDLE;
+  // Sized like the swapchain and recreated with it.
+  Image depth;
+  Image hdr;
 
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
@@ -156,15 +275,27 @@ struct Renderer::Impl {
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
   VkFence uploadFence = VK_NULL_HANDLE;
 
-  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-  VkPipeline pipeline = VK_NULL_HANDLE;
+  VkPipelineLayout meshLayout = VK_NULL_HANDLE;
+  VkPipeline meshPipeline = VK_NULL_HANDLE;
+
+  VkSampler nearestSampler = VK_NULL_HANDLE;
+  VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+  VkDescriptorSet tonemapSet = VK_NULL_HANDLE;
+  VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
+  VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
   std::vector<GpuMesh> meshes;
 
   void createSwapchain();
   void destroySwapchain();
   void createFrames();
-  void createPipeline();
+  void createDescriptors();
+  void createPipelines();
+
+  Image createImage(VkFormat format, VkImageUsageFlags usage,
+                    VkImageAspectFlags aspect);
+  void destroyImage(Image &image);
 
   Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VmaAllocationCreateFlags flags);
@@ -203,6 +334,49 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 void Renderer::Impl::destroyBuffer(Buffer &buffer) {
   vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
   buffer = {};
+}
+
+// A GPU-only 2D image the size of the swapchain.
+Image Renderer::Impl::createImage(VkFormat format, VkImageUsageFlags usage,
+                                  VkImageAspectFlags aspect) {
+  VkImageCreateInfo imageInfo{};
+  imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  imageInfo.imageType = VK_IMAGE_TYPE_2D;
+  imageInfo.format = format;
+  imageInfo.extent = {swapchain.extent.width, swapchain.extent.height, 1};
+  imageInfo.mipLevels = 1;
+  imageInfo.arrayLayers = 1;
+  imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+  imageInfo.usage = usage;
+
+  VmaAllocationCreateInfo allocInfo{};
+  allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+  // Render targets get their own allocation, which drivers handle best.
+  allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+  Image image;
+  check(vmaCreateImage(allocator, &imageInfo, &allocInfo, &image.image,
+                       &image.allocation, nullptr),
+        "vmaCreateImage");
+
+  VkImageViewCreateInfo viewInfo{};
+  viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  viewInfo.image = image.image;
+  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.format = format;
+  viewInfo.subresourceRange.aspectMask = aspect;
+  viewInfo.subresourceRange.levelCount = 1;
+  viewInfo.subresourceRange.layerCount = 1;
+  check(vkCreateImageView(device.device, &viewInfo, nullptr, &image.view),
+        "vkCreateImageView");
+  return image;
+}
+
+void Renderer::Impl::destroyImage(Image &image) {
+  vkDestroyImageView(device.device, image.view, nullptr);
+  vmaDestroyImage(allocator, image.image, image.allocation);
+  image = {};
 }
 
 // Records commands with `record`, submits them and waits until the GPU is
@@ -261,33 +435,28 @@ void Renderer::Impl::createSwapchain() {
           "vkCreateSemaphore");
   }
 
-  VkImageCreateInfo depthInfo{};
-  depthInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  depthInfo.imageType = VK_IMAGE_TYPE_2D;
-  depthInfo.format = kDepthFormat;
-  depthInfo.extent = {swapchain.extent.width, swapchain.extent.height, 1};
-  depthInfo.mipLevels = 1;
-  depthInfo.arrayLayers = 1;
-  depthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-  depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  depth = createImage(kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                      VK_IMAGE_ASPECT_DEPTH_BIT);
+  hdr = createImage(kHdrFormat,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT);
 
-  VmaAllocationCreateInfo depthAlloc{};
-  depthAlloc.usage = VMA_MEMORY_USAGE_AUTO;
-  check(vmaCreateImage(allocator, &depthInfo, &depthAlloc, &depthImage,
-                       &depthAllocation, nullptr),
-        "vmaCreateImage");
+  // Point the tonemap pass at the new HDR image. Safe because the device is
+  // idle whenever the swapchain is (re)created.
+  VkDescriptorImageInfo hdrInfo{};
+  hdrInfo.sampler = nearestSampler;
+  hdrInfo.imageView = hdr.view;
+  hdrInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-  VkImageViewCreateInfo viewInfo{};
-  viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-  viewInfo.image = depthImage;
-  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  viewInfo.format = kDepthFormat;
-  viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-  viewInfo.subresourceRange.levelCount = 1;
-  viewInfo.subresourceRange.layerCount = 1;
-  check(vkCreateImageView(device.device, &viewInfo, nullptr, &depthView),
-        "vkCreateImageView");
+  VkWriteDescriptorSet write{};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = tonemapSet;
+  write.dstBinding = 0;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  write.pImageInfo = &hdrInfo;
+  vkUpdateDescriptorSets(device.device, 1, &write, 0, nullptr);
 
   swapchainOutOfDate = false;
 
@@ -297,8 +466,8 @@ void Renderer::Impl::createSwapchain() {
 }
 
 void Renderer::Impl::destroySwapchain() {
-  vkDestroyImageView(device.device, depthView, nullptr);
-  vmaDestroyImage(allocator, depthImage, depthAllocation);
+  destroyImage(hdr);
+  destroyImage(depth);
 
   for (VkSemaphore semaphore : renderFinished) {
     vkDestroySemaphore(device.device, semaphore, nullptr);
@@ -357,123 +526,96 @@ void Renderer::Impl::createFrames() {
         "vkCreateFence");
 }
 
-void Renderer::Impl::createPipeline() {
+void Renderer::Impl::createDescriptors() {
+  VkDevice dev = device.device;
+
+  VkSamplerCreateInfo samplerInfo{};
+  samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  samplerInfo.magFilter = VK_FILTER_NEAREST;
+  samplerInfo.minFilter = VK_FILTER_NEAREST;
+  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &nearestSampler),
+        "vkCreateSampler");
+
+  VkDescriptorSetLayoutBinding binding{};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+  VkDescriptorSetLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layoutInfo.bindingCount = 1;
+  layoutInfo.pBindings = &binding;
+  check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr,
+                                    &tonemapSetLayout),
+        "vkCreateDescriptorSetLayout");
+
+  VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+  VkDescriptorPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.maxSets = 1;
+  poolInfo.poolSizeCount = 1;
+  poolInfo.pPoolSizes = &poolSize;
+  check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &descriptorPool),
+        "vkCreateDescriptorPool");
+
+  VkDescriptorSetAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocInfo.descriptorPool = descriptorPool;
+  allocInfo.descriptorSetCount = 1;
+  allocInfo.pSetLayouts = &tonemapSetLayout;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, &tonemapSet),
+        "vkAllocateDescriptorSets");
+}
+
+void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
   VkPushConstantRange pushRange{};
   pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   pushRange.size = sizeof(PushConstants);
 
-  VkPipelineLayoutCreateInfo layoutInfo{};
-  layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  layoutInfo.pushConstantRangeCount = 1;
-  layoutInfo.pPushConstantRanges = &pushRange;
-  check(vkCreatePipelineLayout(dev, &layoutInfo, nullptr, &pipelineLayout),
+  VkPipelineLayoutCreateInfo meshLayoutInfo{};
+  meshLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  meshLayoutInfo.pushConstantRangeCount = 1;
+  meshLayoutInfo.pPushConstantRanges = &pushRange;
+  check(vkCreatePipelineLayout(dev, &meshLayoutInfo, nullptr, &meshLayout),
         "vkCreatePipelineLayout");
 
-  VkShaderModule vertModule = loadShader(dev, "mesh.vert");
-  VkShaderModule fragModule = loadShader(dev, "mesh.frag");
+  meshPipeline = createGraphicsPipeline(dev, {.vertexShader = "mesh.vert",
+                                              .fragmentShader = "mesh.frag",
+                                              .layout = meshLayout,
+                                              .colorFormat = kHdrFormat,
+                                              .depthFormat = kDepthFormat,
+                                              .cullMode = VK_CULL_MODE_BACK_BIT});
 
-  VkPipelineShaderStageCreateInfo stages[2]{};
-  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-  stages[0].module = vertModule;
-  stages[0].pName = "main";
-  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-  stages[1].module = fragModule;
-  stages[1].pName = "main";
+  VkPipelineLayoutCreateInfo tonemapLayoutInfo{};
+  tonemapLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  tonemapLayoutInfo.setLayoutCount = 1;
+  tonemapLayoutInfo.pSetLayouts = &tonemapSetLayout;
+  check(vkCreatePipelineLayout(dev, &tonemapLayoutInfo, nullptr,
+                               &tonemapLayout),
+        "vkCreatePipelineLayout");
 
-  // Vertices are read in the shader through a buffer address ("vertex
-  // pulling"), so the fixed-function vertex input stays empty.
-  VkPipelineVertexInputStateCreateInfo vertexInput{};
-  vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-  inputAssembly.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-  VkPipelineViewportStateCreateInfo viewportState{};
-  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-  viewportState.viewportCount = 1;
-  viewportState.scissorCount = 1;
-
-  VkPipelineRasterizationStateCreateInfo rasterizer{};
-  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-  rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-  rasterizer.lineWidth = 1.0f;
-
-  VkPipelineMultisampleStateCreateInfo multisample{};
-  multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-  // Reverse-Z: nearer surfaces have larger depth values.
-  VkPipelineDepthStencilStateCreateInfo depthStencil{};
-  depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  depthStencil.depthTestEnable = VK_TRUE;
-  depthStencil.depthWriteEnable = VK_TRUE;
-  depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
-
-  VkPipelineColorBlendAttachmentState blendAttachment{};
-  blendAttachment.colorWriteMask =
-      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-  VkPipelineColorBlendStateCreateInfo colorBlend{};
-  colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-  colorBlend.attachmentCount = 1;
-  colorBlend.pAttachments = &blendAttachment;
-
-  // Viewport and scissor are set per frame, so a resize doesn't need a new
-  // pipeline.
-  VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
-                                    VK_DYNAMIC_STATE_SCISSOR};
-  VkPipelineDynamicStateCreateInfo dynamicState{};
-  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  dynamicState.dynamicStateCount = 2;
-  dynamicState.pDynamicStates = dynamicStates;
-
-  VkFormat colorFormat = swapchain.image_format;
-  VkPipelineRenderingCreateInfo renderingInfo{};
-  renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachmentFormats = &colorFormat;
-  renderingInfo.depthAttachmentFormat = kDepthFormat;
-
-  VkGraphicsPipelineCreateInfo pipelineInfo{};
-  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-  pipelineInfo.pNext = &renderingInfo;
-  pipelineInfo.stageCount = 2;
-  pipelineInfo.pStages = stages;
-  pipelineInfo.pVertexInputState = &vertexInput;
-  pipelineInfo.pInputAssemblyState = &inputAssembly;
-  pipelineInfo.pViewportState = &viewportState;
-  pipelineInfo.pRasterizationState = &rasterizer;
-  pipelineInfo.pMultisampleState = &multisample;
-  pipelineInfo.pDepthStencilState = &depthStencil;
-  pipelineInfo.pColorBlendState = &colorBlend;
-  pipelineInfo.pDynamicState = &dynamicState;
-  pipelineInfo.layout = pipelineLayout;
-
-  VkResult result = vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1,
-                                              &pipelineInfo, nullptr, &pipeline);
-  vkDestroyShaderModule(dev, vertModule, nullptr);
-  vkDestroyShaderModule(dev, fragModule, nullptr);
-  check(result, "vkCreateGraphicsPipelines");
+  tonemapPipeline =
+      createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
+                                   .fragmentShader = "tonemap.frag",
+                                   .layout = tonemapLayout,
+                                   .colorFormat = swapchain.image_format});
 }
 
 Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->window = window.handle();
 
-  auto instance = vkb::InstanceBuilder{}
-                      .set_app_name("Meridian")
-                      .request_validation_layers()
-                      .use_default_debug_messenger()
-                      .require_api_version(1, 3, 0)
-                      .build();
+  vkb::InstanceBuilder instanceBuilder;
+  instanceBuilder.set_app_name("Meridian").require_api_version(1, 3, 0);
+  if (kEnableValidation) {
+    instanceBuilder.request_validation_layers().use_default_debug_messenger();
+  }
+  auto instance = instanceBuilder.build();
   if (!instance) {
     throw std::runtime_error(instance.error().message());
   }
@@ -522,9 +664,10 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   check(vmaCreateAllocator(&allocatorInfo, &impl_->allocator),
         "vmaCreateAllocator");
 
-  impl_->createSwapchain();
   impl_->createFrames();
-  impl_->createPipeline();
+  impl_->createDescriptors();
+  impl_->createSwapchain();
+  impl_->createPipelines();
 
   std::cout << "GPU: " << physical.value().name << "\n";
 }
@@ -629,11 +772,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   const float aspect =
       static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
+  // Exposure is applied while shading ("pre-exposure") so the HDR target
+  // holds display-range values: physical luminances like the sun disk would
+  // overflow 16-bit floats.
   SceneData scene;
   scene.viewProjection = camera.projection(aspect) * camera.view();
   scene.sunDirection = lighting.sunDirection;
-  scene.sunColor = lighting.sunColor;
-  scene.skyColor = lighting.skyColor;
+  scene.exposure = camera.exposure();
+  scene.sunIlluminance = lighting.sunIlluminance;
+  scene.skyLuminance = lighting.skyLuminance;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -647,21 +794,27 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   check(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
 
-  VkImage image = impl_->swapchainImages[imageIndex];
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = static_cast<float>(extent.height);
+  viewport.maxDepth = 1.0f;
+  VkRect2D scissor = {{0, 0}, extent};
 
-  transitionImage(cmd, {image, VK_IMAGE_ASPECT_COLOR_BIT,
+  // --- Scene pass: shade into the HDR target.
+
+  // The HDR and depth images are shared by both frames in flight, so each
+  // barrier also waits for the previous frame's use of the image.
+  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT});
 
-  // The depth image is shared by both frames in flight, so wait for the
-  // previous frame's depth writes before clearing it.
   constexpr VkPipelineStageFlags2 kDepthStages =
       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
       VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-  transitionImage(cmd, {impl_->depthImage, VK_IMAGE_ASPECT_DEPTH_BIT,
+  transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, kDepthStages,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -669,42 +822,36 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT});
 
-  VkRenderingAttachmentInfo colorAttachment{};
-  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-  colorAttachment.imageView = impl_->swapchainImageViews[imageIndex];
-  colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  colorAttachment.clearValue.color = {
-      {lighting.skyColor.x, lighting.skyColor.y, lighting.skyColor.z, 1.0f}};
+  const Vec3 sky = lighting.skyLuminance * scene.exposure;
+
+  VkRenderingAttachmentInfo hdrAttachment{};
+  hdrAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  hdrAttachment.imageView = impl_->hdr.view;
+  hdrAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  hdrAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  hdrAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  hdrAttachment.clearValue.color = {{sky.x, sky.y, sky.z, 1.0f}};
 
   VkRenderingAttachmentInfo depthAttachment{};
   depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-  depthAttachment.imageView = impl_->depthView;
+  depthAttachment.imageView = impl_->depth.view;
   depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   depthAttachment.clearValue.depthStencil.depth = 0.0f;
 
-  VkRenderingInfo renderingInfo{};
-  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-  renderingInfo.renderArea = {{0, 0}, extent};
-  renderingInfo.layerCount = 1;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachments = &colorAttachment;
-  renderingInfo.pDepthAttachment = &depthAttachment;
+  VkRenderingInfo sceneRendering{};
+  sceneRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  sceneRendering.renderArea = {{0, 0}, extent};
+  sceneRendering.layerCount = 1;
+  sceneRendering.colorAttachmentCount = 1;
+  sceneRendering.pColorAttachments = &hdrAttachment;
+  sceneRendering.pDepthAttachment = &depthAttachment;
 
-  vkCmdBeginRendering(cmd, &renderingInfo);
-
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->pipeline);
-
-  VkViewport viewport{};
-  viewport.width = static_cast<float>(extent.width);
-  viewport.height = static_cast<float>(extent.height);
-  viewport.maxDepth = 1.0f;
+  vkCmdBeginRendering(cmd, &sceneRendering);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    impl_->meshPipeline);
   vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-  VkRect2D scissor = {{0, 0}, extent};
   vkCmdSetScissor(cmd, 0, 1, &scissor);
 
   for (const DrawItem &item : items) {
@@ -714,7 +861,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     push.model = item.transform;
     push.vertexBuffer = mesh.vertices.address;
     push.sceneBuffer = frame.sceneBuffer.address;
-    vkCmdPushConstants(cmd, impl_->pipelineLayout,
+    vkCmdPushConstants(cmd, impl_->meshLayout,
                        VK_SHADER_STAGE_VERTEX_BIT |
                            VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(push), &push);
@@ -725,7 +872,50 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   vkCmdEndRendering(cmd);
 
-  transitionImage(cmd, {image, VK_IMAGE_ASPECT_COLOR_BIT,
+  // --- Tonemap pass: HDR target -> swapchain image.
+
+  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+
+  VkImage swapchainImage = impl_->swapchainImages[imageIndex];
+  transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT});
+
+  VkRenderingAttachmentInfo swapchainAttachment{};
+  swapchainAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  swapchainAttachment.imageView = impl_->swapchainImageViews[imageIndex];
+  swapchainAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  swapchainAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  swapchainAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+  VkRenderingInfo tonemapRendering{};
+  tonemapRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  tonemapRendering.renderArea = {{0, 0}, extent};
+  tonemapRendering.layerCount = 1;
+  tonemapRendering.colorAttachmentCount = 1;
+  tonemapRendering.pColorAttachments = &swapchainAttachment;
+
+  vkCmdBeginRendering(cmd, &tonemapRendering);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    impl_->tonemapPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          impl_->tonemapLayout, 0, 1, &impl_->tonemapSet, 0,
+                          nullptr);
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+  vkCmdEndRendering(cmd);
+
+  transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -786,8 +976,10 @@ Renderer::~Renderer() {
     impl_->destroyBuffer(mesh.indices);
   }
 
-  vkDestroyPipeline(dev, impl_->pipeline, nullptr);
-  vkDestroyPipelineLayout(dev, impl_->pipelineLayout, nullptr);
+  vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->tonemapLayout, nullptr);
+  vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->meshLayout, nullptr);
 
   vkDestroyFence(dev, impl_->uploadFence, nullptr);
   vkDestroyCommandPool(dev, impl_->uploadPool, nullptr);
@@ -799,6 +991,9 @@ Renderer::~Renderer() {
   }
 
   impl_->destroySwapchain();
+  vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->tonemapSetLayout, nullptr);
+  vkDestroySampler(dev, impl_->nearestSampler, nullptr);
   vmaDestroyAllocator(impl_->allocator);
 
   vkb::destroy_device(impl_->device);

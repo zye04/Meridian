@@ -16,11 +16,12 @@ struct MeshId {
   uint32_t index = 0;
 };
 
-// Directions point toward the light. Colors are linear RGB.
+// Physical units, linear Rec.709 RGB. The sun direction points toward the
+// sun. Defaults approximate a clear day with the sun about 35 degrees high.
 struct Lighting {
   Vec3 sunDirection = normalize({0.5f, 0.55f, -0.4f});
-  Vec3 sunColor = {1.0f, 0.93f, 0.82f};
-  Vec3 skyColor = {0.30f, 0.50f, 0.80f};
+  Vec3 sunIlluminance = {100000.0f, 95000.0f, 85000.0f}; // lux
+  Vec3 skyLuminance = {4800.0f, 8000.0f, 12800.0f};      // cd/m^2
 };
 
 struct DrawItem {
