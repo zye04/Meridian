@@ -86,6 +86,11 @@ void main() {
     vec4 mean = vec4(0.0);
     vec4 meanSquared = vec4(0.0);
     float count = 0.0;
+    // Tent-weighted (1-2-1) for restarts: it cancels the jitter's
+    // alternation between neighbouring columns, which a box mean leaves as
+    // stripes.
+    vec4 tent = vec4(0.0);
+    float tentWeight = 0.0;
     float nearbyDepth = 0.0;
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
@@ -96,6 +101,9 @@ void main() {
                 mean += c;
                 meanSquared += c * c;
                 count += 1.0;
+                float w = float((2 - abs(x)) * (2 - abs(y)));
+                tent += c * w;
+                tentWeight += w;
                 nearbyDepth = max(nearbyDepth, cloudDistance(d));
             }
         }
@@ -114,7 +122,7 @@ void main() {
     if (!valid || (!cut && any(lessThan(depths, vec4(0.0))))) {
         // No history: start from the neighborhood mean, which hides most of
         // a single frame's jitter noise (a new resolution, disocclusion).
-        imageStore(resolvedColor, id, mean);
+        imageStore(resolvedColor, id, tent / tentWeight);
         imageStore(resolvedDepth, id, vec4(stored));
         return;
     }

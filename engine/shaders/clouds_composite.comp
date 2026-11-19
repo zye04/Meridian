@@ -28,6 +28,8 @@ vec4 cloudSum;
 float weightSum;
 float depthSum;
 float depthWeight;
+// A tap disagreed with this pixel's surface (skipped or read as clear).
+bool disagreed;
 
 // Adds a low-resolution texel as seen from this pixel's surface (distance
 // along the ray; kSky for none): a texel whose march geometry cut short
@@ -37,17 +39,19 @@ void accumulate(ivec2 texel, float weight, float sceneDistance) {
     vec4 cloud = imageLoad(resolvedColor, texel);
     float d = imageLoad(resolvedDepth, texel).r;
     if (d < 0.0) {
+        disagreed = true;
         if (sceneDistance == kSky) {
             return;
         }
         d = -1.0 - d;
     }
     if (d > sceneDistance) {
+        disagreed = true;
         cloud = vec4(0.0, 0.0, 0.0, 1.0);
     }
     cloudSum += cloud * weight;
     weightSum += weight;
-    float opacity = (1.0 - cloud.a) * weight;
+    float opacity = (1.0 - cloud.a) * max(weight, 0.0);
     if (d > 0.0 && opacity > 0.0) {
         depthSum += d * opacity;
         depthWeight += opacity;
@@ -74,14 +78,37 @@ void main() {
     vec2 p = uv * vec2(lowSize) - 0.5;
     ivec2 base = ivec2(floor(p));
     vec2 f = p - vec2(base);
+    // Catmull-Rom over 4x4 texels where every tap agrees with this pixel's
+    // surface: bilinear's slope breaks at texel centers showed as a static
+    // 4-px grid. Elsewhere (silhouettes) the bilateral bilinear taps, which
+    // can't ring across the edge.
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    float wx[4] = float[4](w0.x, w1.x, w2.x, w3.x);
+    float wy[4] = float[4](w0.y, w1.y, w2.y, w3.y);
     cloudSum = vec4(0.0);
     weightSum = 0.0;
     depthSum = 0.0;
     depthWeight = 0.0;
-    for (int y = 0; y <= 1; ++y) {
-        for (int x = 0; x <= 1; ++x) {
-            float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
-            accumulate(clamp(base + ivec2(x, y), ivec2(0), lowSize - 1), w, sceneDistance);
+    disagreed = false;
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            accumulate(clamp(base + ivec2(x - 1, y - 1), ivec2(0), lowSize - 1), wx[x] * wy[y],
+                       sceneDistance);
+        }
+    }
+    if (disagreed) {
+        cloudSum = vec4(0.0);
+        weightSum = 0.0;
+        depthSum = 0.0;
+        depthWeight = 0.0;
+        for (int y = 0; y <= 1; ++y) {
+            for (int x = 0; x <= 1; ++x) {
+                float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
+                accumulate(clamp(base + ivec2(x, y), ivec2(0), lowSize - 1), w, sceneDistance);
+            }
         }
     }
     // Sky in a gap the bilinear footprint saw only as geometry (thin gaps
@@ -101,6 +128,7 @@ void main() {
         return;
     }
     vec4 cloud = cloudSum / weightSum;
+    cloud = vec4(max(cloud.rgb, 0.0), clamp(cloud.a, 0.0, 1.0));
     vec4 background = imageLoad(hdr, pixel);
     imageStore(hdr, pixel, vec4(cloud.rgb + background.rgb * cloud.a, background.a));
 
