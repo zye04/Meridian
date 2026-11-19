@@ -186,7 +186,8 @@ images are shared between them, and barriers account for that.
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the
   camera it is seen from, R the Atmosphere's bottomRadius), current and
   previous position each with its own camera. Varyings carry the flat
-  relative position; only aerial perspective uses the displayed one.
+  relative position; aerial perspective and the surface's atmosphere
+  lookups (sun transmittance, sky luminance) use the displayed one.
   Culling tests displayed bounds (`displayedSphere` in cull.glsl; terrain
   boxes in terrain_select.comp); LOD distances stay flat.
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump

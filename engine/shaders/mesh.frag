@@ -615,7 +615,10 @@ void main() {
 
     // All lighting is relative to a sun illuminance of 1 (as in the
     // atmosphere LUTs) and scaled by the real sun at the end.
-    vec3 position = atmospherePosition(worldPosition);
+    // The atmosphere is a sphere: light the point where it is displayed,
+    // not the flat point d^2 / 2R above it (shadow rays stay flat).
+    vec3 position = atmospherePosition(
+        pc.scene.cameraPosition + displayedPosition(pc.scene, inRelativePosition).xyz);
     float height = length(position);
     vec3 up = position / height;
     vec3 sunAtSurface = transmittanceToSun(height, dot(up, L));

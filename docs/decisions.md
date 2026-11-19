@@ -429,8 +429,13 @@ foliage that survives simplification).
   Lighting, the TLAS query and the heightfield march keep running in the
   flat world, where the BLAS/TLAS and the heightfield live: varyings carry
   the flat camera-relative position (so normals from its derivatives and
-  shadow ray origins are unwarped) and only aerial perspective uses the
-  displayed one. Rejected: a real spherical world (every system, the TLAS
+  shadow ray origins are unwarped); aerial perspective and the
+  atmosphere lookups at the surface (sun transmittance, sky luminance)
+  use the displayed one, since the flat point lies d^2 / 2R too high in
+  the spherical atmosphere (+196 m at 50 km). That fix is subtle: summit
+  and sunset views change by under 0.04/255 mean in any band, under 30
+  pixels by more than 4/255 (the displayed point's up also tilts by d/R,
+  so near terrain shifts by noise-level amounts too). Rejected: a real spherical world (every system, the TLAS
   and gameplay would need it, for a 15 km map where the drop is 4.4 m at
   7.5 km).
   - https://frozenfractal.com/blog/2025/12/12/around-the-world-28-scaling-up/
