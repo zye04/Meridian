@@ -161,18 +161,123 @@ vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
     return textureGrad(textures[nonuniformEXT(index)], uv, dx, dy);
 }
 
+// Hex-tiling (Mikkelsen 2022, "Practical Real-Time Hex-Tiling", JCGT;
+// ported from github.com/mmikk/hextile-demo): each point blends three
+// randomly rotated and offset copies of the texture on a hex grid, so no
+// repetition shows at a distance. The blend favors the brighter copy
+// instead of averaging, which keeps the texture's contrast (no mush).
+const float kHexFallOffContrast = 0.6;
+const float kHexExponent = 7.0;
+// Grid scale relative to the texture: the reference's sqrt(12) cells per
+// repeat make most of the surface a blend of copies (visible ghosting); one
+// cell per repeat shows seams; two keeps blend zones thin without seams.
+const float kHexCellsPerRepeat = 2.0;
+
+vec2 hexHash(vec2 p) {
+    return fract(sin(p * mat2(127.1, 311.7, 269.5, 183.3)) * 43758.5453);
+}
+
+mat2 hexRotation(ivec2 vertex) {
+    float angle = abs(float(vertex.x * vertex.y)) + abs(float(vertex.x + vertex.y)) + kPi;
+    angle = mod(angle, 2.0 * kPi);
+    if (angle > kPi) {
+        angle -= 2.0 * kPi;
+    }
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat2(c, -s, s, c);
+}
+
+// Applies the same tile placement to every map of a layer.
+struct HexTiles {
+    vec2 uv[3];
+    vec2 dx[3];
+    vec2 dy[3];
+    mat2 rotation[3];
+    vec3 barycentric;
+};
+
+HexTiles hexTiles(vec2 uv, vec2 dx, vec2 dy) {
+    vec2 skewed = (uv * kHexCellsPerRepeat) * mat2(1.0, -0.57735027, 0.0, 1.15470054);
+    ivec2 base = ivec2(floor(skewed));
+    vec3 t = vec3(fract(skewed), 0.0);
+    t.z = 1.0 - t.x - t.y;
+    float s = step(0.0, -t.z);
+    float s2 = 2.0 * s - 1.0;
+    ivec2 is = ivec2(s);
+
+    HexTiles tiles;
+    tiles.barycentric = vec3(-t.z * s2, s - t.y * s2, s - t.x * s2);
+    ivec2 vertices[3] = ivec2[3](base + is, base + ivec2(is.x, 1 - is.y),
+                                 base + ivec2(1 - is.x, is.y));
+    for (int i = 0; i < 3; ++i) {
+        vec2 center = (vec2(vertices[i]) * mat2(1.0, 0.5, 0.0, 1.0 / 1.15470054)) /
+                      kHexCellsPerRepeat;
+        mat2 rotation = hexRotation(vertices[i]);
+        tiles.uv[i] = rotation * (uv - center) + center + hexHash(vec2(vertices[i]));
+        tiles.dx[i] = rotation * dx;
+        tiles.dy[i] = rotation * dy;
+        tiles.rotation[i] = rotation;
+    }
+    return tiles;
+}
+
+// A scan's normal map also holds bumps about the size of the tile. Once a
+// pixel covers a good part of a tile, only those remain after filtering and
+// they repeat as a visible grid, so normals fade out with the footprint
+// (in tiles).
+float normalFade(vec2 dx, vec2 dy) {
+    return 1.0 - smoothstep(0.02, 0.2, max(length(dx), length(dy)));
+}
+
+// Tangent-space normal as a height derivative, the form that blends and
+// rotates correctly (Mikkelsen's surface gradient framework).
+vec2 normalToDerivative(vec3 n) {
+    vec3 a = abs(n);
+    return -n.xy / max(a.z, max(a.x, a.y) / 128.0);
+}
+
 // Top-down projection, uv = (x, -z): tangent +X, bitangent -Z, normal +Y.
 TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
     float scale = 1.0 / layer.tileSize;
-    vec2 uv = vec2(inWorldPosition.x, -inWorldPosition.z) * scale;
-    vec2 dx = vec2(dpdx.x, -dpdx.z) * scale;
-    vec2 dy = vec2(dpdy.x, -dpdy.z) * scale;
+    HexTiles tiles = hexTiles(vec2(inWorldPosition.x, -inWorldPosition.z) * scale,
+                              vec2(dpdx.x, -dpdx.z) * scale,
+                              vec2(dpdy.x, -dpdy.z) * scale);
+
+    vec3 colors[3];
+    vec3 luminance;
+    for (int i = 0; i < 3; ++i) {
+        colors[i] = sampleGrad(layer.baseColor, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rgb;
+        luminance[i] = dot(colors[i], vec3(0.299, 0.587, 0.114));
+    }
+    // One set of weights for every map keeps color, height and normals of
+    // the layer coherent.
+    vec3 w = mix(vec3(1.0), luminance, kHexFallOffContrast) *
+             pow(tiles.barycentric, vec3(kHexExponent));
+    w /= w.x + w.y + w.z;
+    // Inside a cell one copy dominates; skipping the others' remaining
+    // maps saves most of the cost with no visible change.
+    w *= step(0.02, w);
+    w /= w.x + w.y + w.z;
 
     TerrainTexel texel;
-    texel.baseColor = sampleGrad(layer.baseColor, uv, dx, dy).rgb;
-    texel.occlusionRoughness = sampleGrad(layer.arm, uv, dx, dy).rg;
-    texel.height = sampleGrad(layer.height, uv, dx, dy).r;
-    vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
+    texel.baseColor = colors[0] * w.x + colors[1] * w.y + colors[2] * w.z;
+    texel.occlusionRoughness = vec2(0.0);
+    texel.height = 0.0;
+    vec2 derivative = vec2(0.0);
+    for (int i = 0; i < 3; ++i) {
+        if (w[i] == 0.0) {
+            continue;
+        }
+        texel.occlusionRoughness +=
+            sampleGrad(layer.arm, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rg * w[i];
+        texel.height += sampleGrad(layer.height, tiles.uv[i], tiles.dx[i], tiles.dy[i]).r * w[i];
+        vec3 n = sampleGrad(layer.normal, tiles.uv[i], tiles.dx[i], tiles.dy[i]).xyz * 2.0 - 1.0;
+        // Back from the tile's rotated frame to the layer's.
+        derivative += (normalToDerivative(n) * tiles.rotation[i]) * w[i];
+    }
+    derivative *= normalFade(tiles.dx[0], tiles.dy[0]);
+    vec3 n = normalize(vec3(-derivative, 1.0));
     vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
     texel.normal = normalize(mat3(t, cross(normal, t), normal) * n);
     return texel;
@@ -207,6 +312,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
         texel.height += sampleGrad(layer.height, uv, dx, dy).r * blend[axis];
         vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
         n.x *= flip[axis].x;
+        n.xy *= normalFade(dx, dy);
         tangentNormals[axis] = n;
     }
     vec3 nx = tangentNormals[0];
@@ -251,7 +357,7 @@ Surface terrainSurface(vec3 normal) {
 
     vec2 p = inWorldPosition.xz / kNoisePeriod;
     float noise = 0.65 * valueNoise(p) + 0.35 * valueNoise(p * 2.7 + 13.0);
-    float needles = smoothstep(0.35, 0.65, noise);
+    float needles = smoothstep(0.45, 0.55, noise);
     float rock = 1.0 - smoothstep(0.75, 0.9, normal.y);
 
     TerrainTexel ground;

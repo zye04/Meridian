@@ -150,6 +150,8 @@ images are shared between them, and barriers account for that.
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
 - Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
-  history isn't rescaled on exposure change; the Renderer constructor
+  history isn't rescaled on exposure change; TAA smears in motion (eye-height
+  ground view at 5 m/s keeps only 48% of the still image's Laplacian
+  sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
   leaks partial Vulkan state if it throws; terrain is one 2 km mesh with no
   LOD or streaming.

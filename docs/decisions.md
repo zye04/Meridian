@@ -110,6 +110,24 @@ sources. Check here before re-researching a topic.
   - https://bgolus.medium.com/normal-mapping-for-a-triplanar-shader-10bf39dca05a
   - https://www.gamedeveloper.com/programming/advanced-terrain-texture-splatting
   - https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-upscalers-in-unreal-engine
+- **Hex-tiling** (Mikkelsen 2022) on the flat terrain layers against visible
+  repetition: three randomly rotated/offset copies on a hex grid,
+  luminance-weighted (fall-off contrast 0.6, exponent 7) so contrast
+  survives; normals blended as rotated height derivatives. Deviations from
+  the reference: 2 hex cells per texture repeat instead of sqrt(12) (the
+  reference grid ghosts twigs and leaves in its wide blend zones; 1 cell
+  shows seams), one weight set from base color for every map so layers
+  stay coherent, and copies under 2% weight skip their other maps (same
+  image, less cost). Heitz-Neyret histogram-preserving tiling was the
+  alternative; it needs a per-texture LUT for little gain here.
+  Scanned normal maps also carry bumps at tile scale that repeat as a grid
+  at distance, so terrain normals fade out once a pixel covers 2-20% of a
+  tile. Rock stays plain triplanar (hex x triplanar is 3x the taps) and
+  still repeats when seen from far above; revisit with the large terrain.
+  Cost: +0.45 ms (wide view) to +0.66 ms (ground filling the screen) at
+  1269x1388 on an RTX 4080, median of 5.
+  - https://jcgt.org/published/0011/03/05/paper.pdf
+  - https://github.com/mmikk/hextile-demo
 - **Test content from Poly Haven** (CC0, public API, no login), fetched by
   script so `assets/` stays reproducible. Megascans (free on Fab for any
   engine since 2026-11) needs a browser login, so it is a manual option
