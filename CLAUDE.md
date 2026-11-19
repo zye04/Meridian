@@ -96,6 +96,13 @@ Startup prints `Render WxH, display WxH, jitter phases N, mip bias B,
 DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
 310.9.16, Super Resolution ..., Ray Reconstruction ... (preset F)`.
 
+Weather: `--weather clear|fair|broken|overcast` (default `fair`),
+`--time-scale X` (game seconds per real second), `--weather-front
+SECONDS` (blend from the start preset to overcast over that many game
+seconds; the change enters at the front line 60 km upwind and travels
+with the wind). Capture runs print the weather at the camera (coverage,
+type, wind speed and the direction it comes from, gustiness, game time).
+
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
@@ -185,7 +192,10 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            UpscalerFrame, UpscalerProvider: the Vulkan
                            extension point for upscaler backends; the
                            Renderer constructor takes an optional
-                           provider), window.h, math/{vec3,mat4}.h
+                           provider), weather.h (WeatherState,
+                           presets, Weather: blend, wind integral,
+                           history, stateAt; windVelocityAt), window.h,
+                           math/{vec3,mat4}.h
 engine/dlss/               meridian_dlss (MERIDIAN_DLSS, default ON):
                            dlss.h (createProvider, attribution),
                            dlss.cpp (NGX SR/DLAA as an UpscalerProvider),
@@ -218,7 +228,7 @@ engine/src/render/         renderer internals:
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
-                           window.cpp
+                           weather.cpp, window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain.glsl (heightfield sampling + mirror,
                            quadtree, morph, detail noise),
@@ -232,7 +242,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cell_cull.comp: placement cells -> instance
                            chunks for cull.comp -> BVH seeds for
                            cluster_traverse.comp -> work items for
-                           cluster_cull.comp
+                           cluster_cull.comp.
+                           wind.glsl (windVelocity, windOffset, gust),
+                           weather.glsl (weatherAt: history lookup)
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten, leaf diffuse transmission),
@@ -398,6 +410,16 @@ barriers account for that.
   never shadows itself where the smooth normal faces the sun). Pyramid
   level 0 bounds each bilinear cell. The quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.
+- Wind: one global wind, owned by `Weather` (the game updates it with the
+  absolute game time, then calls `Renderer::setWeather` before every
+  `draw`). `WindState` is the 10 m wind (direction it blows toward, xz);
+  other altitudes follow the power-law profile and veer
+  (`windVelocityAt`, wind.glsl `windVelocity`). Anything carried by the
+  wind scrolls by `windOffset` (the time integral of the velocity, never
+  velocity x time, so speed changes don't jump), and computes motion with
+  `scene.wind` and `scene.previousWind`. The weather at a position comes
+  from `Weather::stateAt` / `weatherAt` (the history rule), never from
+  the current state directly.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,

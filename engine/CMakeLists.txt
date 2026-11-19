@@ -111,6 +111,7 @@ add_library(meridian STATIC
     src/render/vulkan_util.cpp
     src/terrain.cpp
     src/texture.cpp
+    src/weather.cpp
     src/vma.cpp
     src/window.cpp)
 add_dependencies(meridian shaders)

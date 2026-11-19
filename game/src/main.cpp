@@ -3,6 +3,7 @@
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
+#include <meridian/weather.h>
 #include <meridian/window.h>
 #ifdef MERIDIAN_HAS_DLSS
 #include <meridian/dlss.h>
@@ -355,6 +356,11 @@ struct Options {
   bool fullscreen = true;
   // Frames to render before exiting; 0 runs until the window closes.
   int frames = 0;
+  std::string weather = "fair";
+  // Game seconds per real second (time-lapse).
+  float timeScale = 1.0f;
+  // Blends from the start weather to overcast over this many game seconds.
+  std::optional<float> weatherFront;
 };
 
 Options parseOptions(int argc, char **argv) {
@@ -451,6 +457,12 @@ Options parseOptions(int argc, char **argv) {
       ++i;
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
+    } else if (arg == "--weather" && i + 1 < argc) {
+      options.weather = argv[++i];
+    } else if (arg == "--time-scale") {
+      options.timeScale = number(i);
+    } else if (arg == "--weather-front") {
+      options.weatherFront = number(i);
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
@@ -462,6 +474,8 @@ Options parseOptions(int argc, char **argv) {
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
                                "--windowed, "
+                               "--weather clear|fair|broken|overcast, --time-scale x, "
+                               "--weather-front seconds, "
                                "--capture file.png|file.pfm, --frames n)");
     }
   }
@@ -614,6 +628,12 @@ int main(int argc, char **argv) {
     placeScenery(renderer);
   }
 
+  meridian::Weather weather(1, meridian::weatherPreset(options.weather));
+  if (options.weatherFront) {
+    weather.setTarget(meridian::weatherPreset("overcast"), *options.weatherFront);
+  }
+  double gameSeconds = 0.0;
+
   meridian::Lighting lighting;
   if (options.haze == Options::Haze::Summer) {
     lighting.atmosphere = summerHaze(0.10f, 0.5f);
@@ -692,7 +712,11 @@ int main(int argc, char **argv) {
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
     }
-    renderer.draw(camera, lighting, interactive ? deltaSeconds : kScriptedStep);
+    const float frameSeconds = interactive ? deltaSeconds : kScriptedStep;
+    gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
+    weather.update(gameSeconds);
+    renderer.setWeather(weather);
+    renderer.draw(camera, lighting, frameSeconds);
 
     ++frames;
     gpuMsSum += renderer.gpuFrameMs();
@@ -728,6 +752,16 @@ int main(int argc, char **argv) {
       separator = ", ";
     }
     std::printf("\n");
+    // Wind as reported in meteorology: where it comes from, clockwise from
+    // north (-z).
+    const meridian::WeatherState here = weather.stateAt(camera.position);
+    const meridian::Vec3 toward = here.wind.direction;
+    const float from = std::fmod(
+        std::atan2(-toward.x, toward.z) * 180.0f / 3.14159265f + 360.0f, 360.0f);
+    std::printf("Weather at the camera: coverage %.2f, type %.2f, wind %.1f m/s from "
+                "%.0f deg, gustiness %.2f (game time %.0f s)\n",
+                here.coverage, here.type, here.wind.speed10m, from, here.wind.gustiness,
+                gameSeconds);
   }
   return renderer.validationErrorCount() == 0 ? 0 : 1;
 }

@@ -4,6 +4,7 @@
 
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
+#include <meridian/weather.h>
 
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
@@ -272,6 +273,43 @@ inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
           {layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]}};
 }
 
+// Gusts (wind.glsl): the phase advances this many noise cells per game second
+// and wraps at the noise's period along it.
+constexpr double kGustPhaseRate = 0.25;
+constexpr double kGustPhasePeriod = 256.0;
+
+// Must match Wind in common.glsl (see wind.glsl). The 10 m wind; offset is
+// the integral of its velocity (Weather::windOffset at 10 m).
+struct GpuWind {
+  float direction[2] = {1.0f, 0.0f};
+  float speed10m = 0.0f;
+  float gustiness = 0.0f;
+  float offset[2] = {};
+  float gustPhase = 0.0f;
+  float shearExponent = kWindShearExponent;
+  float veer = kWindVeer;
+  float veerAltitude = kWindVeerAltitude;
+  float pad[2] = {};
+};
+static_assert(sizeof(GpuWind) == 48);
+
+// Must match WeatherHistorySample in common.glsl.
+static_assert(sizeof(WeatherHistorySample) == 16);
+
+// Must match Weather in common.glsl (see weather.glsl). History samples are
+// oldest first, their travel relative to the current travel (<= 0) so it
+// stays precise however far the air has moved.
+struct GpuWeather {
+  float coverage = 0.0f;
+  float type = 1.0f;
+  float precipitation = 0.0f;
+  float frontLineUpwind = kFrontLineUpwind;
+  uint32_t historyCount = 0;
+  uint32_t pad = 0;
+  VkDeviceAddress history = 0;
+};
+static_assert(sizeof(GpuWeather) == 32);
+
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
@@ -331,8 +369,12 @@ struct SceneData {
   // Every mesh's cluster group BVH nodes and DAG levels.
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
+  // The global wind, this frame's and last frame's (for motion vectors).
+  GpuWind wind;
+  GpuWind previousWind;
+  GpuWeather weather;
 };
-static_assert(sizeof(SceneData) == 1776);
+static_assert(sizeof(SceneData) == 1904);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -734,6 +776,8 @@ struct FrameData {
   Buffer instanceBuffer;
   // This frame's DrawCounters, copied back for statistics.
   Buffer drawCountReadback;
+  // GpuWeather::history: kWeatherHistoryCapacity WeatherHistorySamples.
+  Buffer weatherHistory;
 };
 
 // The NVIDIA driver leaks a few KB during device creation and on the first
