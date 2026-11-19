@@ -47,6 +47,10 @@ ending at `--camera`) and compare with the still capture of the same view:
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry).
+They also print `GPU passes:` with GPU ms per pass (upload + tlas, cull early,
+atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
+tonemap; they sum to the total). A
+new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
 Useful views: the default start is eye height on the ground at (0, 700),
 looking at the sample models; ground detail `0 80.8 700 0 -0.25`; open

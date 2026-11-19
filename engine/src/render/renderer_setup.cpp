@@ -283,7 +283,7 @@ void Renderer::Impl::createFrames() {
   VkQueryPoolCreateInfo queryInfo{};
   queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-  queryInfo.queryCount = kFramesInFlight * 2;
+  queryInfo.queryCount = kFramesInFlight * (kMaxPassTimes + 1);
   check(vkCreateQueryPool(dev, &queryInfo, nullptr, &timestampPool),
         "vkCreateQueryPool");
 }

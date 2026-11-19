@@ -111,6 +111,12 @@ struct Lighting {
   Atmosphere atmosphere;
 };
 
+// GPU time of one named frame pass.
+struct PassTime {
+  const char *name;
+  float ms;
+};
+
 // A mesh placed in the world (what loadGltf returns per node primitive).
 struct DrawItem {
   MeshId mesh;
@@ -145,8 +151,12 @@ public:
   // adaptation. Pass a fixed step for repeatable output.
   void draw(const Camera &camera, const Lighting &lighting, float deltaSeconds);
 
-  // GPU time of a recent frame, measured with timestamp queries.
+  // GPU time of a recent frame, measured with timestamp queries: from the
+  // first to the last pass timestamp.
   float gpuFrameMs() const;
+  // Per-pass GPU time of a recent frame, in frame order. Passes sum to
+  // gpuFrameMs().
+  std::span<const PassTime> gpuPassTimes() const;
 
   // Opaque and alpha-masked instances drawn in a recent frame (blended
   // instances are drawn from the CPU and not counted).

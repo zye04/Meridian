@@ -349,6 +349,13 @@ int main(int argc, char **argv) {
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.droppedCullEntryCount(), renderer.validationErrorCount());
+    std::printf("GPU passes:");
+    const char *separator = " ";
+    for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {
+      std::printf("%s%s %.2f", separator, pass.name, pass.ms);
+      separator = ", ";
+    }
+    std::printf("\n");
   }
   return renderer.validationErrorCount() == 0 ? 0 : 1;
 }

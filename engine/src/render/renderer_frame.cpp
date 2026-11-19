@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 
 namespace meridian {
 
@@ -235,6 +236,10 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
 
 float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
 
+std::span<const PassTime> Renderer::gpuPassTimes() const {
+  return {impl_->passTimes.data(), impl_->passTimeCount};
+}
+
 uint32_t Renderer::drawnInstanceCount() const { return impl_->drawnInstances; }
 
 uint32_t Renderer::drawnClusterCount() const { return impl_->drawnClusters; }
@@ -284,13 +289,21 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // Once each slot has been submitted, the fence guarantees its previous
   // timestamps are written.
-  uint64_t timestamps[2] = {};
+  uint64_t timestamps[kMaxPassTimes + 1] = {};
+  const uint32_t timestampCount = impl_->passTimeCount + 1;
   if (impl_->frameNumber >= kFramesInFlight &&
-      vkGetQueryPoolResults(dev, impl_->timestampPool, frameSlot * 2, 2,
+      vkGetQueryPoolResults(dev, impl_->timestampPool,
+                            frameSlot * (kMaxPassTimes + 1), timestampCount,
                             sizeof(timestamps), timestamps, sizeof(uint64_t),
                             VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
-    impl_->gpuFrameMs = static_cast<float>(timestamps[1] - timestamps[0]) *
-                        impl_->timestampPeriodNs * 1e-6f;
+    const float msPerTick = impl_->timestampPeriodNs * 1e-6f;
+    for (uint32_t i = 0; i < impl_->passTimeCount; ++i) {
+      impl_->passTimes[i].ms =
+          static_cast<float>(timestamps[i + 1] - timestamps[i]) * msPerTick;
+    }
+    impl_->gpuFrameMs =
+        static_cast<float>(timestamps[impl_->passTimeCount] - timestamps[0]) *
+        msPerTick;
   }
   if (impl_->frameNumber >= kFramesInFlight) {
     check(vmaInvalidateAllocation(impl_->allocator, frame.drawCountReadback.allocation,
@@ -391,9 +404,20 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   check(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
 
-  vkCmdResetQueryPool(cmd, impl_->timestampPool, frameSlot * 2, 2);
+  const uint32_t firstQuery = frameSlot * (kMaxPassTimes + 1);
+  vkCmdResetQueryPool(cmd, impl_->timestampPool, firstQuery, kMaxPassTimes + 1);
   vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, impl_->timestampPool,
-                       frameSlot * 2);
+                       firstQuery);
+  // Closes the named pass: it spans from the previous timestamp to here.
+  uint32_t passCount = 0;
+  auto endPass = [&](const char *name) {
+    if (passCount == kMaxPassTimes) {
+      throw std::runtime_error("more passes than kMaxPassTimes");
+    }
+    impl_->passTimes[passCount].name = name;
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                         impl_->timestampPool, firstQuery + ++passCount);
+  };
 
   VkViewport viewport{};
   viewport.width = static_cast<float>(extent.width);
@@ -403,7 +427,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   impl_->uploadInstances(cmd, frame);
   impl_->buildTlas(cmd, frame);
+  endPass("upload + tlas");
   impl_->cullInstances(cmd, frame, 0);
+  endPass("cull early");
 
   // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
 
@@ -461,6 +487,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     impl_->skyIrradiancePipeline);
   vkCmdDispatch(cmd, 1, 1, 1);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+  endPass("atmosphere");
 
   // --- Scene pass: shade into the HDR target.
 
@@ -562,10 +589,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDraw(cmd, 3, 1, 0, 0);
   drawCulled(0);
   vkCmdEndRendering(cmd);
+  endPass("scene early");
 
   impl_->buildDepthPyramid(cmd);
   impl_->pyramidValid = true;
+  endPass("pyramid");
   impl_->cullInstances(cmd, frame, 1);
+  endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -612,6 +642,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
 
   vkCmdEndRendering(cmd);
+  endPass("scene late");
 
   // --- Temporal resolve: scene color + history -> new history.
 
@@ -668,6 +699,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
   vkCmdPipelineBarrier2(cmd, &historyDependency);
   impl_->historyValid = true;
+  endPass("taa");
 
   // --- Auto-exposure: histogram of the resolved frame, then adaptation.
   // The new exposure is used by the next frame's scene pass.
@@ -682,6 +714,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     impl_->exposurePipeline);
   vkCmdDispatch(cmd, 1, 1, 1);
   vkCmdPipelineBarrier2(cmd, &historyDependency);
+  endPass("exposure");
 
   // --- Tonemap pass: resolved HDR -> swapchain image.
 
@@ -716,6 +749,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdSetScissor(cmd, 0, 1, &scissor);
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
+  endPass("tonemap");
+  impl_->passTimeCount = passCount;
 
   // Optional capture: copy the finished frame into a CPU-readable buffer.
   Buffer captureBuffer;
@@ -752,9 +787,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_NONE, 0});
   }
-
-  vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                       impl_->timestampPool, frameSlot * 2 + 1);
 
   check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 

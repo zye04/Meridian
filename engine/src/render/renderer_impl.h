@@ -63,10 +63,12 @@ struct Renderer::Impl {
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
 
-  // Two GPU timestamps per frame in flight: start and end of the frame.
+  // Per frame in flight: a start timestamp, then one after each named pass.
   VkQueryPool timestampPool = VK_NULL_HANDLE;
   float timestampPeriodNs = 0.0f;
   float gpuFrameMs = 0.0f;
+  std::array<PassTime, kMaxPassTimes> passTimes;
+  uint32_t passTimeCount = 0;
   uint32_t drawnInstances = 0;
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
