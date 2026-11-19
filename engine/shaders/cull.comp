@@ -49,11 +49,16 @@ void main() {
     atomicAdd(cull.counters.counters[kCounterInstances], 1u);
     uint itemCount = (mesh.clusterCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
     uint first = atomicAdd(cull.counters.counters[cull.phase * 3u], itemCount);
+    // The count is the cluster cull's dispatch size: give back what doesn't
+    // fit so it ends at the capacity.
+    uint end = min(first + itemCount, kMaxWorkItems);
+    uint dropped = itemCount - (end > first ? end - first : 0u);
+    if (dropped > 0u) {
+        atomicAdd(cull.counters.counters[cull.phase * 3u], -dropped);
+        atomicAdd(cull.counters.counters[kCounterOverflow], dropped);
+        itemCount -= dropped;
+    }
     for (uint i = 0u; i < itemCount; ++i) {
-        if (first + i >= kMaxWorkItems) {
-            atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
-            return;
-        }
         uint offset = i * kClustersPerWorkItem;
         uint count = min(kClustersPerWorkItem, mesh.clusterCount - offset);
         cull.work.items[first + i] =

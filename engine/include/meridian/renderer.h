@@ -152,6 +152,9 @@ public:
   // Clusters and triangles of those instances drawn in a recent frame.
   uint32_t drawnClusterCount() const;
   uint32_t drawnTriangleCount() const;
+  // Work items and clusters the culling passes dropped in a recent frame
+  // because a list was full (nonzero means geometry is missing).
+  uint32_t droppedCullEntryCount() const;
 
   // Level of detail: the largest simplification error allowed on screen, in
   // pixels (default 1; 0 draws full detail).

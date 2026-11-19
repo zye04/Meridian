@@ -222,7 +222,10 @@ foliage that survives simplification).
   (NVIDIA Turing+, AMD RDNA2+, Intel Arc); no index expansion, unlike a
   compute-expanded index buffer. Culling is two-level: instances emit work
   items of up to 64 clusters, a cluster pass (indirect dispatch) applies
-  the LOD cut and frustum test.
+  the LOD cut and frustum test. Full work-item or draw lists drop the
+  excess, give the count back so indirect arguments stay at capacity
+  (device creation checks the dispatch limits cover it), and report the
+  drops.
 - **RT mismatch, interim:** shadows still trace full-detail BLAS, and the
   coarser raster surface can lie under it (acne blotches over distant
   terrain at 1 px). Shadow rays start the cluster's own simplification

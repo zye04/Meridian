@@ -71,6 +71,7 @@ struct Renderer::Impl {
   uint32_t drawnInstances = 0;
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
+  uint32_t droppedEntries = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
 

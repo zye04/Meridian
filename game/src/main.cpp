@@ -344,10 +344,10 @@ int main(int argc, char **argv) {
 
   if (!interactive) {
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u validation errors\n",
+                "%u triangles, %u dropped by full cull lists, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
-                renderer.validationErrorCount());
+                renderer.droppedCullEntryCount(), renderer.validationErrorCount());
   }
   return renderer.validationErrorCount() == 0 ? 0 : 1;
 }

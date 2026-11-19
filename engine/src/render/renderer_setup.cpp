@@ -886,10 +886,18 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationProperties{};
   accelerationProperties.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+  VkPhysicalDeviceMeshShaderPropertiesEXT meshProperties{};
+  meshProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
+  accelerationProperties.pNext = &meshProperties;
   VkPhysicalDeviceProperties2 properties{};
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &accelerationProperties;
   vkGetPhysicalDeviceProperties2(physical.value().physical_device, &properties);
+  if (meshProperties.maxMeshWorkGroupCount[0] < kMaxDrawnClusters ||
+      meshProperties.maxMeshWorkGroupTotalCount < kMaxDrawnClusters ||
+      properties.properties.limits.maxComputeWorkGroupCount[0] < kMaxWorkItems) {
+    throw std::runtime_error("GPU dispatch limits are below the culling list sizes");
+  }
   impl_->scratchAlignment =
       accelerationProperties.minAccelerationStructureScratchOffsetAlignment;
 

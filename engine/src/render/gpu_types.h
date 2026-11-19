@@ -54,7 +54,8 @@ constexpr uint32_t kClusterTriangleCapacity = 32u << 20;
 constexpr uint32_t kDrawBuckets = 4;
 // Per culling phase: work items (up to 64 clusters of one instance each) and
 // drawn clusters per draw list; clusters to retest in phase 1. Overflow is
-// dropped and counted.
+// dropped and counted, and the counts that size indirect dispatches stay at
+// capacity (the device must allow dispatches that large).
 constexpr uint32_t kMaxWorkItems = 1u << 19;
 constexpr uint32_t kMaxDrawnClusters = 1u << 20;
 constexpr uint32_t kMaxRetestClusters = 1u << 20;

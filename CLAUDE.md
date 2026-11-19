@@ -44,8 +44,9 @@ ending at `--camera`) and compare with the still capture of the same view:
 "%[fx:standard_deviation]\n" info:` (higher = sharper).
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
-detail, for A/B). Capture runs print drawn instances, clusters and
-triangles.
+detail, for A/B). Capture runs print drawn instances, clusters,
+triangles and entries dropped by full cull lists (nonzero = missing
+geometry).
 
 Useful views: the default start is eye height on the ground at (0, 700),
 looking at the sample models; ground detail `0 80.8 700 0 -0.25`; open

@@ -241,6 +241,8 @@ uint32_t Renderer::drawnClusterCount() const { return impl_->drawnClusters; }
 
 uint32_t Renderer::drawnTriangleCount() const { return impl_->drawnTriangles; }
 
+uint32_t Renderer::droppedCullEntryCount() const { return impl_->droppedEntries; }
+
 void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
 
 void Renderer::setOcclusionCulling(bool enabled) {
@@ -297,10 +299,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
         static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
     impl_->drawnInstances = counters->instances;
     impl_->drawnTriangles = counters->triangles;
+    impl_->droppedEntries = counters->overflow;
     impl_->drawnClusters = 0;
     for (const auto &lists : counters->meshTasks) {
       for (const auto &tasks : lists) {
-        impl_->drawnClusters += std::min(tasks[0], kMaxDrawnClusters);
+        impl_->drawnClusters += tasks[0];
       }
     }
   }

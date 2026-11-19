@@ -32,6 +32,8 @@ void draw(uint instanceIndex, uint clusterIndex, uint triangleCount) {
     uint list = min(cull.phase, 1u) * kDrawBuckets + mesh.drawBucket;
     uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
     if (slot >= kMaxDrawnClusters) {
+        // The count is the mesh task count: keep it at the capacity.
+        atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], uint(-1));
         atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
         return;
     }
