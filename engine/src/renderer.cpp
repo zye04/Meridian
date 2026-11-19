@@ -6,6 +6,13 @@
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#include <sanitizer/lsan_interface.h>
+#define MERIDIAN_HAS_LSAN 1
+#endif
+#endif
+
 #include <array>
 #include <cstring>
 #include <fstream>
@@ -23,6 +30,8 @@ constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 // 16-bit float keeps smooth gradients across the full HDR range.
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+// Upper bound on draw items per frame, sizing each frame's TLAS.
+constexpr uint32_t kMaxInstances = 4096;
 
 #ifdef NDEBUG
 constexpr bool kEnableValidation = false;
@@ -43,10 +52,18 @@ struct Image {
   VkImageView view = VK_NULL_HANDLE;
 };
 
+struct AccelerationStructure {
+  VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+  Buffer buffer;
+  VkDeviceAddress address = 0;
+};
+
 struct GpuMesh {
   Buffer vertices;
   Buffer indices;
   uint32_t indexCount = 0;
+  // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
+  AccelerationStructure blas;
 };
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
@@ -58,8 +75,10 @@ struct SceneData {
   float pad0 = 0.0f;
   Vec3 skyLuminance;
   float pad1 = 0.0f;
+  VkDeviceAddress tlas = 0;
+  uint64_t pad2 = 0;
 };
-static_assert(sizeof(SceneData) == 112);
+static_assert(sizeof(SceneData) == 128);
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
@@ -75,7 +94,21 @@ struct FrameData {
   VkFence renderFence = VK_NULL_HANDLE;
   VkSemaphore imageAvailable = VK_NULL_HANDLE;
   Buffer sceneBuffer;
+  // Top-level acceleration structure over this frame's draw items, rebuilt
+  // every frame from the instance buffer.
+  Buffer instanceBuffer;
+  AccelerationStructure tlas;
+  Buffer tlasScratch;
 };
+
+// The NVIDIA driver leaks a few KB during device creation and on the first
+// acceleration structure build in each command buffer. LeakSanitizer ignores
+// allocations made while one of these lives; elsewhere it's a no-op.
+#ifdef MERIDIAN_HAS_LSAN
+using DriverLeakScope = __lsan::ScopedDisabler;
+#else
+struct DriverLeakScope {};
+#endif
 
 void check(VkResult result, const char *what) {
   if (result != VK_SUCCESS) {
@@ -251,7 +284,11 @@ struct Renderer::Impl {
   vkb::Instance instance;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   vkb::Device device;
+  // Device functions from extensions (ray tracing), which the loader doesn't
+  // export directly.
+  vkb::DispatchTable dispatch;
   VmaAllocator allocator = nullptr;
+  VkDeviceSize scratchAlignment = 0;
 
   VkQueue graphicsQueue = VK_NULL_HANDLE;
   uint32_t graphicsQueueFamily = 0;
@@ -303,14 +340,23 @@ struct Renderer::Impl {
   void destroyImage(Image &image);
 
   Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                      VmaAllocationCreateFlags flags);
+                      VmaAllocationCreateFlags flags,
+                      VkDeviceSize alignment = 0);
   void destroyBuffer(Buffer &buffer);
+
+  AccelerationStructure
+  createAccelerationStructure(VkAccelerationStructureTypeKHR type,
+                              VkDeviceSize size);
+  void destroyAccelerationStructure(AccelerationStructure &as);
+  void buildTlas(VkCommandBuffer cmd, FrameData &frame,
+                 std::span<const DrawItem> items);
 
   template <typename Record> void submitNow(Record &&record);
 };
 
 Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                                    VmaAllocationCreateFlags flags) {
+                                    VmaAllocationCreateFlags flags,
+                                    VkDeviceSize alignment) {
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
@@ -322,9 +368,10 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
   Buffer buffer;
   VmaAllocationInfo info{};
-  check(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer.buffer,
-                        &buffer.allocation, &info),
-        "vmaCreateBuffer");
+  check(vmaCreateBufferWithAlignment(allocator, &bufferInfo, &allocInfo,
+                                     alignment, &buffer.buffer,
+                                     &buffer.allocation, &info),
+        "vmaCreateBufferWithAlignment");
   buffer.mapped = info.pMappedData;
 
   if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
@@ -339,6 +386,103 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 void Renderer::Impl::destroyBuffer(Buffer &buffer) {
   vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
   buffer = {};
+}
+
+AccelerationStructure
+Renderer::Impl::createAccelerationStructure(VkAccelerationStructureTypeKHR type,
+                                            VkDeviceSize size) {
+  AccelerationStructure as;
+  as.buffer = createBuffer(size,
+                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                           0);
+
+  VkAccelerationStructureCreateInfoKHR info{};
+  info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+  info.buffer = as.buffer.buffer;
+  info.size = size;
+  info.type = type;
+  check(dispatch.createAccelerationStructureKHR(&info, nullptr, &as.handle),
+        "vkCreateAccelerationStructureKHR");
+
+  VkAccelerationStructureDeviceAddressInfoKHR addressInfo{};
+  addressInfo.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+  addressInfo.accelerationStructure = as.handle;
+  as.address = dispatch.getAccelerationStructureDeviceAddressKHR(&addressInfo);
+  return as;
+}
+
+void Renderer::Impl::destroyAccelerationStructure(AccelerationStructure &as) {
+  dispatch.destroyAccelerationStructureKHR(as.handle, nullptr);
+  destroyBuffer(as.buffer);
+  as = {};
+}
+
+void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
+                               std::span<const DrawItem> items) {
+  if (items.size() > kMaxInstances) {
+    throw std::runtime_error("too many draw items for the TLAS");
+  }
+
+  auto *instances = static_cast<VkAccelerationStructureInstanceKHR *>(
+      frame.instanceBuffer.mapped);
+  for (size_t i = 0; i < items.size(); ++i) {
+    const Mat4 &m = items[i].transform;
+    VkAccelerationStructureInstanceKHR instance{};
+    // Vulkan wants a row-major 3x4 matrix; Mat4 is column-major.
+    for (int row = 0; row < 3; ++row) {
+      for (int column = 0; column < 4; ++column) {
+        instance.transform.matrix[row][column] = m.m[column][row];
+      }
+    }
+    instance.mask = 0xFF;
+    instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    instance.accelerationStructureReference =
+        meshes[items[i].mesh.index].blas.address;
+    instances[i] = instance;
+  }
+  check(vmaFlushAllocation(allocator, frame.instanceBuffer.allocation, 0,
+                           VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
+
+  VkAccelerationStructureGeometryKHR geometry{};
+  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+  geometry.geometry.instances.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+  geometry.geometry.instances.data.deviceAddress = frame.instanceBuffer.address;
+
+  VkAccelerationStructureBuildGeometryInfoKHR build{};
+  build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+  build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  build.dstAccelerationStructure = frame.tlas.handle;
+  build.geometryCount = 1;
+  build.pGeometries = &geometry;
+  build.scratchData.deviceAddress = frame.tlasScratch.address;
+
+  VkAccelerationStructureBuildRangeInfoKHR range{};
+  range.primitiveCount = static_cast<uint32_t>(items.size());
+  const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
+  {
+    DriverLeakScope driverLeak;
+    dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build, &ranges);
+  }
+
+  VkMemoryBarrier2 barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+  VkDependencyInfo dependency{};
+  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  dependency.memoryBarrierCount = 1;
+  dependency.pMemoryBarriers = &barrier;
+  vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
 // A GPU-only 2D image the size of the swapchain.
@@ -519,6 +663,45 @@ void Renderer::Impl::createFrames() {
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    frame.instanceBuffer = createBuffer(
+        kMaxInstances * sizeof(VkAccelerationStructureInstanceKHR),
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  }
+
+  // Size each TLAS for the maximum instance count once, so per-frame
+  // rebuilds never allocate.
+  VkAccelerationStructureGeometryKHR tlasGeometry{};
+  tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+  tlasGeometry.geometry.instances.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+
+  VkAccelerationStructureBuildGeometryInfoKHR tlasBuild{};
+  tlasBuild.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  tlasBuild.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+  tlasBuild.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  tlasBuild.geometryCount = 1;
+  tlasBuild.pGeometries = &tlasGeometry;
+
+  VkAccelerationStructureBuildSizesInfoKHR tlasSizes{};
+  tlasSizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  dispatch.getAccelerationStructureBuildSizesKHR(
+      VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuild,
+      &kMaxInstances, &tlasSizes);
+
+  for (FrameData &frame : frames) {
+    frame.tlas = createAccelerationStructure(
+        VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        tlasSizes.accelerationStructureSize);
+    frame.tlasScratch = createBuffer(
+        tlasSizes.buildScratchSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        0, scratchAlignment);
   }
 
   check(vkCreateCommandPool(dev, &poolInfo, nullptr, &uploadPool),
@@ -646,21 +829,53 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features13.dynamicRendering = VK_TRUE;
   features13.synchronization2 = VK_TRUE;
 
-  auto physical = vkb::PhysicalDeviceSelector{impl_->instance}
-                      .set_minimum_version(1, 3)
-                      .set_required_features_12(features12)
-                      .set_required_features_13(features13)
-                      .set_surface(impl_->surface)
-                      .select();
+  // Hardware ray tracing is required: shadows (and later reflections and GI)
+  // are traced with ray queries.
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationFeatures{};
+  accelerationFeatures.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+  accelerationFeatures.accelerationStructure = VK_TRUE;
+
+  VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
+  rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+  rayQueryFeatures.rayQuery = VK_TRUE;
+
+  auto physical =
+      vkb::PhysicalDeviceSelector{impl_->instance}
+          .set_minimum_version(1, 3)
+          .set_required_features_12(features12)
+          .set_required_features_13(features13)
+          .add_required_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+          .add_required_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+          .add_required_extension(
+              VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
+          .add_required_extension_features(accelerationFeatures)
+          .add_required_extension_features(rayQueryFeatures)
+          .set_surface(impl_->surface)
+          .select();
   if (!physical) {
     throw std::runtime_error(physical.error().message());
   }
 
-  auto device = vkb::DeviceBuilder{physical.value()}.build();
+  auto device = [&] {
+    DriverLeakScope driverLeak;
+    return vkb::DeviceBuilder{physical.value()}.build();
+  }();
   if (!device) {
     throw std::runtime_error(device.error().message());
   }
   impl_->device = device.value();
+  impl_->dispatch = impl_->device.make_table();
+
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationProperties{};
+  accelerationProperties.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+  VkPhysicalDeviceProperties2 properties{};
+  properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  properties.pNext = &accelerationProperties;
+  vkGetPhysicalDeviceProperties2(physical.value().physical_device, &properties);
+  impl_->scratchAlignment =
+      accelerationProperties.minAccelerationStructureScratchOffsetAlignment;
 
   impl_->graphicsQueue =
       impl_->device.get_queue(vkb::QueueType::graphics).value();
@@ -691,14 +906,19 @@ MeshId Renderer::uploadMesh(const MeshData &data) {
 
   GpuMesh mesh;
   mesh.indexCount = static_cast<uint32_t>(data.indices.size());
+  constexpr VkBufferUsageFlags kRayTracingInput =
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   mesh.vertices = impl_->createBuffer(
       vertexBytes,
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+          kRayTracingInput,
       0);
   mesh.indices = impl_->createBuffer(
       indexBytes,
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          kRayTracingInput,
+      0);
 
   // GPU-only memory is fastest to read but the CPU can't write it, so the
   // data goes through a temporary CPU-visible staging buffer.
@@ -713,28 +933,94 @@ MeshId Renderer::uploadMesh(const MeshData &data) {
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
+  VkAccelerationStructureGeometryKHR geometry{};
+  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+  geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  auto &triangles = geometry.geometry.triangles;
+  triangles.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+  triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+  triangles.vertexData.deviceAddress = mesh.vertices.address;
+  triangles.vertexStride = sizeof(Vertex);
+  triangles.maxVertex = static_cast<uint32_t>(data.vertices.size() - 1);
+  triangles.indexType = VK_INDEX_TYPE_UINT32;
+  triangles.indexData.deviceAddress = mesh.indices.address;
+
+  VkAccelerationStructureBuildGeometryInfoKHR build{};
+  build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+  build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  build.geometryCount = 1;
+  build.pGeometries = &geometry;
+
+  const uint32_t triangleCount = mesh.indexCount / 3;
+  VkAccelerationStructureBuildSizesInfoKHR sizes{};
+  sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  impl_->dispatch.getAccelerationStructureBuildSizesKHR(
+      VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &triangleCount,
+      &sizes);
+
+  mesh.blas = impl_->createAccelerationStructure(
+      VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+      sizes.accelerationStructureSize);
+  Buffer scratch = impl_->createBuffer(
+      sizes.buildScratchSize,
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0, impl_->scratchAlignment);
+  build.dstAccelerationStructure = mesh.blas.handle;
+  build.scratchData.deviceAddress = scratch.address;
+
   impl_->submitNow([&](VkCommandBuffer cmd) {
     VkBufferCopy vertexCopy{0, 0, vertexBytes};
     vkCmdCopyBuffer(cmd, staging.buffer, mesh.vertices.buffer, 1, &vertexCopy);
     VkBufferCopy indexCopy{vertexBytes, 0, indexBytes};
     vkCmdCopyBuffer(cmd, staging.buffer, mesh.indices.buffer, 1, &indexCopy);
 
-    VkMemoryBarrier2 barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                           VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT;
-    barrier.dstAccessMask =
-        VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;
+    VkMemoryBarrier2 copied{};
+    copied.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    copied.dstStageMask =
+        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    copied.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                           VK_ACCESS_2_INDEX_READ_BIT |
+                           VK_ACCESS_2_SHADER_READ_BIT;
 
     VkDependencyInfo dependency{};
     dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     dependency.memoryBarrierCount = 1;
-    dependency.pMemoryBarriers = &barrier;
+    dependency.pMemoryBarriers = &copied;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+
+    VkAccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = triangleCount;
+    const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
+    {
+      DriverLeakScope driverLeak;
+      impl_->dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build,
+                                                        &ranges);
+    }
+
+    // Later TLAS builds reference this BLAS.
+    VkMemoryBarrier2 built{};
+    built.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    built.srcStageMask =
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    built.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    built.dstStageMask =
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    built.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    dependency.pMemoryBarriers = &built;
     vkCmdPipelineBarrier2(cmd, &dependency);
   });
 
+  impl_->destroyBuffer(scratch);
   impl_->destroyBuffer(staging);
 
   impl_->meshes.push_back(mesh);
@@ -809,6 +1095,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.exposure = camera.exposure();
   scene.sunIlluminance = lighting.sunIlluminance;
   scene.skyLuminance = lighting.skyLuminance;
+  scene.tlas = frame.tlas.address;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -831,6 +1118,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   viewport.height = static_cast<float>(extent.height);
   viewport.maxDepth = 1.0f;
   VkRect2D scissor = {{0, 0}, extent};
+
+  impl_->buildTlas(cmd, frame, items);
 
   // --- Scene pass: shade into the HDR target.
 
@@ -1007,6 +1296,7 @@ Renderer::~Renderer() {
   vkDeviceWaitIdle(dev);
 
   for (GpuMesh &mesh : impl_->meshes) {
+    impl_->destroyAccelerationStructure(mesh.blas);
     impl_->destroyBuffer(mesh.vertices);
     impl_->destroyBuffer(mesh.indices);
   }
@@ -1020,6 +1310,9 @@ Renderer::~Renderer() {
   vkDestroyFence(dev, impl_->uploadFence, nullptr);
   vkDestroyCommandPool(dev, impl_->uploadPool, nullptr);
   for (FrameData &frame : impl_->frames) {
+    impl_->destroyAccelerationStructure(frame.tlas);
+    impl_->destroyBuffer(frame.tlasScratch);
+    impl_->destroyBuffer(frame.instanceBuffer);
     impl_->destroyBuffer(frame.sceneBuffer);
     vkDestroySemaphore(dev, frame.imageAvailable, nullptr);
     vkDestroyFence(dev, frame.renderFence, nullptr);

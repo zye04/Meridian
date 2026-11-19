@@ -1,5 +1,6 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
 #include "common.glsl"
 
 layout(location = 0) in vec3 inWorldPosition;
@@ -13,6 +14,23 @@ const vec3 kRock = vec3(0.20, 0.18, 0.16);
 const vec3 kSnow = vec3(0.80, 0.82, 0.85);
 const float kGroundAlbedo = 0.1;
 const float kPi = 3.14159265;
+const float kShadowRayBias = 0.05;
+const float kShadowRayLength = 20000.0;
+
+// Traces one ray toward the sun: 1 if it escapes, 0 if anything blocks it.
+float sunVisibility(vec3 position, vec3 geometricNormal) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
+                          gl_RayFlagsOpaqueEXT |
+                              gl_RayFlagsTerminateOnFirstHitEXT,
+                          0xFF, position + geometricNormal * kShadowRayBias,
+                          0.0, pc.scene.sunDirection, kShadowRayLength);
+    rayQueryProceedEXT(query);
+    return rayQueryGetIntersectionTypeEXT(query, true) ==
+                   gl_RayQueryCommittedIntersectionNoneEXT
+               ? 1.0
+               : 0.0;
+}
 
 void main() {
     vec3 normal = normalize(inNormal);
@@ -23,7 +41,19 @@ void main() {
     albedo = mix(albedo, kSnow, snow);
 
     // Direct sun through a Lambert BRDF (albedo / pi).
+    // Offset shadow rays along the true triangle normal: the smooth shading
+    // normal can point below the surface and make the ray hit its own
+    // triangle. Derivatives must be taken outside the branch below.
+    vec3 geometricNormal =
+        normalize(cross(dFdx(inWorldPosition), dFdy(inWorldPosition)));
+    if (dot(geometricNormal, normal) < 0.0) {
+        geometricNormal = -geometricNormal;
+    }
+
     float sunCosine = max(dot(normal, pc.scene.sunDirection), 0.0);
+    if (sunCosine > 0.0) {
+        sunCosine *= sunVisibility(inWorldPosition, geometricNormal);
+    }
     vec3 direct = albedo / kPi * pc.scene.sunIlluminance * sunCosine;
 
     // Hemisphere ambient: a uniform sky above, and below the light bounced

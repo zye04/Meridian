@@ -19,6 +19,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     float exposure;
     vec3 sunIlluminance;
     vec3 skyLuminance;
+    // Device address of the scene's top-level acceleration structure.
+    uvec2 tlas;
 };
 
 layout(push_constant) uniform PushConstants {
