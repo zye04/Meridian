@@ -26,6 +26,15 @@ struct TextureId {
   uint32_t index = 0;
 };
 
+// How a material's alpha (base color alpha) is used, as in glTF.
+enum class AlphaMode {
+  Opaque,
+  // Cut out where alpha < alphaCutoff (foliage, fences). Casts shadows.
+  Mask,
+  // Alpha-blended over what's behind (glass). Casts no shadows.
+  Blend,
+};
+
 // glTF metallic-roughness material. Factors multiply the textures.
 struct MaterialData {
   float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -39,6 +48,10 @@ struct MaterialData {
   std::optional<TextureId> normalTexture;
   std::optional<TextureId> occlusionTexture;
   std::optional<TextureId> emissiveTexture;
+  AlphaMode alphaMode = AlphaMode::Opaque;
+  float alphaCutoff = 0.5f;
+  // Render back faces too (thin geometry such as leaves).
+  bool doubleSided = false;
   // Temporary: grass/rock/snow by slope and height, until terrain gets real
   // material layers.
   bool proceduralTerrain = false;

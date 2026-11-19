@@ -71,19 +71,28 @@ int main() {
                           renderer.createMaterial(terrainMaterial));
   std::vector<meridian::DrawItem> scene = {{terrain}};
 
-  // Sample asset from tools/fetch-sample-assets.sh, a few meters in front of
-  // the starting camera.
-  const std::filesystem::path helmetPath =
-      std::filesystem::path(MERIDIAN_ASSET_DIR) / "FlightHelmet/FlightHelmet.gltf";
-  if (std::filesystem::exists(helmetPath)) {
-    meridian::Model helmet = meridian::loadGltf(renderer, helmetPath);
-    const meridian::Mat4 placement = meridian::translation({0.0f, 298.4f, 697.0f});
-    for (meridian::DrawItem item : helmet.drawItems) {
+  // Sample assets from tools/fetch-sample-assets.sh (AlphaBlendModeTest must
+  // be cooked first), placed a few meters in front of the starting camera.
+  struct SampleModel {
+    const char *path;
+    meridian::Vec3 position;
+  };
+  const SampleModel samples[] = {
+      {"FlightHelmet/FlightHelmet.gltf", {0.0f, 298.4f, 697.0f}},
+      {"AlphaBlendModeTest/AlphaBlendModeTest.gltf", {-3.0f, 298.4f, 695.0f}},
+  };
+  for (const SampleModel &sample : samples) {
+    const auto path = std::filesystem::path(MERIDIAN_ASSET_DIR) / sample.path;
+    if (!std::filesystem::exists(path)) {
+      std::printf("Missing %s; see tools/fetch-sample-assets.sh\n", sample.path);
+      continue;
+    }
+    meridian::Model model = meridian::loadGltf(renderer, path);
+    const meridian::Mat4 placement = meridian::translation(sample.position);
+    for (meridian::DrawItem item : model.drawItems) {
       item.transform = placement * item.transform;
       scene.push_back(item);
     }
-  } else {
-    std::printf("Sample assets missing; run tools/fetch-sample-assets.sh\n");
   }
 
   meridian::Lighting lighting;

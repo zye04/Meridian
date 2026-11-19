@@ -42,39 +42,37 @@ target_include_directories(basisu_encoder SYSTEM INTERFACE
     ${basis_universal_SOURCE_DIR}/encoder)
 
 set(SHADER_DIR ${CMAKE_BINARY_DIR}/shaders)
-set(SHADER_SOURCES
-    shaders/mesh.vert
-    shaders/mesh.frag
-    shaders/fullscreen.vert
-    shaders/tonemap.frag
-    shaders/taa.comp
-    shaders/histogram.comp
-    shaders/exposure.comp
-    shaders/sky.vert
-    shaders/sky.frag
-    shaders/transmittance_lut.comp
-    shaders/multiscattering_lut.comp
-    shaders/sky_view_lut.comp
-    shaders/aerial_perspective_lut.comp
-    shaders/sky_irradiance.comp
-    shaders/dfg_lut.comp)
-foreach(source ${SHADER_SOURCES})
-  get_filename_component(name ${source} NAME)
-  set(output ${SHADER_DIR}/${name}.spv)
+file(GLOB SHADER_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl)
+
+# Compiles shaders/<source> to <output>.spv; extra arguments become -D
+# defines, so one source can produce several variants.
+function(add_shader source output)
+  set(defines "")
+  foreach(define ${ARGN})
+    list(APPEND defines -D${define})
+  endforeach()
+  set(spv ${SHADER_DIR}/${output}.spv)
   add_custom_command(
-    OUTPUT ${output}
+    OUTPUT ${spv}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_DIR}
-    COMMAND Vulkan::glslc --target-env=vulkan1.3 -O
-            ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${output}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source}
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/common.glsl
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/post.glsl
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/exposure.glsl
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere.glsl
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/material.glsl
+    COMMAND Vulkan::glslc --target-env=vulkan1.3 -O ${defines}
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${source} -o ${spv}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${source} ${SHADER_INCLUDES}
     VERBATIM)
-  list(APPEND SHADER_OUTPUTS ${output})
+  set_property(GLOBAL APPEND PROPERTY MERIDIAN_SHADERS ${spv})
+endfunction()
+
+foreach(source
+    mesh.vert mesh.frag fullscreen.vert tonemap.frag taa.comp histogram.comp
+    exposure.comp sky.vert sky.frag transmittance_lut.comp
+    multiscattering_lut.comp sky_view_lut.comp aerial_perspective_lut.comp
+    sky_irradiance.comp dfg_lut.comp)
+  add_shader(${source} ${source})
 endforeach()
+add_shader(mesh.frag mesh_masked.frag ALPHA_MASK)
+add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND)
+
+get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_library(meridian STATIC

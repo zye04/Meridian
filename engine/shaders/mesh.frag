@@ -49,16 +49,50 @@ vec3 sampleSunDirection(vec2 pixel) {
                                      sin(angle) * bitangent));
 }
 
+// Only opaque and alpha-masked instances cast shadows (see buildTlas).
+const uint kShadowCasterMask = 0x01u;
+
+// Alpha-masked geometry is non-opaque in the acceleration structure, so the
+// ray query reports each candidate hit; we accept it only where the base
+// color alpha passes the material's cutoff.
+bool alphaTestCandidate(rayQueryEXT query) {
+    InstanceInfo instance = pc.scene.instances.instances[
+        rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+    uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
+    vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, false);
+
+    uint i0 = instance.indexBuffer.indices[primitive * 3u];
+    uint i1 = instance.indexBuffer.indices[primitive * 3u + 1u];
+    uint i2 = instance.indexBuffer.indices[primitive * 3u + 2u];
+    Vertex v0 = instance.vertexBuffer.vertices[i0];
+    Vertex v1 = instance.vertexBuffer.vertices[i1];
+    Vertex v2 = instance.vertexBuffer.vertices[i2];
+    vec3 w = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics);
+    vec2 uv = w.x * vec2(v0.uvX, v0.uvY) + w.y * vec2(v1.uvX, v1.uvY) +
+              w.z * vec2(v2.uvX, v2.uvY);
+
+    Material m = pc.materialBuffer.materials[instance.materialIndex];
+    float alpha = m.baseColorFactor.a;
+    if (m.baseColorTexture != kNoTexture) {
+        alpha *= textureLod(textures[nonuniformEXT(m.baseColorTexture)], uv, 0.0).a;
+    }
+    return alpha >= m.alphaCutoff;
+}
+
 // Traces one ray toward the sun: 1 if it escapes, 0 if anything blocks it.
 float sunVisibility(vec3 position, vec3 geometricNormal) {
     rayQueryEXT query;
     rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
-                          gl_RayFlagsOpaqueEXT |
-                              gl_RayFlagsTerminateOnFirstHitEXT,
-                          0xFF, position + geometricNormal * kShadowRayBias,
-                          0.0, sampleSunDirection(gl_FragCoord.xy),
-                          kShadowRayLength);
-    rayQueryProceedEXT(query);
+                          gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
+                          position + geometricNormal * kShadowRayBias, 0.0,
+                          sampleSunDirection(gl_FragCoord.xy), kShadowRayLength);
+    while (rayQueryProceedEXT(query)) {
+        if (rayQueryGetIntersectionTypeEXT(query, false) ==
+                gl_RayQueryCandidateIntersectionTriangleEXT &&
+            alphaTestCandidate(query)) {
+            rayQueryConfirmIntersectionEXT(query);
+        }
+    }
     return rayQueryGetIntersectionTypeEXT(query, true) ==
                    gl_RayQueryCommittedIntersectionNoneEXT
                ? 1.0
@@ -69,6 +103,7 @@ float sunVisibility(vec3 position, vec3 geometricNormal) {
 
 struct Surface {
     vec3 baseColor;
+    float alpha;
     float metallic;
     float perceptualRoughness;
     float occlusion;
@@ -92,6 +127,7 @@ Surface proceduralTerrain(vec3 normal) {
     float snow = smoothstep(150.0, 190.0, inWorldPosition.y) *
                  smoothstep(0.6, 0.8, normal.y);
     s.baseColor = mix(s.baseColor, kSnow, snow);
+    s.alpha = 1.0;
     s.metallic = 0.0;
     s.perceptualRoughness = mix(0.9, 0.5, snow);
     s.occlusion = 1.0;
@@ -107,6 +143,7 @@ Surface materialSurface(Material m, vec3 normal) {
         baseColor *= sampleTexture(m.baseColorTexture, inUv);
     }
     s.baseColor = baseColor.rgb;
+    s.alpha = baseColor.a;
 
     // glTF packs roughness in green and metalness in blue.
     s.metallic = m.metallicFactor;
@@ -172,6 +209,11 @@ void main() {
     Surface s = (material.flags & kMaterialProceduralTerrain) != 0u
                     ? proceduralTerrain(normal)
                     : materialSurface(material, normal);
+#ifdef ALPHA_MASK
+    if (s.alpha < material.alphaCutoff) {
+        discard;
+    }
+#endif
 
     vec3 N = s.normal;
     vec3 V = normalize(pc.scene.cameraPosition - inWorldPosition);
@@ -203,7 +245,10 @@ void main() {
     vec3 up = position / height;
     vec3 sunAtSurface = transmittanceToSun(height, dot(up, L));
 
-    vec3 direct = vec3(0.0);
+    // Diffuse and specular are kept apart: a blended surface (glass) fades
+    // its diffuse with alpha but keeps its full reflection.
+    vec3 diffuseLight = vec3(0.0);
+    vec3 specularLight = vec3(0.0);
     float NoL = clamp(dot(N, L), 0.0, 1.0);
     if (NoL > 0.0 && dot(geometricNormal, L) > 0.0) {
         float visibility = sunVisibility(inWorldPosition, geometricNormal);
@@ -214,8 +259,9 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 diffuse = diffuseColor / kPi;
-        direct = (diffuse + specular) * sunAtSurface * (NoL * visibility);
+        vec3 sunLight = sunAtSurface * (NoL * visibility);
+        diffuseLight = diffuseColor / kPi * sunLight;
+        specularLight = specular * sunLight;
     }
 
     // Ambient from the sky. Diffuse: sky irradiance from above, light bounced
@@ -229,10 +275,17 @@ void main() {
     vec3 R = reflect(-V, N);
     vec3 skyRadiance = mix(skyLuminance(position, R), skyIrradiance / kPi, a);
     vec3 specularReflectance = mix(dfg.xxx, dfg.yyy, f0) * energyCompensation;
-    vec3 ambient = (diffuseColor / kPi * diffuseIrradiance +
-                    specularReflectance * skyRadiance) * s.occlusion;
+    diffuseLight += diffuseColor / kPi * diffuseIrradiance * s.occlusion;
+    specularLight += specularReflectance * skyRadiance * s.occlusion;
 
-    vec3 luminance = direct + ambient;
+#ifdef ALPHA_BLEND
+    // Premultiplied alpha (blend: one, one-minus-source-alpha).
+    float coverage = s.alpha;
+    vec3 luminance = diffuseLight * coverage + specularLight;
+#else
+    float coverage = 1.0;
+    vec3 luminance = diffuseLight + specularLight;
+#endif
 
     // Aerial perspective: haze between the camera and this point.
     float distanceKm = length(inWorldPosition - pc.scene.cameraPosition) * 0.001;
@@ -246,11 +299,11 @@ void main() {
     float w = sqrt(slice / kAerialPerspectiveSlices);
     vec4 haze = textureLod(aerialPerspectiveLut,
                            vec3(gl_FragCoord.xy * pc.scene.inverseResolution, w), 0.0);
-    luminance = luminance * mix(1.0, haze.a, weight) + haze.rgb * weight;
+    luminance = luminance * mix(1.0, haze.a, weight) + haze.rgb * (weight * coverage);
 
     // Emissive is already in physical units (cd/m^2), not relative to the sun.
     vec3 exposed = luminance * pc.scene.sunIlluminance + s.emissive;
-    outColor = vec4(exposed * pc.scene.exposure.exposure, 1.0);
+    outColor = vec4(exposed * pc.scene.exposure.exposure, coverage);
 
     vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;

@@ -76,6 +76,8 @@ struct GpuMesh {
   Buffer indices;
   uint32_t indexCount = 0;
   uint32_t materialIndex = 0;
+  AlphaMode alphaMode = AlphaMode::Opaque;
+  bool doubleSided = false;
   // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
   AccelerationStructure blas;
 };
@@ -138,9 +140,23 @@ struct SceneData {
   VkDeviceAddress exposure = 0;
   VkDeviceAddress skyIrradiance = 0;
   float inverseResolution[2] = {};
+  VkDeviceAddress instances = 0;
+  uint64_t pad2 = 0;
   GpuAtmosphere atmosphere;
 };
-static_assert(sizeof(SceneData) == 384);
+static_assert(sizeof(SceneData) == 400);
+
+// Must match InstanceInfo in common.glsl.
+struct InstanceInfo {
+  VkDeviceAddress vertexBuffer = 0;
+  VkDeviceAddress indexBuffer = 0;
+  uint32_t materialIndex = 0;
+  uint32_t pad = 0;
+};
+
+// TLAS instance masks: shadow rays only test shadow casters.
+constexpr uint8_t kShadowCasterMask = 0x01;
+constexpr uint8_t kNonCasterMask = 0x02;
 
 // Must match ExposureBuffer in exposure.glsl.
 struct ExposureState {
@@ -174,6 +190,7 @@ static_assert(sizeof(PushConstants) == 96);
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
 constexpr uint32_t kMaterialProceduralTerrain = 1u;
+constexpr uint32_t kMaterialAlphaMask = 2u;
 
 struct GpuMaterial {
   float baseColorFactor[4] = {};
@@ -211,7 +228,9 @@ GpuMaterial toGpu(const MaterialData &m) {
   g.normalTexture = textureIndex(m.normalTexture);
   g.occlusionTexture = textureIndex(m.occlusionTexture);
   g.emissiveTexture = textureIndex(m.emissiveTexture);
-  g.flags = m.proceduralTerrain ? kMaterialProceduralTerrain : 0u;
+  g.alphaCutoff = m.alphaCutoff;
+  g.flags = (m.proceduralTerrain ? kMaterialProceduralTerrain : 0u) |
+            (m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u);
   return g;
 }
 constexpr VkShaderStageFlags kScenePushStages = VK_SHADER_STAGE_VERTEX_BIT |
@@ -227,6 +246,8 @@ struct FrameData {
   // Top-level acceleration structure over this frame's draw items, rebuilt
   // every frame from the instance buffer.
   Buffer instanceBuffer;
+  // InstanceInfo per TLAS instance, for alpha-tested shadow rays.
+  Buffer instanceInfoBuffer;
   AccelerationStructure tlas;
   Buffer tlasScratch;
 };
@@ -320,8 +341,12 @@ struct PipelineDesc {
   VkPipelineLayout layout = VK_NULL_HANDLE;
   std::span<const VkFormat> colorFormats;
   VkFormat depthFormat = VK_FORMAT_UNDEFINED;
-  VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
+  // Cull mode is set per draw (double-sided materials).
+  bool dynamicCullMode = false;
   bool depthTest = true;
+  // Premultiplied-alpha blending into the first attachment, no depth or
+  // motion writes: the surface behind keeps its depth and motion.
+  bool alphaBlend = false;
 };
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
@@ -356,7 +381,7 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   VkPipelineRasterizationStateCreateInfo rasterizer{};
   rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
   rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-  rasterizer.cullMode = desc.cullMode;
+  rasterizer.cullMode = VK_CULL_MODE_NONE;
   rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   rasterizer.lineWidth = 1.0f;
 
@@ -370,7 +395,7 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   const bool depthTest =
       desc.depthTest && desc.depthFormat != VK_FORMAT_UNDEFINED;
   depthStencil.depthTestEnable = depthTest;
-  depthStencil.depthWriteEnable = depthTest;
+  depthStencil.depthWriteEnable = depthTest && !desc.alphaBlend;
   depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 
   VkPipelineColorBlendAttachmentState blendAttachment{};
@@ -379,6 +404,19 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
   std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(
       desc.colorFormats.size(), blendAttachment);
+  if (desc.alphaBlend) {
+    VkPipelineColorBlendAttachmentState &color = blendAttachments[0];
+    color.blendEnable = VK_TRUE;
+    color.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    color.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    color.colorBlendOp = VK_BLEND_OP_ADD;
+    color.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    color.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    color.alphaBlendOp = VK_BLEND_OP_ADD;
+    for (size_t i = 1; i < blendAttachments.size(); ++i) {
+      blendAttachments[i].colorWriteMask = 0;
+    }
+  }
 
   VkPipelineColorBlendStateCreateInfo colorBlend{};
   colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -388,10 +426,11 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   // Viewport and scissor are set per frame, so a resize doesn't need a new
   // pipeline.
   VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
-                                    VK_DYNAMIC_STATE_SCISSOR};
+                                    VK_DYNAMIC_STATE_SCISSOR,
+                                    VK_DYNAMIC_STATE_CULL_MODE};
   VkPipelineDynamicStateCreateInfo dynamicState{};
   dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  dynamicState.dynamicStateCount = 2;
+  dynamicState.dynamicStateCount = desc.dynamicCullMode ? 3 : 2;
   dynamicState.pDynamicStates = dynamicStates;
 
   VkPipelineRenderingCreateInfo renderingInfo{};
@@ -495,6 +534,12 @@ struct Renderer::Impl {
   // the atmosphere compute passes.
   VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
   VkPipeline meshPipeline = VK_NULL_HANDLE;
+  VkPipeline maskedMeshPipeline = VK_NULL_HANDLE;
+  VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
+  // Draw order scratch lists, reused every frame to avoid allocations.
+  std::vector<uint32_t> opaqueDraws;
+  std::vector<uint32_t> maskedDraws;
+  std::vector<std::pair<float, uint32_t>> blendedDraws;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -530,6 +575,8 @@ struct Renderer::Impl {
   Buffer materialBuffer;
   uint32_t materialCount = 0;
   std::vector<Image> textures;
+  // CPU copy of what draw ordering and acceleration structures need.
+  std::vector<MaterialData> materials;
   Image dfgLut;
   VkSampler textureSampler = VK_NULL_HANDLE;
   VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;
@@ -650,7 +697,10 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
 
   auto *instances = static_cast<VkAccelerationStructureInstanceKHR *>(
       frame.instanceBuffer.mapped);
+  auto *infos = static_cast<InstanceInfo *>(frame.instanceInfoBuffer.mapped);
   for (size_t i = 0; i < items.size(); ++i) {
+    const GpuMesh &mesh = meshes[items[i].mesh.index];
+    infos[i] = {mesh.vertices.address, mesh.indices.address, mesh.materialIndex};
     const Mat4 &m = items[i].transform;
     VkAccelerationStructureInstanceKHR instance{};
     // Vulkan wants a row-major 3x4 matrix; Mat4 is column-major.
@@ -659,13 +709,17 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
         instance.transform.matrix[row][column] = m.m[column][row];
       }
     }
-    instance.mask = 0xFF;
+    instance.instanceCustomIndex = static_cast<uint32_t>(i);
+    instance.mask = mesh.alphaMode == AlphaMode::Blend ? kNonCasterMask
+                                                       : kShadowCasterMask;
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    instance.accelerationStructureReference =
-        meshes[items[i].mesh.index].blas.address;
+    instance.accelerationStructureReference = mesh.blas.address;
     instances[i] = instance;
   }
   check(vmaFlushAllocation(allocator, frame.instanceBuffer.allocation, 0,
+                           VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
+  check(vmaFlushAllocation(allocator, frame.instanceInfoBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
@@ -930,6 +984,12 @@ void Renderer::Impl::createFrames() {
           "vkCreateSemaphore");
     frame.sceneBuffer = createBuffer(
         sizeof(SceneData),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    frame.instanceInfoBuffer = createBuffer(
+        kMaxInstances * sizeof(InstanceInfo),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
@@ -1297,12 +1357,20 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
 
   const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat};
-  meshPipeline = createGraphicsPipeline(dev, {.vertexShader = "mesh.vert",
-                                              .fragmentShader = "mesh.frag",
-                                              .layout = sceneLayout,
-                                              .colorFormats = sceneFormats,
-                                              .depthFormat = kDepthFormat,
-                                              .cullMode = VK_CULL_MODE_BACK_BIT});
+  PipelineDesc meshDesc{.vertexShader = "mesh.vert",
+                        .fragmentShader = "mesh.frag",
+                        .layout = sceneLayout,
+                        .colorFormats = sceneFormats,
+                        .depthFormat = kDepthFormat,
+                        .dynamicCullMode = true};
+  meshPipeline = createGraphicsPipeline(dev, meshDesc);
+  // Alpha testing (discard) disables early depth testing, so masked
+  // materials get their own pipeline instead of slowing down opaque ones.
+  meshDesc.fragmentShader = "mesh_masked.frag";
+  maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.fragmentShader = "mesh_blended.frag";
+  meshDesc.alphaBlend = true;
+  blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
 
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
@@ -1369,6 +1437,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
 
   VkPhysicalDeviceFeatures features{};
   features.samplerAnisotropy = VK_TRUE;
+  // Blended surfaces blend color but leave motion vectors untouched.
+  features.independentBlend = VK_TRUE;
 
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -1385,6 +1455,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
   features13.dynamicRendering = VK_TRUE;
   features13.synchronization2 = VK_TRUE;
+  // discard (alpha masking) compiles to demote-to-helper in SPIR-V 1.6.
+  features13.shaderDemoteToHelperInvocation = VK_TRUE;
 
   // Hardware ray tracing is required: shadows (and later reflections and GI)
   // are traced with ray queries.
@@ -1543,6 +1615,7 @@ MaterialId Renderer::createMaterial(const MaterialData &material) {
     throw std::runtime_error("material table is full");
   }
   const uint32_t index = impl_->materialCount++;
+  impl_->materials.push_back(material);
   const GpuMaterial gpu = toGpu(material);
   impl_->submitNow([&](VkCommandBuffer cmd) {
     vkCmdUpdateBuffer(cmd, impl_->materialBuffer.buffer,
@@ -1569,6 +1642,8 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   GpuMesh mesh;
   mesh.indexCount = static_cast<uint32_t>(data.indices.size());
   mesh.materialIndex = material.index;
+  mesh.alphaMode = impl_->materials[material.index].alphaMode;
+  mesh.doubleSided = impl_->materials[material.index].doubleSided;
   constexpr VkBufferUsageFlags kRayTracingInput =
       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -1599,7 +1674,8 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   VkAccelerationStructureGeometryKHR geometry{};
   geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  // Alpha-masked geometry must reach the shader's alpha test.
+  geometry.flags = mesh.alphaMode == AlphaMode::Mask ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
   auto &triangles = geometry.geometry.triangles;
   triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
@@ -1780,6 +1856,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.tlas = frame.tlas.address;
+  scene.instances = frame.instanceInfoBuffer.address;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -1931,10 +2008,33 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                      sizeof(scenePush), &scenePush);
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    impl_->meshPipeline);
+  // Opaque first, then alpha-masked, then blended back to front (each
+  // blended surface must composite over everything behind it).
+  impl_->opaqueDraws.clear();
+  impl_->maskedDraws.clear();
+  impl_->blendedDraws.clear();
+  for (uint32_t i = 0; i < items.size(); ++i) {
+    switch (impl_->meshes[items[i].mesh.index].alphaMode) {
+    case AlphaMode::Opaque:
+      impl_->opaqueDraws.push_back(i);
+      break;
+    case AlphaMode::Mask:
+      impl_->maskedDraws.push_back(i);
+      break;
+    case AlphaMode::Blend: {
+      const Mat4 &t = items[i].transform;
+      const Vec3 position = {t.m[3][0], t.m[3][1], t.m[3][2]};
+      const Vec3 offset = position - camera.position;
+      impl_->blendedDraws.emplace_back(dot(offset, offset), i);
+      break;
+    }
+    }
+  }
+  std::sort(impl_->blendedDraws.begin(), impl_->blendedDraws.end(),
+            [](const auto &a, const auto &b) { return a.first > b.first; });
 
-  for (const DrawItem &item : items) {
+  auto drawItem = [&](uint32_t index) {
+    const DrawItem &item = items[index];
     const GpuMesh &mesh = impl_->meshes[item.mesh.index];
 
     PushConstants push;
@@ -1945,9 +2045,25 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     push.materialIndex = mesh.materialIndex;
     vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
                        sizeof(push), &push);
-
+    vkCmdSetCullMode(cmd, mesh.doubleSided ? VK_CULL_MODE_NONE
+                                           : VK_CULL_MODE_BACK_BIT);
     vkCmdBindIndexBuffer(cmd, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+  };
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->meshPipeline);
+  for (uint32_t index : impl_->opaqueDraws) {
+    drawItem(index);
+  }
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    impl_->maskedMeshPipeline);
+  for (uint32_t index : impl_->maskedDraws) {
+    drawItem(index);
+  }
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    impl_->blendedMeshPipeline);
+  for (const auto &[distance, index] : impl_->blendedDraws) {
+    drawItem(index);
   }
 
   vkCmdEndRendering(cmd);
@@ -2136,6 +2252,8 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);
 
   vkDestroyQueryPool(dev, impl_->timestampPool, nullptr);
@@ -2145,6 +2263,7 @@ Renderer::~Renderer() {
     impl_->destroyAccelerationStructure(frame.tlas);
     impl_->destroyBuffer(frame.tlasScratch);
     impl_->destroyBuffer(frame.instanceBuffer);
+    impl_->destroyBuffer(frame.instanceInfoBuffer);
     impl_->destroyBuffer(frame.sceneBuffer);
     vkDestroySemaphore(dev, frame.imageAvailable, nullptr);
     vkDestroyFence(dev, frame.renderFence, nullptr);

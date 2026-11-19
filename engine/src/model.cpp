@@ -271,6 +271,19 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
     }
     material.emissiveTexture =
         textures.get(textureInfo(m.emissiveTexture), ColorSpace::Srgb);
+    switch (m.alphaMode) {
+    case fastgltf::AlphaMode::Opaque:
+      material.alphaMode = AlphaMode::Opaque;
+      break;
+    case fastgltf::AlphaMode::Mask:
+      material.alphaMode = AlphaMode::Mask;
+      break;
+    case fastgltf::AlphaMode::Blend:
+      material.alphaMode = AlphaMode::Blend;
+      break;
+    }
+    material.alphaCutoff = m.alphaCutoff;
+    material.doubleSided = m.doubleSided;
     materials.push_back(renderer.createMaterial(material));
   }
   const MaterialId defaultMaterial = renderer.createMaterial({});

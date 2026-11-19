@@ -15,6 +15,7 @@ struct Vertex {
 // glTF metallic-roughness material. Must match GpuMaterial in C++.
 const uint kNoTexture = 0xFFFFFFFFu;
 const uint kMaterialProceduralTerrain = 1u;
+const uint kMaterialAlphaMask = 2u;
 
 struct Material {
     vec4 baseColorFactor;
@@ -38,6 +39,23 @@ layout(buffer_reference, std430) readonly buffer MaterialBuffer {
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
     Vertex vertices[];
+};
+
+layout(buffer_reference, std430) readonly buffer IndexBuffer {
+    uint indices[];
+};
+
+// Per TLAS instance (instance custom index), so ray queries can look up the
+// surface they hit. Must match InstanceInfo in C++.
+struct InstanceInfo {
+    VertexBuffer vertexBuffer;
+    IndexBuffer indexBuffer;
+    uint materialIndex;
+    uint pad;
+};
+
+layout(buffer_reference, std430) readonly buffer InstanceBuffer {
+    InstanceInfo instances[];
 };
 
 // Must match AtmosphereParameters in C++. Distances in km, coefficients
@@ -86,6 +104,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     ExposureBuffer exposure;
     SkyIrradianceBuffer skyIrradiance;
     vec2 inverseResolution;
+    InstanceBuffer instances;
+    uvec2 pad2;
     AtmosphereParameters atmosphere;
 };
 
