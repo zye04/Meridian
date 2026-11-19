@@ -1739,12 +1739,15 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   tile seamlessly.
   - Schneider, Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Hillaire, TileableVolumeNoise (Perlin-Worley construction): https://github.com/sebh/TileableVolumeNoise
-- **Density (`clouds.glsl` `cloudDensity`):** weather coverage x vertical
-  profile x base shape (HZD: `remap(R, worleyFbm - 1, 1)`), thresholded
-  by coverage (`remap(shape * profile, 1 - coverage, 1) * coverage`),
-  then eroded by the curl-distorted detail (150 m of distortion fading
-  toward the top; wispy at the base, billowy above; up to 0.35 of the
-  shape carved). Output is in [0, 1]; the march scales it to extinction.
+- **Density (`clouds.glsl` `cloudDensity`):** the plain product weather
+  coverage x vertical profile x base shape (HZD: `remap(R, worleyFbm -
+  1, 1)`), then eroded by the curl-distorted detail (150 m of distortion
+  fading toward the top). Coverage is thresholded once, in the map; a
+  second HZD-style `remap(shape, 1 - coverage, 1)` on top of it would
+  punch holes in overcast (R spread over [0, 1] at coverage 1) and shrink
+  fair well below its coverage. Erosion depends on type like the
+  profile: cumulus wispy at the base and billowy above, carving up to
+  0.35; stratus wispy throughout, carving up to 0.5. Output is in [0, 1]; the march scales it to extinction.
   `world.y` is the altitude on the curved shell, so the caller decides
   the curvature. Profiles are analytic smoothsteps by normalized height
   (stratus a soft slab, cumulus a flat base thinning upward) instead of
@@ -1758,14 +1761,23 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   texels in double so it doesn't swim. Per texel: the local state from
   `weatherAt` (history rule), weather noise at `xz - windOffset(3 km)`
   with a time coordinate (one lattice unit per 30 game minutes, so cells
-  form and dissolve without wind), coverage `remap(n, 1 - c, 1)`, type
-  the local type +-0.16 of 32 km Perlin variation, precipitation the
-  local value. The noise: inverted Worley fBm in 4 km cells times
+  form and dissolve without wind), coverage as a saturating soft
+  threshold `R = saturate((n - lo) / w)`, `lo = (1 - c)(1 + w) - w`,
+  `w = 0.15` (coverage 0: R = 0; coverage 1: R = 1 everywhere, a solid
+  overcast; in between cells grow from their cores; this replaces the
+  spec's `remap(n, 1 - c, 1)`, which left R spread over [0, 1] at
+  coverage 1), type the local type +-0.16 of 32 km Perlin variation,
+  clamped to [0, 1] like the RGBA8 map stores it (the fallback too, so
+  the edge matches; cumulonimbus types above 1 need a wider format
+  later), precipitation the local value. The noise: inverted Worley fBm in 4 km cells times
   Perlin fBm 16 km wide (`mix(0.5, 1.5, p)`), mapped to about uniform
   with a logistic approximation of the normal CDF (mean 0.46 and
   single-octave deviation 0.18 measured on dumps; the deviation scales
-  like a weighted mean of independent octaves), so coverage c covers
-  ~c of the sky (measured: fair 0.35 -> 35.1%, broken 0.65 -> 62.5%).
+  like a weighted mean of independent octaves), so the soft threshold
+  covers about `c (1 + w) - w / 2` of the sky with R > 0.5 for either
+  octave count. Measured fraction of texels with R > 0.5: clear 0,
+  fair (0.35) 0.331, broken (0.65) 0.648, overcast (1.0) 1.0 (R = 1 on
+  every texel).
   - Logistic approximation of the normal CDF (1.702): https://doi.org/10.3926/jiem.2009.v2n1.p114-127
 - **Fallback beyond the window:** `weatherMapAt` reads the map inside its
   texel centers, beyond them the same noise with one octave instead of
