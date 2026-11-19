@@ -115,8 +115,8 @@ vec4 sampleTexture(uint index, vec2 uv) {
     return texture(textures[nonuniformEXT(index)], uv);
 }
 
-// Grass, rock and snow chosen by slope and height, until terrain gets real
-// material layers.
+// Grass, rock and snow chosen by slope and height: the terrain's fallback
+// when no TerrainMaterial is set.
 Surface proceduralTerrain(vec3 normal) {
     const vec3 kGrass = vec3(0.06, 0.13, 0.03);
     const vec3 kRock = vec3(0.20, 0.18, 0.16);
@@ -133,6 +133,159 @@ Surface proceduralTerrain(vec3 normal) {
     s.occlusion = 1.0;
     s.emissive = vec3(0.0);
     s.normal = normal;
+    return s;
+}
+
+// ---------------------------------------------------------------- Terrain
+// Scanned ground layers projected in world space (the terrain's UVs span
+// the whole mesh). Every sample uses explicit gradients so layers can be
+// skipped per pixel without breaking mip selection.
+
+struct TerrainTexel {
+    vec3 baseColor;
+    vec3 normal; // world space
+    vec2 occlusionRoughness;
+    float height;
+};
+
+TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
+    TerrainTexel r;
+    r.baseColor = mix(a.baseColor, b.baseColor, t);
+    r.normal = normalize(mix(a.normal, b.normal, t));
+    r.occlusionRoughness = mix(a.occlusionRoughness, b.occlusionRoughness, t);
+    r.height = mix(a.height, b.height, t);
+    return r;
+}
+
+vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
+    return textureGrad(textures[nonuniformEXT(index)], uv, dx, dy);
+}
+
+// Top-down projection, uv = (x, -z): tangent +X, bitangent -Z, normal +Y.
+TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
+    float scale = 1.0 / layer.tileSize;
+    vec2 uv = vec2(inWorldPosition.x, -inWorldPosition.z) * scale;
+    vec2 dx = vec2(dpdx.x, -dpdx.z) * scale;
+    vec2 dy = vec2(dpdy.x, -dpdy.z) * scale;
+
+    TerrainTexel texel;
+    texel.baseColor = sampleGrad(layer.baseColor, uv, dx, dy).rgb;
+    texel.occlusionRoughness = sampleGrad(layer.arm, uv, dx, dy).rg;
+    texel.height = sampleGrad(layer.height, uv, dx, dy).r;
+    vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
+    vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
+    texel.normal = normalize(mat3(t, cross(normal, t), normal) * n);
+    return texel;
+}
+
+// Triplanar projection with the Whiteout normal blend and per-side handedness
+// correction (Ben Golus, "Normal Mapping for a Triplanar Shader").
+TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
+    float scale = 1.0 / layer.tileSize;
+    vec3 blend = pow(abs(normal), vec3(4.0));
+    blend /= blend.x + blend.y + blend.z;
+    vec3 axisSign = vec3(normal.x < 0.0 ? -1.0 : 1.0, normal.y < 0.0 ? -1.0 : 1.0,
+                         normal.z < 0.0 ? -1.0 : 1.0);
+    // Flipping u on the back sides keeps the textures unmirrored.
+    vec2 flip[3] = vec2[3](vec2(axisSign.x, 1.0), vec2(axisSign.y, 1.0),
+                           vec2(-axisSign.z, 1.0));
+    vec2 uvs[3] = vec2[3](inWorldPosition.zy, inWorldPosition.xz, inWorldPosition.xy);
+    vec2 dxs[3] = vec2[3](dpdx.zy, dpdx.xz, dpdx.xy);
+    vec2 dys[3] = vec2[3](dpdy.zy, dpdy.xz, dpdy.xy);
+
+    TerrainTexel texel;
+    texel.baseColor = vec3(0.0);
+    texel.occlusionRoughness = vec2(0.0);
+    texel.height = 0.0;
+    vec3 tangentNormals[3];
+    for (int axis = 0; axis < 3; ++axis) {
+        vec2 uv = uvs[axis] * flip[axis] * scale;
+        vec2 dx = dxs[axis] * flip[axis] * scale;
+        vec2 dy = dys[axis] * flip[axis] * scale;
+        texel.baseColor += sampleGrad(layer.baseColor, uv, dx, dy).rgb * blend[axis];
+        texel.occlusionRoughness += sampleGrad(layer.arm, uv, dx, dy).rg * blend[axis];
+        texel.height += sampleGrad(layer.height, uv, dx, dy).r * blend[axis];
+        vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
+        n.x *= flip[axis].x;
+        tangentNormals[axis] = n;
+    }
+    vec3 nx = tangentNormals[0];
+    vec3 ny = tangentNormals[1];
+    vec3 nz = tangentNormals[2];
+    nx = vec3(nx.xy + normal.zy, abs(normal.x) * nx.z * axisSign.x);
+    ny = vec3(ny.xy + normal.xz, abs(normal.y) * ny.z * axisSign.y);
+    nz = vec3(nz.xy + normal.xy, abs(normal.z) * nz.z * axisSign.z);
+    texel.normal = normalize(nx.zyx * blend.x + ny.xzy * blend.y + nz.xyz * blend.z);
+    return texel;
+}
+
+// Height-based blend weight of b over a (Mishkinis, "Advanced Terrain
+// Texture Splatting"): near the border the taller texel wins, so needles
+// fill the gaps between stones instead of cross-fading.
+float heightBlend(float heightA, float heightB, float t) {
+    const float kDepth = 0.1;
+    float top = max(heightA + 1.0 - t, heightB + t) - kDepth;
+    float a = max(heightA + 1.0 - t - top, 0.0);
+    float b = max(heightB + t - top, 0.0);
+    return b / (a + b);
+}
+
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float valueNoise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(cell), hash(cell + vec2(1, 0)), f.x),
+               mix(hash(cell + vec2(0, 1)), hash(cell + vec2(1, 1)), f.x), f.y);
+}
+
+Surface terrainSurface(vec3 normal) {
+    const float kNoisePeriod = 40.0; // meters
+    const vec3 kSnow = vec3(0.80, 0.82, 0.85);
+    vec3 dpdx = dFdx(inWorldPosition);
+    vec3 dpdy = dFdy(inWorldPosition);
+    Terrain terrain = pc.scene.terrain;
+
+    vec2 p = inWorldPosition.xz / kNoisePeriod;
+    float noise = 0.65 * valueNoise(p) + 0.35 * valueNoise(p * 2.7 + 13.0);
+    float needles = smoothstep(0.35, 0.65, noise);
+    float rock = 1.0 - smoothstep(0.75, 0.9, normal.y);
+
+    TerrainTexel ground;
+    if (rock < 1.0) {
+        if (needles <= 0.0) {
+            ground = samplePlanar(terrain.layers[0], normal, dpdx, dpdy);
+        } else if (needles >= 1.0) {
+            ground = samplePlanar(terrain.layers[1], normal, dpdx, dpdy);
+        } else {
+            TerrainTexel soil = samplePlanar(terrain.layers[0], normal, dpdx, dpdy);
+            TerrainTexel litter = samplePlanar(terrain.layers[1], normal, dpdx, dpdy);
+            ground = mixTexels(soil, litter, heightBlend(soil.height, litter.height, needles));
+        }
+    }
+    if (rock > 0.0) {
+        TerrainTexel cliff = sampleTriplanar(terrain.layers[2], normal, dpdx, dpdy);
+        ground = rock >= 1.0 ? cliff
+                             : mixTexels(ground, cliff,
+                                         heightBlend(ground.height, cliff.height, rock));
+    }
+
+    Surface s;
+    s.baseColor = ground.baseColor;
+    s.occlusion = ground.occlusionRoughness.x;
+    s.perceptualRoughness = ground.occlusionRoughness.y;
+    s.normal = ground.normal;
+    float snow = smoothstep(150.0, 190.0, inWorldPosition.y) *
+                 smoothstep(0.6, 0.8, normal.y);
+    s.baseColor = mix(s.baseColor, kSnow, snow);
+    s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
+    s.normal = normalize(mix(s.normal, normal, snow));
+    s.alpha = 1.0;
+    s.metallic = 0.0;
+    s.emissive = vec3(0.0);
     return s;
 }
 
@@ -206,9 +359,14 @@ void main() {
         normal = -normal;
     }
 
-    Surface s = (material.flags & kMaterialTerrain) != 0u
-                    ? proceduralTerrain(normal)
-                    : materialSurface(material, normal);
+    Surface s;
+    if ((material.flags & kMaterialTerrain) == 0u) {
+        s = materialSurface(material, normal);
+    } else if (pc.scene.terrain.enabled != 0u) {
+        s = terrainSurface(normal);
+    } else {
+        s = proceduralTerrain(normal);
+    }
 #ifdef ALPHA_MASK
     if (s.alpha < material.alphaCutoff) {
         discard;

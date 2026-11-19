@@ -97,6 +97,19 @@ sources. Check here before re-researching a topic.
   disable early-Z for opaque draws), premultiplied blending so glass keeps
   full specular, no motion writes for blended surfaces, and back-to-front
   sorting by object origin.
+- **Terrain material**: three scanned layers (forest soil and pine-needle
+  litter on flat ground, mixed by 40 m value noise; rock cliff on slopes)
+  with snow kept procedural. Flat layers use a top-down world projection;
+  rock uses triplanar with the Whiteout normal blend and back-side u flip
+  (Golus), checked numerically for our right-handed axes. Layer borders
+  use height blending (Mishkinis) so the taller texel wins instead of a
+  soft cross-fade. Every sample is `textureGrad` with world-position
+  derivatives, so per-pixel layer skipping keeps correct mips and 16x
+  anisotropy. Mip bias stays 0: a negative bias shimmers under native TAA
+  and only pays off with an upscaler (DLSS: log2(render/display) - 1).
+  - https://bgolus.medium.com/normal-mapping-for-a-triplanar-shader-10bf39dca05a
+  - https://www.gamedeveloper.com/programming/advanced-terrain-texture-splatting
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-upscalers-in-unreal-engine
 - **Test content from Poly Haven** (CC0, public API, no login), fetched by
   script so `assets/` stays reproducible. Megascans (free on Fab for any
   engine since 2026-11) needs a browser login, so it is a manual option

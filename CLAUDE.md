@@ -45,6 +45,8 @@ ending at `--camera`) and compare with the still capture of the same view:
 
 Useful views: default start `0 300 700 0 -0.35`; sample models
 `-1.6 299.2 700 -0.35 -0.12`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
+These are ~220 m above the terrain (ground there is ~79 m); for ground
+detail use eye height `0 80.8 700 0 -0.25`.
 
 ## Testing policy (usage matters)
 
