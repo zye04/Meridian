@@ -529,6 +529,7 @@ struct Renderer::Impl {
   // Materials and textures, bound once per frame as set 1 ("bindless").
   Buffer materialBuffer;
   uint32_t materialCount = 0;
+  std::vector<Image> textures;
   Image dfgLut;
   VkSampler textureSampler = VK_NULL_HANDLE;
   VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;
@@ -555,7 +556,8 @@ struct Renderer::Impl {
   void computeDfgLut();
 
   Image createImage(VkFormat format, VkExtent3D extent,
-                    VkImageUsageFlags usage, VkImageAspectFlags aspect);
+                    VkImageUsageFlags usage, VkImageAspectFlags aspect,
+                    uint32_t mipLevels = 1);
   Image createScreenImage(VkFormat format, VkImageUsageFlags usage,
                           VkImageAspectFlags aspect);
   void destroyImage(Image &image);
@@ -709,14 +711,15 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
 // A GPU-only 2D image, or 3D when extent.depth > 1.
 Image Renderer::Impl::createImage(VkFormat format, VkExtent3D extent,
                                   VkImageUsageFlags usage,
-                                  VkImageAspectFlags aspect) {
+                                  VkImageAspectFlags aspect,
+                                  uint32_t mipLevels) {
   const bool is3d = extent.depth > 1;
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = is3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
   imageInfo.format = format;
   imageInfo.extent = extent;
-  imageInfo.mipLevels = 1;
+  imageInfo.mipLevels = mipLevels;
   imageInfo.arrayLayers = 1;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -724,8 +727,12 @@ Image Renderer::Impl::createImage(VkFormat format, VkExtent3D extent,
 
   VmaAllocationCreateInfo allocInfo{};
   allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-  // Render targets get their own allocation, which drivers handle best.
-  allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  // Render targets get their own allocation, which drivers handle best;
+  // sampled textures share larger blocks.
+  if (usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+    allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  }
 
   Image image;
   check(vmaCreateImage(allocator, &imageInfo, &allocInfo, &image.image,
@@ -738,7 +745,7 @@ Image Renderer::Impl::createImage(VkFormat format, VkExtent3D extent,
   viewInfo.viewType = is3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = format;
   viewInfo.subresourceRange.aspectMask = aspect;
-  viewInfo.subresourceRange.levelCount = 1;
+  viewInfo.subresourceRange.levelCount = mipLevels;
   viewInfo.subresourceRange.layerCount = 1;
   check(vkCreateImageView(device.device, &viewInfo, nullptr, &image.view),
         "vkCreateImageView");
@@ -1456,6 +1463,81 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   std::cout << "GPU: " << physical.value().name << "\n";
 }
 
+TextureId Renderer::uploadTexture(const TextureData &texture) {
+  if (impl_->textures.size() == kMaxTextures) {
+    throw std::runtime_error("texture table is full");
+  }
+  const VkFormat format = texture.colorSpace == ColorSpace::Srgb
+                              ? VK_FORMAT_BC7_SRGB_BLOCK
+                              : VK_FORMAT_BC7_UNORM_BLOCK;
+  const auto mipCount = static_cast<uint32_t>(texture.mips.size());
+  Image image = impl_->createImage(
+      format, {texture.width, texture.height, 1},
+      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      VK_IMAGE_ASPECT_COLOR_BIT, mipCount);
+
+  VkDeviceSize totalBytes = 0;
+  for (const auto &mip : texture.mips) {
+    totalBytes += mip.size();
+  }
+  Buffer staging = impl_->createBuffer(
+      totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+          VMA_ALLOCATION_CREATE_MAPPED_BIT);
+
+  std::vector<VkBufferImageCopy> regions(mipCount);
+  VkDeviceSize offset = 0;
+  for (uint32_t level = 0; level < mipCount; ++level) {
+    std::memcpy(static_cast<char *>(staging.mapped) + offset,
+                texture.mips[level].data(), texture.mips[level].size());
+    VkBufferImageCopy &region = regions[level];
+    region.bufferOffset = offset;
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+    region.imageExtent = {std::max(1u, texture.width >> level),
+                          std::max(1u, texture.height >> level), 1};
+    offset += texture.mips[level].size();
+  }
+  check(vmaFlushAllocation(impl_->allocator, staging.allocation, 0,
+                           VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
+
+  impl_->submitNow([&](VkCommandBuffer cmd) {
+    transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COPY_BIT,
+                          VK_ACCESS_2_TRANSFER_WRITE_BIT});
+    vkCmdCopyBufferToImage(cmd, staging.buffer, image.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipCount,
+                           regions.data());
+    transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_COPY_BIT,
+                          VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  });
+  impl_->destroyBuffer(staging);
+
+  const auto index = static_cast<uint32_t>(impl_->textures.size());
+  VkDescriptorImageInfo imageInfo{impl_->textureSampler, image.view,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkWriteDescriptorSet write{};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.dstSet = impl_->materialSet;
+  write.dstBinding = 1;
+  write.dstArrayElement = index;
+  write.descriptorCount = 1;
+  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  write.pImageInfo = &imageInfo;
+  vkUpdateDescriptorSets(impl_->device.device, 1, &write, 0, nullptr);
+
+  impl_->textures.push_back(image);
+  return {index};
+}
+
 MaterialId Renderer::createMaterial(const MaterialData &material) {
   if (impl_->materialCount == kMaxMaterials) {
     throw std::runtime_error("material table is full");
@@ -2069,6 +2151,9 @@ Renderer::~Renderer() {
     vkDestroyCommandPool(dev, frame.commandPool, nullptr);
   }
 
+  for (Image &texture : impl_->textures) {
+    impl_->destroyImage(texture);
+  }
   impl_->destroyImage(impl_->dfgLut);
   impl_->destroyBuffer(impl_->materialBuffer);
   vkDestroyDescriptorPool(dev, impl_->materialPool, nullptr);

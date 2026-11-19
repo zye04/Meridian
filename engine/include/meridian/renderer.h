@@ -3,6 +3,7 @@
 #include <meridian/camera.h>
 #include <meridian/math/mat4.h>
 #include <meridian/mesh.h>
+#include <meridian/texture.h>
 
 #include <cstdint>
 #include <memory>
@@ -85,6 +86,9 @@ public:
 
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
+
+  // Uploads a texture into the bindless table; materials refer to it by id.
+  TextureId uploadTexture(const TextureData &texture);
 
   MaterialId createMaterial(const MaterialData &material);
 

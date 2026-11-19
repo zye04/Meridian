@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(Meridian LANGUAGES CXX)
+project(Meridian LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

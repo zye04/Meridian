@@ -9,7 +9,20 @@ FetchContent_Declare(VulkanMemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
     GIT_TAG v3.5.0
     SYSTEM)
-FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator)
+# Basis Universal: KTX2 textures. The engine only uses the transcoder; the
+# encoder (in the same static library, linked only where used) is for tools.
+set(BASISU_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(basis_universal
+    URL https://github.com/BinomialLLC/basis_universal/archive/refs/tags/v2_50.tar.gz
+    URL_HASH SHA256=216e49e1f4213d4bfa4afaa07527e16bac28533dddd444197d3aa19230ac130c
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator basis_universal)
+# Third-party code: don't apply our warning flags to it.
+target_compile_options(basisu_encoder PRIVATE -w)
+target_include_directories(basisu_encoder SYSTEM INTERFACE
+    ${basis_universal_SOURCE_DIR}/transcoder
+    ${basis_universal_SOURCE_DIR}/encoder)
 
 set(SHADER_DIR ${CMAKE_BINARY_DIR}/shaders)
 set(SHADER_SOURCES
@@ -50,6 +63,7 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 add_library(meridian STATIC
     src/renderer.cpp
     src/terrain.cpp
+    src/texture.cpp
     src/vma.cpp
     src/window.cpp)
 add_dependencies(meridian shaders)
@@ -61,4 +75,5 @@ target_link_libraries(meridian PRIVATE
     glfw
     Vulkan::Vulkan
     vk-bootstrap::vk-bootstrap
-    GPUOpen::VulkanMemoryAllocator)
+    GPUOpen::VulkanMemoryAllocator
+    basisu_encoder)
