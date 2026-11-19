@@ -288,7 +288,8 @@ int main(int argc, char **argv) {
   if (options.camera) {
     camera = *options.camera;
   }
-  // Scripted motion uses a fixed step so runs repeat exactly.
+  // Scripted runs (motion and exposure) use a fixed step so they repeat
+  // exactly.
   constexpr float kScriptedStep = 1.0f / 60.0f;
   if (options.cameraVelocity) {
     camera.position = camera.position - *options.cameraVelocity *
@@ -326,7 +327,7 @@ int main(int argc, char **argv) {
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
     }
-    renderer.draw(camera, lighting);
+    renderer.draw(camera, lighting, interactive ? deltaSeconds : kScriptedStep);
 
     ++frames;
     gpuMsSum += renderer.gpuFrameMs();

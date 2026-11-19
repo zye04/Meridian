@@ -67,9 +67,11 @@ startup ~60 s). Scatter close-up with the tree: `7.2 83 706 0 0.15`.
   (the 1440p monitor; Hyprland's 1920x1080 FALLBACK output when it's off).
   `--windowed` gives a tiled window, whose size varies between runs.
 - Interactive runs pick up the user's mouse; use capture runs for checks.
-- Two captures of the same view never match bit for bit (per-frame noise in
-  soft shadows and TAA); compare the mean difference (~0.02/255), not exact
-  pixels.
+- Captures step time by a fixed 1/60 s (motion and exposure adaptation), so
+  two captures of the same view with the same build match almost exactly
+  (mean difference ~1e-6/255; GPU atomics can still reorder a pixel).
+  Debug and Release differ by ~0.02/255. Compare mean differences, not
+  exact pixels.
 - Prefer unit tests for math (e.g. frustum planes in tests/mat4_test.cpp)
   over visual checks.
 

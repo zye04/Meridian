@@ -141,7 +141,9 @@ public:
   InstanceId addInstance(MeshId mesh, const Mat4 &transform);
   uint32_t instanceCount() const;
 
-  void draw(const Camera &camera, const Lighting &lighting);
+  // deltaSeconds: time since the previous frame, which paces exposure
+  // adaptation. Pass a fixed step for repeatable output.
+  void draw(const Camera &camera, const Lighting &lighting, float deltaSeconds);
 
   // GPU time of a recent frame, measured with timestamp queries.
   float gpuFrameMs() const;

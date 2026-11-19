@@ -12,7 +12,6 @@
 #include <VkBootstrap.h>
 
 #include <array>
-#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -176,7 +175,6 @@ struct Renderer::Impl {
   // GPU-only. Each frame shades with the exposure the previous frame computed.
   Buffer histogramBuffer;
   Buffer exposureBuffer;
-  std::chrono::steady_clock::time_point lastDrawTime;
   VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
   std::vector<GpuMesh> meshes;

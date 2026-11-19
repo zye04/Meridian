@@ -255,7 +255,8 @@ void Renderer::requestCapture(const std::filesystem::path &path) {
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
 
-void Renderer::draw(const Camera &camera, const Lighting &lighting) {
+void Renderer::draw(const Camera &camera, const Lighting &lighting,
+                    float deltaSeconds) {
   VkDevice dev = impl_->device.device;
 
   int width = 0;
@@ -641,15 +642,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   vkCmdPipelineBarrier2(cmd, &historyDependency);
 
   VkDescriptorSet postSet = impl_->postSets[impl_->frameNumber % 2];
-  const auto now = std::chrono::steady_clock::now();
   PostConstants postConstants;
   postConstants.historyValid = impl_->historyValid ? 1 : 0;
-  postConstants.deltaSeconds = std::min(
-      std::chrono::duration<float>(now - impl_->lastDrawTime).count(), 0.1f);
+  postConstants.deltaSeconds = deltaSeconds;
   postConstants.histogram = impl_->histogramBuffer.address;
   postConstants.exposure = impl_->exposureBuffer.address;
   postConstants.exposureCompensation = camera.exposureCompensation;
-  impl_->lastDrawTime = now;
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->taaPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,

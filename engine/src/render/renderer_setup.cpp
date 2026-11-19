@@ -925,7 +925,6 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->createExposureBuffers();
   impl_->createAtmosphere();
   impl_->createScene();
-  impl_->lastDrawTime = std::chrono::steady_clock::now();
 
   std::cout << "GPU: " << physical.value().name << "\n";
 }
