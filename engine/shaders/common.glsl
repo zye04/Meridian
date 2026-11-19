@@ -327,6 +327,45 @@ struct Terrain {
     vec2 rockNormalY;
 };
 
+// Must match GpuWind in C++; functions in wind.glsl. The 10 m wind (direction
+// it blows toward, xz); offset is the time integral of its velocity (m).
+struct Wind {
+    vec2 direction;
+    float speed10m;
+    float gustiness;
+    vec2 offset;
+    float gustPhase;
+    float shearExponent;
+    float veer;
+    float veerAltitude;
+    float pad0;
+    float pad1;
+};
+
+// Must match WeatherHistorySample in C++.
+struct WeatherHistorySample {
+    float travel;
+    float coverage;
+    float type;
+    float precipitation;
+};
+
+layout(buffer_reference, std430) readonly buffer WeatherHistoryBuffer {
+    WeatherHistorySample samples[];
+};
+
+// Must match GpuWeather in C++; lookup in weather.glsl. The current state;
+// history oldest first, travel relative to the current travel (<= 0).
+struct Weather {
+    float coverage;
+    float type;
+    float precipitation;
+    float frontLineUpwind;
+    uint historyCount;
+    uint pad0;
+    WeatherHistoryBuffer history;
+};
+
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // All view matrices here leave out the camera translation: they take
     // positions relative to the camera (world - cameraPosition, or
@@ -398,6 +437,10 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint pad3;
     ClusterNodeBuffer clusterNodes;
     ClusterLevelBuffer clusterLevels;
+    // The global wind, this frame's and last frame's (for motion vectors).
+    Wind wind;
+    Wind previousWind;
+    Weather weather;
 };
 
 // Largest axis scale of a transform: a conservative bound under
