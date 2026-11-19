@@ -273,6 +273,8 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
             sampleGrad(layer.arm, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rg * w[i];
         texel.height += sampleGrad(layer.height, tiles.uv[i], tiles.dx[i], tiles.dy[i]).r * w[i];
         vec3 n = sampleGrad(layer.normal, tiles.uv[i], tiles.dx[i], tiles.dy[i]).xyz * 2.0 - 1.0;
+        // OpenGL-style maps point green up the image, which is -v here.
+        n.y = -n.y;
         // Back from the tile's rotated frame to the layer's.
         derivative += (normalToDerivative(n) * tiles.rotation[i]) * w[i];
     }
@@ -294,9 +296,14 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     // Flipping u on the back sides keeps the textures unmirrored.
     vec2 flip[3] = vec2[3](vec2(axisSign.x, 1.0), vec2(axisSign.y, 1.0),
                            vec2(-axisSign.z, 1.0));
-    vec2 uvs[3] = vec2[3](inWorldPosition.zy, inWorldPosition.xz, inWorldPosition.xy);
-    vec2 dxs[3] = vec2[3](dpdx.zy, dpdx.xz, dpdx.xy);
-    vec2 dys[3] = vec2[3](dpdy.zy, dpdy.xz, dpdy.xy);
+    // v runs against the world axis so green (up the image, -v) points
+    // along +y on the sides and +z on top, as the Whiteout swizzles expect;
+    // it also keeps cliffs upright.
+    const vec2 kV = vec2(1.0, -1.0);
+    vec2 uvs[3] = vec2[3](inWorldPosition.zy * kV, inWorldPosition.xz * kV,
+                          inWorldPosition.xy * kV);
+    vec2 dxs[3] = vec2[3](dpdx.zy * kV, dpdx.xz * kV, dpdx.xy * kV);
+    vec2 dys[3] = vec2[3](dpdy.zy * kV, dpdy.xz * kV, dpdy.xy * kV);
 
     TerrainTexel texel;
     texel.baseColor = vec3(0.0);
