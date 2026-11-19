@@ -53,9 +53,11 @@ constexpr uint32_t kClusterTriangleCapacity = 32u << 20;
 // sorted back to front.
 constexpr uint32_t kDrawBuckets = 4;
 // Per culling phase: work items (up to 64 clusters of one instance each) and
-// drawn clusters per draw list. Overflow is dropped and counted.
+// drawn clusters per draw list; clusters to retest in phase 1. Overflow is
+// dropped and counted.
 constexpr uint32_t kMaxWorkItems = 1u << 19;
 constexpr uint32_t kMaxDrawnClusters = 1u << 20;
+constexpr uint32_t kMaxRetestClusters = 1u << 20;
 constexpr uint32_t kDrawBucketBlended = 4;
 
 #ifdef NDEBUG
@@ -189,9 +191,11 @@ struct SceneData {
   float frustumPlanes[6][4] = {};
   GpuAtmosphere atmosphere;
   GpuTerrain terrain;
-  // For occlusion culling: unjittered view and the projection's x/y scale
-  // and near plane.
+  // For occlusion culling: unjittered view (this frame's and last frame's,
+  // which made the pyramid phase 0 tests against) and the projection's x/y
+  // scale and near plane.
   Mat4 view;
+  Mat4 previousView;
   float projectionScale[2] = {};
   float nearPlane = 0.0f;
   // LOD selection: the largest allowed simplification error on screen.
@@ -202,7 +206,7 @@ struct SceneData {
   VkDeviceAddress clusterTriangles = 0;
   VkDeviceAddress drawLists = 0;
 };
-static_assert(sizeof(SceneData) == 752);
+static_assert(sizeof(SceneData) == 816);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -248,12 +252,16 @@ struct DrawCounters {
   // Per phase and draw list: vkCmdDrawMeshTasksIndirectEXT arguments, one
   // mesh workgroup per cluster.
   uint32_t meshTasks[2][kDrawBuckets][3];
+  // Phase 1's retest of the clusters phase 0 found occluded: dispatch
+  // arguments (one workgroup per 64 entries) and the entry count.
+  uint32_t retestDispatch[3];
   uint32_t instances;
   uint32_t triangles;
   uint32_t overflow;
-  uint32_t pad;
+  uint32_t retestCount;
+  uint32_t pad[3];
 };
-static_assert(sizeof(DrawCounters) == 136);
+static_assert(sizeof(DrawCounters) == 160);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -280,14 +288,18 @@ struct CullConstants {
   VkDeviceAddress workItems = 0;
   VkDeviceAddress counters = 0;
   VkDeviceAddress visibility = 0;
+  // 0, 1, or kCullRetest: phase 1 over the clusters phase 0 found occluded.
   uint32_t phase = 0;
   uint32_t occlusion = 0;
   uint32_t pyramidLevels = 0;
-  uint32_t pad0 = 0;
+  // Whether the pyramid holds last frame's depth (phase 0 tests clusters
+  // against it).
+  uint32_t previousPyramid = 0;
   float pyramidSize[2] = {};
-  uint32_t pad1[2] = {};
+  VkDeviceAddress retest = 0;
 };
 static_assert(sizeof(CullConstants) == 64);
+constexpr uint32_t kCullRetest = 2;
 
 // TLAS instance masks: shadow rays only test shadow casters.
 constexpr uint8_t kShadowCasterMask = 0x01;

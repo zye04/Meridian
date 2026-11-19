@@ -106,15 +106,18 @@ docs/decisions.md          technique decisions with sources
 Instance table upload (when changed) -> TLAS build over all instances ->
 early cull (cull.comp phase 0: instances visible last frame, frustum test
 only, emit work items of up to 64 clusters; then cluster_cull.comp,
-dispatched indirectly: Nanite LOD cut + frustum test, fills 4 cluster draw
-lists: opaque/masked x single/double-sided) -> atmosphere LUTs
+dispatched indirectly: Nanite LOD cut + frustum test + occlusion against
+last frame's pyramid seen from last frame's view, queuing what it hides
+for a retest; fills 4 cluster draw lists: opaque/masked x
+single/double-sided) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
 pass into HDR RGBA16F + RG16F motion + D32 depth (sky fullscreen, then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
 cull (phase 1: every instance against frustum + pyramid; the newly visible
-go through the cluster cull; writes the per-instance visibility buffer) ->
+go through the cluster cull, and phase 0's queued clusters are retested
+against the new pyramid; writes the per-instance visibility buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> AgX

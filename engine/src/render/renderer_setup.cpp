@@ -101,6 +101,7 @@ void Renderer::Impl::createSwapchain() {
 }
 
 void Renderer::Impl::createDepthPyramid() {
+  pyramidValid = false;
   depthPyramidExtent = {std::bit_floor(swapchain.extent.width),
                         std::bit_floor(swapchain.extent.height)};
   const auto levels = static_cast<uint32_t>(std::bit_width(
@@ -661,6 +662,8 @@ void Renderer::Impl::createScene() {
   drawLists = createBuffer(VkDeviceSize{2 * kDrawBuckets} * kMaxDrawnClusters * 2 *
                                sizeof(uint32_t),
                            kListUsage, 0);
+  retestClusters = createBuffer(VkDeviceSize{kMaxRetestClusters} * 2 * sizeof(uint32_t),
+                                kListUsage, 0);
   drawCounters = createBuffer(
       sizeof(DrawCounters),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
@@ -929,6 +932,7 @@ Renderer::~Renderer() {
   for (Buffer *buffer :
        {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
         &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,
+        &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->visibility}) {
     impl_->destroyBuffer(*buffer);

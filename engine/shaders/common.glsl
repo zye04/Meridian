@@ -208,9 +208,11 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
     Terrain terrain;
-    // For occlusion culling: unjittered view and the projection's x/y scale
-    // and near plane.
+    // For occlusion culling: unjittered view (this frame's and last frame's,
+    // which made the pyramid phase 0 tests against) and the projection's
+    // x/y scale and near plane.
     mat4 view;
+    mat4 previousView;
     vec2 projectionScale;
     float nearPlane;
     // LOD selection: the largest allowed simplification error on screen.

@@ -7,8 +7,11 @@
 // Cluster culling and LOD selection, one workgroup per work item and one
 // thread per cluster. A cluster is drawn when Nanite's cut rule picks it
 // (its coarser replacement's error is over the threshold on screen, its own
-// is at or under) and it is in the view frustum. Survivors append to the
-// draw list of their mesh's bucket for mesh.mesh.
+// is at or under), it is in the view frustum and not occluded. Occlusion
+// follows Nanite's two passes: phase 0 tests against last frame's depth
+// pyramid and queues what it hides for a retest against this frame's
+// (phase kCullRetest), so nothing visible is dropped. Survivors append to
+// the draw list of their mesh's bucket for mesh.mesh.
 
 layout(local_size_x = 64) in;
 
@@ -22,7 +25,40 @@ float projectedError(vec3 center, float radius, float error) {
            scene.inverseResolution.y;
 }
 
+void draw(uint instanceIndex, uint clusterIndex, uint triangleCount) {
+    InstanceData instance = cull.scene.instances.instances[instanceIndex];
+    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
+    // Retested clusters are drawn in the late pass.
+    uint list = min(cull.phase, 1u) * kDrawBuckets + mesh.drawBucket;
+    uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
+    if (slot >= kMaxDrawnClusters) {
+        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+        return;
+    }
+    cull.scene.drawLists.entries[list * kMaxDrawnClusters + slot] =
+        uvec2(instanceIndex, clusterIndex);
+    atomicAdd(cull.counters.counters[kCounterTriangles], triangleCount);
+}
+
+void retest() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= min(cull.counters.counters[kCounterRetest], kMaxRetestClusters)) {
+        return;
+    }
+    uvec2 entry = cull.retest.entries[index];
+    mat4 transform = cull.scene.instances.instances[entry.x].transform;
+    ClusterInfo cluster = cull.scene.clusters.clusters[entry.y];
+    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
+    if (!occluded(center, cluster.boundsRadius * maxScale(transform), cull.scene.view)) {
+        draw(entry.x, entry.y, cluster.triangleCount);
+    }
+}
+
 void main() {
+    if (cull.phase == kCullRetest) {
+        retest();
+        return;
+    }
     uint itemIndex = gl_WorkGroupID.x;
     if (itemIndex >= kMaxWorkItems) {
         return;
@@ -54,18 +90,29 @@ void main() {
     }
 
     vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
-    if (!inFrustum(center, cluster.boundsRadius * scale)) {
+    float radius = cluster.boundsRadius * scale;
+    if (!inFrustum(center, radius)) {
         return;
     }
 
-    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
-    uint list = cull.phase * kDrawBuckets + mesh.drawBucket;
-    uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
-    if (slot >= kMaxDrawnClusters) {
-        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+    if (cull.occlusion != 0u && cull.phase == 0u && cull.previousPyramid != 0u &&
+        occluded(center, radius, cull.scene.previousView)) {
+        uint slot = atomicAdd(cull.counters.counters[kCounterRetest], 1u);
+        if (slot >= kMaxRetestClusters) {
+            // Dropping it could hide something visible: draw it now instead.
+            draw(instanceIndex, clusterIndex, cluster.triangleCount);
+            return;
+        }
+        // One retest workgroup per 64 entries.
+        if (slot % 64u == 0u) {
+            atomicAdd(cull.counters.counters[kCounterRetestDispatch], 1u);
+        }
+        cull.retest.entries[slot] = uvec2(instanceIndex, clusterIndex);
         return;
     }
-    cull.scene.drawLists.entries[list * kMaxDrawnClusters + slot] =
-        uvec2(instanceIndex, clusterIndex);
-    atomicAdd(cull.counters.counters[kCounterTriangles], cluster.triangleCount);
+    if (cull.occlusion != 0u && cull.phase == 1u &&
+        occluded(center, radius, cull.scene.view)) {
+        return;
+    }
+    draw(instanceIndex, clusterIndex, cluster.triangleCount);
 }

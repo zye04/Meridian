@@ -38,7 +38,7 @@ void main() {
         }
     } else {
         bool visible = visibleInFrustum &&
-                       (cull.occlusion == 0u || !occluded(center, radius));
+                       (cull.occlusion == 0u || !occluded(center, radius, cull.scene.view));
         cull.visibility.visible[index] = visible ? 1u : 0u;
         // Instances processed in phase 0 aren't processed again.
         if (!visible || (cull.occlusion != 0u && wasVisible)) {

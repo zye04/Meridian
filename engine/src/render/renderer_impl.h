@@ -56,6 +56,10 @@ struct Renderer::Impl {
   VkExtent2D depthPyramidExtent{};
   bool historyValid = false;
   Mat4 previousViewProjection;
+  Mat4 previousView;
+  // The depth pyramid holds last frame's depth at the current size, so the
+  // early cluster cull can test against it.
+  bool pyramidValid = false;
 
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
@@ -110,6 +114,8 @@ struct Renderer::Impl {
   // draw lists, and the DrawCounters (indirect arguments and statistics).
   Buffer workItems;
   Buffer drawLists;
+  // Clusters the early cull found occluded, retested by the late cull.
+  Buffer retestClusters;
   Buffer drawCounters;
   // Per instance: visible at the end of last frame's culling (1) or not.
   Buffer visibility;

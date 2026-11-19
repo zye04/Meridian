@@ -218,3 +218,14 @@ foliage that survives simplification).
   error above the surface; that removed them (overview mean difference
   vs the pre-cluster renderer 5.9/255 -> 0.29/255, the rest is LOD
   shading). Slice 2 traces the clusters themselves.
+- **Cluster occlusion, Nanite's two passes:** the early cluster cull tests
+  against last frame's depth pyramid (seen from last frame's view; the
+  pyramid is from last frame's early pass, so it has fewer occluders and
+  stays conservative) and queues what it hides; the late cull retests
+  those against this frame's pyramid. No per-cluster visibility state
+  (niagara keeps per-meshlet bits, which grow with instances x clusters).
+  Valid while instances don't move; the first frame after a resize skips
+  the early test. Measured (`--scatter 3000`, 1920x1080): clusters drawn
+  at the start view 11534 -> 3367 with occlusion, open view 9694 -> 6382;
+  images match occlusion off (mean 0.04/255 still, 0.09/255 moving at
+  5 m/s, below the 0.12/255 run-to-run noise).

@@ -13,11 +13,22 @@ layout(buffer_reference, std430) buffer WorkItemBuffer {
 
 // Must match DrawCounters in C++: per phase, the cluster cull's dispatch
 // arguments (3 uints), then per phase and draw list the mesh task
-// arguments (3 uints), then statistics.
+// arguments (3 uints), the retest dispatch arguments, then counts.
 const uint kCounterMeshTasks = 6u;
-const uint kCounterInstances = 30u;
-const uint kCounterTriangles = 31u;
-const uint kCounterOverflow = 32u;
+const uint kCounterRetestDispatch = 30u;
+const uint kCounterInstances = 33u;
+const uint kCounterTriangles = 34u;
+const uint kCounterOverflow = 35u;
+const uint kCounterRetest = 36u;
+
+// Clusters phase 0 found occluded by last frame's pyramid: (instance,
+// cluster), retested in phase 1 against this frame's.
+const uint kMaxRetestClusters = 1u << 20;
+const uint kCullRetest = 2u;
+
+layout(buffer_reference, std430) buffer RetestBuffer {
+    uvec2 entries[];
+};
 
 layout(buffer_reference, std430) buffer CounterBuffer {
     uint counters[];
@@ -37,11 +48,14 @@ layout(push_constant) uniform CullConstants {
     WorkItemBuffer work;
     CounterBuffer counters;
     VisibilityBuffer visibility;
+    // 0, 1, or kCullRetest: phase 1 over the clusters phase 0 found occluded.
     uint phase;
     uint occlusion;
     uint pyramidLevels;
-    uint pad0;
+    // Whether the pyramid holds last frame's depth.
+    uint previousPyramid;
     vec2 pyramidSize;
+    RetestBuffer retest;
 } cull;
 
 // Largest axis scale of a transform: a conservative bound under
@@ -83,8 +97,10 @@ bool projectSphere(vec3 c, float r, out vec4 bounds) {
     return true;
 }
 
-bool occluded(vec3 worldCenter, float radius) {
-    vec3 c = (cull.scene.view * vec4(worldCenter, 1.0)).xyz;
+// Against the depth pyramid, as seen from `view` (the view its depth was
+// rendered with).
+bool occluded(vec3 worldCenter, float radius, mat4 view) {
+    vec3 c = (view * vec4(worldCenter, 1.0)).xyz;
     c.z = -c.z;
     vec4 bounds;
     if (!projectSphere(c, radius, bounds)) {

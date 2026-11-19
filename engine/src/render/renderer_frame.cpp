@@ -61,6 +61,7 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
         tasks[1] = tasks[2] = 1;
       }
     }
+    initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
     vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -79,6 +80,8 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
   constants.pyramidSize[0] = static_cast<float>(depthPyramidExtent.width);
   constants.pyramidSize[1] = static_cast<float>(depthPyramidExtent.height);
   constants.pyramidLevels = static_cast<uint32_t>(depthPyramidLevels.size());
+  constants.previousPyramid = pyramidValid ? 1 : 0;
+  constants.retest = retestClusters.address;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1,
                           &cullSet, 0, nullptr);
@@ -97,6 +100,15 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
   vkCmdDispatchIndirect(cmd, drawCounters.buffer,
                         offsetof(DrawCounters, workDispatch) +
                             phase * sizeof(DrawCounters::workDispatch[0]));
+  if (phase == 1) {
+    // Retest what phase 0 found occluded by last frame's pyramid; draws into
+    // phase 1's lists like the newly visible instances.
+    constants.phase = kCullRetest;
+    vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(constants), &constants);
+    vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+                          offsetof(DrawCounters, retestDispatch));
+  }
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
@@ -344,6 +356,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
   scene.view = view;
+  scene.previousView = impl_->previousView;
+  impl_->previousView = view;
   scene.projectionScale[0] = projection.m[0][0];
   scene.projectionScale[1] = projection.m[1][1];
   scene.nearPlane = camera.nearPlane;
@@ -546,6 +560,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   vkCmdEndRendering(cmd);
 
   impl_->buildDepthPyramid(cmd);
+  impl_->pyramidValid = true;
   impl_->cullInstances(cmd, frame, 1);
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
