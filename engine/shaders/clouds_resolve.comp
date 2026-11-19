@@ -7,10 +7,11 @@
 // Temporal resolve of the cloud march at its own resolution: accumulates the
 // per-frame jittered march into a history reprojected by the cloud's mean
 // depth and the wind displacement since last frame, with the history clipped
-// to the current neighborhood (variance clipping, as taa.comp). Depth < 0
-// marks texels where scene geometry hid the layer; history from there is
-// rejected (disocclusion), so clear air from behind a silhouette doesn't
-// linger over newly revealed clouds.
+// to the current neighborhood (variance clipping, as taa.comp). Depth
+// -1 - d marks texels where scene geometry cut the march; history from
+// there is rejected where the march now runs past it (disocclusion), so
+// clear air from behind a silhouette doesn't linger over newly revealed
+// clouds.
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -54,6 +55,11 @@ vec4 sampleCatmullRom(vec2 uv, vec2 texSize) {
     return result;
 }
 
+// The cloud distance of a stored depth, cut by geometry or not.
+float cloudDistance(float stored) {
+    return stored < 0.0 ? -1.0 - stored : stored;
+}
+
 // Pulls the history toward the center of the neighborhood box until it fits.
 vec4 clipToBox(vec4 history, vec4 boxMin, vec4 boxMax) {
     vec4 center = 0.5 * (boxMax + boxMin);
@@ -71,10 +77,12 @@ void main() {
         return;
     }
     vec4 current = imageLoad(cloudColor, id);
-    float depth = imageLoad(cloudDepth, id).r;
+    float stored = imageLoad(cloudDepth, id).r;
+    bool cut = stored < 0.0;
+    float depth = cloudDistance(stored);
 
-    // Neighborhood statistics over the texels that saw the layer (geometry
-    // texels say nothing about the clouds here).
+    // Neighborhood statistics over the texels cut like this one (a cut
+    // texel says nothing about the clouds behind its surface).
     vec4 mean = vec4(0.0);
     vec4 meanSquared = vec4(0.0);
     float count = 0.0;
@@ -83,12 +91,12 @@ void main() {
         for (int x = -1; x <= 1; ++x) {
             ivec2 p = clamp(id + ivec2(x, y), ivec2(0), size - 1);
             float d = imageLoad(cloudDepth, p).r;
-            if (d >= 0.0) {
+            if ((d < 0.0) == cut) {
                 vec4 c = imageLoad(cloudColor, p);
                 mean += c;
                 meanSquared += c * c;
                 count += 1.0;
-                nearbyDepth = max(nearbyDepth, d);
+                nearbyDepth = max(nearbyDepth, cloudDistance(d));
             }
         }
     }
@@ -99,15 +107,15 @@ void main() {
     vec2 uv = (vec2(id) + 0.5) / vec2(size);
     vec4 previousClip = cloudPreviousClip(cloudRay(uv), reprojectDepth);
     vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
-    bool valid = pc.historyValid != 0u && depth >= 0.0 && previousClip.w > 0.0 &&
+    bool valid = pc.historyValid != 0u && previousClip.w > 0.0 &&
                  all(greaterThanEqual(previousUv, vec2(0.0))) &&
                  all(lessThanEqual(previousUv, vec2(1.0)));
     vec4 depths = textureGather(historyDepth, previousUv, 0);
-    if (!valid || any(lessThan(depths, vec4(0.0)))) {
+    if (!valid || (!cut && any(lessThan(depths, vec4(0.0))))) {
         // No history: start from the neighborhood mean, which hides most of
         // a single frame's jitter noise (a new resolution, disocclusion).
-        imageStore(resolvedColor, id, depth < 0.0 ? current : mean);
-        imageStore(resolvedDepth, id, vec4(depth));
+        imageStore(resolvedColor, id, mean);
+        imageStore(resolvedDepth, id, vec4(stored));
         return;
     }
 
@@ -120,6 +128,8 @@ void main() {
     // (gather order: (0,1), (1,1), (1,0), (0,0)).
     vec2 f = fract(previousUv * vec2(size) - 0.5);
     vec4 opacities = 1.0 - textureGather(historyColor, previousUv, 3);
+    depths = vec4(cloudDistance(depths.x), cloudDistance(depths.y), cloudDistance(depths.z),
+                  cloudDistance(depths.w));
     vec4 weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y)) *
                    opacities * vec4(greaterThan(depths, vec4(0.0)));
     float weightSum = dot(weights, vec4(1.0));
@@ -134,5 +144,5 @@ void main() {
         ? (reprojectDepth * currentOpacity + historyDistance * historyOpacity) / opacity
         : 0.0;
     imageStore(resolvedColor, id, resolved);
-    imageStore(resolvedDepth, id, vec4(resolvedDistance));
+    imageStore(resolvedDepth, id, vec4(cut ? -1.0 - resolvedDistance : resolvedDistance));
 }
