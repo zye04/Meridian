@@ -21,18 +21,19 @@ const float kCoverageEdge = 0.15;
 // much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
 const vec2 kDetailErosion = vec2(0.5, 0.35);
-// The shape cut (stratus, cumulus): the product coverage x profile x shape
-// below it is clear air. It carves the gaps and rounds the cumulus tops
-// (the profile thins upward) and cell edges (coverage falls); low for
-// stratus so overcast stays a nearly continuous sheet.
+// The shape cut (stratus, cumulus): profile x shape below it is clear air.
+// It carves the gaps and rounds the cumulus tops (the profile thins
+// upward); low for stratus so overcast stays a nearly continuous sheet.
+// Coverage multiplies the result (thresholded once, in the map).
 const vec2 kShapeCut = vec2(0.1, 0.35);
 // The base shape's range, stretched to [0, 1]: the dilated Perlin-Worley
 // spans only about 0.78-0.92 (measured: 6% below 0.8, median 0.84, 4%
 // above 0.9), too little contrast to carve gaps on its own.
 const vec2 kShapeRange = vec2(0.78, 0.92);
-// Shape floor at full stratus coverage: lifts the shape so overcast reads as
-// a continuous sheet (gaps only where the profile thins at its top and
-// bottom and the detail erodes it), while broken stratocumulus keeps holes.
+// Shape floor for stratus (type 0, scaled down toward cumulus): lifts the
+// shape so overcast reads as a continuous sheet (gaps only where the
+// profile thins at its top and bottom and the detail erodes it), while
+// mixed types keep holes.
 const float kStratusShapeFloor = 0.6;
 
 float remap(float v, float lo, float hi, float newLo, float newHi) {
@@ -192,10 +193,10 @@ float cloudProfile(float type, float h) {
 // Cloud density in [0, 1] (the march scales it to extinction) at world xz
 // and altitude world.y (m above sea level, on the curved layer); lod is the
 // noise mip level (0 near the camera, coarser for longer steps). Weather
-// coverage x vertical profile x the base Perlin-Worley shape (coverage is
-// thresholded once, in the map), cut at kShapeCut, eroded by curl-distorted
-// detail Worley noise (Schneider 2015). heightFraction: the normalized height in the
-// local layer (lighting's ambient gradient).
+// coverage (thresholded once, in the map) x the vertical profile times the
+// base Perlin-Worley shape cut at kShapeCut, eroded by curl-distorted
+// detail Worley noise (Schneider 2015). heightFraction: the normalized
+// height in the local layer (lighting's ambient gradient).
 float cloudDensity(vec3 world, float lod, out float heightFraction) {
     heightFraction = 0.0;
     vec4 weather = weatherMapAt(world);
@@ -215,11 +216,11 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     float worley = dot(base.gba, vec3(0.625, 0.25, 0.125));
     float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
     shape = clamp(remap(shape, kShapeRange.x, kShapeRange.y, 0.0, 1.0), 0.0, 1.0);
-    float shapeFloor = kStratusShapeFloor * coverage * (1.0 - clamp(weather.g, 0.0, 1.0));
-    shape = mix(shape, 1.0, shapeFloor);
-    float cut = mix(kShapeCut.x, kShapeCut.y, clamp(weather.g, 0.0, 1.0));
-    float cloud = clamp(remap(coverage * cloudProfile(weather.g, h) * shape, cut, 1.0, 0.0, 1.0),
-                        0.0, 1.0);
+    float type = clamp(weather.g, 0.0, 1.0);
+    shape = mix(shape, 1.0, kStratusShapeFloor * (1.0 - type));
+    float cut = mix(kShapeCut.x, kShapeCut.y, type);
+    float cloud = coverage * clamp(remap(cloudProfile(weather.g, h) * shape, cut, 1.0, 0.0, 1.0),
+                                   0.0, 1.0);
     if (cloud <= 0.0) {
         return 0.0;
     }
@@ -229,7 +230,6 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
                        vec3(0.625, 0.25, 0.125));
     // Cumulus: wispy at the base, billowy toward the top; stratus wispy and
     // eroded more throughout.
-    float type = clamp(weather.g, 0.0, 1.0);
     float billow = type * clamp(h * 4.0, 0.0, 1.0);
     float erosion = mix(detail, 1.0 - detail, billow) * mix(kDetailErosion.x, kDetailErosion.y, type);
     return clamp(remap(cloud, erosion, 1.0, 0.0, 1.0), 0.0, 1.0);
