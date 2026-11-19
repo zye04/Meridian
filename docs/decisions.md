@@ -100,8 +100,8 @@ sources. Check here before re-researching a topic.
 - **meridian-cook** converts PNG/JPEG to KTX2 UASTC (slower pack level,
   zstd, mips; sRGB for color, renormalized normal maps) and writes a
   standard glTF. It cooks blended or masked materials opaque when their
-  alpha is provably 1 (base color factor alpha 1 and no base color image
-  pixel below 255): Poly Haven marks modeled leaves `BLEND` and plants
+  alpha is provably 1 (base color factor alpha 1, no base color image
+  pixel below 255, no RGBA vertex colors): Poly Haven marks modeled leaves `BLEND` and plants
   `MASK` with JPEG base colors, which cost a blended, unculled
   full-detail draw or a no-op alpha test and kept leaves out of shadows.
 - **Transparency**: separate opaque/masked/blended pipelines (discard would

@@ -165,16 +165,30 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
     image.data = std::move(encoded);
   }
 
+  // Vertex colors with alpha multiply the base color alpha.
+  std::set<size_t> vertexAlphaMaterials;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    for (const fastgltf::Primitive &primitive : mesh.primitives) {
+      const auto color = primitive.findAttribute("COLOR_0");
+      if (primitive.materialIndex && color != primitive.attributes.cend() &&
+          asset.accessors[color->accessorIndex].type == fastgltf::AccessorType::Vec4) {
+        vertexAlphaMaterials.insert(*primitive.materialIndex);
+      }
+    }
+  }
+
   // Exporters often mark materials blended or masked when their alpha is 1
   // everywhere; cooking them opaque skips needless blending and alpha tests.
-  for (fastgltf::Material &m : asset.materials) {
+  for (size_t i = 0; i < asset.materials.size(); ++i) {
+    fastgltf::Material &m = asset.materials[i];
     const auto &baseColor = m.pbrData.baseColorTexture;
     const bool opaqueTexture =
         !baseColor ||
         opaqueImages.contains(
             asset.textures[baseColor->textureIndex].imageIndex.value_or(SIZE_MAX));
     if (m.alphaMode != fastgltf::AlphaMode::Opaque && opaqueTexture &&
-        m.pbrData.baseColorFactor[3] == 1.0f && m.alphaCutoff <= 1.0f) {
+        !vertexAlphaMaterials.contains(i) && m.pbrData.baseColorFactor[3] == 1.0f &&
+        m.alphaCutoff <= 1.0f) {
       std::printf("Material %s has no transparency; cooking it opaque\n",
                   std::string(m.name).c_str());
       m.alphaMode = fastgltf::AlphaMode::Opaque;
