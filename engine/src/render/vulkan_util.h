@@ -1,0 +1,60 @@
+// Small Vulkan helpers shared by the renderer's source files.
+#pragma once
+
+#include <vulkan/vulkan.h>
+
+#include <atomic>
+#include <cstdint>
+#include <span>
+#include <string>
+
+namespace meridian {
+
+// Low-discrepancy sequence used for sub-pixel jitter; returns [0, 1).
+float halton(uint32_t index, uint32_t base);
+
+// Counts validation errors (and prints every message, like vk-bootstrap's
+// default messenger) so automated runs can fail on them.
+extern std::atomic<uint32_t> validationErrors;
+VKAPI_ATTR VkBool32 VKAPI_CALL
+debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+              VkDebugUtilsMessageTypeFlagsEXT type,
+              const VkDebugUtilsMessengerCallbackDataEXT *data, void *user);
+
+void check(VkResult result, const char *what);
+
+struct ImageBarrier {
+  VkImage image;
+  VkImageAspectFlags aspect;
+  VkImageLayout from;
+  VkImageLayout to;
+  VkPipelineStageFlags2 srcStage;
+  VkAccessFlags2 srcAccess;
+  VkPipelineStageFlags2 dstStage;
+  VkAccessFlags2 dstAccess;
+};
+
+void transitionImage(VkCommandBuffer cmd, const ImageBarrier &b);
+
+// Loads build/shaders/<name>.spv (see add_shader() in engine/CMakeLists.txt).
+VkShaderModule loadShader(VkDevice device, const std::string &name);
+
+struct PipelineDesc {
+  const char *vertexShader = nullptr;
+  const char *fragmentShader = nullptr;
+  VkPipelineLayout layout = VK_NULL_HANDLE;
+  std::span<const VkFormat> colorFormats;
+  VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+  // Cull mode is set per draw (double-sided materials).
+  bool dynamicCullMode = false;
+  bool depthTest = true;
+  // Premultiplied-alpha blending into the first attachment, no depth or
+  // motion writes: the surface behind keeps its depth and motion.
+  bool alphaBlend = false;
+};
+
+VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc);
+VkPipeline createComputePipeline(VkDevice device, const char *shader,
+                                 VkPipelineLayout layout);
+
+} // namespace meridian

@@ -77,7 +77,10 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_library(meridian STATIC
     src/model.cpp
-    src/renderer.cpp
+    src/render/renderer_frame.cpp
+    src/render/renderer_resources.cpp
+    src/render/renderer_setup.cpp
+    src/render/vulkan_util.cpp
     src/terrain.cpp
     src/texture.cpp
     src/vma.cpp
