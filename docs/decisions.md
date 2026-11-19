@@ -1817,7 +1817,12 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   quarter-res pixel), at least 60 m, widened only where the steps left
   (of at most 128) couldn't reach the segment's end; an earlier rule,
   the segment / 64, gave ~1 km steps at 30 km and striped mid-distance
-  clouds. Start jittered by interleaved gradient noise per frame (no blue
+  clouds. Each sample sits at a per-frame jittered fraction of its own
+  step (the step boundaries don't depend on the jitter; Task 4 fix: with
+  only the start jittered, later samples moved less and less where the
+  steps split the remaining segment, so accumulation left static
+  horizontal bands on mid-distance clouds), jittered by interleaved
+  gradient noise per frame (no blue
   noise texture in the engine yet; IGN is the engine's existing
   low-discrepancy per-pixel sequence); the march stops at the scene
   depth, the sea-level sphere, 300 km, or transmittance 0.01.
@@ -1889,7 +1894,7 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   front of the surface are kept but the texel is flagged as knowing
   nothing behind it. History whose bilinear footprint touches a flagged
   texel is rejected where this frame's march isn't cut, and a restarted texel
-  takes its 3x3 mean (texels that saw the layer) instead of the single
+  takes its 3x3 tent-weighted mean (texels cut alike) instead of the single
   jittered sample, which otherwise left a noisy strip behind moving
   silhouettes for ~20 frames (wall corner strafe at 10 m/s, inspected).
   Neighborhood statistics use only texels cut like the current one, so a
@@ -1900,9 +1905,12 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   re-wrapped (`std::remainder`); the 2^18 m noise offsets jump where
   they wrap, and the full offset loses float precision with play time.
 - **Composite (`clouds_composite.comp`, full resolution, compute):** joint
-  bilateral upsample (Kopf et al.) in its simplest, classifying form:
-  the 2x2 bilinear taps, each kept only where it agrees with the pixel's
-  surface: a flagged (cut) texel is skipped for a sky pixel and read at
+  bilateral upsample (Kopf et al.) in its simplest, classifying form.
+  Where all 4x4 texels around the pixel agree with its surface,
+  Catmull-Rom weights (bilinear's slope breaks at texel centers showed as
+  a static 4-px grid on smooth cloud gradients); otherwise the 2x2
+  bilinear taps, which can't ring across a silhouette, each kept only
+  where it agrees with the pixel's surface: a flagged (cut) texel is skipped for a sky pixel and read at
   its decoded depth for a geometry pixel; a cloud texel deeper than the
   pixel's surface counts as clear. A sky pixel whose four taps all saw geometry
   (thin gaps) uses the surrounding 4x4 texels that saw the sky. Blended
@@ -1932,14 +1940,25 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   sequence across the quarter -> half switch: frame-to-frame MAE stays
   at its neighbors' level (no pop). `clouds` GPU ms: ground 0.82-0.97,
   above 0.87, inside 1.48-1.6 (Task 3: 0.89, 0.84, 1.37).
-- Known gaps: the cloud history is pre-exposed and not rescaled when the
-  exposure changes (as TAA's); after accumulation, clouds still show a
-  faint static 4-px grid (the quarter-res texels through the bilinear
-  footprint) and, on mid-distance clouds seen from below, soft vertical
-  bands from step aliasing (the jitter is resolved, the bands are
-  static). Levers: a bicubic (or 4x4 bilateral) upsample in the
-  composite; blue-noise instead of IGN jitter; smaller steps at
-  mid-distance.
+- Static bands and grid (Task 4 fix round 2): diagnosed on a frozen
+  mid-distance cumulus (`1119 1356 -431 2.5 0.12 --time-scale 0`): the
+  pattern didn't change between frames 120 and 121 (crop MAE 9/65535),
+  survived 400 frames with 2% current weight and no clipping (so not the
+  resolve), and grew without jitter: the march's start-only jitter was
+  the cause. Per-step jitter removed the bands; the Catmull-Rom upsample
+  cut the 4-px row structure (mean |2nd derivative| by row phase,
+  max-min / mean: 0.38 -> 0.16, flat sky 0.02-0.07). Cost (Debug, median
+  of 3, `clouds` ms): ground 0.91 -> 1.08, above 0.85 -> 1.05, inside
+  1.49 -> 1.67 (about half each: the exact last step and the 16-tap
+  upsample). What remains: thin dark ribbons on the cloud's underside,
+  also in the converged reference and unchanged by jittering the light
+  march, i.e. the density field (shape cut / profile), not sampling.
+  With per-step jitter the single-frame noise alternates between
+  neighbouring columns (IGN), so a restarted texel's 3x3 box mean showed
+  vertical stripes behind a strafed silhouette; restarts use a 1-2-1
+  tent instead, which cancels that alternation.
+- Known gap: the cloud history is pre-exposed and not rescaled when the
+  exposure changes (as TAA's).
   - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
   - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Salvi, An Excursion in Temporal Supersampling (GDC 2016, variance clipping): http://behindthepixels.io/assets/files/TemporalAA.pdf
