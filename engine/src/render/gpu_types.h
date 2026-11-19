@@ -157,9 +157,12 @@ struct GpuTerrainLayer {
 static_assert(sizeof(GpuTerrainLayer) == 32);
 
 // CDLOD terrain quadtree (terrain.glsl): level 0 nodes are 16 m, 32x32
-// quads of 0.5 m; each level doubles. The root covers 262 km around the
-// origin. Level 0's LOD range in meters; each level's range doubles.
-constexpr uint32_t kTerrainRootLevel = 14;
+// quads of 0.5 m; each level doubles. The root covers 1049 km around the
+// origin: the horizon up to ~20 km altitude. Level 0's LOD range in meters;
+// each level's range doubles.
+constexpr uint32_t kTerrainRootLevel = 16;
+static_assert(kTerrainRootLevel <= 16,
+              "terrain node encoding (terrain.glsl) holds 16-bit x/z and a 5-bit level");
 constexpr float kTerrainLodRange0 = 80.0f;
 // Capacity of each selection list and of the terrain draw list. Overflow is
 // dropped and counted in DrawCounters::overflow.
@@ -349,7 +352,7 @@ struct TerrainCounters {
   uint32_t drawTasks[3];
   uint32_t pad;
 };
-static_assert(sizeof(TerrainCounters) == 256);
+static_assert(sizeof(TerrainCounters) == 288);
 
 // Must match the push constants in terrain_select.comp.
 struct TerrainSelectConstants {

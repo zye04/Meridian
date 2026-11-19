@@ -53,12 +53,12 @@ void main() {
     // Selection lists coarse (far) levels first; drawing the list backwards
     // goes near to far, so early-Z rejects hidden terrain before shading.
     uint task = gl_NumWorkGroups.x - 1u - gl_WorkGroupID.x;
-    uint node = terrain.nodes.nodes[task / kTerrainTasksPerNode];
+    uvec2 node = terrain.nodes.nodes[task / kTerrainTasksPerNode];
     uint block = task % kTerrainTasksPerNode;
     uvec3 n = terrainDecodeNode(node);
     uint level = n.x;
     float quad = terrainNodeSize(level) / float(kTerrainNodeQuads);
-    vec2 nodeOrigin = terrainRootOrigin(terrain) + vec2(n.yz) * terrainNodeSize(level);
+    vec2 nodeOrigin = terrainNodeOrigin(terrain, level, n.yz);
     uvec2 blockOrigin = uvec2(block & 3u, block >> 2) * kBlockQuads;
 
     SetMeshOutputsEXT(kBlockVertices * kBlockVertices, 2u * kBlockQuads * kBlockQuads);
@@ -69,13 +69,14 @@ void main() {
         vec3 previous =
             terrainVertex(terrain, grid, local, level, quad, scene.previousCameraPosition);
 
-        vec4 relative = vec4(world - scene.cameraPosition, 1.0);
-        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * relative;
-        outRelativePosition[i] = relative.xyz;
+        vec3 relative = world - scene.cameraPosition;
+        vec4 displayed = displayedPosition(scene, relative);
+        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * displayed;
+        outRelativePosition[i] = relative;
         outNormal[i] = vec3(0.0, 1.0, 0.0);
-        outCurrentClip[i] = scene.currentViewProjection * relative;
+        outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *
-                             vec4(previous - scene.previousCameraPosition, 1.0);
+                             displayedPosition(scene, previous - scene.previousCameraPosition);
         outUv[i] = vec2(0.0);
         outTangent[i] = vec4(0.0);
         outMaterialIndex[i] = 0u;

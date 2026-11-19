@@ -63,7 +63,8 @@ Napf summit (-359, -465, 1406.7 m), looking at it past the sample models
 overview (3000 m above the ground) `1119 4354 -431 -1.55 -0.35`; across
 the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`;
 sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
---sun 0.9 0.05 -0.4`.
+--sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
+0`.
 `--scatter N` places N random Poly Haven models within 150 m of the start
 (fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
 startup ~60 s); over the scatter: `1119 1362 -431 -1.55 -0.25`. Debug
@@ -131,7 +132,7 @@ docs/decisions.md          technique decisions with sources
 
 Instance table upload (when changed) -> TLAS build over all instances ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
-indirect dispatch per quadtree level from the root, level 14, down to 0;
+indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the
 camera is within the next finer level's range, else emit to the terrain
 draw list) -> early cull (cull.comp phase 0: instances visible last frame, frustum test
@@ -170,6 +171,14 @@ images are shared between them, and barriers account for that.
   and pass that between stages, culling included. World positions are
   rebuilt only where they are needed (textures, shadow rays, atmosphere).
 - Motion vectors: UV units, `previous - current` (the DLSS convention).
+- Curvature is a display warp: the world is flat (gameplay, `heightAt`,
+  lighting, shadow rays, TLAS), but every rasterized vertex drops by
+  `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the
+  camera it is seen from, R the Atmosphere's bottomRadius), current and
+  previous position each with its own camera. Varyings carry the flat
+  relative position; only aerial perspective uses the displayed one.
+  Culling tests displayed bounds (`displayedSphere` in cull.glsl; terrain
+  boxes in terrain_select.comp); LOD distances stay flat.
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
   allocated); `MeshInfo` and `InstanceData` tables are on the GPU; the TLAS
   custom index is the instance index. Opaque/masked meshes are drawn as
@@ -238,7 +247,8 @@ images are shared between them, and barriers account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; the horizon is flat; the
+  leaks partial Vulkan state if it throws; above ~20 km altitude the
+  terrain's root square (1049 km) ends inside the horizon; the
   terrain's detail displacement (near the camera) casts no shadows (the
   march tests the bilinear heightfield).
   RT shadows trace full-detail BLAS while the raster draws LOD

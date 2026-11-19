@@ -33,20 +33,23 @@ vec2 terrainSampleOrigin(Terrain t) {
     return -0.5 * vec2(float(t.width - 1u), float(t.height - 1u)) * t.spacing;
 }
 
-// The root node is centered on the origin, shifted by less than one sample
-// spacing so that grid vertices at the data's spacing land on samples.
-vec2 terrainRootOrigin(Terrain t) {
+// World (x, z) of a node's corner. The root is centered on the origin,
+// shifted by less than one sample spacing so that grid vertices at the
+// data's spacing land on samples. The shift is added last: the root's
+// corner (~524 km out) would round it to centimeters.
+vec2 terrainNodeOrigin(Terrain t, uint level, uvec2 index) {
     vec2 o = terrainSampleOrigin(t);
-    return vec2(-0.5 * terrainNodeSize(t.rootLevel)) + (o - t.spacing * floor(o / t.spacing));
+    return (vec2(index) * terrainNodeSize(level) - 0.5 * terrainNodeSize(t.rootLevel)) +
+           (o - t.spacing * floor(o / t.spacing));
 }
 
-// Nodes are (level, x, z) with x, z < 2^(rootLevel - level) <= 2^14.
-uint terrainEncodeNode(uint level, uint x, uint z) {
-    return level | (x << 4) | (z << 18);
+// Nodes are (level, x, z) with x, z < 2^(rootLevel - level) <= 2^16.
+uvec2 terrainEncodeNode(uint level, uint x, uint z) {
+    return uvec2(level | (x << 5), z);
 }
 
-uvec3 terrainDecodeNode(uint node) {
-    return uvec3(node & 0xFu, (node >> 4) & 0x3FFFu, node >> 18);
+uvec3 terrainDecodeNode(uvec2 node) {
+    return uvec3(node.x & 0x1Fu, node.x >> 5, node.y);
 }
 
 // floor(i / n) for any sign; the float estimate is corrected because GPU

@@ -322,8 +322,8 @@ foliage that survives simplification).
     fit a GPU-driven pipeline); terrain through the cluster LOD path (the
     DAG of ~112M triangles would cost minutes and GBs to build).
   - https://github.com/fstrugar/CDLOD
-- **Numbers:** level 0 nodes are 16 m (0.5 m quads); the root is level 14
-  (262 km), centered on the origin. Level 0's LOD range is 80 m and
+- **Numbers:** level 0 nodes are 16 m (0.5 m quads); the root is level 16
+  (1049 km, see Curvature), centered on the origin. Level 0's LOD range is 80 m and
   ranges double per level. Morphing covers the last 30% of each level's
   span. The range is 5x the node size: at 64 m (4x) the no-crack margin
   was marginal (the L+1 neighbor could start morphing where level-L
@@ -409,3 +409,47 @@ foliage that survives simplification).
   every 1 m for 2 km, then 8 m): mean difference 0.017/255 (open),
   0.027/255 (ground at sunset), 0.032/255 (sunset), 0.039/255 (across the
   crop edge, grazing sun).
+
+## Curvature: display warp (2026-11-19)
+
+- **Rasterized positions bend; the world stays flat.** Every vertex
+  (terrain, clusters, blended) drops by d^2 / 2R below the camera (d =
+  horizontal distance, R = Atmosphere bottomRadius), so far terrain sinks
+  under the horizon and meets the atmosphere's spherical ground, and
+  objects stay on the ground they stand on at any distance. The common
+  "fake curvature" vertex shader trick, applied to everything drawn.
+  Lighting, the TLAS query and the heightfield march keep running in the
+  flat world, where the BLAS/TLAS and the heightfield live: varyings carry
+  the flat camera-relative position (so normals from its derivatives and
+  shadow ray origins are unwarped) and only aerial perspective uses the
+  displayed one. Rejected: a real spherical world (every system, the TLAS
+  and gameplay would need it, for a 15 km map where the drop is 4.4 m at
+  7.5 km).
+  - https://frozenfractal.com/blog/2025/12/12/around-the-world-28-scaling-up/
+  - https://leadwerks.com/community/blogs/entry/2595-terrain-deformation
+- **Motion vectors:** the previous clip position warps with the previous
+  camera, so the warp moving with the camera reprojects correctly (high
+  overview at 50 m/s: Laplacian ratio motion/still 0.857, Task 5 0.858).
+- **Culling** tests displayed bounds. Spheres drop by the drop at their
+  nearest horizontal distance and grow by the difference to the drop at
+  their farthest (conservative: every point drops between the two);
+  occlusion against last frame's pyramid uses last frame's camera for the
+  warp. Terrain boxes: min lowered by the drop at the farthest corner, max
+  by the drop at the nearest point. LOD selection (CDLOD ranges, cluster
+  error) stays on flat distances, matching the geomorph.
+- **Measured** (Debug, 2560x1440): from the summit (-359, 1408.7, -465)
+  the skyline drops ~5-6 px (median row 721 -> 726/727 at pitch 0, the
+  true horizon is ~23 px below center, hidden by terrain), no step or gap.
+  Near-field mean difference vs flat 0.07/255 (ground) and 0.08/255
+  (`--scatter 3000`), mostly the exposure shift from the changed horizon.
+- **Quadtree root raised from level 14 (262 km) to 16 (1049 km).** The
+  262 km root ended ~131 km out, which sank inside the true horizon
+  (sqrt(2Rh): 235 km at 4.35 km altitude) and showed as an edge against
+  the atmosphere's ground from ~5 km up. Level 16 reaches the horizon up
+  to ~20 km altitude. Cost: ~60 more coarse nodes drawn (ground view 393
+  -> 455 of 8192), selection +0.01 ms, scene pass unchanged within noise;
+  the summit and full-ground views are bit-identical (the extra
+  terrain is behind the horizon there). Level-0 indices now need 16 bits,
+  so nodes are two uints ((level | x << 5), z); the root's sub-sample
+  shift is added after the node offset, since at ~524 km float rounds it
+  to 3 cm.

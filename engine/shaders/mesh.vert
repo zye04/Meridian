@@ -19,9 +19,10 @@ void main() {
     Vertex vertex = pc.scene.vertices.vertices[gl_VertexIndex];
 
     vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
-    vec4 relative = vec4(world - pc.scene.cameraPosition, 1.0);
-    gl_Position = pc.scene.viewProjection * relative;
-    outRelativePosition = relative.xyz;
+    vec3 relative = world - pc.scene.cameraPosition;
+    vec4 displayed = displayedPosition(pc.scene, relative);
+    gl_Position = pc.scene.viewProjection * displayed;
+    outRelativePosition = relative;
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
     outNormal = normalMatrix * vertex.normal;
@@ -30,7 +31,7 @@ void main() {
     outMaterialIndex = mesh.materialIndex;
     outLodError = 0.0;
     // Static geometry for now: only the camera moves between frames.
-    outCurrentClip = pc.scene.currentViewProjection * relative;
+    outCurrentClip = pc.scene.currentViewProjection * displayed;
     outPreviousClip = pc.scene.previousViewProjection *
-                      vec4(world - pc.scene.previousCameraPosition, 1.0);
+                      displayedPosition(pc.scene, world - pc.scene.previousCameraPosition);
 }

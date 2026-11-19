@@ -65,6 +65,17 @@ float maxScale(mat4 transform) {
     return sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
 }
 
+// A sphere (relative to the camera it is seen from) as displayed under the
+// curvature warp: its points drop between the drop at its nearest and
+// farthest horizontal distance, so lower it by the first and grow it by the
+// difference.
+vec4 displayedSphere(vec3 center, float radius) {
+    float d = length(center.xz);
+    float nearDrop = curvatureDrop(cull.scene, vec3(max(d - radius, 0.0), 0.0, 0.0));
+    float farDrop = curvatureDrop(cull.scene, vec3(d + radius, 0.0, 0.0));
+    return vec4(center.x, center.y - nearDrop, center.z, radius + farDrop - nearDrop);
+}
+
 bool inFrustum(vec3 center, float radius) {
     bool inside = true;
     for (int i = 0; i < 6; ++i) {
@@ -99,9 +110,10 @@ bool projectSphere(vec3 c, float r, out vec4 bounds) {
 
 // Against the depth pyramid, as seen from `view` (the view its depth was
 // rendered with).
-// `relativeCenter` is relative to that view's camera.
-bool occluded(vec3 relativeCenter, float radius, mat4 view) {
-    vec3 c = (view * vec4(relativeCenter, 1.0)).xyz;
+// The sphere's center is relative to that view's camera.
+bool occluded(vec4 sphere, mat4 view) {
+    float radius = sphere.w;
+    vec3 c = (view * vec4(sphere.xyz, 1.0)).xyz;
     c.z = -c.z;
     vec4 bounds;
     if (!projectSphere(c, radius, bounds)) {

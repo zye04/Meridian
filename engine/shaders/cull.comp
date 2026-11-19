@@ -27,10 +27,10 @@ void main() {
         return;
     }
 
-    vec3 center = (instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz -
-                  cull.scene.cameraPosition;
-    float radius = mesh.boundsRadius * maxScale(instance.transform);
-    bool visibleInFrustum = inFrustum(center, radius);
+    vec4 sphere = displayedSphere((instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz -
+                                      cull.scene.cameraPosition,
+                                  mesh.boundsRadius * maxScale(instance.transform));
+    bool visibleInFrustum = inFrustum(sphere.xyz, sphere.w);
 
     bool wasVisible = cull.visibility.visible[index] != 0u;
     if (cull.phase == 0u) {
@@ -39,7 +39,7 @@ void main() {
         }
     } else {
         bool visible = visibleInFrustum &&
-                       (cull.occlusion == 0u || !occluded(center, radius, cull.scene.view));
+                       (cull.occlusion == 0u || !occluded(sphere, cull.scene.view));
         cull.visibility.visible[index] = visible ? 1u : 0u;
         // Instances processed in phase 0 aren't processed again.
         if (!visible || (cull.occlusion != 0u && wasVisible)) {

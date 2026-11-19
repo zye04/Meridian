@@ -29,7 +29,8 @@ const float kShadowRayLength = 20000.0;
 const float kGroundAlbedo = 0.1;
 const float kMinPerceptualRoughness = 0.045;
 
-// inRelativePosition + cameraPosition, set first thing in main(). World
+// inRelativePosition + cameraPosition, set first thing in main(); both are
+// in the flat world, before the curvature warp (common.glsl). World
 // positions place textures and the shadow rays; derivatives and distances
 // use the relative position, which keeps its precision far from the origin.
 vec3 worldPosition;
@@ -617,8 +618,9 @@ void main() {
     vec3 luminance = diffuseLight + specularLight;
 #endif
 
-    // Aerial perspective: haze between the camera and this point.
-    float distanceKm = length(inRelativePosition) * 0.001;
+    // Aerial perspective: haze between the camera and this point as
+    // displayed (inRelativePosition is the flat world's).
+    float distanceKm = length(displayedPosition(pc.scene, inRelativePosition).xyz) * 0.001;
     float slice = distanceKm / kAerialPerspectiveKmPerSlice;
     float weight = 1.0;
     if (slice < 0.5) {

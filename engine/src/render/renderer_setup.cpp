@@ -689,9 +689,10 @@ void Renderer::Impl::createScene() {
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
           VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
-  terrainLists = createBuffer(VkDeviceSize{3} * kMaxTerrainNodes * sizeof(uint32_t),
-                              kListUsage, 0);
-  terrain.nodes = terrainLists.address + VkDeviceSize{2} * kMaxTerrainNodes * sizeof(uint32_t);
+  // Nodes are two uints (terrain.glsl).
+  constexpr VkDeviceSize kNodeSize = 2 * sizeof(uint32_t);
+  terrainLists = createBuffer(VkDeviceSize{3} * kMaxTerrainNodes * kNodeSize, kListUsage, 0);
+  terrain.nodes = terrainLists.address + VkDeviceSize{2} * kMaxTerrainNodes * kNodeSize;
   // New instances start invisible; the late culling phase picks them up.
   submitNow([&](VkCommandBuffer cmd) {
     vkCmdFillBuffer(cmd, visibility.buffer, 0, VK_WHOLE_SIZE, 0);

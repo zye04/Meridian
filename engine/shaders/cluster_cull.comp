@@ -50,9 +50,10 @@ void retest() {
     uvec2 entry = cull.retest.entries[index];
     mat4 transform = cull.scene.instances.instances[entry.x].transform;
     ClusterInfo cluster = cull.scene.clusters.clusters[entry.y];
-    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz -
-                  cull.scene.cameraPosition;
-    if (!occluded(center, cluster.boundsRadius * maxScale(transform), cull.scene.view)) {
+    vec4 sphere = displayedSphere((transform * vec4(cluster.boundsCenter, 1.0)).xyz -
+                                      cull.scene.cameraPosition,
+                                  cluster.boundsRadius * maxScale(transform));
+    if (!occluded(sphere, cull.scene.view)) {
         draw(entry.x, entry.y, cluster.triangleCount);
     }
 }
@@ -93,14 +94,15 @@ void main() {
     }
 
     vec3 world = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
-    vec3 center = world - cull.scene.cameraPosition;
     float radius = cluster.boundsRadius * scale;
-    if (!inFrustum(center, radius)) {
+    vec4 sphere = displayedSphere(world - cull.scene.cameraPosition, radius);
+    if (!inFrustum(sphere.xyz, sphere.w)) {
         return;
     }
 
+    // Last frame's pyramid holds last frame's warp.
     if (cull.occlusion != 0u && cull.phase == 0u && cull.previousPyramid != 0u &&
-        occluded(world - cull.scene.previousCameraPosition, radius,
+        occluded(displayedSphere(world - cull.scene.previousCameraPosition, radius),
                  cull.scene.previousView)) {
         uint slot = atomicAdd(cull.counters.counters[kCounterRetest], 1u);
         if (slot >= kMaxRetestClusters) {
@@ -116,7 +118,7 @@ void main() {
         return;
     }
     if (cull.occlusion != 0u && cull.phase == 1u &&
-        occluded(center, radius, cull.scene.view)) {
+        occluded(sphere, cull.scene.view)) {
         return;
     }
     draw(instanceIndex, clusterIndex, cluster.triangleCount);

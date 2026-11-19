@@ -173,7 +173,7 @@ layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
 
 // Selected terrain nodes, (level, x, z) packed by terrain.glsl.
 layout(buffer_reference, std430) buffer TerrainNodeBuffer {
-    uint nodes[];
+    uvec2 nodes[];
 };
 
 // Must match GpuTerrain in C++. Layers: soil, needles, rock.
@@ -254,6 +254,18 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     ClusterTriangleBuffer clusterTriangles;
     DrawListBuffer drawLists;
 };
+
+// Curvature as a display warp: the world stays flat (lighting, shadow rays,
+// the TLAS), but rasterized positions drop by d^2 / 2R below the camera's
+// horizontal plane, so far ground sinks under the horizon and meets the
+// spherical atmosphere. `relative` is relative to the camera it is seen from.
+float curvatureDrop(SceneBuffer scene, vec3 relative) {
+    return dot(relative.xz, relative.xz) / (2000.0 * scene.atmosphere.bottomRadius);
+}
+
+vec4 displayedPosition(SceneBuffer scene, vec3 relative) {
+    return vec4(relative.x, relative.y - curvatureDrop(scene, relative), relative.z, 1.0);
+}
 
 // Shaders with their own push constants (cull.comp) define
 // MERIDIAN_CUSTOM_PUSH_CONSTANTS before including this file.

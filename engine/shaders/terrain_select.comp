@@ -15,8 +15,8 @@ layout(local_size_x = 64) in;
 // Must match TerrainCounters in C++: per level, dispatch arguments (3
 // uints each) over its input list, then each list's node count, then the
 // terrain draw's mesh task arguments.
-const uint kCounterNodeCount = 45u;
-const uint kCounterDrawTasks = 60u;
+const uint kCounterNodeCount = 51u;
+const uint kCounterDrawTasks = 68u;
 
 // Must match DrawCounters in C++ (see cull.glsl).
 const uint kDrawCounterOverflow = 35u;
@@ -52,7 +52,7 @@ void main() {
     SceneBuffer scene = select.scene;
     Terrain terrain = scene.terrain;
     uint level = select.level;
-    uint node;
+    uvec2 node;
     if (level == terrain.rootLevel) {
         if (gl_GlobalInvocationID.x > 0u) {
             return;
@@ -68,12 +68,18 @@ void main() {
 
     uvec3 n = terrainDecodeNode(node);
     float size = terrainNodeSize(level);
-    vec2 lo = terrainRootOrigin(terrain) + vec2(n.yz) * size;
+    vec2 lo = terrainNodeOrigin(terrain, level, n.yz);
     vec2 hi = lo + size;
     vec2 heights = terrainHeightBounds(terrain, lo, hi);
     vec3 boxLo = vec3(lo.x, heights.x, lo.y) - scene.cameraPosition;
     vec3 boxHi = vec3(hi.x, heights.y, hi.y) - scene.cameraPosition;
-    if (!boxInFrustum(boxLo, boxHi)) {
+    // Displayed under the curvature warp: the drop is smallest at the
+    // node's nearest point and largest at its farthest corner.
+    vec2 nearest = max(max(boxLo.xz, -boxHi.xz), vec2(0.0));
+    vec2 farthest = max(abs(boxLo.xz), abs(boxHi.xz));
+    float farDrop = curvatureDrop(scene, vec3(farthest.x, 0.0, farthest.y));
+    float nearDrop = curvatureDrop(scene, vec3(nearest.x, 0.0, nearest.y));
+    if (!boxInFrustum(boxLo - vec3(0.0, farDrop, 0.0), boxHi - vec3(0.0, nearDrop, 0.0))) {
         return;
     }
 
