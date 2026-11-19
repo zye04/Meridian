@@ -70,10 +70,23 @@ struct Renderer::Impl {
   VkPipeline meshPipeline = VK_NULL_HANDLE;
   VkPipeline maskedMeshPipeline = VK_NULL_HANDLE;
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
-  // Draw order scratch lists, reused every frame to avoid allocations.
-  std::vector<uint32_t> opaqueDraws;
-  std::vector<uint32_t> maskedDraws;
+  VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+  VkPipeline cullPipeline = VK_NULL_HANDLE;
+  // Blended instances sorted back to front each frame (reused storage).
   std::vector<std::pair<float, uint32_t>> blendedDraws;
+
+  // GPU scene: shared geometry pools, mesh and instance tables, and the
+  // indirect draw lists the cull pass writes.
+  Buffer vertexPool;
+  Buffer indexPool;
+  uint32_t vertexCount = 0;
+  uint32_t indexCount = 0;
+  Buffer meshTable;
+  Buffer instanceTable;
+  std::vector<InstanceData> instances;
+  bool instancesDirty = false;
+  Buffer drawCommands;
+  Buffer drawCounts;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -134,6 +147,7 @@ struct Renderer::Impl {
   void createDescriptors();
   void createPipelines();
   void createExposureBuffers();
+  void createScene();
   void createAtmosphere();
   void createMaterialSystem();
   void computeDfgLut();
@@ -154,8 +168,9 @@ struct Renderer::Impl {
   createAccelerationStructure(VkAccelerationStructureTypeKHR type,
                               VkDeviceSize size);
   void destroyAccelerationStructure(AccelerationStructure &as);
-  void buildTlas(VkCommandBuffer cmd, FrameData &frame,
-                 std::span<const DrawItem> items);
+  void buildTlas(VkCommandBuffer cmd, FrameData &frame);
+  void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
+  void cullInstances(VkCommandBuffer cmd, const FrameData &frame);
 
   template <typename Record> void submitNow(Record &&record);
 };

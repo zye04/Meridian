@@ -27,6 +27,10 @@ struct TextureId {
   uint32_t index = 0;
 };
 
+struct InstanceId {
+  uint32_t index = 0;
+};
+
 // How a material's alpha (base color alpha) is used, as in glTF.
 enum class AlphaMode {
   Opaque,
@@ -88,6 +92,7 @@ struct Lighting {
   Atmosphere atmosphere;
 };
 
+// A mesh placed in the world (what loadGltf returns per node primitive).
 struct DrawItem {
   MeshId mesh;
   Mat4 transform = Mat4::identity();
@@ -109,8 +114,11 @@ public:
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
   MeshId uploadMesh(const MeshData &mesh, MaterialId material);
 
-  void draw(const Camera &camera, const Lighting &lighting,
-            std::span<const DrawItem> items);
+  // Places a mesh in the world. Instances persist and live on the GPU, which
+  // culls them and builds the draw lists itself each frame.
+  InstanceId addInstance(MeshId mesh, const Mat4 &transform);
+
+  void draw(const Camera &camera, const Lighting &lighting);
 
   // GPU time of a recent frame, measured with timestamp queries.
   float gpuFrameMs() const;

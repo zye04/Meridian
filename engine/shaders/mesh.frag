@@ -11,6 +11,7 @@ layout(location = 2) in vec4 inCurrentClip;
 layout(location = 3) in vec4 inPreviousClip;
 layout(location = 4) in vec2 inUv;
 layout(location = 5) in vec4 inTangent;
+layout(location = 6) flat in uint inMaterialIndex;
 
 layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
@@ -56,22 +57,21 @@ const uint kShadowCasterMask = 0x01u;
 // ray query reports each candidate hit; we accept it only where the base
 // color alpha passes the material's cutoff.
 bool alphaTestCandidate(rayQueryEXT query) {
-    InstanceInfo instance = pc.scene.instances.instances[
+    InstanceData instance = pc.scene.instances.instances[
         rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+    MeshInfo mesh = pc.scene.meshes.meshes[instance.meshIndex];
     uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
     vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, false);
 
-    uint i0 = instance.indexBuffer.indices[primitive * 3u];
-    uint i1 = instance.indexBuffer.indices[primitive * 3u + 1u];
-    uint i2 = instance.indexBuffer.indices[primitive * 3u + 2u];
-    Vertex v0 = instance.vertexBuffer.vertices[i0];
-    Vertex v1 = instance.vertexBuffer.vertices[i1];
-    Vertex v2 = instance.vertexBuffer.vertices[i2];
+    uint first = mesh.firstIndex + primitive * 3u;
+    Vertex v0 = pc.scene.vertices.vertices[pc.scene.indices.indices[first] + mesh.vertexOffset];
+    Vertex v1 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 1u] + mesh.vertexOffset];
+    Vertex v2 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 2u] + mesh.vertexOffset];
     vec3 w = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics);
     vec2 uv = w.x * vec2(v0.uvX, v0.uvY) + w.y * vec2(v1.uvX, v1.uvY) +
               w.z * vec2(v2.uvX, v2.uvY);
 
-    Material m = pc.materialBuffer.materials[instance.materialIndex];
+    Material m = pc.scene.materials.materials[mesh.materialIndex];
     float alpha = m.baseColorFactor.a;
     if (m.baseColorTexture != kNoTexture) {
         alpha *= textureLod(textures[nonuniformEXT(m.baseColorTexture)], uv, 0.0).a;
@@ -200,7 +200,7 @@ vec3 fresnelSchlick(vec3 f0, float VoH) {
 }
 
 void main() {
-    Material material = pc.materialBuffer.materials[pc.materialIndex];
+    Material material = pc.scene.materials.materials[inMaterialIndex];
     vec3 normal = normalize(inNormal);
     if (!gl_FrontFacing) {
         normal = -normal;

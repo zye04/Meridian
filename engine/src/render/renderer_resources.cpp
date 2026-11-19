@@ -1,5 +1,6 @@
 #include "renderer_impl.h"
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
@@ -229,27 +230,64 @@ MaterialId Renderer::createMaterial(const MaterialData &material) {
 }
 
 MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
-  const VkDeviceSize vertexBytes = data.vertices.size() * sizeof(Vertex);
-  const VkDeviceSize indexBytes = data.indices.size() * sizeof(uint32_t);
+  const auto vertexCount = static_cast<uint32_t>(data.vertices.size());
+  const auto indexCount = static_cast<uint32_t>(data.indices.size());
+  if (impl_->vertexCount + vertexCount > kVertexPoolCapacity ||
+      impl_->indexCount + indexCount > kIndexPoolCapacity ||
+      impl_->meshes.size() == kMaxMeshes) {
+    throw std::runtime_error("geometry pools are full");
+  }
 
+  const MaterialData &materialData = impl_->materials[material.index];
   GpuMesh mesh;
-  mesh.indexCount = static_cast<uint32_t>(data.indices.size());
+  mesh.firstIndex = impl_->indexCount;
+  mesh.indexCount = indexCount;
+  mesh.vertexOffset = static_cast<int32_t>(impl_->vertexCount);
   mesh.materialIndex = material.index;
-  mesh.alphaMode = impl_->materials[material.index].alphaMode;
-  mesh.doubleSided = impl_->materials[material.index].doubleSided;
-  constexpr VkBufferUsageFlags kRayTracingInput =
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-  mesh.vertices = impl_->createBuffer(
-      vertexBytes,
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-          kRayTracingInput,
-      0);
-  mesh.indices = impl_->createBuffer(
-      indexBytes,
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-          kRayTracingInput,
-      0);
+  mesh.alphaMode = materialData.alphaMode;
+  mesh.doubleSided = materialData.doubleSided;
+  switch (mesh.alphaMode) {
+  case AlphaMode::Opaque:
+    mesh.drawBucket = mesh.doubleSided ? 1 : 0;
+    break;
+  case AlphaMode::Mask:
+    mesh.drawBucket = mesh.doubleSided ? 3 : 2;
+    break;
+  case AlphaMode::Blend:
+    mesh.drawBucket = kDrawBucketBlended;
+    break;
+  }
+  impl_->vertexCount += vertexCount;
+  impl_->indexCount += indexCount;
+
+  // Bounding sphere around the bounding box: cheap and good enough for
+  // culling.
+  Vec3 lo = data.vertices.front().position;
+  Vec3 hi = lo;
+  for (const Vertex &v : data.vertices) {
+    lo = {std::min(lo.x, v.position.x), std::min(lo.y, v.position.y),
+          std::min(lo.z, v.position.z)};
+    hi = {std::max(hi.x, v.position.x), std::max(hi.y, v.position.y),
+          std::max(hi.z, v.position.z)};
+  }
+  MeshInfo info;
+  info.boundsCenter = (lo + hi) * 0.5f;
+  for (const Vertex &v : data.vertices) {
+    info.boundsRadius =
+        std::max(info.boundsRadius, length(v.position - info.boundsCenter));
+  }
+  info.firstIndex = mesh.firstIndex;
+  info.indexCount = mesh.indexCount;
+  info.vertexOffset = mesh.vertexOffset;
+  info.materialIndex = mesh.materialIndex;
+  info.drawBucket = mesh.drawBucket;
+
+  const VkDeviceSize vertexBytes = VkDeviceSize{vertexCount} * sizeof(Vertex);
+  const VkDeviceSize indexBytes = VkDeviceSize{indexCount} * sizeof(uint32_t);
+  const VkDeviceSize vertexPoolOffset =
+      VkDeviceSize(mesh.vertexOffset) * sizeof(Vertex);
+  const VkDeviceSize indexPoolOffset =
+      VkDeviceSize{mesh.firstIndex} * sizeof(uint32_t);
 
   // GPU-only memory is fastest to read but the CPU can't write it, so the
   // data goes through a temporary CPU-visible staging buffer.
@@ -273,11 +311,11 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-  triangles.vertexData.deviceAddress = mesh.vertices.address;
+  triangles.vertexData.deviceAddress = impl_->vertexPool.address + vertexPoolOffset;
   triangles.vertexStride = sizeof(Vertex);
-  triangles.maxVertex = static_cast<uint32_t>(data.vertices.size() - 1);
+  triangles.maxVertex = vertexCount - 1;
   triangles.indexType = VK_INDEX_TYPE_UINT32;
-  triangles.indexData.deviceAddress = mesh.indices.address;
+  triangles.indexData.deviceAddress = impl_->indexPool.address + indexPoolOffset;
 
   VkAccelerationStructureBuildGeometryInfoKHR build{};
   build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -287,7 +325,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   build.geometryCount = 1;
   build.pGeometries = &geometry;
 
-  const uint32_t triangleCount = mesh.indexCount / 3;
+  const uint32_t triangleCount = indexCount / 3;
   VkAccelerationStructureBuildSizesInfoKHR sizes{};
   sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
   impl_->dispatch.getAccelerationStructureBuildSizesKHR(
@@ -305,19 +343,24 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   build.dstAccelerationStructure = mesh.blas.handle;
   build.scratchData.deviceAddress = scratch.address;
 
+  const auto meshIndex = static_cast<uint32_t>(impl_->meshes.size());
   impl_->submitNow([&](VkCommandBuffer cmd) {
-    VkBufferCopy vertexCopy{0, 0, vertexBytes};
-    vkCmdCopyBuffer(cmd, staging.buffer, mesh.vertices.buffer, 1, &vertexCopy);
-    VkBufferCopy indexCopy{vertexBytes, 0, indexBytes};
-    vkCmdCopyBuffer(cmd, staging.buffer, mesh.indices.buffer, 1, &indexCopy);
+    VkBufferCopy vertexCopy{0, vertexPoolOffset, vertexBytes};
+    vkCmdCopyBuffer(cmd, staging.buffer, impl_->vertexPool.buffer, 1, &vertexCopy);
+    VkBufferCopy indexCopy{vertexBytes, indexPoolOffset, indexBytes};
+    vkCmdCopyBuffer(cmd, staging.buffer, impl_->indexPool.buffer, 1, &indexCopy);
+    vkCmdUpdateBuffer(cmd, impl_->meshTable.buffer, meshIndex * sizeof(MeshInfo),
+                      sizeof(info), &info);
 
     VkMemoryBarrier2 copied{};
     copied.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_CLEAR_BIT;
     copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     copied.dstStageMask =
         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
         VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
         VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     copied.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                            VK_ACCESS_2_INDEX_READ_BIT |
@@ -356,7 +399,19 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   impl_->destroyBuffer(staging);
 
   impl_->meshes.push_back(mesh);
-  return {static_cast<uint32_t>(impl_->meshes.size() - 1)};
+  return {meshIndex};
+}
+
+InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
+  if (impl_->instances.size() == kMaxInstances) {
+    throw std::runtime_error("instance table is full");
+  }
+  InstanceData instance;
+  instance.transform = transform;
+  instance.meshIndex = mesh.index;
+  impl_->instances.push_back(instance);
+  impl_->instancesDirty = true;
+  return {static_cast<uint32_t>(impl_->instances.size() - 1)};
 }
 
 } // namespace meridian

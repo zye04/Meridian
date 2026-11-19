@@ -84,4 +84,27 @@ inline Mat4 perspective(float fovY, float aspect, float nearPlane) {
   return result;
 }
 
+// Frustum planes (Gribb & Hartmann) of a view-projection matrix, normalized,
+// as world-space (normal xyz, distance w) with the inside where
+// dot(normal, p) + w >= 0. Order: left, right, bottom, top, near, far. With
+// the reverse-Z infinite projection the far plane never rejects anything.
+inline void extractFrustumPlanes(const Mat4 &viewProjection,
+                                 float planes[6][4]) {
+  auto row = [&](int r, int c) { return viewProjection.m[c][r]; };
+  // Rows combined as r3 +/- r(axis); near is z <= w, far is z >= 0.
+  const int axes[6] = {0, 0, 1, 1, 2, 2};
+  const float signs[6] = {1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 0.0f};
+  for (int p = 0; p < 6; ++p) {
+    float plane[4];
+    for (int c = 0; c < 4; ++c) {
+      plane[c] = p == 5 ? row(2, c) : row(3, c) + signs[p] * row(axes[p], c);
+    }
+    const float length = std::sqrt(plane[0] * plane[0] + plane[1] * plane[1] +
+                                   plane[2] * plane[2]);
+    for (int c = 0; c < 4; ++c) {
+      planes[p][c] = length > 0.0f ? plane[c] / length : plane[c];
+    }
+  }
+}
+
 } // namespace meridian

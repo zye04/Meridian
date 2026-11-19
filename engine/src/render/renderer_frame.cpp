@@ -3,24 +3,76 @@
 #include <basisu_enc.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 namespace meridian {
 
-void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
-                               std::span<const DrawItem> items) {
-  if (items.size() > kMaxInstances) {
-    throw std::runtime_error("too many draw items for the TLAS");
-  }
 
-  auto *instances = static_cast<VkAccelerationStructureInstanceKHR *>(
+// Writes the CPU instance list to the GPU instance table when it changed.
+// The table is shared by both frames in flight, so the copy waits for the
+// previous frame's reads.
+void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
+  if (!instancesDirty) {
+    return;
+  }
+  const VkDeviceSize bytes = instances.size() * sizeof(InstanceData);
+  std::memcpy(frame.instanceStaging.mapped, instances.data(), bytes);
+  check(vmaFlushAllocation(allocator, frame.instanceStaging.allocation, 0, bytes),
+        "vmaFlushAllocation");
+
+  constexpr VkPipelineStageFlags2 kReaders =
+      VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  memoryBarrier(cmd, kReaders, 0, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+  VkBufferCopy copy{0, 0, bytes};
+  vkCmdCopyBuffer(cmd, frame.instanceStaging.buffer, instanceTable.buffer, 1,
+                  &copy);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT, kReaders,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+  instancesDirty = false;
+}
+
+// Frustum-culls every instance on the GPU and fills the indirect draw lists.
+void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame) {
+  // The draw lists are shared by both frames in flight.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, 0,
+                VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  vkCmdFillBuffer(cmd, drawCounts.buffer, 0, VK_WHOLE_SIZE, 0);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+
+  CullConstants constants;
+  constants.sceneBuffer = frame.sceneBuffer.address;
+  constants.drawCommands = drawCommands.address;
+  constants.drawCounts = drawCounts.address;
+  constants.bucketCapacity = kMaxInstances;
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
+  vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                     sizeof(constants), &constants);
+  vkCmdDispatch(cmd, (static_cast<uint32_t>(instances.size()) + 63) / 64, 1, 1);
+
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+}
+
+// Rebuilds the TLAS over all instances (including those outside the view:
+// they still cast shadows into it).
+void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
+  auto *tlasInstances = static_cast<VkAccelerationStructureInstanceKHR *>(
       frame.instanceBuffer.mapped);
-  auto *infos = static_cast<InstanceInfo *>(frame.instanceInfoBuffer.mapped);
-  for (size_t i = 0; i < items.size(); ++i) {
-    const GpuMesh &mesh = meshes[items[i].mesh.index];
-    infos[i] = {mesh.vertices.address, mesh.indices.address, mesh.materialIndex};
-    const Mat4 &m = items[i].transform;
+  for (size_t i = 0; i < instances.size(); ++i) {
+    const GpuMesh &mesh = meshes[instances[i].meshIndex];
+    const Mat4 &m = instances[i].transform;
     VkAccelerationStructureInstanceKHR instance{};
     // Vulkan wants a row-major 3x4 matrix; Mat4 is column-major.
     for (int row = 0; row < 3; ++row) {
@@ -33,12 +85,9 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
                                                        : kShadowCasterMask;
     instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
     instance.accelerationStructureReference = mesh.blas.address;
-    instances[i] = instance;
+    tlasInstances[i] = instance;
   }
   check(vmaFlushAllocation(allocator, frame.instanceBuffer.allocation, 0,
-                           VK_WHOLE_SIZE),
-        "vmaFlushAllocation");
-  check(vmaFlushAllocation(allocator, frame.instanceInfoBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
@@ -60,7 +109,7 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame,
   build.scratchData.deviceAddress = frame.tlasScratch.address;
 
   VkAccelerationStructureBuildRangeInfoKHR range{};
-  range.primitiveCount = static_cast<uint32_t>(items.size());
+  range.primitiveCount = static_cast<uint32_t>(instances.size());
   const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
   {
     DriverLeakScope driverLeak;
@@ -89,8 +138,7 @@ void Renderer::requestCapture(const std::filesystem::path &path) {
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
 
-void Renderer::draw(const Camera &camera, const Lighting &lighting,
-                    std::span<const DrawItem> items) {
+void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   VkDevice dev = impl_->device.device;
 
   int width = 0;
@@ -177,7 +225,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.tlas = frame.tlas.address;
-  scene.instances = frame.instanceInfoBuffer.address;
+  scene.vertices = impl_->vertexPool.address;
+  scene.indices = impl_->indexPool.address;
+  scene.meshes = impl_->meshTable.address;
+  scene.instances = impl_->instanceTable.address;
+  scene.materials = impl_->materialBuffer.address;
+  scene.instanceCount = static_cast<uint32_t>(impl_->instances.size());
+  extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -201,7 +255,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   viewport.maxDepth = 1.0f;
   VkRect2D scissor = {{0, 0}, extent};
 
-  impl_->buildTlas(cmd, frame, items);
+  impl_->uploadInstances(cmd, frame);
+  impl_->buildTlas(cmd, frame);
+  impl_->cullInstances(cmd, frame);
 
   // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
 
@@ -329,62 +385,43 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                      sizeof(scenePush), &scenePush);
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  // Opaque first, then alpha-masked, then blended back to front (each
-  // blended surface must composite over everything behind it).
-  impl_->opaqueDraws.clear();
-  impl_->maskedDraws.clear();
+  // The GPU-culled indirect draw lists: opaque, then alpha-masked, each
+  // single- and double-sided.
+  vkCmdBindIndexBuffer(cmd, impl_->indexPool.buffer, 0, VK_INDEX_TYPE_UINT32);
+  constexpr VkDeviceSize kCommandSize = sizeof(VkDrawIndexedIndirectCommand);
+  for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
+    const bool masked = bucket >= 2;
+    const bool doubleSided = bucket % 2 == 1;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      masked ? impl_->maskedMeshPipeline : impl_->meshPipeline);
+    vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+    vkCmdDrawIndexedIndirectCount(
+        cmd, impl_->drawCommands.buffer, bucket * kMaxInstances * kCommandSize,
+        impl_->drawCounts.buffer, bucket * sizeof(uint32_t), kMaxInstances,
+        kCommandSize);
+  }
+
+  // Blended last, back to front, from the CPU: each surface must composite
+  // over everything behind it, and there are few of them.
   impl_->blendedDraws.clear();
-  for (uint32_t i = 0; i < items.size(); ++i) {
-    switch (impl_->meshes[items[i].mesh.index].alphaMode) {
-    case AlphaMode::Opaque:
-      impl_->opaqueDraws.push_back(i);
-      break;
-    case AlphaMode::Mask:
-      impl_->maskedDraws.push_back(i);
-      break;
-    case AlphaMode::Blend: {
-      const Mat4 &t = items[i].transform;
-      const Vec3 position = {t.m[3][0], t.m[3][1], t.m[3][2]};
-      const Vec3 offset = position - camera.position;
+  for (uint32_t i = 0; i < impl_->instances.size(); ++i) {
+    const InstanceData &instance = impl_->instances[i];
+    if (impl_->meshes[instance.meshIndex].drawBucket == kDrawBucketBlended) {
+      const Mat4 &t = instance.transform;
+      const Vec3 offset = Vec3{t.m[3][0], t.m[3][1], t.m[3][2]} - camera.position;
       impl_->blendedDraws.emplace_back(dot(offset, offset), i);
-      break;
-    }
     }
   }
   std::sort(impl_->blendedDraws.begin(), impl_->blendedDraws.end(),
             [](const auto &a, const auto &b) { return a.first > b.first; });
-
-  auto drawItem = [&](uint32_t index) {
-    const DrawItem &item = items[index];
-    const GpuMesh &mesh = impl_->meshes[item.mesh.index];
-
-    PushConstants push;
-    push.model = item.transform;
-    push.vertexBuffer = mesh.vertices.address;
-    push.sceneBuffer = frame.sceneBuffer.address;
-    push.materialBuffer = impl_->materialBuffer.address;
-    push.materialIndex = mesh.materialIndex;
-    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
-                       sizeof(push), &push);
-    vkCmdSetCullMode(cmd, mesh.doubleSided ? VK_CULL_MODE_NONE
-                                           : VK_CULL_MODE_BACK_BIT);
-    vkCmdBindIndexBuffer(cmd, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
-  };
-
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->meshPipeline);
-  for (uint32_t index : impl_->opaqueDraws) {
-    drawItem(index);
-  }
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    impl_->maskedMeshPipeline);
-  for (uint32_t index : impl_->maskedDraws) {
-    drawItem(index);
-  }
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     impl_->blendedMeshPipeline);
   for (const auto &[distance, index] : impl_->blendedDraws) {
-    drawItem(index);
+    const GpuMesh &mesh = impl_->meshes[impl_->instances[index].meshIndex];
+    vkCmdSetCullMode(cmd, mesh.doubleSided ? VK_CULL_MODE_NONE
+                                           : VK_CULL_MODE_BACK_BIT);
+    vkCmdDrawIndexed(cmd, mesh.indexCount, 1, mesh.firstIndex, mesh.vertexOffset,
+                     index);
   }
 
   vkCmdEndRendering(cmd);

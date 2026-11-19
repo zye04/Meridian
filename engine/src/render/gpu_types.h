@@ -37,7 +37,17 @@ constexpr uint32_t kMaxMaterials = 16384;
 constexpr uint32_t kMaxTextures = 16384;
 constexpr uint32_t kDfgLutSize = 128;
 // Upper bound on draw items per frame, sizing each frame's TLAS.
-constexpr uint32_t kMaxInstances = 4096;
+constexpr uint32_t kMaxInstances = 65536;
+// Shared geometry pools (bump-allocated; real streaming will need an
+// allocator with frees): 4M vertices = 192 MB, 16M indices = 64 MB.
+constexpr uint32_t kVertexPoolCapacity = 4u << 20;
+constexpr uint32_t kIndexPoolCapacity = 16u << 20;
+constexpr uint32_t kMaxMeshes = 65536;
+// Indirect draw lists: opaque, opaque double-sided, masked, masked
+// double-sided. Blended meshes (kDrawBucketBlended) are drawn from the CPU,
+// sorted back to front.
+constexpr uint32_t kDrawBuckets = 4;
+constexpr uint32_t kDrawBucketBlended = 4;
 
 #ifdef NDEBUG
 constexpr bool kEnableValidation = false;
@@ -64,11 +74,14 @@ struct AccelerationStructure {
   VkDeviceAddress address = 0;
 };
 
+// CPU-side record of an uploaded mesh; its geometry is a range of the shared
+// pools.
 struct GpuMesh {
-  Buffer vertices;
-  Buffer indices;
+  uint32_t firstIndex = 0;
   uint32_t indexCount = 0;
+  int32_t vertexOffset = 0;
   uint32_t materialIndex = 0;
+  uint32_t drawBucket = 0;
   AlphaMode alphaMode = AlphaMode::Opaque;
   bool doubleSided = false;
   // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
@@ -133,19 +146,48 @@ struct SceneData {
   VkDeviceAddress exposure = 0;
   VkDeviceAddress skyIrradiance = 0;
   float inverseResolution[2] = {};
+  VkDeviceAddress vertices = 0;
+  VkDeviceAddress indices = 0;
+  VkDeviceAddress meshes = 0;
   VkDeviceAddress instances = 0;
-  uint64_t pad2 = 0;
+  VkDeviceAddress materials = 0;
+  uint32_t instanceCount = 0;
+  uint32_t pad1 = 0;
+  float frustumPlanes[6][4] = {};
   GpuAtmosphere atmosphere;
 };
-static_assert(sizeof(SceneData) == 400);
+static_assert(sizeof(SceneData) == 528);
 
-// Must match InstanceInfo in common.glsl.
-struct InstanceInfo {
-  VkDeviceAddress vertexBuffer = 0;
-  VkDeviceAddress indexBuffer = 0;
+// Must match MeshInfo in common.glsl.
+struct MeshInfo {
+  Vec3 boundsCenter;
+  float boundsRadius = 0.0f;
+  uint32_t firstIndex = 0;
+  uint32_t indexCount = 0;
+  int32_t vertexOffset = 0;
   uint32_t materialIndex = 0;
+  uint32_t drawBucket = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(MeshInfo) == 48);
+
+// Must match InstanceData in common.glsl.
+struct InstanceData {
+  Mat4 transform;
+  uint32_t meshIndex = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(InstanceData) == 80);
+
+// Must match CullConstants in cull.comp.
+struct CullConstants {
+  VkDeviceAddress sceneBuffer = 0;
+  VkDeviceAddress drawCommands = 0;
+  VkDeviceAddress drawCounts = 0;
+  uint32_t bucketCapacity = 0;
   uint32_t pad = 0;
 };
+static_assert(sizeof(CullConstants) == 32);
 
 // TLAS instance masks: shadow rays only test shadow casters.
 constexpr uint8_t kShadowCasterMask = 0x01;
@@ -171,14 +213,10 @@ static_assert(sizeof(PostConstants) == 32);
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
-  Mat4 model;
-  VkDeviceAddress vertexBuffer = 0;
   VkDeviceAddress sceneBuffer = 0;
-  VkDeviceAddress materialBuffer = 0;
-  uint32_t materialIndex = 0;
-  uint32_t pad = 0;
+  uint64_t pad = 0;
 };
-static_assert(sizeof(PushConstants) == 96);
+static_assert(sizeof(PushConstants) == 16);
 
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
@@ -236,12 +274,12 @@ struct FrameData {
   VkFence renderFence = VK_NULL_HANDLE;
   VkSemaphore imageAvailable = VK_NULL_HANDLE;
   Buffer sceneBuffer;
-  // Top-level acceleration structure over this frame's draw items, rebuilt
-  // every frame from the instance buffer.
+  // Top-level acceleration structure over all instances, rebuilt every
+  // frame from the TLAS instance buffer.
   Buffer instanceBuffer;
-  // InstanceInfo per TLAS instance, for alpha-tested shadow rays.
-  Buffer instanceInfoBuffer;
   AccelerationStructure tlas;
+  // CPU-visible copy of the instance table, uploaded when instances change.
+  Buffer instanceStaging;
   Buffer tlasScratch;
 };
 

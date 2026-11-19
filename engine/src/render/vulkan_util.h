@@ -36,6 +36,12 @@ struct ImageBarrier {
 
 void transitionImage(VkCommandBuffer cmd, const ImageBarrier &b);
 
+// A global memory barrier: everything before (srcStage/srcAccess) happens
+// and is visible before everything after (dstStage/dstAccess).
+void memoryBarrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage,
+                   VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
+                   VkAccessFlags2 dstAccess);
+
 // Loads build/shaders/<name>.spv (see add_shader() in engine/CMakeLists.txt).
 VkShaderModule loadShader(VkDevice device, const std::string &name);
 

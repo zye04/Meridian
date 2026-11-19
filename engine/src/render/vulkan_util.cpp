@@ -60,6 +60,22 @@ void transitionImage(VkCommandBuffer cmd, const ImageBarrier &b) {
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
+void memoryBarrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage,
+                   VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
+                   VkAccessFlags2 dstAccess) {
+  VkMemoryBarrier2 barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  barrier.srcStageMask = srcStage;
+  barrier.srcAccessMask = srcAccess;
+  barrier.dstStageMask = dstStage;
+  barrier.dstAccessMask = dstAccess;
+  VkDependencyInfo dependency{};
+  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  dependency.memoryBarrierCount = 1;
+  dependency.pMemoryBarriers = &barrier;
+  vkCmdPipelineBarrier2(cmd, &dependency);
+}
+
 VkShaderModule loadShader(VkDevice device, const std::string &name) {
   std::string path = std::string(MERIDIAN_SHADER_DIR) + "/" + name + ".spv";
   std::ifstream file(path, std::ios::binary | std::ios::ate);

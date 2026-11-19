@@ -49,12 +49,18 @@ Useful views: default start `0 300 700 0 -0.35`; sample models
 - GPU ms are only comparable at the same window size. Hyprland tiling
   changes the size, so the capture resolution varies between runs.
 - Interactive runs pick up the user's mouse; use capture runs for checks.
+- Two captures of the same view never match bit for bit (per-frame noise in
+  soft shadows and TAA); compare the mean difference (~0.02/255), not exact
+  pixels.
+- Prefer unit tests for math (e.g. frustum planes in tests/mat4_test.cpp)
+  over visual checks.
 
 ## Layout
 
 ```
-engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
-                           Atmosphere, MaterialData), camera.h, mesh.h,
+engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
+                           createMaterial, uploadTexture, addInstance, draw;
+                           Lighting, Atmosphere, MaterialData), camera.h, mesh.h,
                            model.h (loadGltf), texture.h (loadKtx2),
                            terrain.h, window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
@@ -64,7 +70,8 @@ engine/src/render/         renderer internals:
   renderer_setup.cpp       init/teardown: swapchain, frames, descriptors,
                            pipelines, atmosphere, materials
   renderer_resources.cpp   buffers, images, BLAS, texture/material/mesh upload
-  renderer_frame.cpp       per-frame: TLAS build, all passes in draw()
+  renderer_frame.cpp       per-frame: instance upload, TLAS, GPU culling,
+                           all passes in draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            terrain.cpp, window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below)
@@ -76,10 +83,13 @@ docs/decisions.md          technique decisions with sources
 
 ## Frame (renderer_frame.cpp, in order)
 
-TLAS build -> atmosphere LUTs (transmittance + multi-scattering only when the
+Instance table upload (when changed) -> TLAS build over all instances ->
+GPU frustum culling (cull.comp fills 4 indirect draw lists: opaque/masked x
+single/double-sided) -> atmosphere LUTs (transmittance + multi-scattering only when the
 Atmosphere changes; sky-view, aerial perspective, sky irradiance every
 frame) -> scene pass into HDR RGBA16F + RG16F motion + D32 depth (sky
-fullscreen, then opaque, masked, blended back to front) -> TAA resolve
+fullscreen, then vkCmdDrawIndexedIndirectCount per list, then blended
+instances CPU-sorted back to front) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> AgX
 tonemap into the swapchain. 2 frames in flight; the HDR/depth/LUT/history
 images are shared between them, and barriers account for that.
@@ -93,7 +103,11 @@ images are shared between them, and barriers account for that.
   far plane (depth 1 = near; compare GREATER_OR_EQUAL; clear to 0).
   Mat4 is column-major `m[column][row]`.
 - Motion vectors: UV units, `previous - current` (the DLSS convention).
-- GPU data by buffer device address (push constants carry the addresses).
+- GPU-driven scene: all meshes live in shared vertex/index pools (bump
+  allocated); `MeshInfo` and `InstanceData` tables are on the GPU;
+  `gl_InstanceIndex` = instance index (firstInstance), and the TLAS custom
+  index is the same. Push constants carry only the scene buffer address;
+  everything else is reached through it (buffer device addresses).
   Descriptor sets: scene layout set 0 = atmosphere LUTs, set 1 = DFG LUT
   + bindless `textures[]`; post layout set 0 = HDR/motion/history (two
   ping-pong sets).

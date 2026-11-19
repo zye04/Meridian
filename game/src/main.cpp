@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
   meridian::MeshId terrain =
       renderer.uploadMesh(meridian::generateTerrain({}),
                           renderer.createMaterial(terrainMaterial));
-  std::vector<meridian::DrawItem> scene = {{terrain}};
+  renderer.addInstance(terrain, meridian::Mat4::identity());
 
   // Sample assets from tools/fetch-sample-assets.sh (AlphaBlendModeTest must
   // be cooked first), placed a few meters in front of the starting camera.
@@ -141,9 +141,8 @@ int main(int argc, char **argv) {
     }
     meridian::Model model = meridian::loadGltf(renderer, path);
     const meridian::Mat4 placement = meridian::translation(sample.position);
-    for (meridian::DrawItem item : model.drawItems) {
-      item.transform = placement * item.transform;
-      scene.push_back(item);
+    for (const meridian::DrawItem &item : model.drawItems) {
+      renderer.addInstance(item.mesh, placement * item.transform);
     }
   }
 
@@ -186,7 +185,7 @@ int main(int argc, char **argv) {
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
     }
-    renderer.draw(camera, lighting, scene);
+    renderer.draw(camera, lighting);
 
     ++frames;
     gpuMsSum += renderer.gpuFrameMs();

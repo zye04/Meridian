@@ -1,0 +1,65 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+
+// GPU-driven culling: one thread per instance tests its bounding sphere
+// against the view frustum and appends a draw command for the survivors to
+// its draw bucket. The scene pass consumes the buckets with
+// vkCmdDrawIndexedIndirectCount, so the CPU never touches per-object work.
+
+layout(local_size_x = 64) in;
+
+// Must match VkDrawIndexedIndirectCommand.
+struct DrawCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
+layout(buffer_reference, std430) writeonly buffer DrawCommandBuffer {
+    DrawCommand commands[];
+};
+
+layout(buffer_reference, std430) buffer DrawCountBuffer {
+    uint counts[];
+};
+
+// Must match CullConstants in C++.
+layout(push_constant) uniform CullConstants {
+    SceneBuffer scene;
+    DrawCommandBuffer commands;
+    DrawCountBuffer counts;
+    // Commands per bucket; bucket b starts at commands[b * capacity].
+    uint bucketCapacity;
+} cull;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= cull.scene.instanceCount) {
+        return;
+    }
+    InstanceData instance = cull.scene.instances.instances[index];
+    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
+    if (mesh.drawBucket == kDrawBucketBlended) {
+        return;
+    }
+
+    vec3 center = (instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz;
+    // Conservative radius under non-uniform scale: the largest axis scale.
+    mat3 m = mat3(instance.transform);
+    float scale = sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
+    float radius = mesh.boundsRadius * scale;
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = cull.scene.frustumPlanes[i];
+        if (dot(plane.xyz, center) + plane.w < -radius) {
+            return;
+        }
+    }
+
+    uint slot = atomicAdd(cull.counts.counts[mesh.drawBucket], 1u);
+    cull.commands.commands[mesh.drawBucket * cull.bucketCapacity + slot] =
+        DrawCommand(mesh.indexCount, 1u, mesh.firstIndex, mesh.vertexOffset, index);
+}

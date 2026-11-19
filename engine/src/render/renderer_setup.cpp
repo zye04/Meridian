@@ -149,10 +149,8 @@ void Renderer::Impl::createFrames() {
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
-    frame.instanceInfoBuffer = createBuffer(
-        kMaxInstances * sizeof(InstanceInfo),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+    frame.instanceStaging = createBuffer(
+        kMaxInstances * sizeof(InstanceData), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
@@ -499,6 +497,37 @@ void Renderer::Impl::computeDfgLut() {
   vkDestroyPipeline(device.device, pipeline, nullptr);
 }
 
+void Renderer::Impl::createScene() {
+  constexpr VkBufferUsageFlags kGeometryUsage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+  vertexPool = createBuffer(VkDeviceSize{kVertexPoolCapacity} * sizeof(Vertex),
+                            kGeometryUsage, 0);
+  indexPool = createBuffer(VkDeviceSize{kIndexPoolCapacity} * sizeof(uint32_t),
+                           kGeometryUsage | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0);
+
+  constexpr VkBufferUsageFlags kTableUsage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  meshTable = createBuffer(kMaxMeshes * sizeof(MeshInfo), kTableUsage, 0);
+  instanceTable =
+      createBuffer(kMaxInstances * sizeof(InstanceData), kTableUsage, 0);
+
+  drawCommands = createBuffer(
+      VkDeviceSize{kDrawBuckets} * kMaxInstances *
+          sizeof(VkDrawIndexedIndirectCommand),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+  drawCounts = createBuffer(
+      kDrawBuckets * sizeof(uint32_t),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+}
+
 void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
@@ -548,6 +577,16 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
 
   taaPipeline = createComputePipeline(dev, "taa.comp", postLayout);
+
+  VkPushConstantRange cullPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                    sizeof(CullConstants)};
+  VkPipelineLayoutCreateInfo cullLayoutInfo{};
+  cullLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  cullLayoutInfo.pushConstantRangeCount = 1;
+  cullLayoutInfo.pPushConstantRanges = &cullPushRange;
+  check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),
+        "vkCreatePipelineLayout");
+  cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
   histogramPipeline =
       createComputePipeline(dev, "histogram.comp", postLayout);
   exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
@@ -604,6 +643,10 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features.samplerAnisotropy = VK_TRUE;
   // Blended surfaces blend color but leave motion vectors untouched.
   features.independentBlend = VK_TRUE;
+  // GPU-driven rendering: many indirect draws per call, each pointing at its
+  // instance through firstInstance.
+  features.multiDrawIndirect = VK_TRUE;
+  features.drawIndirectFirstInstance = VK_TRUE;
 
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -615,6 +658,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features12.descriptorBindingPartiallyBound = VK_TRUE;
   features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
   features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+  // The GPU culling pass decides how many draws each list holds.
+  features12.drawIndirectCount = VK_TRUE;
 
   VkPhysicalDeviceVulkan13Features features13{};
   features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -695,6 +740,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->computeDfgLut();
   impl_->createExposureBuffers();
   impl_->createAtmosphere();
+  impl_->createScene();
   impl_->lastDrawTime = std::chrono::steady_clock::now();
 
   std::cout << "GPU: " << physical.value().name << "\n";
@@ -706,8 +752,11 @@ Renderer::~Renderer() {
 
   for (GpuMesh &mesh : impl_->meshes) {
     impl_->destroyAccelerationStructure(mesh.blas);
-    impl_->destroyBuffer(mesh.vertices);
-    impl_->destroyBuffer(mesh.indices);
+  }
+  for (Buffer *buffer :
+       {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
+        &impl_->instanceTable, &impl_->drawCommands, &impl_->drawCounts}) {
+    impl_->destroyBuffer(*buffer);
   }
 
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
@@ -719,6 +768,8 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->transmittanceLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->exposurePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
@@ -733,7 +784,7 @@ Renderer::~Renderer() {
     impl_->destroyAccelerationStructure(frame.tlas);
     impl_->destroyBuffer(frame.tlasScratch);
     impl_->destroyBuffer(frame.instanceBuffer);
-    impl_->destroyBuffer(frame.instanceInfoBuffer);
+    impl_->destroyBuffer(frame.instanceStaging);
     impl_->destroyBuffer(frame.sceneBuffer);
     vkDestroySemaphore(dev, frame.imageAvailable, nullptr);
     vkDestroyFence(dev, frame.renderFence, nullptr);

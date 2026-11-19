@@ -66,7 +66,7 @@ foreach(source
     mesh.vert mesh.frag fullscreen.vert tonemap.frag taa.comp histogram.comp
     exposure.comp sky.vert sky.frag transmittance_lut.comp
     multiscattering_lut.comp sky_view_lut.comp aerial_perspective_lut.comp
-    sky_irradiance.comp dfg_lut.comp)
+    sky_irradiance.comp dfg_lut.comp cull.comp)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK)

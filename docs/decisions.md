@@ -97,3 +97,20 @@ sources. Check here before re-researching a topic.
   disable early-Z for opaque draws), premultiplied blending so glass keeps
   full specular, no motion writes for blended surfaces, and back-to-front
   sorting by object origin.
+
+## GPU-driven rendering (phase 1, 2026-11-19)
+
+- **Persistent GPU scene and shared geometry pools**, culled by a
+  **compute pass that appends draw commands, drawn with
+  vkCmdDrawIndexedIndirectCount**, the standard 2025-26 GPU-driven
+  pipeline. Instances persist (`addInstance`); the CPU does no per-object
+  work besides TLAS instance writes and sorting blended instances.
+  - https://deepwiki.com/vblanco20-1/vulkan-guide/9-extra-chapter:-gpu-driven-rendering
+  - https://daslang.io/doc/reference/tutorials/vulkan/12_gpu_driven.html
+- Draw lists split by pipeline and cull mode (opaque/masked x single/double
+  sided), so one indirect call covers each. Blended stays CPU-sorted.
+- Next: phase 2, two-phase Hi-Z occlusion culling (depth pyramid; last
+  frame's visible set plus a re-test); phase 3, meshlets / mesh shaders and
+  cluster culling (benchmarks: williscool.com task/mesh vs indirect).
+  - https://www.williscool.com/technical/task-mesh-benchmarking/task-mesh-benchmarking.md.html
+

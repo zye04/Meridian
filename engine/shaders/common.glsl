@@ -45,17 +45,42 @@ layout(buffer_reference, std430) readonly buffer IndexBuffer {
     uint indices[];
 };
 
-// Per TLAS instance (instance custom index), so ray queries can look up the
-// surface they hit. Must match InstanceInfo in C++.
-struct InstanceInfo {
-    VertexBuffer vertexBuffer;
-    IndexBuffer indexBuffer;
+// One per uploaded mesh. Its geometry lives in the shared vertex and index
+// pools. Must match MeshInfo in C++.
+const uint kDrawBucketBlended = 4u;
+
+struct MeshInfo {
+    // Bounding sphere in model space, for culling.
+    vec3 boundsCenter;
+    float boundsRadius;
+    uint firstIndex;
+    uint indexCount;
+    int vertexOffset;
     uint materialIndex;
-    uint pad;
+    // Indirect draw list (see cull.comp); kDrawBucketBlended is drawn from
+    // the CPU, sorted back to front.
+    uint drawBucket;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+layout(buffer_reference, std430) readonly buffer MeshBuffer {
+    MeshInfo meshes[];
+};
+
+// One per placed instance; gl_InstanceIndex and the TLAS instance custom
+// index both refer to it. Must match InstanceData in C++.
+struct InstanceData {
+    mat4 transform;
+    uint meshIndex;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 layout(buffer_reference, std430) readonly buffer InstanceBuffer {
-    InstanceInfo instances[];
+    InstanceData instances[];
 };
 
 // Must match AtmosphereParameters in C++. Distances in km, coefficients
@@ -104,15 +129,23 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     ExposureBuffer exposure;
     SkyIrradianceBuffer skyIrradiance;
     vec2 inverseResolution;
+    // Shared geometry pools and the GPU scene tables.
+    VertexBuffer vertices;
+    IndexBuffer indices;
+    MeshBuffer meshes;
     InstanceBuffer instances;
-    uvec2 pad2;
+    MaterialBuffer materials;
+    uint instanceCount;
+    uint pad1;
+    // World-space planes (xyz normal, w distance), inside where >= 0.
+    vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
 };
 
+// Shaders with their own push constants (cull.comp) define
+// MERIDIAN_CUSTOM_PUSH_CONSTANTS before including this file.
+#ifndef MERIDIAN_CUSTOM_PUSH_CONSTANTS
 layout(push_constant) uniform PushConstants {
-    mat4 model;
-    VertexBuffer vertexBuffer;
     SceneBuffer scene;
-    MaterialBuffer materialBuffer;
-    uint materialIndex;
 } pc;
+#endif

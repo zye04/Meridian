@@ -63,3 +63,36 @@ TEST_CASE("perspective flips Y for Vulkan") {
   Clip above = project(proj, {0, 1, -5});
   CHECK(above.y / above.w < 0.0f);
 }
+
+namespace {
+
+// The same sphere test cull.comp runs.
+bool sphereVisible(const float planes[6][4], Vec3 center, float radius) {
+  for (int i = 0; i < 6; ++i) {
+    if (planes[i][0] * center.x + planes[i][1] * center.y +
+            planes[i][2] * center.z + planes[i][3] <
+        -radius) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
+TEST_CASE("frustum planes keep what the camera sees and reject the rest") {
+  // Camera at the origin looking down -Z, 90 degree vertical FOV.
+  Mat4 viewProjection = meridian::perspective(1.5707964f, 1.0f, 0.1f) *
+                        meridian::lookAt({0, 0, 0}, {0, 0, -1}, {0, 1, 0});
+  float planes[6][4];
+  meridian::extractFrustumPlanes(viewProjection, planes);
+
+  CHECK(sphereVisible(planes, {0, 0, -10}, 1.0f));     // straight ahead
+  CHECK(sphereVisible(planes, {0, 0, -1e6f}, 1.0f));   // infinite far plane
+  CHECK_FALSE(sphereVisible(planes, {0, 0, 10}, 1.0f));   // behind
+  CHECK_FALSE(sphereVisible(planes, {-30, 0, -10}, 1.0f)); // far left
+  CHECK_FALSE(sphereVisible(planes, {0, 30, -10}, 1.0f));  // far above
+  CHECK_FALSE(sphereVisible(planes, {0, 0, -0.01f}, 0.05f)); // before near
+  // Partially inside counts as visible.
+  CHECK(sphereVisible(planes, {-10.5f, 0, -10}, 1.0f));
+}
