@@ -20,8 +20,6 @@ layout(location = 3) out vec4 outPreviousClip[];
 layout(location = 4) out vec2 outUv[];
 layout(location = 5) out vec4 outTangent[];
 layout(location = 6) flat out uint outMaterialIndex[];
-// How far (m) the drawn surface may deviate from the bilinear heightfield.
-layout(location = 7) flat out float outLodError[];
 
 const uint kBlockQuads = 8u;
 const uint kBlockVertices = kBlockQuads + 1u;
@@ -71,20 +69,6 @@ void main() {
         vec3 previous =
             terrainVertex(terrain, grid, local, level, quad, scene.previousCameraPosition);
 
-        // The deviation from the bilinear heightfield: detail displacement
-        // near the camera; beyond, how far the heightfield bends away from
-        // a coarse quad (estimated at the center of the coarser grid's quad
-        // this vertex can morph into).
-        float lodError;
-        if (level < 2u) {
-            lodError = kTerrainDetailAmplitude;
-        } else {
-            vec2 corner = grid - vec2(local & 1u) * quad;
-            float a = terrainHeight(terrain, corner);
-            float b = terrainHeight(terrain, corner + vec2(2.0 * quad));
-            lodError = abs(terrainHeight(terrain, corner + vec2(quad)) - 0.5 * (a + b));
-        }
-
         vec4 relative = vec4(world - scene.cameraPosition, 1.0);
         gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * relative;
         outRelativePosition[i] = relative.xyz;
@@ -95,7 +79,6 @@ void main() {
         outUv[i] = vec2(0.0);
         outTangent[i] = vec4(0.0);
         outMaterialIndex[i] = 0u;
-        outLodError[i] = lodError;
     }
     for (uint i = gl_LocalInvocationIndex; i < 2u * kBlockQuads * kBlockQuads; i += 32u) {
         uint q = i / 2u;

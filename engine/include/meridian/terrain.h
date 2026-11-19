@@ -42,9 +42,12 @@ void saveHeightfield(const Heightfield &field, const std::filesystem::path &path
 Heightfield quantizeHeightfield(std::span<const float> heights, uint32_t width,
                                 uint32_t height, float spacing);
 
-// Min/max pyramid for culling bounds and the shadow march. Level 0 is the
-// samples; level k+1 texel (x, z) covers level-k texels 2x..2x+1, 2z..2z+1
-// (clamped to the level). Level sizes are ceil(previous / 2), down to 1x1.
+// Min/max pyramid for culling bounds and the shadow march (Tevs 2008 maximum
+// mipmaps). Level 0 texel (x, z) bounds the bilinear cell from sample (x, z)
+// to (x + 1, z + 1), so level k bounds samples x * 2^k..(x + 1) * 2^k
+// inclusive: the whole bilinear surface over its cells. Level k+1 texel
+// (x, z) covers level-k texels 2x..2x+1, 2z..2z+1; indices are clamped to
+// the grid. Level sizes are ceil(previous / 2), down to 1x1.
 struct HeightPyramidLevel {
   uint32_t width, height;
   std::vector<uint32_t> minMax; // min | max << 16

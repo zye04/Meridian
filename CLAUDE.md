@@ -30,6 +30,7 @@ ctest --test-dir build                           # or ./build/tests/tests
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
+cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 ```
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
@@ -60,7 +61,9 @@ Napf summit (-359, -465, 1406.7 m), looking at it past the sample models
 `1119 1356 -431 -1.55 -0.02`; full-ground view `1119 1355.9 -431 -1.55
 -0.25`; LOD transitions from above `1119 1420 -431 -1.55 -0.6`; high
 overview (3000 m above the ground) `1119 4354 -431 -1.55 -0.35`; across
-the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`.
+the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`;
+sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
+--sun 0.9 0.05 -0.4`.
 `--scatter N` places N random Poly Haven models within 150 m of the start
 (fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
 startup ~60 s); over the scatter: `1119 1362 -431 -1.55 -0.25`. Debug
@@ -187,7 +190,10 @@ images are shared between them, and barriers account for that.
   double per level, vertices morph over the last 30% of their level's
   span. Levels 0-1 (finer than the data) add up to 0.3 m of detail noise.
   Nodes are drawn near to far (the selected list read backwards) so
-  early-Z rejects hidden terrain. The terrain is not in the TLAS.
+  early-Z rejects hidden terrain. The terrain is not in the TLAS: sun
+  shadows march its height pyramid (`terrainOccludes` in terrain.glsl,
+  every surface) besides the TLAS query; terrain fragments start the ray
+  on the bilinear heightfield. Pyramid level 0 bounds each bilinear cell.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
   together (static_asserts check the sizes).
@@ -232,8 +238,9 @@ images are shared between them, and barriers account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; the terrain casts no shadows yet
-  (not in the TLAS) and the horizon is flat.
+  leaks partial Vulkan state if it throws; the horizon is flat; the
+  terrain's detail displacement (near the camera) casts no shadows (the
+  march tests the bilinear heightfield).
   RT shadows trace full-detail BLAS while the raster draws LOD
   clusters; shadow rays start the cluster's simplification error above the
   surface to avoid acne (virtualized geometry slice 2 traces the clusters

@@ -4,9 +4,7 @@
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "material.glsl"
-#ifdef TERRAIN
 #include "terrain.glsl"
-#endif
 
 layout(location = 0) in vec3 inRelativePosition;
 layout(location = 1) in vec3 inNormal;
@@ -15,9 +13,11 @@ layout(location = 3) in vec4 inPreviousClip;
 layout(location = 4) in vec2 inUv;
 layout(location = 5) in vec4 inTangent;
 layout(location = 6) flat in uint inMaterialIndex;
+#ifndef TERRAIN
 // How far (m) this LOD cluster may deviate from the full-detail surface the
 // shadow rays are traced against; 0 at full detail.
 layout(location = 7) flat in float inLodError;
+#endif
 
 layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
@@ -90,13 +90,26 @@ bool alphaTestCandidate(rayQueryEXT query) {
     return alpha >= m.alphaCutoff;
 }
 
-// Traces one ray toward the sun: 1 if it escapes, 0 if anything blocks it.
+// Traces one ray toward the sun: 1 if it escapes, 0 if an object (the
+// TLAS) or the terrain (its heightfield) blocks it.
 float sunVisibility(vec3 position, vec3 geometricNormal) {
+#ifdef TERRAIN
+    // Start on the heightfield the march tests, not on the raster: coarse
+    // triangles can lie below it by more than their estimated error, and
+    // can face away from the sun.
+    vec3 origin = position;
+    origin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz)) + kShadowRayBias;
+#else
+    vec3 origin = position + geometricNormal * max(kShadowRayBias, inLodError);
+#endif
+    vec3 direction = sampleSunDirection(gl_FragCoord.xy);
+    if (terrainOccludes(pc.scene, origin, direction, kShadowRayLength)) {
+        return 0.0;
+    }
     rayQueryEXT query;
     rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
                           gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
-                          position + geometricNormal * max(kShadowRayBias, inLodError), 0.0,
-                          sampleSunDirection(gl_FragCoord.xy), kShadowRayLength);
+                          origin, 0.0, direction, kShadowRayLength);
     while (rayQueryProceedEXT(query)) {
         if (rayQueryGetIntersectionTypeEXT(query, false) ==
                 gl_RayQueryCandidateIntersectionTriangleEXT &&

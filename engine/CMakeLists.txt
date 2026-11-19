@@ -68,8 +68,16 @@ function(add_shader source output)
   set_property(GLOBAL APPEND PROPERTY MERIDIAN_SHADERS ${spv})
 endfunction()
 
+# Swaps the terrain shadow march for a brute-force linear one, for A/B
+# checks.
+option(MERIDIAN_TERRAIN_MARCH_BRUTE_FORCE "Brute-force terrain shadow march" OFF)
+set(MARCH_DEFINES "")
+if(MERIDIAN_TERRAIN_MARCH_BRUTE_FORCE)
+  set(MARCH_DEFINES TERRAIN_MARCH_BRUTE_FORCE)
+endif()
+
 foreach(source
-    mesh.vert mesh.frag fullscreen.vert tonemap.frag taa.comp histogram.comp
+    mesh.vert fullscreen.vert tonemap.frag taa.comp histogram.comp
     exposure.comp sky.vert sky.frag transmittance_lut.comp
     multiscattering_lut.comp sky_view_lut.comp aerial_perspective_lut.comp
     sky_irradiance.comp dfg_lut.comp cull.comp depth_pyramid.comp
@@ -77,9 +85,10 @@ foreach(source
     terrain_normals.comp)
   add_shader(${source} ${source})
 endforeach()
-add_shader(mesh.frag mesh_masked.frag ALPHA_MASK)
-add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND)
-add_shader(mesh.frag terrain.frag TERRAIN)
+add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
+add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
+add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
+add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})

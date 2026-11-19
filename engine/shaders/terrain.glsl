@@ -141,6 +141,151 @@ vec2 terrainHeightBounds(Terrain t, vec2 lo, vec2 hi) {
            vec2(-kTerrainDetailAmplitude, kTerrainDetailAmplitude);
 }
 
+// ---------------------------------------------------------------- Shadows
+
+// Highest terrain (m) over pyramid level >= 1 texel c, which bounds the
+// bilinear surface over its cells. Reads the offsets through the scene
+// reference: indexing a copied Terrain's array spills it to local memory,
+// one more dependent load per march step.
+float terrainCellMax(SceneBuffer scene, uint level, uvec2 c) {
+    Terrain t = scene.terrain;
+    uint levelWidth = (t.width + (1u << level) - 1u) >> level;
+    uint v = t.pyramid.minMax[scene.terrain.pyramidOffsets[level] + c.y * levelWidth + c.x];
+    return t.minHeight + t.heightScale * float(v >> 16);
+}
+
+#ifdef TERRAIN_MARCH_BRUTE_FORCE
+// Reference for A/B checks: bilinear height every 1 m for 2 km, then every
+// 8 m.
+bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
+    Terrain t = scene.terrain;
+    if (t.width == 0u) {
+        return false;
+    }
+    float top = terrainCellMax(scene, t.pyramidLevels, uvec2(0u));
+    float s = 0.0;
+    while (s < maxDistance) {
+        vec3 p = origin + s * direction;
+        if (p.y > top && direction.y >= 0.0) {
+            return false;
+        }
+        if (p.y < terrainHeight(t, p.xz)) {
+            return true;
+        }
+        s += s < 2000.0 ? 1.0 : 8.0;
+    }
+    return false;
+}
+#else
+// Whether the bilinear heightfield blocks the ray (flat world): a march of
+// the max pyramid (Tevs 2008). Each step tests the cell around the ray at
+// the current level: if the ray stays above the cell's max over the cell,
+// it skips to the cell's exit and tries one level coarser; otherwise it
+// descends. Level 0 solves the ray against the bilinear cell exactly.
+//
+// Outside the crop the heights mirror. Within one period tile ([-0.5,
+// w - 0.5) in sample units, the mirror plane halfway between two equal
+// edge samples) the mirrored field is the crop with clamped indices, in
+// local coordinates that reverse on odd tiles; steps stop at tile edges so
+// a cell never straddles one.
+bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
+    Terrain t = scene.terrain;
+    if (t.width == 0u) {
+        return false;
+    }
+    float tEnd = maxDistance;
+    float top = terrainCellMax(scene, t.pyramidLevels, uvec2(0u));
+    if (direction.y > 0.0) {
+        tEnd = min(tEnd, (top - origin.y) / direction.y);
+    }
+    vec2 size = vec2(float(t.width), float(t.height));
+    vec2 g0 = (origin.xz - terrainSampleOrigin(t)) / t.spacing;
+    vec2 dg = direction.xz / t.spacing;
+    dg = mix(dg, vec2(1e-12), equal(dg, vec2(0.0)));
+    // Cell lookups are nudged across the boundary the last step exited
+    // through (a position computed there can round to just before it), and
+    // only on that axis: nudging the other could cross into the next row.
+    const float kNudge = 0.01;
+    vec2 nudge = vec2(0.0);
+
+    float s = 0.0;
+    uint level = 0u;
+    // The tile's local position at s = 0 and local direction, and where
+    // the ray leaves the tile; set when s reaches it.
+    vec2 lBase = vec2(0.0);
+    vec2 dl = vec2(0.0);
+    vec2 inverseDl = vec2(0.0);
+    vec2 exitSide = vec2(0.0);
+    vec2 tileExit = vec2(-1.0);
+    float sTileExit = -1.0;
+    for (uint i = 0u; i < 256u && s < tEnd; ++i) {
+        if (s >= sTileExit) {
+            vec2 tile = floor((g0 + s * dg + sign(dg) * nudge + 0.5) / size);
+            bvec2 odd = equal(mod(tile, 2.0), vec2(1.0));
+            lBase = mix(g0 - tile * size, (tile + 1.0) * size - 1.0 - g0, odd);
+            dl = mix(dg, -dg, odd);
+            inverseDl = 1.0 / dl;
+            exitSide = step(0.0, dl);
+            tileExit = (mix(vec2(-0.5), size - 0.5, exitSide) - lBase) * inverseDl;
+            sTileExit = min(tileExit.x, tileExit.y);
+        }
+        vec2 l = lBase + s * dl;
+        vec2 ln = l + sign(dl) * nudge;
+
+        float cellSize = float(1u << level);
+        vec2 cell = floor(ln / cellSize);
+        if (level > 0u) {
+            vec2 levelSize = ceil(size / cellSize);
+            cell = clamp(cell, vec2(0.0), levelSize - 1.0);
+        }
+        // Edge cells extend to the tile edge, where their exit lies behind.
+        vec2 cellExit = max(((cell + exitSide) * cellSize - l) * inverseDl, 0.0);
+        cellExit = mix(cellExit, vec2(1e30), equal(cellExit, vec2(0.0)));
+        vec2 axisExit = min(cellExit + s, tileExit);
+        float sNext = min(min(axisExit.x, axisExit.y), tEnd);
+
+        if (level == 0u) {
+            // The 2x2 samples from cell to cell + 1, clamped to the crop
+            // by the sampler (CLAMP_TO_EDGE).
+            vec4 q = t.minHeight + t.heightScale * 65535.0 *
+                     textureGather(textures[t.heightTexture], (cell + 1.0) / size);
+            float s00 = q.w;
+            float s10 = q.z;
+            float s01 = q.x;
+            float s11 = q.y;
+            // Surface minus ray height along the segment is a quadratic
+            // a u^2 + b u + c0 in the distance u past s.
+            vec2 f = l - cell;
+            float k1 = s10 - s00;
+            float k2 = s01 - s00;
+            float k3 = s00 - s10 - s01 + s11;
+            float c0 = s00 + k1 * f.x + k2 * f.y + k3 * f.x * f.y - (origin.y + s * direction.y);
+            float b = k1 * dl.x + k2 * dl.y + k3 * (f.x * dl.y + f.y * dl.x) - direction.y;
+            float a = k3 * dl.x * dl.y;
+            float u = sNext - s;
+            float peak = max(c0, c0 + u * (b + u * a));
+            float vertex = a < 0.0 ? -b / (2.0 * a) : -1.0;
+            if (vertex > 0.0 && vertex < u) {
+                peak = max(peak, c0 + vertex * (b + vertex * a));
+            }
+            if (peak > 0.0) {
+                return true;
+            }
+        } else {
+            float rayLow = origin.y + (direction.y > 0.0 ? s : sNext) * direction.y;
+            if (rayLow <= terrainCellMax(scene, level, uvec2(cell))) {
+                --level;
+                continue;
+            }
+        }
+        s = sNext;
+        nudge = kNudge * vec2(lessThanEqual(axisExit, vec2(sNext)));
+        level = min(level + 1u, t.pyramidLevels);
+    }
+    return false;
+}
+#endif
+
 // 0 until the last kTerrainMorphZone of the level's span (from the previous
 // level's range to its own), then up to 1 at its range.
 float terrainMorph(Terrain t, uint level, float distanceToCamera) {

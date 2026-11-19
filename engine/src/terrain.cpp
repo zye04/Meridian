@@ -175,8 +175,21 @@ std::vector<HeightPyramidLevel> buildHeightPyramid(const Heightfield &field) {
   std::vector<HeightPyramidLevel> levels;
   HeightPyramidLevel base{field.width, field.height, {}};
   base.minMax.resize(field.samples.size());
-  for (size_t k = 0; k < field.samples.size(); ++k) {
-    base.minMax[k] = field.samples[k] | (static_cast<uint32_t>(field.samples[k]) << 16);
+  for (uint32_t y = 0; y < field.height; ++y) {
+    for (uint32_t x = 0; x < field.width; ++x) {
+      uint32_t lo = 0xFFFF;
+      uint32_t hi = 0;
+      for (uint32_t dy = 0; dy < 2; ++dy) {
+        for (uint32_t dx = 0; dx < 2; ++dx) {
+          const uint32_t sx = std::min(x + dx, field.width - 1);
+          const uint32_t sy = std::min(y + dy, field.height - 1);
+          const uint32_t v = field.samples[static_cast<size_t>(sy) * field.width + sx];
+          lo = std::min(lo, v);
+          hi = std::max(hi, v);
+        }
+      }
+      base.minMax[static_cast<size_t>(y) * field.width + x] = lo | (hi << 16);
+    }
   }
   levels.push_back(std::move(base));
   while (levels.back().width > 1 || levels.back().height > 1) {

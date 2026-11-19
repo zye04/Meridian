@@ -367,3 +367,45 @@ foliage that survives simplification).
 - Coarse LOD triangles don't gate the sun on terrain: their facing
   differs from the per-pixel normal on steep slopes and cut the light
   per triangle.
+
+## Terrain shadows: heightfield march (2026-11-19)
+
+- **The sun ray marches the terrain's max pyramid** (Tevs et al. 2008,
+  maximum mipmaps; Lumen traces heightfields the same way), next to the
+  TLAS query, on every surface. Rejected: terrain BLAS + partitioned TLAS
+  (a 15 km heightfield at 2 m is ~112M triangles to build and keep
+  resident, and the LOD raster would still disagree with it). The march
+  runs in the flat world, like the TLAS query.
+  - Tevs, Ihrke, Seidel, "Maximum mipmaps for fast, accurate, and
+    scalable dynamic height field rendering", I3D 2008:
+    https://doi.org/10.1145/1342250.1342279
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-technical-details-in-unreal-engine
+- **March:** in sample units, starting at level 0; a cell whose max lies
+  below the ray over the cell is skipped to its exit and the march goes
+  one level coarser, otherwise one level finer. Level 0 is exact: surface
+  minus ray height along the segment is a quadratic, checked at both ends
+  and its peak, from one `textureGather` of the 2x2 samples. Hard cap of
+  256 steps (counts as unoccluded); the ray also ends above the highest
+  terrain (the pyramid top) or at 20 km. Mirroring: inside one period tile
+  ([-0.5, w - 0.5) samples) the mirrored field is the crop with clamped
+  indices, in coordinates reversed on odd tiles; steps stop at tile edges.
+- **Pyramid level 0 bounds bilinear cells** (samples x..x+1, z..z+1), so
+  a level-k texel bounds the whole bilinear surface over its cells and a
+  step needs one read. Culling bounds only get slightly looser.
+- **Ray origin on terrain:** the bilinear height at the fragment (or the
+  raster, if higher) plus 5 cm. Offsetting by the per-vertex LOD error
+  left acne on distant lit hills (coarse triangles sit further below the
+  heightfield than the single-sample estimate), so that varying is gone.
+- **Costs found on the way:** indexing `Terrain.pyramidOffsets` on a
+  copied struct spilled it to local memory (one more dependent load per
+  step, 0.3 ms); per-step tile math, 4 texel fetches and a start at
+  level 3 cost another 0.25 ms. The march is latency-bound: most pixels
+  take 5-16 steps. Cap 64 would lose long sunset shadows (3.2/255).
+- **Measured** (Release, 2560x1440, RTX 4080, median of 5, scene early,
+  march vs `terrainOccludes` returning false, near-to-far terrain): open
+  view 1.25 vs 1.10 ms (0.15 ms); full-ground view 1.33 vs 1.21 ms;
+  sunset view 2.46 vs 1.31 ms (lit rays climb slowly). A/B against the
+  brute-force march (`MERIDIAN_TERRAIN_MARCH_BRUTE_FORCE`: bilinear height
+  every 1 m for 2 km, then 8 m): mean difference 0.017/255 (open),
+  0.027/255 (ground at sunset), 0.032/255 (sunset), 0.039/255 (across the
+  crop edge, grazing sun).

@@ -76,7 +76,7 @@ TEST_CASE("indices mirror outside the grid like MIRRORED_REPEAT") {
   }
 }
 
-TEST_CASE("height pyramid bounds every sample it covers") {
+TEST_CASE("height pyramid bounds the bilinear cells it covers") {
   std::mt19937 rng(7);
   std::vector<float> heights(7 * 5);
   for (float &h : heights) {
@@ -93,8 +93,8 @@ TEST_CASE("height pyramid bounds every sample it covers") {
       for (uint32_t x = 0; x < levels[k].width; ++x) {
         uint32_t lo = 0xFFFF;
         uint32_t hi = 0;
-        for (uint32_t sy = y * cover; sy < std::min((y + 1) * cover, field.height); ++sy) {
-          for (uint32_t sx = x * cover; sx < std::min((x + 1) * cover, field.width); ++sx) {
+        for (uint32_t sy = y * cover; sy < std::min((y + 1) * cover + 1, field.height); ++sy) {
+          for (uint32_t sx = x * cover; sx < std::min((x + 1) * cover + 1, field.width); ++sx) {
             lo = std::min<uint32_t>(lo, field.samples[sy * field.width + sx]);
             hi = std::max<uint32_t>(hi, field.samples[sy * field.width + sx]);
           }
