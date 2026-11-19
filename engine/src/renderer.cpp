@@ -80,7 +80,7 @@ struct SceneData {
   Vec3 sunIlluminance;
   uint32_t frameIndex = 0;
   Vec3 skyLuminance;
-  float pad0 = 0.0f;
+  float sunAngularRadius = 0.0f;
   VkDeviceAddress tlas = 0;
   uint64_t pad1 = 0;
 };
@@ -1226,6 +1226,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.exposure = camera.exposure();
   scene.sunIlluminance = lighting.sunIlluminance;
   scene.skyLuminance = lighting.skyLuminance;
+  scene.sunAngularRadius = lighting.sunAngularRadius;
   scene.tlas = frame.tlas.address;
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,

@@ -22,6 +22,31 @@ const float kPi = 3.14159265;
 const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
 
+// Interleaved gradient noise (Jimenez 2014), shifted every frame so the
+// temporal resolve averages successive samples.
+float interleavedGradientNoise(vec2 pixel, uint frame) {
+    pixel += 5.588238 * float(frame % 64u);
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+// Picks a direction inside the sun's disk. One ray per pixel per frame;
+// accumulated over frames this gives penumbrae that widen with distance from
+// the occluder, like real sun shadows.
+vec3 sampleSunDirection(vec2 pixel) {
+    vec3 sun = pc.scene.sunDirection;
+    vec3 tangent = normalize(cross(abs(sun.y) < 0.99 ? vec3(0, 1, 0)
+                                                      : vec3(1, 0, 0), sun));
+    vec3 bitangent = cross(sun, tangent);
+
+    float radius = tan(pc.scene.sunAngularRadius) *
+                   sqrt(interleavedGradientNoise(pixel, pc.scene.frameIndex));
+    float angle = 2.0 * kPi *
+                  interleavedGradientNoise(pixel + vec2(17.0, 31.0),
+                                           pc.scene.frameIndex);
+    return normalize(sun + radius * (cos(angle) * tangent +
+                                     sin(angle) * bitangent));
+}
+
 // Traces one ray toward the sun: 1 if it escapes, 0 if anything blocks it.
 float sunVisibility(vec3 position, vec3 geometricNormal) {
     rayQueryEXT query;
@@ -29,7 +54,8 @@ float sunVisibility(vec3 position, vec3 geometricNormal) {
                           gl_RayFlagsOpaqueEXT |
                               gl_RayFlagsTerminateOnFirstHitEXT,
                           0xFF, position + geometricNormal * kShadowRayBias,
-                          0.0, pc.scene.sunDirection, kShadowRayLength);
+                          0.0, sampleSunDirection(gl_FragCoord.xy),
+                          kShadowRayLength);
     rayQueryProceedEXT(query);
     return rayQueryGetIntersectionTypeEXT(query, true) ==
                    gl_RayQueryCommittedIntersectionNoneEXT

@@ -24,6 +24,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     vec3 sunIlluminance;
     uint frameIndex;
     vec3 skyLuminance;
+    float sunAngularRadius;
     // Device address of the scene's top-level acceleration structure.
     uvec2 tlas;
 };

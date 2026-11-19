@@ -20,6 +20,8 @@ struct MeshId {
 // sun. Defaults approximate a clear day with the sun about 35 degrees high.
 struct Lighting {
   Vec3 sunDirection = normalize({0.5f, 0.55f, -0.4f});
+  // Half the sun's apparent size; it softens shadows with distance.
+  float sunAngularRadius = 0.00465f; // radians
   Vec3 sunIlluminance = {100000.0f, 95000.0f, 85000.0f}; // lux
   Vec3 skyLuminance = {4800.0f, 8000.0f, 12800.0f};      // cd/m^2
 };
