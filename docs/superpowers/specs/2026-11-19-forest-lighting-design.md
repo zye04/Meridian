@@ -76,6 +76,11 @@ because near-only ray representations make it affordable.
   `accelerationStructureIndirectBuild`; the partitioned build takes its
   operations from GPU buffers, which is what M2b needs.
 - `VK_EXT_opacity_micromap` for the proxies.
+- **NVIDIA-only at startup (accepted, revisitable; user, 2026-11-19):**
+  the partitioned TLAS makes Meridian require an NVIDIA GPU with that
+  extension. The vendor-neutral fallback, if ever needed, is a plain TLAS
+  rebuilt from GPU-written instances (cost: full-capacity rebuilds on
+  drivers without indirect builds); it is not built now.
 - M1's `terrainOccludes` (hierarchical max-pyramid march) is the
   terrain's ray representation everywhere.
 
