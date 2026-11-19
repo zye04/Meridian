@@ -197,11 +197,17 @@ void main() {
 
         float jitter = fract(52.9829189 * fract(dot(vec2(id) + 5.588238 * float(pc.scene.frameIndex % 64u),
                                                      vec2(0.06711056, 0.00583715))));
-        float t = tStart + jitter * max(max(kMinStep, tStart * kStepGrowth),
-                                        (tEnd - tStart) / float(kMaxSteps));
+        // Step boundaries don't depend on the jitter; each sample sits at
+        // the same jittered fraction of its own step, so over frames every
+        // step is covered evenly. (Jittering only the start shifted later
+        // samples less and less where steps split the remaining segment,
+        // leaving static bands after accumulation.)
+        float t = tStart;
         for (int i = 0; i < kMaxSteps && t < tEnd; ++i) {
-            float dt = max(max(kMinStep, t * kStepGrowth), (tEnd - t) / float(kMaxSteps - i));
-            vec3 rel = direction * t;
+            float dt = min(max(max(kMinStep, t * kStepGrowth), (tEnd - t) / float(kMaxSteps - i)),
+                           tEnd - t);
+            float sampleT = t + jitter * dt;
+            vec3 rel = direction * sampleT;
             vec3 world = cloudPoint(rel, radius);
             float lod = max(0.0, log2(dt / 100.0));
             float heightFraction;
@@ -251,7 +257,7 @@ void main() {
                 float stepTransmittance = exp(-sigma * dt);
                 float opacity = transmittance * (1.0 - stepTransmittance);
                 luminance += source * opacity;
-                depthSum += t * opacity;
+                depthSum += sampleT * opacity;
                 weightSum += opacity;
                 transmittance *= stepTransmittance;
                 if (transmittance < kOpaque) {
