@@ -101,11 +101,16 @@ float sunVisibility(vec3 position, vec3 geometricNormal) {
     // can face away from the sun.
     vec3 origin = position;
     origin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz)) + kShadowRayBias;
+    vec3 marchOrigin = origin;
 #else
     vec3 origin = position + geometricNormal * max(kShadowRayBias, inLodError);
+    // An object's base can sit below the bilinear heightfield (detail
+    // displacement, coarse ridges), where the march would hit at once.
+    vec3 marchOrigin = origin;
+    marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
     vec3 direction = sampleSunDirection(gl_FragCoord.xy);
-    if (terrainOccludes(pc.scene, origin, direction, kShadowRayLength)) {
+    if (terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
         return 0.0;
     }
     rayQueryEXT query;

@@ -397,6 +397,13 @@ foliage that survives simplification).
   raster, if higher) plus 5 cm. Offsetting by the per-vertex LOD error
   left acne on distant lit hills (coarse triangles sit further below the
   heightfield than the single-sample estimate), so that varying is gone.
+  On objects the march starts at the same rule's height (bilinear height
+  plus 5 cm, or the offset fragment if higher); the TLAS query keeps the
+  normal-offset origin. An object's base can sit below the bilinear
+  field (detail displacement, coarse ridges), where the march hit at once
+  and left a sunless band (the helmet plinth's lower edge in the ground
+  view, high sun: mean luminance there 0.077 -> 0.101; whole-image mean
+  difference 0.65/65535, `--scatter 16` from above 2e-8).
 - **Costs found on the way:** indexing `Terrain.pyramidOffsets` on a
   copied struct spilled it to local memory (one more dependent load per
   step, 0.3 ms); per-step tile math, 4 texel fetches and a start at
