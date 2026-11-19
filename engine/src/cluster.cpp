@@ -6,12 +6,37 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstring>
+#include <fstream>
+#include <stdexcept>
 
 namespace meridian {
 
 namespace {
 
 constexpr size_t kMaxClusterTriangles = 128;
+constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
+// Bump when the build settings or Cluster's layout change.
+constexpr uint32_t kCacheVersion = 1;
+
+template <typename T> void writeArray(std::ofstream &out, const std::vector<T> &v) {
+  const uint64_t count = v.size();
+  out.write(reinterpret_cast<const char *>(&count), sizeof(count));
+  out.write(reinterpret_cast<const char *>(v.data()),
+            static_cast<std::streamsize>(count * sizeof(T)));
+}
+
+template <typename T>
+bool readArray(std::ifstream &in, uint64_t bytesLeft, std::vector<T> &v) {
+  uint64_t count = 0;
+  if (!in.read(reinterpret_cast<char *>(&count), sizeof(count)) ||
+      count > bytesLeft / sizeof(T)) {
+    return false;
+  }
+  v.resize(count);
+  return static_cast<bool>(in.read(reinterpret_cast<char *>(v.data()),
+                                   static_cast<std::streamsize>(count * sizeof(T))));
+}
 
 LodBounds toLodBounds(const clodBounds &b) {
   return {{b.center[0], b.center[1], b.center[2]}, b.radius, b.error};
@@ -75,6 +100,59 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
         refined < 0 ? LodBounds{{}, 0.0f, -1.0f} : groups[refined];
   }
   return lod;
+}
+
+void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
+                       const std::vector<ClusterLod> &lods) {
+  // Written aside and renamed, so a crash never leaves a half file behind.
+  const std::filesystem::path partial = file.string() + ".partial";
+  {
+    std::ofstream out(partial, std::ios::binary | std::ios::trunc);
+    out.write(kCacheMagic, sizeof(kCacheMagic));
+    out.write(reinterpret_cast<const char *>(&kCacheVersion), sizeof(kCacheVersion));
+    out.write(reinterpret_cast<const char *>(&sourceKey), sizeof(sourceKey));
+    const uint64_t count = lods.size();
+    out.write(reinterpret_cast<const char *>(&count), sizeof(count));
+    for (const ClusterLod &lod : lods) {
+      writeArray(out, lod.clusters);
+      writeArray(out, lod.vertices);
+      writeArray(out, lod.triangles);
+    }
+    if (!out) {
+      throw std::runtime_error("cannot write " + partial.string());
+    }
+  }
+  std::filesystem::rename(partial, file);
+}
+
+std::optional<std::vector<ClusterLod>>
+readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
+  std::error_code error;
+  const uint64_t size = std::filesystem::file_size(file, error);
+  std::ifstream in(file, std::ios::binary);
+  if (error || !in) {
+    return std::nullopt;
+  }
+  char magic[4] = {};
+  uint32_t version = 0;
+  uint64_t key = 0;
+  uint64_t count = 0;
+  in.read(magic, sizeof(magic));
+  in.read(reinterpret_cast<char *>(&version), sizeof(version));
+  in.read(reinterpret_cast<char *>(&key), sizeof(key));
+  in.read(reinterpret_cast<char *>(&count), sizeof(count));
+  if (!in || std::memcmp(magic, kCacheMagic, sizeof(magic)) != 0 ||
+      version != kCacheVersion || key != sourceKey || count > size) {
+    return std::nullopt;
+  }
+  std::vector<ClusterLod> lods(count);
+  for (ClusterLod &lod : lods) {
+    if (!readArray(in, size, lod.clusters) || !readArray(in, size, lod.vertices) ||
+        !readArray(in, size, lod.triangles)) {
+      return std::nullopt;
+    }
+  }
+  return lods;
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,

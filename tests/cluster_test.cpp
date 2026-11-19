@@ -3,6 +3,8 @@
 
 #include <cfloat>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
 
 using namespace meridian;
 
@@ -122,4 +124,46 @@ TEST_CASE("projected error falls with distance and grows with scale") {
   // Scale 2: error 0.02 at distance 11 - 2.
   CHECK(projectedErrorPixels(b, {0, 0, 11}, 2.0f, 1.0f, 0.1f, 1000.0f) ==
         doctest::Approx(0.02f / 9.0f * 0.5f * 1000.0f));
+}
+
+namespace {
+
+std::filesystem::path cacheFile(const char *name) {
+  return std::filesystem::temp_directory_path() / name;
+}
+
+} // namespace
+
+TEST_CASE("cluster cache round-trips") {
+  const std::vector<ClusterLod> lods = {buildClusterLod(bumpyGrid(20)),
+                                        buildClusterLod(bumpyGrid(1))};
+  const auto file = cacheFile("meridian_round_trip.clusters");
+  writeClusterCache(file, 42, lods);
+  const auto read = readClusterCache(file, 42);
+  REQUIRE(read);
+  REQUIRE(read->size() == 2);
+  for (size_t i = 0; i < lods.size(); ++i) {
+    CHECK((*read)[i].vertices == lods[i].vertices);
+    CHECK((*read)[i].triangles == lods[i].triangles);
+    REQUIRE((*read)[i].clusters.size() == lods[i].clusters.size());
+    CHECK(std::memcmp((*read)[i].clusters.data(), lods[i].clusters.data(),
+                      lods[i].clusters.size() * sizeof(Cluster)) == 0);
+  }
+  std::filesystem::remove(file);
+}
+
+TEST_CASE("cluster cache rejects another source key") {
+  const auto file = cacheFile("meridian_key.clusters");
+  writeClusterCache(file, 42, {buildClusterLod(bumpyGrid(4))});
+  CHECK_FALSE(readClusterCache(file, 43));
+  std::filesystem::remove(file);
+}
+
+TEST_CASE("truncated or missing cluster cache is rejected") {
+  const auto file = cacheFile("meridian_truncated.clusters");
+  writeClusterCache(file, 7, {buildClusterLod(bumpyGrid(20))});
+  std::filesystem::resize_file(file, std::filesystem::file_size(file) / 2);
+  CHECK_FALSE(readClusterCache(file, 7));
+  std::filesystem::remove(file);
+  CHECK_FALSE(readClusterCache(file, 7));
 }

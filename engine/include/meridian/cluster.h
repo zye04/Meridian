@@ -3,6 +3,8 @@
 #include <meridian/math/vec3.h>
 
 #include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace meridian {
@@ -57,5 +59,13 @@ float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
 // drawn clusters cover the surface once, without cracks.
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
                 float nearPlane, float screenHeight, float thresholdPixels);
+
+// Derived-data cache of every primitive's hierarchy in one file. sourceKey
+// identifies the source it was built from; any other key, version or a
+// short file reads as nullopt.
+void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
+                       const std::vector<ClusterLod> &lods);
+std::optional<std::vector<ClusterLod>>
+readClusterCache(const std::filesystem::path &file, uint64_t sourceKey);
 
 } // namespace meridian

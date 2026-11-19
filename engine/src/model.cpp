@@ -4,6 +4,7 @@
 #include <fastgltf/tools.hpp>
 #include <mikktspace.h>
 
+#include <cstdio>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -224,6 +225,44 @@ const fastgltf::TextureInfo *textureInfo(const T &optionalInfo) {
 // exceed 1. We map 1.0 to the luminance of a bright display (1000 cd/m^2).
 constexpr float kEmissiveLuminance = 1000.0f;
 
+// FNV-1a over the loaded geometry: the cluster cache stays valid exactly as
+// long as the vertices and indices it refers to are unchanged.
+uint64_t geometryKey(const std::vector<MeshData> &meshes) {
+  uint64_t hash = 14695981039346656037ull;
+  const auto mix = [&](const void *data, size_t bytes) {
+    const auto *p = static_cast<const unsigned char *>(data);
+    for (size_t i = 0; i < bytes; ++i) {
+      hash = (hash ^ p[i]) * 1099511628211ull;
+    }
+  };
+  for (const MeshData &mesh : meshes) {
+    mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
+    mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
+  }
+  return hash;
+}
+
+// Fills every primitive's cluster hierarchy from the cache next to the
+// glTF, building and caching them when it is missing or stale.
+void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &meshes) {
+  const uint64_t key = geometryKey(meshes);
+  std::filesystem::path cache = gltf;
+  cache.replace_extension(".clusters");
+  if (auto cached = readClusterCache(cache, key); cached && cached->size() == meshes.size()) {
+    for (size_t i = 0; i < meshes.size(); ++i) {
+      meshes[i].clusters = std::move((*cached)[i]);
+    }
+    return;
+  }
+  std::printf("Building clusters for %s\n", gltf.string().c_str());
+  std::vector<ClusterLod> lods;
+  for (MeshData &mesh : meshes) {
+    mesh.clusters = buildClusterLod(mesh);
+    lods.push_back(mesh.clusters);
+  }
+  writeClusterCache(cache, key, lods);
+}
+
 } // namespace
 
 Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
@@ -290,14 +329,21 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
 
   // Each glTF mesh may hold several primitives; upload each once and
   // instance it for every node that references the mesh.
+  std::vector<MeshData> primitives;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    for (const fastgltf::Primitive &primitive : mesh.primitives) {
+      primitives.push_back(loadPrimitive(asset, primitive));
+    }
+  }
+  loadClusters(path, primitives);
   std::vector<std::vector<MeshId>> meshes(asset.meshes.size());
+  size_t next = 0;
   for (size_t i = 0; i < asset.meshes.size(); ++i) {
     for (const fastgltf::Primitive &primitive : asset.meshes[i].primitives) {
       MaterialId material = primitive.materialIndex
                                 ? materials[*primitive.materialIndex]
                                 : defaultMaterial;
-      meshes[i].push_back(
-          renderer.uploadMesh(loadPrimitive(asset, primitive), material));
+      meshes[i].push_back(renderer.uploadMesh(primitives[next++], material));
     }
   }
 

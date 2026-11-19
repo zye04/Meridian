@@ -161,6 +161,9 @@ images are shared between them, and barriers account for that.
   terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
+- `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
+  next to the glTF, keyed by a hash of the loaded geometry; the first load
+  after a change prints "Building clusters" and rewrites it.
 - Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
