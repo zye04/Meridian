@@ -114,7 +114,8 @@ engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf, applyUvTransform),
                            texture.h (loadKtx2),
-                           cluster.h (buildClusterLod, LOD cut rule),
+                           cluster.h (buildClusterLod, LOD cut rule,
+                           per-level group BVH, selectClustersBvh),
                            terrain.h (Heightfield, heightAt, load/save,
                            generateHeightfield, buildHeightPyramid),
                            window.h, math/{vec3,mat4}.h
@@ -274,7 +275,11 @@ images are shared between them, and barriers account for that.
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building
-  clusters" and rewrites it (an unwritable cache only warns).
+  clusters" and rewrites it (an unwritable cache only warns). The cache
+  also stores each mesh's per-DAG-level group BVH (`nodes`, `levels`;
+  version 3, so older caches rebuild once). `selectClustersBvh` is the
+  CPU reference for the GPU traversal: it must select exactly the clusters
+  `lodVisible` accepts.
 - Known gaps: blended instances are drawn at full detail with no culling
   (every instance, every frame; harmless while no scattered model is
   blended); masked-geometry RT shadows are not visually verified yet; TAA

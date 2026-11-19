@@ -637,3 +637,32 @@ foliage that survives simplification).
   - https://graphics.pixar.com/library/StochasticSimplification/ (Cook, Halstead, Planck, Ryu 2007)
   - https://meshoptimizer.org/#simplification
   - https://ambientcg.com/view?id=Bark012
+
+## Cluster-group BVH (M2a, 2026-11-19)
+
+- **One BVH per DAG level over that level's cluster groups**, as
+  vk_lod_clusters ("a set of hierarchies - one for each LOD level"):
+  leaves are clusterlod groups (a contiguous cluster range), inner nodes
+  their children's conservative LOD bounds. A node's LOD sphere encloses
+  the self and refined spheres of every cluster below and carries the
+  largest self error, so a node whose bound projects at or under the
+  threshold holds no drawable cluster and is skipped; reached leaves test
+  each cluster with the unchanged cut rule. A level is entered only when
+  its band can hold the cut (largest self error at the root's nearest
+  point over the threshold, smallest refined error at the farthest point
+  a refined sphere can be at or under it). Built at load inside
+  `buildClusterLod`, stored in the `.clusters` cache (version 3).
+- **Branching factor 8, top-down median splits** along the longest axis
+  of the leaf centers (three bisections per node), nodes laid out
+  breadth-first with each node's children contiguous and after it: fixed
+  48-byte nodes with indices, ready for the GPU's one-dispatch-per-depth
+  traversal (Task 7), and a 1.6M-triangle tree's levels stay a handful of
+  depths deep. Wider nodes (32) would cut depths but waste threads on
+  sparse groups; 8 is the middle ground and is easy to revisit.
+- **Float safety:** enclosing radii are widened by 1e-4 so rounding in
+  the distance tests never makes a node look farther than a cluster below
+  it. `selectClustersBvh` (the CPU replica) is tested to select exactly
+  the flat `lodVisible` scan on a 1.55M-triangle synthetic tree (16
+  levels, terminal groups at several depths) at 1-1000 m and 0.5-4 px.
+  - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/lod_generation.md
+  - https://github.com/zeux/meshoptimizer/blob/v1.0/demo/clusterlod.h

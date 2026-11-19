@@ -1,10 +1,12 @@
 #include <doctest/doctest.h>
 #include <meridian/mesh.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 
 using namespace meridian;
 
@@ -148,6 +150,12 @@ TEST_CASE("cluster cache round-trips") {
     REQUIRE((*read)[i].clusters.size() == lods[i].clusters.size());
     CHECK(std::memcmp((*read)[i].clusters.data(), lods[i].clusters.data(),
                       lods[i].clusters.size() * sizeof(Cluster)) == 0);
+    REQUIRE((*read)[i].nodes.size() == lods[i].nodes.size());
+    CHECK(std::memcmp((*read)[i].nodes.data(), lods[i].nodes.data(),
+                      lods[i].nodes.size() * sizeof(ClusterBvhNode)) == 0);
+    REQUIRE((*read)[i].levels.size() == lods[i].levels.size());
+    CHECK(std::memcmp((*read)[i].levels.data(), lods[i].levels.data(),
+                      lods[i].levels.size() * sizeof(ClusterLevelInfo)) == 0);
   }
   std::filesystem::remove(file);
 }
@@ -194,4 +202,204 @@ TEST_CASE("damaged cluster hierarchies are invalid") {
   ClusterLod size = lod;
   size.clusters[0].vertexCount = 129;
   CHECK_FALSE(validClusterLod(size, mesh.vertices.size()));
+
+  const MeshData bigMesh = bumpyGrid(100);
+  const ClusterLod big = buildClusterLod(bigMesh);
+  REQUIRE(validClusterLod(big, bigMesh.vertices.size()));
+
+  ClusterLod leaf = big;
+  leaf.nodes.back().firstChild = static_cast<uint32_t>(leaf.clusters.size());
+  CHECK_FALSE(validClusterLod(leaf, bigMesh.vertices.size()));
+
+  ClusterLod cycle = big;
+  REQUIRE_FALSE(cycle.nodes[cycle.levels[0].rootNode].leaf);
+  cycle.nodes[cycle.levels[0].rootNode].firstChild = cycle.levels[0].rootNode;
+  CHECK_FALSE(validClusterLod(cycle, bigMesh.vertices.size()));
+
+  ClusterLod noBvh = big;
+  noBvh.nodes.clear();
+  noBvh.levels.clear();
+  CHECK_FALSE(validClusterLod(noBvh, bigMesh.vertices.size()));
+
+  ClusterLod uncovered = big;
+  --uncovered.nodes.back().childCount;
+  CHECK_FALSE(validClusterLod(uncovered, bigMesh.vertices.size()));
+
+  ClusterLod twice = big;
+  REQUIRE((twice.nodes.back().leaf && twice.nodes[twice.nodes.size() - 2].leaf));
+  twice.nodes.back().firstChild = twice.nodes[twice.nodes.size() - 2].firstChild;
+  CHECK_FALSE(validClusterLod(twice, bigMesh.vertices.size()));
+
+  ClusterLod root = big;
+  root.levels.back().rootNode = static_cast<uint32_t>(root.nodes.size());
+  CHECK_FALSE(validClusterLod(root, bigMesh.vertices.size()));
+}
+
+TEST_CASE("a cluster cache of the previous version is rejected") {
+  const auto file = cacheFile("meridian_old_version.clusters");
+  writeClusterCache(file, 5, {buildClusterLod(bumpyGrid(4))});
+  CHECK(readClusterCache(file, 5));
+  uint32_t version = 0;
+  {
+    std::fstream io(file, std::ios::binary | std::ios::in | std::ios::out);
+    io.seekg(4);
+    io.read(reinterpret_cast<char *>(&version), sizeof(version));
+    // The format before the BVH was stored.
+    version = (version & 0xffffu) | (2u << 16);
+    io.seekp(4);
+    io.write(reinterpret_cast<const char *>(&version), sizeof(version));
+  }
+  CHECK_FALSE(readClusterCache(file, 5));
+  std::filesystem::remove(file);
+}
+
+namespace {
+
+// Stands in for island_tree_01: a solid trunk (simplifies normally) under a
+// crown of disjoint quads (simplification gets stuck early, leaving terminal
+// groups at several depths).
+MeshData syntheticTree() {
+  MeshData mesh;
+  constexpr int kAround = 64;
+  constexpr int kRings = 400;
+  for (int r = 0; r <= kRings; ++r) {
+    for (int a = 0; a <= kAround; ++a) {
+      const float angle = 6.2831853f * a / kAround;
+      const float y = 12.0f * r / kRings;
+      const float radius = 0.5f + 0.05f * std::sin(y * 3.0f + angle * 2.0f);
+      Vertex v;
+      v.position = {radius * std::cos(angle), y, radius * std::sin(angle)};
+      v.normal = {std::cos(angle), 0.0f, std::sin(angle)};
+      v.uvX = static_cast<float>(a) / kAround;
+      v.uvY = y;
+      mesh.vertices.push_back(v);
+    }
+  }
+  for (int r = 0; r < kRings; ++r) {
+    for (int a = 0; a < kAround; ++a) {
+      const uint32_t i = r * (kAround + 1) + a;
+      const uint32_t j = i + kAround + 1;
+      mesh.indices.insert(mesh.indices.end(), {i, i + 1, j, i + 1, j + 1, j});
+    }
+  }
+  uint32_t state = 12345;
+  const auto random = [&] {
+    state = state * 1664525u + 1013904223u;
+    return static_cast<float>(state >> 8) / 16777216.0f;
+  };
+  for (int q = 0; q < 750000; ++q) {
+    const Vec3 center{random() * 10.0f - 5.0f, 8.0f + random() * 8.0f,
+                      random() * 10.0f - 5.0f};
+    const Vec3 u = normalize(Vec3{random() - 0.5f, random() - 0.5f, random() - 0.5f});
+    const Vec3 v = normalize(cross(u, Vec3{0.3f, 1.0f, 0.2f})) * 0.1f;
+    const Vec3 w = cross(u, v);
+    const auto base = static_cast<uint32_t>(mesh.vertices.size());
+    for (const Vec3 corner : {center - v - w, center + v - w, center + v + w,
+                              center - v + w}) {
+      Vertex vertex;
+      vertex.position = corner;
+      vertex.normal = u;
+      mesh.vertices.push_back(vertex);
+    }
+    mesh.indices.insert(mesh.indices.end(),
+                        {base, base + 1, base + 2, base, base + 2, base + 3});
+  }
+  return mesh;
+}
+
+const ClusterLod &cachedTree() {
+  static const ClusterLod lod = [] {
+    const auto file = cacheFile("meridian_tree.clusters");
+    writeClusterCache(file, 9, {buildClusterLod(syntheticTree())});
+    auto read = readClusterCache(file, 9);
+    std::filesystem::remove(file);
+    REQUIRE(read);
+    return std::move(read->front());
+  }();
+  return lod;
+}
+
+bool contains(Vec3 center, float radius, Vec3 innerCenter, float innerRadius) {
+  return length(innerCenter - center) + innerRadius <= radius;
+}
+
+void checkBvh(const ClusterLod &lod) {
+  std::vector<int> leafOf(lod.clusters.size(), 0);
+  for (const ClusterBvhNode &node : lod.nodes) {
+    REQUIRE(node.childCount > 0);
+    for (uint32_t i = node.firstChild; i < node.firstChild + node.childCount; ++i) {
+      if (node.leaf) {
+        const Cluster &c = lod.clusters[i];
+        ++leafOf[i];
+        CHECK(node.lod.error >= c.self.error);
+        CHECK(contains(node.lod.center, node.lod.radius, c.self.center, c.self.radius));
+        if (c.refined.error >= 0.0f) {
+          CHECK(contains(node.lod.center, node.lod.radius, c.refined.center,
+                         c.refined.radius));
+        }
+        CHECK(contains(node.boundsCenter, node.boundsRadius, c.boundsCenter,
+                       c.boundsRadius));
+      } else {
+        const ClusterBvhNode &child = lod.nodes[i];
+        CHECK(node.lod.error >= child.lod.error);
+        CHECK(contains(node.lod.center, node.lod.radius, child.lod.center,
+                       child.lod.radius));
+        CHECK(contains(node.boundsCenter, node.boundsRadius, child.boundsCenter,
+                       child.boundsRadius));
+      }
+    }
+  }
+  CHECK(std::all_of(leafOf.begin(), leafOf.end(), [](int n) { return n == 1; }));
+}
+
+std::vector<uint32_t> flatCut(const ClusterLod &lod, Vec3 camera, float scale,
+                              float projY, float threshold) {
+  std::vector<uint32_t> cut;
+  for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
+    if (lodVisible(lod.clusters[i], camera, scale, projY, 0.1f, 1440.0f, threshold)) {
+      cut.push_back(i);
+    }
+  }
+  return cut;
+}
+
+void checkTraversal(const ClusterLod &lod, Vec3 center) {
+  for (const Vec3 direction : {Vec3{0, 0, 1}, normalize(Vec3{1, 0.5f, -0.3f}),
+                               normalize(Vec3{-0.2f, -1, 0.4f})}) {
+    for (float distance : {1.0f, 10.0f, 100.0f, 1000.0f}) {
+      for (float threshold : {0.5f, 1.0f, 4.0f}) {
+        for (float scale : {1.0f, 2.5f}) {
+          for (float projY : {1.2f, 3.0f}) {
+            const Vec3 camera = center + direction * distance;
+            std::vector<uint32_t> bvh = selectClustersBvh(lod, camera, scale, projY,
+                                                          0.1f, 1440.0f, threshold);
+            std::sort(bvh.begin(), bvh.end());
+            const std::vector<uint32_t> flat =
+                flatCut(lod, camera, scale, projY, threshold);
+            CHECK(!flat.empty());
+            CHECK(bvh == flat);
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+TEST_CASE("every cluster BVH node bounds what is below it") {
+  const ClusterLod &tree = cachedTree();
+  CHECK(tree.levels.size() >= 4);
+  checkBvh(tree);
+  checkBvh(buildClusterLod(bumpyGrid(1)));
+  checkBvh(buildClusterLod(bumpyGrid(100)));
+}
+
+TEST_CASE("the BVH traversal selects exactly the flat cut") {
+  const ClusterLod &tree = cachedTree();
+  checkTraversal(tree, {0.0f, 8.0f, 0.0f});
+  const ClusterLod single = buildClusterLod(bumpyGrid(1));
+  REQUIRE(single.clusters.size() == 1);
+  checkTraversal(single, {});
+  checkTraversal(buildClusterLod(bumpyGrid(100)), {});
 }
