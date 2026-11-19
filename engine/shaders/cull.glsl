@@ -14,6 +14,7 @@ layout(buffer_reference, std430) buffer WorkItemBuffer {
 // Must match DrawCounters in C++: per phase, the cluster cull's dispatch
 // arguments (3 uints), then per phase and draw list the mesh task
 // arguments (3 uints), the retest dispatch arguments, then counts.
+// gpu_types.h checks these offsets.
 const uint kCounterMeshTasks = 6u;
 const uint kCounterRetestDispatch = 30u;
 const uint kCounterInstances = 33u;

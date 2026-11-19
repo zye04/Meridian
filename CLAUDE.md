@@ -201,7 +201,9 @@ images are shared between them, and barriers account for that.
   Descriptor sets: scene layout set 0 = atmosphere LUTs, set 1 = DFG LUT
   + bindless `textures[]` (also read by terrain.mesh: the terrain's
   R16_UNORM height image, via texelFetch so it matches `heightAt`
-  exactly, and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = HDR/motion/history (two
+  exactly; the shadow march also reads it with textureGather through
+  `nearestSampler`, whose CLAMP_TO_EDGE its mirror-tile math relies on,
+  so don't switch that sampler to mirrored; and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = HDR/motion/history (two
   ping-pong sets); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted

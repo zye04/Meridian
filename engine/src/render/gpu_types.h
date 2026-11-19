@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -187,10 +188,12 @@ constexpr uint32_t kTerrainRootLevel = 16;
 static_assert(kTerrainRootLevel <= 16,
               "terrain node encoding (terrain.glsl) holds 16-bit x/z and a 5-bit level");
 constexpr float kTerrainLodRange0 = 80.0f;
-// Capacity of each selection list and of the terrain draw list. Overflow is
-// dropped and counted in DrawCounters::overflow.
+// Must match terrain.glsl. Capacity of each selection list and of the
+// terrain draw list. Overflow is dropped and counted in
+// DrawCounters::overflow.
 constexpr uint32_t kMaxTerrainNodes = 8192;
-// Mesh shader workgroups per drawn node (4x4 blocks of 8x8 quads).
+// Must match terrain.glsl. Mesh shader workgroups per drawn node (4x4
+// blocks of 8x8 quads).
 constexpr uint32_t kTerrainTasksPerNode = 16;
 constexpr uint32_t kMaxHeightPyramidLevels = 16;
 
@@ -330,6 +333,15 @@ struct DrawCounters {
   uint32_t pad[2];
 };
 static_assert(sizeof(DrawCounters) == 160);
+// The shaders index DrawCounters as a uint array (cull.glsl,
+// terrain_select.comp).
+static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
+static_assert(offsetof(DrawCounters, retestDispatch) == 30 * 4);
+static_assert(offsetof(DrawCounters, instances) == 33 * 4);
+static_assert(offsetof(DrawCounters, triangles) == 34 * 4);
+static_assert(offsetof(DrawCounters, overflow) == 35 * 4);
+static_assert(offsetof(DrawCounters, retestCount) == 36 * 4);
+static_assert(offsetof(DrawCounters, terrainNodes) == 37 * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -379,6 +391,9 @@ struct TerrainCounters {
   uint32_t pad;
 };
 static_assert(sizeof(TerrainCounters) == 288);
+// terrain_select.comp indexes TerrainCounters as a uint array.
+static_assert(offsetof(TerrainCounters, count) == 51 * 4);
+static_assert(offsetof(TerrainCounters, drawTasks) == 68 * 4);
 
 // Must match the push constants in terrain_select.comp.
 struct TerrainSelectConstants {

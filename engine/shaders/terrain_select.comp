@@ -14,11 +14,11 @@ layout(local_size_x = 64) in;
 
 // Must match TerrainCounters in C++: per level, dispatch arguments (3
 // uints each) over its input list, then each list's node count, then the
-// terrain draw's mesh task arguments.
+// terrain draw's mesh task arguments. gpu_types.h checks these offsets.
 const uint kCounterNodeCount = 51u;
 const uint kCounterDrawTasks = 68u;
 
-// Must match DrawCounters in C++ (see cull.glsl).
+// Must match DrawCounters in C++ (see cull.glsl); gpu_types.h checks them.
 const uint kDrawCounterOverflow = 35u;
 const uint kDrawCounterTerrainNodes = 37u;
 
