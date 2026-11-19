@@ -2,7 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 
-layout(location = 0) out vec3 outWorldPosition;
+layout(location = 0) out vec3 outRelativePosition;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec4 outCurrentClip;
 layout(location = 3) out vec4 outPreviousClip;
@@ -18,9 +18,10 @@ void main() {
     MeshInfo mesh = pc.scene.meshes.meshes[instance.meshIndex];
     Vertex vertex = pc.scene.vertices.vertices[gl_VertexIndex];
 
-    vec4 world = instance.transform * vec4(vertex.position, 1.0);
-    gl_Position = pc.scene.viewProjection * world;
-    outWorldPosition = world.xyz;
+    vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
+    vec4 relative = vec4(world - pc.scene.cameraPosition, 1.0);
+    gl_Position = pc.scene.viewProjection * relative;
+    outRelativePosition = relative.xyz;
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
     outNormal = normalMatrix * vertex.normal;
@@ -29,6 +30,7 @@ void main() {
     outMaterialIndex = mesh.materialIndex;
     outLodError = 0.0;
     // Static geometry for now: only the camera moves between frames.
-    outCurrentClip = pc.scene.currentViewProjection * world;
-    outPreviousClip = pc.scene.previousViewProjection * world;
+    outCurrentClip = pc.scene.currentViewProjection * relative;
+    outPreviousClip = pc.scene.previousViewProjection *
+                      vec4(world - pc.scene.previousCameraPosition, 1.0);
 }

@@ -14,5 +14,5 @@ void main() {
 
     // A point on the near plane (depth 1 with reverse-Z), unjittered.
     vec4 nearPoint = inverse(pc.scene.currentViewProjection) * vec4(ndc, 1.0, 1.0);
-    outViewRay = nearPoint.xyz / nearPoint.w - pc.scene.cameraPosition;
+    outViewRay = nearPoint.xyz / nearPoint.w;
 }

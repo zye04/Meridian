@@ -9,7 +9,7 @@
 layout(local_size_x = 32) in;
 layout(triangles, max_vertices = 128, max_primitives = 128) out;
 
-layout(location = 0) out vec3 outWorldPosition[];
+layout(location = 0) out vec3 outRelativePosition[];
 layout(location = 1) out vec3 outNormal[];
 layout(location = 2) out vec4 outCurrentClip[];
 layout(location = 3) out vec4 outPreviousClip[];
@@ -43,9 +43,10 @@ void main() {
         uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
                      uint(mesh.vertexOffset);
         Vertex vertex = scene.vertices.vertices[index];
-        vec4 world = instance.transform * vec4(vertex.position, 1.0);
-        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * world;
-        outWorldPosition[i] = world.xyz;
+        vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
+        vec4 relative = vec4(world - scene.cameraPosition, 1.0);
+        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * relative;
+        outRelativePosition[i] = relative.xyz;
         outNormal[i] = normalMatrix * vertex.normal;
         outTangent[i] = vec4(mat3(instance.transform) * vertex.tangent.xyz,
                              vertex.tangent.w);
@@ -53,8 +54,9 @@ void main() {
         outMaterialIndex[i] = mesh.materialIndex;
         outLodError[i] = lodError;
         // Static geometry for now: only the camera moves between frames.
-        outCurrentClip[i] = scene.currentViewProjection * world;
-        outPreviousClip[i] = scene.previousViewProjection * world;
+        outCurrentClip[i] = scene.currentViewProjection * relative;
+        outPreviousClip[i] = scene.previousViewProjection *
+                             vec4(world - scene.previousCameraPosition, 1.0);
     }
     for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {
         uint t = scene.clusterTriangles.triangles[cluster.firstTriangle + i];

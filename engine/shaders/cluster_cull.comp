@@ -50,7 +50,8 @@ void retest() {
     uvec2 entry = cull.retest.entries[index];
     mat4 transform = cull.scene.instances.instances[entry.x].transform;
     ClusterInfo cluster = cull.scene.clusters.clusters[entry.y];
-    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
+    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz -
+                  cull.scene.cameraPosition;
     if (!occluded(center, cluster.boundsRadius * maxScale(transform), cull.scene.view)) {
         draw(entry.x, entry.y, cluster.triangleCount);
     }
@@ -91,14 +92,16 @@ void main() {
         return;
     }
 
-    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
+    vec3 world = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
+    vec3 center = world - cull.scene.cameraPosition;
     float radius = cluster.boundsRadius * scale;
     if (!inFrustum(center, radius)) {
         return;
     }
 
     if (cull.occlusion != 0u && cull.phase == 0u && cull.previousPyramid != 0u &&
-        occluded(center, radius, cull.scene.previousView)) {
+        occluded(world - cull.scene.previousCameraPosition, radius,
+                 cull.scene.previousView)) {
         uint slot = atomicAdd(cull.counters.counters[kCounterRetest], 1u);
         if (slot >= kMaxRetestClusters) {
             // Dropping it could hide something visible: draw it now instead.

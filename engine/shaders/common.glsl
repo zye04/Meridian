@@ -178,6 +178,10 @@ struct Terrain {
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
+    // All view matrices here leave out the camera translation: they take
+    // positions relative to the camera (world - cameraPosition, or
+    // previousCameraPosition for the previous ones), which stay precise
+    // far from the origin.
     // Jittered for temporal anti-aliasing; used to rasterize.
     mat4 viewProjection;
     // Without jitter, this frame and last frame; used for motion vectors.
@@ -189,6 +193,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint frameIndex;
     vec3 cameraPosition;
     float sunAngularRadius;
+    vec3 previousCameraPosition;
+    float pad2;
     // Device address of the scene's top-level acceleration structure.
     uvec2 tlas;
     // Written by last frame's exposure pass; the scene is shaded with it
@@ -204,7 +210,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     MaterialBuffer materials;
     uint instanceCount;
     uint pad1;
-    // World-space planes (xyz normal, w distance), inside where >= 0.
+    // Camera-relative planes (xyz normal, w distance), inside where >= 0.
     vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
     Terrain terrain;

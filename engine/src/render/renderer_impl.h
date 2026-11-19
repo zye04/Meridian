@@ -56,6 +56,7 @@ struct Renderer::Impl {
   bool historyValid = false;
   Mat4 previousViewProjection;
   Mat4 previousView;
+  Vec3 previousCameraPosition;
   // The depth pyramid holds last frame's depth at the current size, so the
   // early cluster cull can test against it.
   bool pyramidValid = false;

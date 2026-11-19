@@ -24,9 +24,14 @@ struct Camera {
 
   Vec3 right() const { return {std::cos(yaw), 0.0f, std::sin(yaw)}; }
 
-  Mat4 view() const {
-    return lookAt(position, position + forward(), {0.0f, 1.0f, 0.0f});
+  // The view with the camera at the origin, for camera-relative positions.
+  Mat4 viewRotation() const {
+    return lookAt({0.0f, 0.0f, 0.0f}, forward(), {0.0f, 1.0f, 0.0f});
   }
+
+  // Not lookAt(position, position + forward()): far from the origin that
+  // sum rounds away much of forward()'s precision.
+  Mat4 view() const { return viewRotation() * translation(position * -1.0f); }
 
   Mat4 projection(float aspect) const {
     return perspective(fovY, aspect, nearPlane);

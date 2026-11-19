@@ -252,3 +252,28 @@ foliage that survives simplification).
   Adding Poly Haven's island_tree_01 (1.6M triangles, ~190 instances):
   1.54-2.12 ms in every view; the close-up draws 1.57M triangles at 1 px
   vs 78.5M (12.70 ms) at `--lod-error 0`.
+
+## Large worlds (2026-11-19)
+
+- **Camera-relative rendering** for the 15 km world (7.5 km from the
+  origin). Shaders subtract the camera position from world positions
+  before any matrix multiply, and every view and view-projection matrix
+  leaves out the camera translation. Two nearby floats subtract exactly
+  (Sterbenz lemma), so the only error left is each vertex's own
+  world-space rounding (~0.5 mm at 7.5 km), which is static and doesn't
+  jitter as the camera moves. Folding the translation into the matrix
+  instead rounds the large terms inside the multiply, which does jitter.
+  Last frame's clip position uses last frame's camera position with its
+  own translation-free matrix. The instance format is unchanged.
+  Rebuilding `Camera::view()` as `viewRotation() * translation(-position)`
+  also fixed a CPU precision loss: `lookAt(position, position +
+  forward())` rounded away much of the direction's precision far out
+  (9 of 16 elements off at 7.4 km).
+- Verified against the previous build: mean difference 0.50/255 at the
+  default view, 0.12 high, 0.10 scatter at 5 m/s. The `view()` fix alone
+  moves the default view 0.55/255: any float-math change re-rolls the
+  ground texture's sub-texel noise. Brightness, draw counts, validation
+  and motion sharpness are unchanged.
+- Rejected: tile + offset coordinates (Unreal's large world coordinates).
+  They buy precision far beyond 15 km that this world doesn't need.
+  - https://godotengine.org/article/emulating-double-precision-gpu-render-large-worlds

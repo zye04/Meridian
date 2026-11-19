@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <meridian/camera.h>
 #include <meridian/math/mat4.h>
 
 using meridian::Mat4;
@@ -95,4 +96,29 @@ TEST_CASE("frustum planes keep what the camera sees and reject the rest") {
   CHECK_FALSE(sphereVisible(planes, {0, 0, -0.01f}, 0.05f)); // before near
   // Partially inside counts as visible.
   CHECK(sphereVisible(planes, {-10.5f, 0, -10}, 1.0f));
+}
+
+TEST_CASE("viewRotation maps camera-relative points far from the origin") {
+  meridian::Camera camera;
+  camera.position = {7400.0f, 1200.0f, -7300.0f};
+  camera.yaw = 0.7f;
+  camera.pitch = -0.2f;
+  const Mat4 rotation = camera.viewRotation();
+
+  // 3 m straight ahead lands on -Z, 2 m to the right on +X.
+  Vec3 ahead = meridian::transformPoint(rotation, camera.forward() * 3.0f);
+  CHECK(ahead.x == doctest::Approx(0.0f).epsilon(1e-5));
+  CHECK(ahead.y == doctest::Approx(0.0f).epsilon(1e-5));
+  CHECK(ahead.z == doctest::Approx(-3.0f).epsilon(1e-5));
+  Vec3 right = meridian::transformPoint(rotation, camera.right() * 2.0f);
+  CHECK(right.x == doctest::Approx(2.0f).epsilon(1e-5));
+  CHECK(right.y == doctest::Approx(0.0f).epsilon(1e-5));
+  CHECK(right.z == doctest::Approx(0.0f).epsilon(1e-5));
+
+  // The full view puts the camera itself at the origin (up to the rounding
+  // of 7 km terms).
+  Vec3 eye = meridian::transformPoint(camera.view(), camera.position);
+  CHECK(std::abs(eye.x) < 1e-2f);
+  CHECK(std::abs(eye.y) < 1e-2f);
+  CHECK(std::abs(eye.z) < 1e-2f);
 }

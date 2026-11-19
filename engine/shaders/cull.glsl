@@ -99,8 +99,9 @@ bool projectSphere(vec3 c, float r, out vec4 bounds) {
 
 // Against the depth pyramid, as seen from `view` (the view its depth was
 // rendered with).
-bool occluded(vec3 worldCenter, float radius, mat4 view) {
-    vec3 c = (view * vec4(worldCenter, 1.0)).xyz;
+// `relativeCenter` is relative to that view's camera.
+bool occluded(vec3 relativeCenter, float radius, mat4 view) {
+    vec3 c = (view * vec4(relativeCenter, 1.0)).xyz;
     c.z = -c.z;
     vec4 bounds;
     if (!projectSphere(c, radius, bounds)) {

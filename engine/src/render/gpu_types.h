@@ -180,6 +180,8 @@ struct SceneData {
   uint32_t frameIndex = 0;
   Vec3 cameraPosition;
   float sunAngularRadius = 0.0f;
+  Vec3 previousCameraPosition;
+  float pad2 = 0.0f;
   VkDeviceAddress tlas = 0;
   VkDeviceAddress exposure = 0;
   VkDeviceAddress skyIrradiance = 0;
@@ -209,7 +211,7 @@ struct SceneData {
   VkDeviceAddress clusterTriangles = 0;
   VkDeviceAddress drawLists = 0;
 };
-static_assert(sizeof(SceneData) == 816);
+static_assert(sizeof(SceneData) == 832);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

@@ -141,6 +141,11 @@ images are shared between them, and barriers account for that.
 - Space: right-handed, Y up, camera looks down -Z. Reverse-Z with an infinite
   far plane (depth 1 = near; compare GREATER_OR_EQUAL; clear to 0).
   Mat4 is column-major `m[column][row]`.
+- Camera-relative rendering: view and view-projection matrices on the GPU
+  carry no translation (`Camera::viewRotation()`); shaders compute
+  `world - cameraPosition` first (last frame: `previousCameraPosition`),
+  and pass that between stages, culling included. World positions are
+  rebuilt only where they are needed (textures, shadow rays, atmosphere).
 - Motion vectors: UV units, `previous - current` (the DLSS convention).
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
   allocated); `MeshInfo` and `InstanceData` tables are on the GPU; the TLAS

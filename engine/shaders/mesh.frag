@@ -5,7 +5,7 @@
 #include "atmosphere.glsl"
 #include "material.glsl"
 
-layout(location = 0) in vec3 inWorldPosition;
+layout(location = 0) in vec3 inRelativePosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inCurrentClip;
 layout(location = 3) in vec4 inPreviousClip;
@@ -25,6 +25,11 @@ const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
 const float kGroundAlbedo = 0.1;
 const float kMinPerceptualRoughness = 0.045;
+
+// inRelativePosition + cameraPosition, set first thing in main(). World
+// positions place textures and the shadow rays; derivatives and distances
+// use the relative position, which keeps its precision far from the origin.
+vec3 worldPosition;
 
 // ---------------------------------------------------------------- Shadows
 
@@ -127,7 +132,7 @@ Surface proceduralTerrain(vec3 normal) {
 
     Surface s;
     s.baseColor = mix(kRock, kGrass, smoothstep(0.75, 0.9, normal.y));
-    float snow = smoothstep(150.0, 190.0, inWorldPosition.y) *
+    float snow = smoothstep(150.0, 190.0, worldPosition.y) *
                  smoothstep(0.6, 0.8, normal.y);
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.alpha = 1.0;
@@ -243,7 +248,7 @@ vec2 normalToDerivative(vec3 n) {
 // Top-down projection, uv = (x, -z): tangent +X, bitangent -Z, normal +Y.
 TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
     float scale = 1.0 / layer.tileSize;
-    HexTiles tiles = hexTiles(vec2(inWorldPosition.x, -inWorldPosition.z) * scale,
+    HexTiles tiles = hexTiles(vec2(worldPosition.x, -worldPosition.z) * scale,
                               vec2(dpdx.x, -dpdx.z) * scale,
                               vec2(dpdy.x, -dpdy.z) * scale);
 
@@ -303,8 +308,8 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     // along +y on the sides and +z on top, as the Whiteout swizzles expect;
     // it also keeps cliffs upright.
     const vec2 kV = vec2(1.0, -1.0);
-    vec2 uvs[3] = vec2[3](inWorldPosition.zy * kV, inWorldPosition.xz * kV,
-                          inWorldPosition.xy * kV);
+    vec2 uvs[3] = vec2[3](worldPosition.zy * kV, worldPosition.xz * kV,
+                          worldPosition.xy * kV);
     vec2 dxs[3] = vec2[3](dpdx.zy * kV, dpdx.xz * kV, dpdx.xy * kV);
     vec2 dys[3] = vec2[3](dpdy.zy * kV, dpdy.xz * kV, dpdy.xy * kV);
 
@@ -361,11 +366,11 @@ float valueNoise(vec2 p) {
 Surface terrainSurface(vec3 normal) {
     const float kNoisePeriod = 40.0; // meters
     const vec3 kSnow = vec3(0.80, 0.82, 0.85);
-    vec3 dpdx = dFdx(inWorldPosition);
-    vec3 dpdy = dFdy(inWorldPosition);
+    vec3 dpdx = dFdx(inRelativePosition);
+    vec3 dpdy = dFdy(inRelativePosition);
     Terrain terrain = pc.scene.terrain;
 
-    vec2 p = inWorldPosition.xz / kNoisePeriod;
+    vec2 p = worldPosition.xz / kNoisePeriod;
     float noise = 0.65 * valueNoise(p) + 0.35 * valueNoise(p * 2.7 + 13.0);
     float needles = smoothstep(0.45, 0.55, noise);
     float rock = 1.0 - smoothstep(0.75, 0.9, normal.y);
@@ -394,7 +399,7 @@ Surface terrainSurface(vec3 normal) {
     s.occlusion = ground.occlusionRoughness.x;
     s.perceptualRoughness = ground.occlusionRoughness.y;
     s.normal = ground.normal;
-    float snow = smoothstep(150.0, 190.0, inWorldPosition.y) *
+    float snow = smoothstep(150.0, 190.0, worldPosition.y) *
                  smoothstep(0.6, 0.8, normal.y);
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
@@ -469,6 +474,7 @@ vec3 fresnelSchlick(vec3 f0, float VoH) {
 }
 
 void main() {
+    worldPosition = inRelativePosition + pc.scene.cameraPosition;
     Material material = pc.scene.materials.materials[inMaterialIndex];
     vec3 normal = normalize(inNormal);
     if (!gl_FrontFacing) {
@@ -490,7 +496,7 @@ void main() {
 #endif
 
     vec3 N = s.normal;
-    vec3 V = normalize(pc.scene.cameraPosition - inWorldPosition);
+    vec3 V = normalize(-inRelativePosition);
     vec3 L = pc.scene.sunDirection;
     float NoV = max(dot(N, V), 1e-4);
 
@@ -507,14 +513,14 @@ void main() {
     // normal can point below the surface and make the ray hit its own
     // triangle. Derivatives must be taken outside the branch below.
     vec3 geometricNormal =
-        normalize(cross(dFdx(inWorldPosition), dFdy(inWorldPosition)));
+        normalize(cross(dFdx(inRelativePosition), dFdy(inRelativePosition)));
     if (dot(geometricNormal, normal) < 0.0) {
         geometricNormal = -geometricNormal;
     }
 
     // All lighting is relative to a sun illuminance of 1 (as in the
     // atmosphere LUTs) and scaled by the real sun at the end.
-    vec3 position = atmospherePosition(inWorldPosition);
+    vec3 position = atmospherePosition(worldPosition);
     float height = length(position);
     vec3 up = position / height;
     vec3 sunAtSurface = transmittanceToSun(height, dot(up, L));
@@ -525,7 +531,7 @@ void main() {
     vec3 specularLight = vec3(0.0);
     float NoL = clamp(dot(N, L), 0.0, 1.0);
     if (NoL > 0.0 && dot(geometricNormal, L) > 0.0) {
-        float visibility = sunVisibility(inWorldPosition, geometricNormal);
+        float visibility = sunVisibility(worldPosition, geometricNormal);
         vec3 H = normalize(V + L);
         float NoH = clamp(dot(N, H), 0.0, 1.0);
         float LoH = clamp(dot(L, H), 0.0, 1.0);
@@ -562,7 +568,7 @@ void main() {
 #endif
 
     // Aerial perspective: haze between the camera and this point.
-    float distanceKm = length(inWorldPosition - pc.scene.cameraPosition) * 0.001;
+    float distanceKm = length(inRelativePosition) * 0.001;
     float slice = distanceKm / kAerialPerspectiveKmPerSlice;
     float weight = 1.0;
     if (slice < 0.5) {

@@ -348,7 +348,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   const float jitterX = halton(phase, 2) - 0.5f;
   const float jitterY = halton(phase, 3) - 0.5f;
 
-  const Mat4 view = camera.view();
+  // Camera-relative: the matrices leave out the translation (see
+  // SceneBuffer in common.glsl).
+  const Mat4 view = camera.viewRotation();
   const Mat4 projection = camera.projection(aspect);
   Mat4 jitteredProjection = projection;
   jitteredProjection.m[2][0] += 2.0f * jitterX / static_cast<float>(extent.width);
@@ -357,11 +359,18 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   SceneData scene;
   scene.viewProjection = jitteredProjection * view;
   scene.currentViewProjection = projection * view;
-  scene.previousViewProjection = impl_->historyValid
-                                     ? impl_->previousViewProjection
-                                     : scene.currentViewProjection;
-  scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
+  if (!impl_->historyValid) {
+    impl_->previousViewProjection = scene.currentViewProjection;
+    impl_->previousView = view;
+    impl_->previousCameraPosition = camera.position;
+  }
+  scene.previousViewProjection = impl_->previousViewProjection;
+  scene.previousView = impl_->previousView;
+  scene.previousCameraPosition = impl_->previousCameraPosition;
   impl_->previousViewProjection = scene.currentViewProjection;
+  impl_->previousView = view;
+  impl_->previousCameraPosition = camera.position;
+  scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
   scene.sunDirection = lighting.sunDirection;
   scene.exposure = impl_->exposureBuffer.address;
   scene.sunIlluminance = lighting.sunIlluminance;
@@ -373,8 +382,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
   scene.view = view;
-  scene.previousView = impl_->previousView;
-  impl_->previousView = view;
   scene.projectionScale[0] = projection.m[0][0];
   scene.projectionScale[1] = projection.m[1][1];
   scene.nearPlane = camera.nearPlane;

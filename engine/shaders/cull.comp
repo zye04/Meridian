@@ -27,7 +27,8 @@ void main() {
         return;
     }
 
-    vec3 center = (instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz;
+    vec3 center = (instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz -
+                  cull.scene.cameraPosition;
     float radius = mesh.boundsRadius * maxScale(instance.transform);
     bool visibleInFrustum = inFrustum(center, radius);
 
