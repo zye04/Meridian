@@ -401,6 +401,12 @@ void Renderer::Impl::createFrames() {
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    frame.weatherHistory = createBuffer(
+        kWeatherHistoryCapacity * sizeof(WeatherHistorySample),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceStaging = createBuffer(
         kMaxInstances * sizeof(InstanceData), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
@@ -1389,6 +1395,7 @@ Renderer::~Renderer() {
     impl_->destroyBuffer(frame.instanceBuffer);
     impl_->destroyBuffer(frame.instanceStaging);
     impl_->destroyBuffer(frame.sceneBuffer);
+    impl_->destroyBuffer(frame.weatherHistory);
     impl_->destroyBuffer(frame.drawCountReadback);
     vkDestroySemaphore(dev, frame.imageAvailable, nullptr);
     vkDestroyFence(dev, frame.renderFence, nullptr);
