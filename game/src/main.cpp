@@ -442,6 +442,8 @@ struct Options {
   float timeScale = 1.0f;
   // Blends from the start weather to overcast over this many game seconds.
   std::optional<float> weatherFront;
+  // Saves the weather map after the last frame (debug).
+  std::optional<std::filesystem::path> weatherMapPath;
 };
 
 Options parseOptions(int argc, char **argv) {
@@ -451,6 +453,12 @@ Options parseOptions(int argc, char **argv) {
       throw std::runtime_error("missing value for option");
     }
     return std::stof(argv[i]);
+  };
+  auto text = [&](int &i) {
+    if (++i >= argc) {
+      throw std::runtime_error("missing value for " + std::string(argv[i - 1]));
+    }
+    return std::string(argv[i]);
   };
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -558,12 +566,16 @@ Options parseOptions(int argc, char **argv) {
       ++i;
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
-    } else if (arg == "--weather" && i + 1 < argc) {
-      options.weather = argv[++i];
+    } else if (arg == "--weather") {
+      options.weather = text(i);
+      // Throws on an unknown name, before anything loads.
+      meridian::weatherPreset(options.weather);
     } else if (arg == "--time-scale") {
       options.timeScale = number(i);
     } else if (arg == "--weather-front") {
       options.weatherFront = number(i);
+    } else if (arg == "--dump-weather-map") {
+      options.weatherMapPath = text(i);
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
@@ -576,12 +588,13 @@ Options parseOptions(int argc, char **argv) {
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
                                "--windowed, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
-                               "--weather-front seconds, "
+                               "--weather-front seconds, --dump-weather-map file.png, "
                                "--capture file.png|file.pfm, --frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
-  if (options.capturePath && options.frames == 0 && options.benchmarkSeconds == 0.0f) {
+  if ((options.capturePath || options.weatherMapPath) && options.frames == 0 &&
+      options.benchmarkSeconds == 0.0f) {
     options.frames = 120;
   }
   if ((options.cameraVelocity || options.cameraAngularVelocity) &&
@@ -925,6 +938,9 @@ int main(int argc, char **argv) {
     benchmarkWritten = perf.stopRecording(benchmark ? options.benchmarkPath : std::filesystem::path{});
   }
 
+  if (options.weatherMapPath) {
+    renderer.dumpWeatherMap(*options.weatherMapPath);
+  }
   if (!interactive) {
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "

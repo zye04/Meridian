@@ -37,9 +37,9 @@ Buffer Renderer::Impl::uploadStorage(const void *data, VkDeviceSize bytes) {
 }
 
 // Points bindless slot `index` (material.glsl's textures[]) at `view`.
-void Renderer::Impl::writeTexture(uint32_t index, VkImageView view, VkSampler sampler) {
-  const VkDescriptorImageInfo imageInfo{sampler, view,
-                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+void Renderer::Impl::writeTexture(uint32_t index, VkImageView view, VkSampler sampler,
+                                  VkImageLayout layout) {
+  const VkDescriptorImageInfo imageInfo{sampler, view, layout};
   VkWriteDescriptorSet write{};
   write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   write.dstSet = materialSet;

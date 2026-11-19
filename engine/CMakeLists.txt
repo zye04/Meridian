@@ -101,7 +101,7 @@ foreach(source
     sky_irradiance.comp dfg_lut.comp cull.comp depth_pyramid.comp
     cluster_traverse.comp cluster_cull.comp mesh.mesh terrain_select.comp
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
-    grade_lut.comp sharpen.comp contact_shadows.comp)
+    grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
@@ -124,6 +124,7 @@ add_library(meridian STATIC
     src/grade.cpp
     src/model.cpp
     src/placement.cpp
+    src/render/renderer_clouds.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_placement.cpp
     src/render/renderer_resources.cpp

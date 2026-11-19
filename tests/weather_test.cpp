@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 using meridian::Vec3;
 using meridian::Weather;
@@ -164,6 +165,32 @@ TEST_CASE("wind offset is the integral of the velocity across a speed change") {
   const Vec3 expected = meridian::windVelocityAt(unit, 1500.0f) * 1150.0f;
   CHECK(aloft.x == doctest::Approx(expected.x).epsilon(1e-5));
   CHECK(aloft.z == doctest::Approx(expected.z).epsilon(1e-5));
+}
+
+TEST_CASE("the wind offset modulo a period stays precise after long travel") {
+  const Vec3 direction = meridian::normalize({-0.6f, 0.0f, 0.8f});
+  Weather weather(1, steady(0.35f, direction, 10.0f));
+  // ~2300 km of air travel at 3 km: a float offset there resolves 25 cm.
+  weather.update(1.0e5);
+  const double period = 262144.0;
+  const Vec3 wrapped = weather.windOffsetModulo(3000.0f, period);
+  const Vec3 offset = weather.windOffset(3000.0f);
+  for (auto [w, o] : {std::pair{wrapped.x, offset.x}, std::pair{wrapped.z, offset.z}}) {
+    CHECK(w >= 0.0f);
+    CHECK(w < period);
+    CHECK(std::abs(std::remainder(static_cast<double>(o) - w, period)) < 0.2);
+  }
+  // One 1/60 s frame later the wrapped offset has moved by velocity * dt,
+  // within the float resolution below the period (1.6 cm), whatever the
+  // total travel.
+  weather.update(1.0e5 + 1.0 / 60.0);
+  const Vec3 next = weather.windOffsetModulo(3000.0f, period);
+  meridian::WindState wind;
+  wind.direction = direction;
+  wind.speed10m = 10.0f;
+  const Vec3 step = meridian::windVelocityAt(wind, 3000.0f) * (1.0f / 60.0f);
+  CHECK(std::abs(std::remainder(static_cast<double>(next.x) - wrapped.x, period) - step.x) < 0.02);
+  CHECK(std::abs(std::remainder(static_cast<double>(next.z) - wrapped.z, period) - step.z) < 0.02);
 }
 
 TEST_CASE("a change reaches a point downwind of the front line at distance / speed") {
