@@ -97,6 +97,15 @@ sources. Check here before re-researching a topic.
   disable early-Z for opaque draws), premultiplied blending so glass keeps
   full specular, no motion writes for blended surfaces, and back-to-front
   sorting by object origin.
+- **Test content from Poly Haven** (CC0, public API, no login), fetched by
+  script so `assets/` stays reproducible. Megascans (free on Fab for any
+  engine since 2026-11) needs a browser login, so it is a manual option
+  for later. Only game-weight assets for now: rocks, litter, small plants
+  and saplings (2k-160k triangles each). Poly Haven's full-size trees are
+  film assets (0.5-7M triangles per tree, no LODs) and wait for
+  virtualized geometry.
+  - https://api.polyhaven.com
+  - https://cgchannel.com/2026/11/epic-has-made-megascans-free-again-for-good-this-time
 
 ## GPU-driven rendering (phase 1, 2026-11-19)
 
@@ -109,8 +118,14 @@ sources. Check here before re-researching a topic.
   - https://daslang.io/doc/reference/tutorials/vulkan/12_gpu_driven.html
 - Draw lists split by pipeline and cull mode (opaque/masked x single/double
   sided), so one indirect call covers each. Blended stays CPU-sorted.
-- Next: phase 2, two-phase Hi-Z occlusion culling (depth pyramid; last
-  frame's visible set plus a re-test); phase 3, meshlets / mesh shaders and
-  cluster culling (benchmarks: williscool.com task/mesh vs indirect).
+- Next, in order: a tiling ground material on the terrain; phase 2,
+  two-phase Hi-Z occlusion culling (depth pyramid; last frame's visible set
+  plus a re-test), tested on Poly Haven assets scattered over the terrain;
+  phase 3, virtualized geometry (meshlets with a cluster LOD hierarchy,
+  Nanite-style, rather than discrete LODs, so film-grade assets such as
+  multi-million-triangle trees become usable; RT needs cluster acceleration
+  structures or proxy meshes); then a 15 km world (chunked terrain with LOD
+  and streaming, large-scale scatter, GPU grass). Benchmarks for task/mesh
+  vs indirect: williscool.com.
   - https://www.williscool.com/technical/task-mesh-benchmarking/task-mesh-benchmarking.md.html
 

@@ -136,7 +136,10 @@ images are shared between them, and barriers account for that.
 - Hyprland is configured in Lua: `hyprctl dispatch "hl.dsp.window.close({
   window = \"address:0x...\" })"`.
 - `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`,
-  then cook AlphaBlendModeTest.
+  then cook AlphaBlendModeTest and each Poly Haven model
+  (`assets/source/<id>/<id>_2k.gltf` -> `assets/<id>`). The script needs
+  `jq`. Loading these models prints UBSan shift warnings from inside
+  MikkTSpace (third-party code, not ours).
 - Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
   history isn't rescaled on exposure change; the Renderer constructor
   leaks partial Vulkan state if it throws; terrain is one 2 km mesh with no
