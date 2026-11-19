@@ -67,6 +67,11 @@ struct Renderer::Impl {
   Mat4 previousViewProjection;
   Mat4 previousView;
   Vec3 previousCameraPosition;
+  // From setWeather; the history is copied to the frame's buffer in draw.
+  GpuWind wind;
+  GpuWind previousWind;
+  GpuWeather weather;
+  std::array<WeatherHistorySample, kWeatherHistoryCapacity> weatherHistory{};
   // The depth pyramid holds last frame's depth at the current size, so the
   // early cluster cull can test against it.
   bool pyramidValid = false;

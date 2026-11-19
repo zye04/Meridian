@@ -465,6 +465,32 @@ void Renderer::setAntiAliasing(const AaSettings &settings) {
 
 AaSettings Renderer::antiAliasing() const { return impl_->aaSettings; }
 
+void Renderer::setWeather(const Weather &weather) {
+  const WeatherState &state = weather.current();
+  GpuWind &wind = impl_->wind;
+  wind.direction[0] = state.wind.direction.x;
+  wind.direction[1] = state.wind.direction.z;
+  wind.speed10m = state.wind.speed10m;
+  wind.gustiness = state.wind.gustiness;
+  const Vec3 offset = weather.windOffset(10.0f);
+  wind.offset[0] = offset.x;
+  wind.offset[1] = offset.z;
+  wind.gustPhase = static_cast<float>(
+      std::fmod(weather.time() * kGustPhaseRate, kGustPhasePeriod));
+
+  GpuWeather &gpu = impl_->weather;
+  gpu.coverage = state.coverage;
+  gpu.type = state.type;
+  gpu.precipitation = state.precipitation;
+  const std::span<const WeatherHistorySample> history = weather.history();
+  gpu.historyCount = static_cast<uint32_t>(history.size());
+  for (size_t i = 0; i < history.size(); ++i) {
+    impl_->weatherHistory[i] = history[i];
+    impl_->weatherHistory[i].travel =
+        static_cast<float>(history[i].travel - weather.travel());
+  }
+}
+
 void Renderer::requestCapture(const std::filesystem::path &path) {
   impl_->capturePath = path;
 }
@@ -587,6 +613,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->previousViewProjection = scene.currentViewProjection;
     impl_->previousView = view;
     impl_->previousCameraPosition = camera.position;
+    impl_->previousWind = impl_->wind;
   }
   scene.previousViewProjection = impl_->previousViewProjection;
   scene.previousView = impl_->previousView;
@@ -650,6 +677,16 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.cellDrawDistance = impl_->cellDrawDistance;
   scene.cellMargin = impl_->cellMargin;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
+  scene.wind = impl_->wind;
+  scene.previousWind = impl_->previousWind;
+  impl_->previousWind = impl_->wind;
+  scene.weather = impl_->weather;
+  scene.weather.history = frame.weatherHistory.address;
+  std::memcpy(frame.weatherHistory.mapped, impl_->weatherHistory.data(),
+              impl_->weather.historyCount * sizeof(WeatherHistorySample));
+  check(vmaFlushAllocation(impl_->allocator, frame.weatherHistory.allocation, 0,
+                           VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),

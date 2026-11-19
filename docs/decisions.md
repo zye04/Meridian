@@ -1279,3 +1279,54 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   blended surfaces write no depth.
 - Clouds, when they exist, write this mask too.
 - Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).
+
+## Weather state and wind (M4 clouds, 2026-11-19)
+
+Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
+
+- **Weather state** (`weather.h`): coverage, type (0 stratus/overcast ..
+  1 cumulus, above 1 reserved for cumulonimbus), precipitation (carried,
+  unused in M4) and the 10 m wind (direction it blows toward, speed,
+  gustiness). `Weather` blends to a target with a smoothstep (value and
+  slope continuous, so C1 with the steady states around it); the wind
+  direction turns along the shorter arc by angle (a vector lerp passes
+  through zero on a reversal). Presets: clear (coverage 0), fair (0.35,
+  cumulus, 3 m/s; the default), broken (0.65, type 0.6, 6 m/s), overcast
+  (1.0, stratus, 8 m/s).
+- **Determinism:** `update` takes the absolute game time; the wind offset
+  and travel integrate in fixed 0.25 s substeps (midpoint rule) and are
+  extrapolated from the last substep to the exact time with the same
+  midpoint velocity, so offsets are continuous and the state at a substep
+  time is bitwise the same for 1, 4 or 60 updates per game second or a
+  600x time-lapse (tested). Blends are analytic in game time.
+- **Fronts (Approaches 2):** a change is born on a front line perpendicular
+  to the current wind, 60 km upwind of the world origin, and crosses the
+  world at wind speed. The state at p is the history sample whose travel
+  (integral of the 10 m speed) is the current travel minus p's downwind
+  distance from the line, blended between neighbours; upwind of the line
+  the current state, beyond the history the oldest sample. Calm wind stops
+  travel (no division by speed anywhere), so the weather on the ground
+  stays where it was. History: one sample per 1 km of travel, 256 samples
+  (~255 km, the spec's ~250 km: the weather map window plus the horizon
+  from 5 km up), kept oldest first in a fixed-capacity vector (dropping
+  the oldest moves 4 KB once per km, and the GPU gets one contiguous
+  array). The GPU copy stores travel relative to now (<= 0) so float
+  precision doesn't degrade as total travel grows; `weatherAt`
+  (weather.glsl) binary-searches it with the same rule.
+- **Wind profile (Approaches 5):** speed by the neutral-stability power
+  law from 10 m (exponent 1/7, altitude clamped to >= 1 m); direction
+  veers clockwise seen from above with altitude (Ekman spiral, northern
+  hemisphere) linearly from 0 at 10 m to 0.35 rad (20 deg) at 1 km, the
+  top of the boundary layer, constant above. Both are time-invariant, so
+  the offset at any altitude is the 10 m offset scaled and rotated the
+  same way and only one integral is stored. The GPU `Wind` block (this
+  frame's and last frame's, for motion vectors) carries direction, speed,
+  gustiness, the 10 m offset, the gust phase and the profile constants;
+  `gust` is value noise in 40 m cells carried by the 10 m wind, evolving
+  along a phase (0.25 cells per game second, periodic every 256 cells so
+  the wrap is seamless), amplitude = gustiness. Altitude means above the
+  ground for vegetation and above sea level for clouds.
+  - Ghost of Tsushima wind: https://gdcvault.com/play/1027350/Blowing-from-the-West-Simulating
+  - UE WindDirectionalSource: https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/WindDirectionalSourceComponent
+  - Power-law wind profile (1/7 for neutral stability): https://en.wikipedia.org/wiki/Wind_profile_power_law
+  - Ekman spiral: https://en.wikipedia.org/wiki/Ekman_spiral

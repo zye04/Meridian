@@ -145,6 +145,8 @@ struct DrawItem {
   Mat4 transform = Mat4::identity();
 };
 
+class Weather;
+
 class Renderer {
 public:
   explicit Renderer(Window &window);
@@ -179,6 +181,11 @@ public:
   // culls them and builds the draw lists itself each frame.
   InstanceId addInstance(MeshId mesh, const Mat4 &transform);
   uint32_t instanceCount() const;
+
+  // Copies the weather the GPU reads (wind, current state, history) into the
+  // next frame. Call every frame before draw; the renderer keeps last
+  // frame's wind for motion vectors.
+  void setWeather(const Weather &weather);
 
   // deltaSeconds: time since the previous frame, which paces exposure
   // adaptation. Pass a fixed step for repeatable output.
