@@ -2046,14 +2046,15 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   tile seamlessly.
   - Schneider, Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Hillaire, TileableVolumeNoise (Perlin-Worley construction): https://github.com/sebh/TileableVolumeNoise
-- **Density (`clouds.glsl` `cloudDensity`):** the plain product weather
-  coverage x vertical profile x base shape (HZD: `remap(R, worleyFbm -
-  1, 1)`), then eroded by the curl-distorted detail (150 m of distortion
-  fading toward the top). Coverage is thresholded once, in the map; a
-  second HZD-style `remap(shape, 1 - coverage, 1)` on top of it would
-  punch holes in overcast (R spread over [0, 1] at coverage 1) and shrink
-  fair well below its coverage (the march then cuts the product at a
-  fixed, type-dependent level; see Cloud march). Erosion depends on type like the
+- **Density (`clouds.glsl` `cloudDensity`):** weather coverage as a
+  plain multiplier times the cut of vertical profile x base shape (HZD:
+  `remap(R, worleyFbm - 1, 1)`, stretched and cut as in "Shape" under
+  Cloud march below), then eroded by the curl-distorted detail (150 m of
+  distortion fading toward the top). Coverage is thresholded once, in
+  the map; a second HZD-style `remap(shape, 1 - coverage, 1)` on top of
+  it would punch holes in overcast (R spread over [0, 1] at coverage 1)
+  and shrink fair well below its coverage, so coverage stays out of the
+  cut. Erosion depends on type like the
   profile: cumulus wispy at the base and billowy above, carving up to
   0.35; stratus wispy throughout, carving up to 0.5. Output is in [0, 1]; the march scales it to extinction.
   `world.y` is the altitude on the curved shell, so the caller decides
@@ -2119,9 +2120,11 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   the planet center below the camera, so clouds curve under the horizon
   with M1's curvature warp; shell intersections use the stable quadratic
   with `c = (h - a)(2R + h + a)`, since `|o|^2 - r^2` loses everything in
-  float at planet scale. Steps: 64 across the segment, at least 60 m,
-  growing as 1.2% of the distance (about a quarter-res pixel), at most
-  128, start jittered by interleaved gradient noise per frame (no blue
+  float at planet scale. Steps: 1.2% of the distance (about a
+  quarter-res pixel), at least 60 m, widened only where the steps left
+  (of at most 128) couldn't reach the segment's end; an earlier rule,
+  the segment / 64, gave ~1 km steps at 30 km and striped mid-distance
+  clouds. Start jittered by interleaved gradient noise per frame (no blue
   noise texture in the engine yet; IGN is the engine's existing
   low-discrepancy per-pixel sequence); the march stops at the scene
   depth, the sea-level sphere, 300 km, or transmittance 0.01.
@@ -2131,7 +2134,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   march (40 m doubling, 1.2 km); sun color from the transmittance LUT at
   the sample, zero in the planet's shadow (the LUT alone returns the
   transmittance to the ground there, which made clouds glow after
-  sunset); dual-lobe Henyey-Greenstein (0.8 and -0.5, 30% backward);
+  sunset; the light march is skipped there and stops once it leaves the
+  layer); dual-lobe Henyey-Greenstein (0.8 and -0.5, 30% backward);
   Wrenninge octaves, 3, extinction x0.25, contribution x0.7, eccentricity
   x0.5 (a <= b keeps it energy-conserving; b = 0.5 left sunlit tops
   grey); ambient = sky irradiance / 2 pi (isotropic in-scattering from
@@ -2148,22 +2152,24 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
 - **Shape (clouds.glsl):** the base Perlin-Worley shape measured only
   about 0.78-0.92 (6% below 0.8, median 0.84, 4% above 0.9), so the
   product coverage x profile x shape gave flat-topped, vertical-walled
-  slabs; the shape is stretched over that range, then the product is cut
-  at 0.35 for cumulus (gaps, domed tops where the profile thins, cells
-  shrinking with coverage at their edges) and 0.1 for stratus. Overcast
-  still had holes, so stratus coverage lifts the shape toward 1
-  (`shape = mix(shape, 1, 0.6 coverage (1 - type))`): a continuous sheet,
-  rough only where the profile thins and the detail erodes it.
+  slabs. The shape is stretched over that range, lifted toward 1 for
+  stratus (`shape = mix(shape, 1, 0.6 (1 - type))`; overcast had holes
+  without it), and profile x shape is cut at 0.35 for cumulus (gaps,
+  domed tops where the profile thins) and 0.1 for stratus, interpolated
+  by type: `density = coverage x saturate(remap(profile x shape, cut,
+  1))`, then eroded. Coverage stays a plain multiplier (the Task 2
+  ruling: thresholded once, in the map).
 - **Composite (`clouds_composite.frag`, replaced by Task 4):** bilinear
   upsample blended over HDR (premultiplied: clouds + background x T),
   skipped where the full-resolution surface is nearer than the clouds'
   mean depth, so clouds don't draw over terrain; HDR only, no motion.
 - Cost (`clouds` GPU ms, 2560x1440, Debug build, one run each): fair
-  ground 0.49, above the layer 0.61, inside (half res) 0.84; clear 0.33
-  at both, the floor of marching empty layer through the weather lookups
-  (the analytic fallback beyond 30 km, with its history search and
-  Worley noise, on every step). Levers: coarser steps or a cheaper
-  weather lookup beyond the window, fewer light steps.
+  ground 0.89, above the layer 0.84, inside (half res) 1.37; clear 0.46,
+  the floor of marching empty layer through the weather lookups (the
+  analytic fallback beyond 30 km, with its history search and Worley
+  noise, on every step); sun below the horizon 0.47 (no light march).
+  Levers: step growth and the step cap, a cheaper weather lookup beyond
+  the window, fewer light steps.
   - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
   - Wrenninge, Kulla, Lundqvist, Oz: The Great and Volumetric (SIGGRAPH 2013 talk): https://doi.org/10.1145/2504459.2504518
   - Schneider, Nubis Evolved (2022): https://advances.realtimerendering.com/s2022/SIGGRAPH2022-Advances-NubisEvolved-NoVideos.pdf

@@ -33,10 +33,10 @@ const int kOctaves = 3;
 const vec3 kOctaveScale = vec3(0.25, 0.7, 0.5);
 // Ambient (sky irradiance) at the layer's bottom relative to its top.
 const float kAmbientBottom = 0.35;
-// View march: kSteps across the segment, at least kMinStep, steps growing
-// with distance (kStepGrowth x t, about the footprint of a quarter-res
-// pixel), at most kMaxSteps; ends at kMaxDistance or when opaque.
-const float kSteps = 64.0;
+// View march: steps grow with distance (kStepGrowth x t, about the
+// footprint of a quarter-res pixel, at least kMinStep), widened only where
+// the steps left couldn't reach the segment's end; at most kMaxSteps, ends
+// at kMaxDistance or when opaque.
 const float kMinStep = 60.0;
 const float kStepGrowth = 0.012;
 const int kMaxSteps = 128;
@@ -190,30 +190,18 @@ void main() {
         vec3 ambient = pc.scene.skyIrradiance.irradiance / (2.0 * kPi);
         float bottomKm = pc.scene.atmosphere.bottomRadius;
 
-        float baseStep = max(kMinStep, (tEnd - tStart) / kSteps);
         float jitter = fract(52.9829189 * fract(dot(vec2(id) + 5.588238 * float(pc.scene.frameIndex % 64u),
                                                      vec2(0.06711056, 0.00583715))));
-        float t = tStart + jitter * max(baseStep, tStart * kStepGrowth);
+        float t = tStart + jitter * max(max(kMinStep, tStart * kStepGrowth),
+                                        (tEnd - tStart) / float(kMaxSteps));
         for (int i = 0; i < kMaxSteps && t < tEnd; ++i) {
-            float dt = max(baseStep, t * kStepGrowth);
+            float dt = max(max(kMinStep, t * kStepGrowth), (tEnd - t) / float(kMaxSteps - i));
             vec3 rel = direction * t;
             vec3 world = cloudPoint(rel, radius);
             float lod = max(0.0, log2(dt / 100.0));
             float heightFraction;
             float density = cloudDensity(world, lod, heightFraction);
             if (density > 0.0) {
-                // Sun: optical depth toward it through the layer.
-                float opticalDepth = 0.0;
-                float s = 0.0;
-                float ds = kLightStep;
-                for (int j = 0; j < kLightSteps; ++j) {
-                    opticalDepth += cloudDensity(cloudPoint(rel + sun * (s + 0.5 * ds), radius),
-                                                 lod + float(j) * 0.5) * ds;
-                    s += ds;
-                    ds *= 2.0;
-                }
-                opticalDepth *= kExtinction;
-
                 // Sun color from the atmosphere at the sample, zero in the
                 // planet's shadow.
                 vec3 up = normalize(vec3(rel.x, radius + h + rel.y, rel.z));
@@ -221,6 +209,24 @@ void main() {
                 vec3 sunLight = transmittanceToSun(sampleRadius, dot(sun, up));
                 if (raySphereIntersectNearest(up * sampleRadius, sun, bottomKm) >= 0.0) {
                     sunLight = vec3(0.0);
+                }
+
+                // Sun: optical depth toward it through the layer (none to
+                // march without sun; stops once above the layer).
+                float opticalDepth = 0.0;
+                if (any(greaterThan(sunLight, vec3(0.0)))) {
+                    float s = 0.0;
+                    float ds = kLightStep;
+                    for (int j = 0; j < kLightSteps; ++j) {
+                        vec3 q = cloudPoint(rel + sun * (s + 0.5 * ds), radius);
+                        if (q.y > top) {
+                            break;
+                        }
+                        opticalDepth += cloudDensity(q, lod + float(j) * 0.5) * ds;
+                        s += ds;
+                        ds *= 2.0;
+                    }
+                    opticalDepth *= kExtinction;
                 }
 
                 float scattered = 0.0;
