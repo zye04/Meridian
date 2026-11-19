@@ -272,8 +272,6 @@ struct InstanceData {
 };
 static_assert(sizeof(InstanceData) == 80);
 
-// Must match CullConstants in cull.glsl; shared by cull.comp and
-// cluster_cull.comp.
 // Must match depth_pyramid.comp.
 struct PyramidConstants {
   int32_t sourceSize[2] = {};
@@ -283,6 +281,8 @@ struct PyramidConstants {
 };
 static_assert(sizeof(PyramidConstants) == 32);
 
+// Must match CullConstants in cull.glsl; shared by cull.comp and
+// cluster_cull.comp.
 struct CullConstants {
   VkDeviceAddress sceneBuffer = 0;
   // This phase's work items.

@@ -95,7 +95,7 @@ struct Renderer::Impl {
   std::vector<std::pair<float, uint32_t>> blendedDraws;
 
   // GPU scene: shared geometry pools, mesh and instance tables, and the
-  // indirect draw lists the cull pass writes.
+  // cluster draw lists the cull passes write.
   Buffer vertexPool;
   Buffer indexPool;
   uint32_t vertexCount = 0;

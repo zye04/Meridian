@@ -12,7 +12,7 @@ layout(location = 6) flat out uint outMaterialIndex;
 layout(location = 7) flat out float outLodError;
 
 void main() {
-    // Indirect draws set firstInstance to the instance's index; the indexed
+    // Blended draws set firstInstance to the instance's index; the indexed
     // draw has already added the mesh's vertexOffset to gl_VertexIndex.
     InstanceData instance = pc.scene.instances.instances[gl_InstanceIndex];
     MeshInfo mesh = pc.scene.meshes.meshes[instance.meshIndex];
