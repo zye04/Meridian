@@ -9,7 +9,8 @@
 // and writes, per pixel, the pre-exposed in-scattered luminance with the
 // haze in front of the clouds (rgb) and the cloud transmittance (a), plus
 // the transmittance-weighted mean cloud depth (m along the ray; 0 = no
-// cloud; -1 = scene geometry hides the layer). Rays are straight in the
+// cloud), stored as -1 - depth where scene geometry cut the march short
+// (in front of or inside the layer). Rays are straight in the
 // displayed (curved) frame: the layer is a spherical shell around the
 // planet center below the camera, matching the curvature warp, and the
 // march stops at the scene's depth.
@@ -173,9 +174,9 @@ void main() {
     if (ground.x > 0.0) {
         tEnd = min(tEnd, ground.x);
     }
-    // Scene geometry in front of the layer: no cloud information here
-    // (depth -1, for the resolve and composite).
-    bool occluded = tEnd > tStart && sceneDistance <= tStart;
+    // Scene geometry in front of or inside the layer: no cloud information
+    // behind it (flagged for the resolve and composite).
+    bool cut = depth > 0.0 && tEnd > tStart && sceneDistance < tEnd;
     tEnd = min(tEnd, min(sceneDistance, kMaxDistance));
 
     vec3 luminance = vec3(0.0);
@@ -271,5 +272,5 @@ void main() {
     }
     vec3 exposed = luminance * pc.scene.sunIlluminance * pc.scene.exposure.exposure;
     imageStore(cloudColor, id, vec4(min(exposed, vec3(kMaxExposedLuminance)), transmittance));
-    imageStore(cloudDepth, id, vec4(occluded ? -1.0 : cloudDistance));
+    imageStore(cloudDepth, id, vec4(cut ? -1.0 - cloudDistance : cloudDistance));
 }

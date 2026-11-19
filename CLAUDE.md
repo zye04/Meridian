@@ -193,10 +193,12 @@ the still, and vs `--clouds off`): fast turn, the fair view with
 `--camera-yaw-rate 1`; toward the layer `1119 1900 -431 -1.55 0.1
 --camera-velocity -60 20 0`; across the base (quarter -> half switch at
 2250 m, base 2500 m) `1119 2650 -431 -1.55 0.1 --camera-velocity -30 250
-0` (with `--capture-sequence 2` for the sequence); silhouettes (the
-marble wall's top and the summit) `1119 1356 -431 -1.55 0.03
---time-scale 1.5` (clouds drift ~10 m/s; still: `--time-scale 0`; add
-`--camera-velocity 0 0 10` to strafe past them).
+0` (with `--capture-sequence 2` for the sequence); summit silhouette
+with clouds drifting across the view `1119 1356 -431 2.5 0.12
+--time-scale 1.5` (~10 m/s, 80% lateral; still: `--time-scale 0`;
+Laplacian on the crop `1000x340+900+560`, since whole frames are
+dominated by terrain); strafing past the marble wall's top
+`1119 1356 -431 -1.55 0.03 --time-scale 1.5 --camera-velocity 0 0 10`.
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
@@ -387,8 +389,8 @@ buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it: luminance with
-haze + transmittance, mean cloud depth, -1 where geometry hides the
-layer; clouds_resolve.comp accumulates it into a per-resolution history
+haze + transmittance, mean cloud depth d, stored -1 - d where scene
+geometry cut the march; clouds_resolve.comp accumulates it into a per-resolution history
 reprojected by cloud depth + wind; clouds_composite.comp upsamples it
 bilaterally on scene depth over HDR (as storage, GENERAL) and writes
 cloud motion where opacity > 0.5) -> contact shadows (contact_shadows.comp: with the

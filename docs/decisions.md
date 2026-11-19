@@ -2190,14 +2190,17 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   Histories are ping-ponged per resolution and restart when the
   resolution changes (HZD/Frostbite-style reprojection; rejected:
   HZD's 1-of-16 updates, see the spec).
-- **Disocclusion:** the march writes depth -1 where scene geometry is in
-  front of the layer (no cloud information). History whose bilinear
-  footprint touches such a texel is rejected, and a restarted texel
+- **Disocclusion:** where scene geometry cut the march short (in front
+  of the layer, or inside the marched segment) the march stores its
+  depth d as -1 - d (-1: no cloud before the surface), so the clouds in
+  front of the surface are kept but the texel is flagged as knowing
+  nothing behind it. History whose bilinear footprint touches a flagged
+  texel is rejected where this frame's march isn't cut, and a restarted texel
   takes its 3x3 mean (texels that saw the layer) instead of the single
   jittered sample, which otherwise left a noisy strip behind moving
   silhouettes for ~20 frames (wall corner strafe at 10 m/s, inspected).
-  Neighborhood statistics skip geometry texels, so a silhouette's box
-  can't keep clear air over clouds.
+  Neighborhood statistics use only texels cut like the current one, so a
+  silhouette's box can't keep clear air over clouds.
 - **Wind displacement:** `scene.clouds.windDisplacement` is computed on
   the CPU from the cloud wind offset modulo 4096 m (reduced in double,
   float-precise to ~0.25 mm), differenced with last frame's and
@@ -2206,9 +2209,9 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
 - **Composite (`clouds_composite.comp`, full resolution, compute):** joint
   bilateral upsample (Kopf et al.) in its simplest, classifying form:
   the 2x2 bilinear taps, each kept only where it agrees with the pixel's
-  surface: a geometry texel (-1) counts as clear air for a geometry pixel
-  and is skipped for a sky pixel; a cloud texel deeper than the pixel's
-  surface counts as clear. A sky pixel whose four taps all saw geometry
+  surface: a flagged (cut) texel is skipped for a sky pixel and read at
+  its decoded depth for a geometry pixel; a cloud texel deeper than the
+  pixel's surface counts as clear. A sky pixel whose four taps all saw geometry
   (thin gaps) uses the surrounding 4x4 texels that saw the sky. Blended
   premultiplied over HDR (read-modify-write as a storage image, which
   is why HDR and motion gained STORAGE usage). Where cloud opacity
@@ -2217,16 +2220,33 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   previous camera plus the wind displacement, so TAA (and later DLSS)
   moves clouds with the clouds; reads depth, writes HDR and motion only.
 - Measured (Debug, 2560x1440, Laplacian moving / still, clouds on vs
-  `--clouds off`): fast turn (1 rad/s) 0.735 vs 0.735; toward the layer
-  (60 m/s) 0.757 vs 0.755; across the base (250 m/s up) 0.709 vs 0.710;
-  silhouettes with clouds drifting at ~10 m/s 1.000 vs 1.000, strafing
-  past them at 10 m/s 0.738 vs 0.738. Cloud motion vectors vs the sky's
+  `--clouds off`; whole frames are dominated by terrain, so crops
+  isolate the clouds): fast turn (1 rad/s) whole frame 0.735 vs 0.735,
+  sky rows 0-800 0.698 vs 0.685, horizon band rows 600-1000 (clouds,
+  ridges, the wall's top) 0.728 vs 0.733; toward the layer (60 m/s)
+  whole 0.757 vs 0.755, sky 0.996 vs 0.995, band 0.909 vs 0.908; across
+  the base (250 m/s up) whole 0.709 vs 0.710. Silhouette in front of
+  clouds drifting across the view (summit, `1119 1356 -431 2.5 0.12`,
+  the 3 km wind 80% lateral; crop 1000x340+900+560, still camera so
+  clouds-off is 1 by construction and the clouds-on ratio is the
+  evidence): drifting / frozen 1.001 at ~10 m/s (`--time-scale 1.5`) and
+  1.001 at ~100 m/s (`15`); crops show no smear or halo at the
+  ridgeline. Strafing past the marble wall at 10 m/s with drifting
+  clouds: whole 0.738 vs 0.738, wall-corner crop clean. Cloud motion vectors vs the sky's
   rotation-only motion: no measurable difference at normal speeds
   (clouds are kilometers away), +5% sky Laplacian at a 200x time-lapse
   (~1.4 km/s lateral drift), which also confirms their sign. Fly-through
   sequence across the quarter -> half switch: frame-to-frame MAE stays
   at its neighbors' level (no pop). `clouds` GPU ms: ground 0.82-0.97,
   above 0.87, inside 1.48-1.6 (Task 3: 0.89, 0.84, 1.37).
+- Known gaps: the cloud history is pre-exposed and not rescaled when the
+  exposure changes (as TAA's); after accumulation, clouds still show a
+  faint static 4-px grid (the quarter-res texels through the bilinear
+  footprint) and, on mid-distance clouds seen from below, soft vertical
+  bands from step aliasing (the jitter is resolved, the bands are
+  static). Levers: a bicubic (or 4x4 bilateral) upsample in the
+  composite; blue-noise instead of IGN jitter; smaller steps at
+  mid-distance.
   - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
   - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Salvi, An Excursion in Temporal Supersampling (GDC 2016, variance clipping): http://behindthepixels.io/assets/files/TemporalAA.pdf
