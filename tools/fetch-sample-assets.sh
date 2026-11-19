@@ -6,7 +6,9 @@
 #   meridian-cook. Tests opaque, masked and blended materials.
 # From Poly Haven (CC0), 2K, resolved through its public API:
 # - Forest rocks, litter and small plants as glTF, to cook with meridian-cook.
-# - Ground textures as JPEG (base color, OpenGL normal, AO/roughness/metal).
+# - Ground textures as JPEG (base color, OpenGL normal, AO/roughness/metal,
+#   height).
+# Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -54,12 +56,40 @@ for model in rock_moss_set_01 rock_moss_set_02 boulder_01 namaqualand_boulder_04
       (.include | to_entries[] | "\(.key) \(.value.url)")')
 done
 
-for texture in forest_ground_04 forest_leaves_04 rocky_trail dirt_floor mossy_rock; do
-  files="$(polyhaven_files "$texture")"
-  url="$(jq -r '.Diffuse["2k"].jpg.url' <<<"$files")"
-  download "${url%/*}" "$root/assets/source/textures/$texture" \
-    "${texture}_diff_2k.jpg" "${texture}_nor_gl_2k.jpg" "${texture}_arm_2k.jpg"
+for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_01 \
+    rocky_trail dirt_floor mossy_rock; do
+  # Maps can live in different directories, so take each one's own URL.
+  while read -r url; do
+    download "${url%/*}" "$root/assets/source/textures/$texture" "${url##*/}"
+  done < <(polyhaven_files "$texture" |
+      jq -r '.Diffuse, .nor_gl, .arm, .Displacement | .["2k"].jpg.url')
 done
 
-echo "Assets in $root/assets. Cook source models with:"
-echo "  build/tools/cook/meridian-cook assets/source/<Model>/<Model>.gltf assets/<Model>"
+cook="$root/build/tools/cook/meridian-cook"
+if [[ ! -x "$cook" ]]; then
+  echo "Build the project, then re-run this script to cook the assets."
+  exit 0
+fi
+
+for model in "$root"/assets/source/*/*_2k.gltf; do
+  name="$(basename "$(dirname "$model")")"
+  [[ -d "$root/assets/$name" ]] || "$cook" "$model" "$root/assets/$name"
+done
+if [[ ! -d "$root/assets/AlphaBlendModeTest" ]]; then
+  "$cook" "$root/assets/source/AlphaBlendModeTest/AlphaBlendModeTest.gltf" \
+    "$root/assets/AlphaBlendModeTest"
+fi
+
+# Terrain layers: one KTX2 per map, as the game loads them.
+for texture in forest_ground_04 forest_leaves_04 rock_face_03; do
+  source="$root/assets/source/textures/$texture/$texture"
+  dest="$root/assets/terrain/$texture"
+  for map in "diff base_color color" "nor_gl normal normal" "arm arm data" \
+      "disp height data"; do
+    read -r suffix name usage <<<"$map"
+    [[ -f "$dest/$name.ktx2" ]] ||
+      "$cook" --texture "${source}_${suffix}_2k.jpg" "$dest/$name.ktx2" "$usage"
+  done
+done
+
+echo "Assets in $root/assets"

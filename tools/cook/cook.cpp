@@ -182,15 +182,43 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
   std::printf("Wrote %s\n", target.string().c_str());
 }
 
+void cookTexture(const std::filesystem::path &input,
+                 const std::filesystem::path &output, Usage usage) {
+  basisu::basisu_encoder_init();
+  basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));
+  const std::vector<uint8_t> ktx2 = encodeKtx2(decode(readFile(input)), usage, jobPool);
+  if (output.has_parent_path()) {
+    std::filesystem::create_directories(output.parent_path());
+  }
+  std::ofstream stream(output, std::ios::binary);
+  stream.write(reinterpret_cast<const char *>(ktx2.data()),
+               static_cast<std::streamsize>(ktx2.size()));
+  if (!stream) {
+    throw std::runtime_error("cannot write " + output.string());
+  }
+  std::printf("Wrote %s\n", output.string().c_str());
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    std::fprintf(stderr, "usage: meridian-cook <input.gltf|.glb> <output-dir>\n");
+  const std::map<std::string, Usage> usages = {
+      {"color", Usage::Color}, {"data", Usage::Data}, {"normal", Usage::Normal}};
+  const bool texture = argc == 5 && std::strcmp(argv[1], "--texture") == 0 &&
+                       usages.contains(argv[4]);
+  if (argc != 3 && !texture) {
+    std::fprintf(stderr,
+                 "usage: meridian-cook <input.gltf|.glb> <output-dir>\n"
+                 "       meridian-cook --texture <input.png|.jpg> <output.ktx2> "
+                 "<color|data|normal>\n");
     return 2;
   }
   try {
-    cook(argv[1], argv[2]);
+    if (texture) {
+      cookTexture(argv[2], argv[3], usages.at(argv[4]));
+    } else {
+      cook(argv[1], argv[2]);
+    }
   } catch (const std::exception &error) {
     std::fprintf(stderr, "error: %s\n", error.what());
     return 1;

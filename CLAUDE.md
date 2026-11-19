@@ -28,6 +28,7 @@ ctest --test-dir build                           # or ./build/tests/tests
 ./build/game/game                                # interactive (WASD, mouse, Esc)
 ./tools/fetch-sample-assets.sh                   # test models into assets/
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
+./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ```
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
@@ -140,10 +141,9 @@ images are shared between them, and barriers account for that.
   from release tarballs.
 - Hyprland is configured in Lua: `hyprctl dispatch "hl.dsp.window.close({
   window = \"address:0x...\" })"`.
-- `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`,
-  then cook AlphaBlendModeTest and each Poly Haven model
-  (`assets/source/<id>/<id>_2k.gltf` -> `assets/<id>`). The script needs
-  `jq`. Loading these models prints UBSan shift warnings from inside
+- `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`
+  (needs `jq`); once the project is built it also cooks every model and the
+  terrain layers (`assets/terrain/<id>/*.ktx2`). Loading these models prints UBSan shift warnings from inside
   MikkTSpace (third-party code, not ours).
 - Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
   history isn't rescaled on exposure change; the Renderer constructor
