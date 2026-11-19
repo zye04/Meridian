@@ -11,4 +11,5 @@ add_link_options($<$<CONFIG:Debug>:-fsanitize=address,undefined>)
 
 add_subdirectory(engine)
 add_subdirectory(game)
+add_subdirectory(tools/cook)
 add_subdirectory(tests)

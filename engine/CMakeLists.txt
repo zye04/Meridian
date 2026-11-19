@@ -33,8 +33,10 @@ target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
 target_compile_options(mikktspace PRIVATE -w)
 target_compile_options(fastgltf PRIVATE -w)
 target_compile_options(fastgltf_simdutf PRIVATE -w)
-# Third-party code: don't apply our warning flags to it.
-target_compile_options(basisu_encoder PRIVATE -w)
+# Third-party code: no warnings, and always optimized and unsanitized. The
+# encoder is unusably slow in Debug, and its UB reports are upstream bugs we
+# can't act on.
+target_compile_options(basisu_encoder PRIVATE -w -O2 -fno-sanitize=all)
 target_include_directories(basisu_encoder SYSTEM INTERFACE
     ${basis_universal_SOURCE_DIR}/transcoder
     ${basis_universal_SOURCE_DIR}/encoder)
