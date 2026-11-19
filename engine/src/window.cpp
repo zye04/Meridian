@@ -29,6 +29,20 @@ bool Window::shouldClose() const { return glfwWindowShouldClose(handle_); }
 
 void Window::pollEvents() { glfwPollEvents(); }
 
+void Window::close() { glfwSetWindowShouldClose(handle_, GLFW_TRUE); }
+
+void Window::setTitle(const char *title) { glfwSetWindowTitle(handle_, title); }
+
+bool Window::isKeyDown(Key key) const {
+  int glfwKey = GLFW_KEY_UNKNOWN;
+  switch (key) {
+  case Key::Escape:
+    glfwKey = GLFW_KEY_ESCAPE;
+    break;
+  }
+  return glfwGetKey(handle_, glfwKey) == GLFW_PRESS;
+}
+
 } // namespace meridian
 
 // GLFW's Wayland decorations (libdecor) pull in dbus and pango, which leak

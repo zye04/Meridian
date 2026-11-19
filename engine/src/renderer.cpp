@@ -5,8 +5,10 @@
 #include <GLFW/glfw3.h>
 #include <VkBootstrap.h>
 
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace meridian {
@@ -37,6 +39,31 @@ void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
+VkShaderModule loadShader(VkDevice device, const std::string &name) {
+  std::string path = std::string(MERIDIAN_SHADER_DIR) + "/" + name + ".spv";
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file) {
+    throw std::runtime_error("cannot open shader " + path);
+  }
+
+  std::vector<uint32_t> code(static_cast<size_t>(file.tellg()) /
+                             sizeof(uint32_t));
+  file.seekg(0);
+  file.read(reinterpret_cast<char *>(code.data()),
+            static_cast<std::streamsize>(code.size() * sizeof(uint32_t)));
+
+  VkShaderModuleCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  info.codeSize = code.size() * sizeof(uint32_t);
+  info.pCode = code.data();
+
+  VkShaderModule module = VK_NULL_HANDLE;
+  if (vkCreateShaderModule(device, &info, nullptr, &module) != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateShaderModule failed for " + path);
+  }
+  return module;
+}
+
 } // namespace
 
 struct Renderer::Impl {
@@ -54,6 +81,9 @@ struct Renderer::Impl {
 
   VkCommandPool commandPool = VK_NULL_HANDLE;
   VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+
+  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  VkPipeline pipeline = VK_NULL_HANDLE;
 
   VkFence renderFence = VK_NULL_HANDLE;
   VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -78,7 +108,6 @@ void Renderer::Impl::createSwapchain() {
                                VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
           .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
           .set_desired_extent(width, height)
-          .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
           .build();
   if (!built) {
     throw std::runtime_error(built.error().message());
@@ -194,6 +223,97 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
     throw std::runtime_error("vkCreateSemaphore failed");
   }
 
+  VkPipelineLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  if (vkCreatePipelineLayout(dev, &layoutInfo, nullptr,
+                             &impl_->pipelineLayout) != VK_SUCCESS) {
+    throw std::runtime_error("vkCreatePipelineLayout failed");
+  }
+
+  VkShaderModule vertModule = loadShader(dev, "triangle.vert");
+  VkShaderModule fragModule = loadShader(dev, "triangle.frag");
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = vertModule;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = fragModule;
+  stages[1].pName = "main";
+
+  VkPipelineVertexInputStateCreateInfo vertexInput{};
+  vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
+
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.cullMode = VK_CULL_MODE_NONE;
+  rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+  rasterizer.lineWidth = 1.0f;
+
+  VkPipelineMultisampleStateCreateInfo multisample{};
+  multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  VkPipelineColorBlendAttachmentState blendAttachment{};
+  blendAttachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+  VkPipelineColorBlendStateCreateInfo colorBlend{};
+  colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlend.attachmentCount = 1;
+  colorBlend.pAttachments = &blendAttachment;
+
+  // Viewport and scissor are set per frame, so a resize doesn't need a new
+  // pipeline.
+  VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                    VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dynamicState{};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = 2;
+  dynamicState.pDynamicStates = dynamicStates;
+
+  VkFormat colorFormat = impl_->swapchain.image_format;
+  VkPipelineRenderingCreateInfo renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachmentFormats = &colorFormat;
+
+  VkGraphicsPipelineCreateInfo pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.pNext = &renderingInfo;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = stages;
+  pipelineInfo.pVertexInputState = &vertexInput;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisample;
+  pipelineInfo.pColorBlendState = &colorBlend;
+  pipelineInfo.pDynamicState = &dynamicState;
+  pipelineInfo.layout = impl_->pipelineLayout;
+
+  VkResult pipelineResult = vkCreateGraphicsPipelines(
+      dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &impl_->pipeline);
+  vkDestroyShaderModule(dev, vertModule, nullptr);
+  vkDestroyShaderModule(dev, fragModule, nullptr);
+  if (pipelineResult != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateGraphicsPipelines failed");
+  }
+
   std::cout << "GPU: " << physical.value().name << "\n";
 }
 
@@ -242,17 +362,43 @@ void Renderer::draw() {
   vkBeginCommandBuffer(cmd, &beginInfo);
 
   transitionImage(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-  VkClearColorValue color = {{0.1f, 0.2f, 0.4f, 1.0f}};
-  VkImageSubresourceRange range{};
-  range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  range.levelCount = VK_REMAINING_MIP_LEVELS;
-  range.layerCount = VK_REMAINING_ARRAY_LAYERS;
-  vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       &color, 1, &range);
+  VkExtent2D extent = impl_->swapchain.extent;
 
-  transitionImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+  VkRenderingAttachmentInfo colorAttachment{};
+  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  colorAttachment.imageView = impl_->swapchainImageViews[imageIndex];
+  colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  colorAttachment.clearValue.color = {{0.1f, 0.2f, 0.4f, 1.0f}};
+
+  VkRenderingInfo renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  renderingInfo.renderArea = {{0, 0}, extent};
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
+
+  vkCmdBeginRendering(cmd, &renderingInfo);
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->pipeline);
+
+  VkViewport viewport{};
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = static_cast<float>(extent.height);
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+  VkRect2D scissor = {{0, 0}, extent};
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+
+  vkCmdEndRendering(cmd);
+
+  transitionImage(cmd, image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
   vkEndCommandBuffer(cmd);
@@ -301,6 +447,8 @@ Renderer::~Renderer() {
 
   vkDestroySemaphore(dev, impl_->imageAvailable, nullptr);
   vkDestroyFence(dev, impl_->renderFence, nullptr);
+  vkDestroyPipeline(dev, impl_->pipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->pipelineLayout, nullptr);
   vkDestroyCommandPool(dev, impl_->commandPool, nullptr);
 
   impl_->destroySwapchain();

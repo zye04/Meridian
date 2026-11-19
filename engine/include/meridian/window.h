@@ -4,6 +4,8 @@ struct GLFWwindow;
 
 namespace meridian {
 
+enum class Key { Escape };
+
 class Window {
 public:
   Window(int width, int height, const char *title);
@@ -14,6 +16,9 @@ public:
 
   bool shouldClose() const;
   void pollEvents();
+  void close();
+  void setTitle(const char *title);
+  bool isKeyDown(Key key) const;
 
   GLFWwindow *handle() const { return handle_; }
 
