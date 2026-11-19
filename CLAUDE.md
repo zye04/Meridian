@@ -120,6 +120,9 @@ engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            per-level group BVH, selectClustersBvh),
                            terrain.h (Heightfield, heightAt, load/save,
                            generateHeightfield, buildHeightPyramid),
+                           placement.h (Prototype, PlacementLayer, dither
+                           pattern, fixed-point rules, evaluatePoint: the
+                           CPU reference of GPU placement),
                            window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
@@ -135,12 +138,14 @@ engine/src/render/         renderer internals:
                            draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
-                           terrain.cpp, window.cpp
+                           terrain.cpp, placement.cpp, window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain.glsl (heightfield sampling + mirror,
                            quadtree, morph, detail noise),
                            terrain_select.comp, terrain.mesh, terrain.frag
-                           (mesh.frag with TERRAIN), terrain_normals.comp
+                           (mesh.frag with TERRAIN), terrain_normals.comp.
+                           placement.glsl: integer keep/reject twin of
+                           placement.cpp
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten), ktx2.cpp (shared encoder)
@@ -235,7 +240,10 @@ images are shared between them, and barriers account for that.
   on the bilinear heightfield. Pyramid level 0 bounds each bilinear cell.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
-  together (static_asserts check the sizes).
+  together (static_asserts check the sizes). `placement.glsl` mirrors
+  `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's
+  integer core operation for operation: placement keep/reject must be
+  bit-exact on CPU and GPU (no floats on that path).
 - New shader: `add_shader(source output [DEFINES...])` in
   `engine/CMakeLists.txt`. Variants come from defines (e.g. `mesh.frag` ->
   `mesh_masked.frag` with `ALPHA_MASK`).

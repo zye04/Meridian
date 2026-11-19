@@ -666,3 +666,46 @@ foliage that survives simplification).
   levels, terminal groups at several depths) at 1-1000 m and 0.5-4 px.
   - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/lod_generation.md
   - https://github.com/zeux/meshoptimizer/blob/v1.0/demo/clusterlod.h
+
+## Placement rules and dither pattern (M2a, 2026-11-19)
+
+- **Rule-driven, dithered placement** (Horizon Zero Dawn's GPU placement):
+  per layer, a density in 0..65535 is the product of smoothstep-shaped
+  factors (slope range, altitude range, fractal-noise mask with an edge
+  band, clustering noise), and a pattern point is kept iff its dither
+  threshold is below that density. Raising density adds points instead of
+  moving them, so rule edits and density gradients stay stable.
+- **Progressive blue-noise pattern**: Mitchell's best-candidate sampling on
+  the torus (8 candidates per existing point, grid-accelerated nearest
+  search); a point's insertion rank is its threshold, so every
+  lowest-threshold prefix is itself evenly spread. Measured min pair
+  distance / nominal spacing (tile / sqrt(n)): 0.77, 0.75, 0.77 at 10, 50,
+  100% of 256 points. One tile covers one 64 m cell; a layer's footprint
+  is the nominal spacing at full density (sqrt(cell area / points)) and
+  sets the point count ((64 / footprint)^2); the measured minimum is
+  ~0.75 x footprint inside a cell, not guaranteed across cell seams. Repetition is broken per cell by one of the 8
+  square symmetries plus a toroidal offset, both from a hash of (cell,
+  layer, seed); spacing across a cell border isn't guaranteed (an
+  occasional close pair at a seam, which reads as natural).
+- **Bit-exact keep/reject**: everything on the keep path is 32-bit integer
+  or 16.16 fixed point, so the GPU (`placement.glsl`, no int64 needed) and
+  the C++ reference agree on any GPU and driver: PCG3D hash (Jarzynski and
+  Olano 2020), value noise on integer lattices with a fixed-point
+  3p^2 - 2p^3 fade, ramps and products in 16-bit fixed point. Rules read
+  the nearest 16-bit sample: altitude in sample steps, slope as the
+  squared central difference compared with tan^2 thresholds converted
+  once on the CPU (no transcendentals on the GPU). Floats are converted
+  once (`placementField`, `placementRule`, `prototypeThresholds`).
+  Continuous attributes (height via `heightAt`, rotation, scale, the
+  mask's edge shrink) are floats. The mask noise depends on the seed only,
+  and a negative mask edge gives 1 minus the same band's ramp, so a forest
+  layer and a lone-tree layer with the same threshold and opposite edges
+  sum to exactly full density. Clustering noise is salted per layer, so
+  forest, lone trees and rocks don't clump in the same places. The keep
+  path covers crops under 32 km wide (cells -256..255, rejected before
+  any cell arithmetic).
+  - https://www.guerrilla-games.com/media/News/Files/GDC2017_VanMuijden_GPUBasedProceduralPlacementInHorizonZeroDawn.pdf
+  - Mitchell 1991, "Spectrally optimal sampling for distribution ray
+    tracing" (best-candidate): https://doi.org/10.1145/127719.122736
+  - Jarzynski and Olano 2020, "Hash Functions for GPU Rendering" (PCG3D):
+    https://jcgt.org/published/0009/03/02/

@@ -97,6 +97,7 @@ add_library(meridian STATIC
     src/cluster.cpp
     src/clusterlod.cpp
     src/model.cpp
+    src/placement.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_resources.cpp
     src/render/renderer_setup.cpp
