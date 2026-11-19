@@ -277,3 +277,29 @@ foliage that survives simplification).
 - Rejected: tile + offset coordinates (Unreal's large world coordinates).
   They buy precision far beyond 15 km that this world doesn't need.
   - https://godotengine.org/article/emulating-double-precision-gpu-render-large-worlds
+
+## Terrain data (2026-11-19)
+
+- **A real DEM instead of procedural noise plus erosion.** Real terrain
+  has the large-scale structure (ridge networks, drainage, valley
+  profiles) that noise needs heavy erosion simulation to approximate, and
+  it is free. swissALTI3D at 2 m (swisstopo open government data, free
+  use with the attribution "© swisstopo") is the highest-resolution
+  national DEM freely downloadable without an account.
+- **Region: Napf (Emmental/Entlebuch), E 2631..2645, N 1198..1212 (LV95
+  km), 15 x 15 tiles = 15 x 15 km.** Steep wooded ridges and meadows
+  without glaciers or bare high alpine rock; relief 625..1572 m, so
+  16-bit steps stay ~1.4 cm. The summit tile (E 2638, N 1205, 1406.7 m)
+  is the crop center. The 1572 m maximum is the south-east corner tile
+  (E 2645, N 1198), real terrain, not no-data.
+- **Source:** the swisstopo STAC collection `ch.swisstopo.swissalti3d`,
+  tiles at `data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_<year>_<E>-<N>/
+  ..._2_2056_5728.tif` (2 m, LV95, LN02 heights, float32 GeoTIFF with
+  overview pages). The newest year holding each tile is taken; page 0 is
+  the full resolution.
+- **Format:** `.height` = 28-byte header (MHF1, version, width, height,
+  spacing, minHeight, heightScale) + uint16 samples. 16 bits over the
+  tile's own min..max beats float32 on size (113 MB vs 225 MB) with
+  sub-2-cm error. Outside the grid, indices mirror like Vulkan
+  MIRRORED_REPEAT on CPU and GPU alike.
+

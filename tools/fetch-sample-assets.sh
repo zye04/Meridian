@@ -10,8 +10,16 @@
 #   geometry.
 # - Ground textures as JPEG (base color, OpenGL normal, AO/roughness/metal,
 #   height).
+# From swisstopo swissALTI3D (open government data, free use with the
+# attribution "© swisstopo"): the 2 m elevation tiles of the Napf region,
+# E 2631..2645, N 1198..1212 (LV95 km, 15 x 15 tiles), mosaicked and cooked
+# to assets/terrain/napf.height. Needs magick.
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
+
+for tool in curl jq magick; do
+  command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
+done
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 models="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models"
@@ -67,6 +75,39 @@ for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_0
       jq -r '.Diffuse, .nor_gl, .arm, .Displacement | .["2k"].jpg.url')
 done
 
+# Latest year available per tile; the survey is flown in rotation, so a tile
+# can be missing from the newest year.
+napf_tiles="$root/assets/source/napf"
+napf_url="https://data.geo.admin.ch/ch.swisstopo.swissalti3d"
+if [[ ! -f "$root/assets/terrain/napf.height" ]]; then
+  mkdir -p "$napf_tiles"
+  for n in $(seq 1212 -1 1198); do
+    for e in $(seq 2631 2645); do
+      tile="$napf_tiles/${e}-${n}.tif"
+      [[ -f "$tile" ]] && continue
+      for year in 2025 2024 2023 2022 2021 2020 2019; do
+        name="swissalti3d_${year}_${e}-${n}"
+        status=$(curl -sS -w '%{http_code}' "$napf_url/$name/${name}_2_2056_5728.tif" \
+          -o "$tile.part") || status=curl-failed
+        if [[ "$status" == 200 ]]; then
+          mv "$tile.part" "$tile"
+          break
+        fi
+        rm -f "$tile.part"
+        if [[ "$status" != 404 ]]; then
+          echo "Downloading swissALTI3D tile E$e N$n ($year) failed: HTTP $status" >&2
+          exit 1
+        fi
+      done
+      if [[ ! -f "$tile" ]]; then
+        echo "No swissALTI3D tile for E$e N$n in 2019-2025" >&2
+        exit 1
+      fi
+    done
+    echo "Downloaded tile row N$n"
+  done
+fi
+
 cook="$root/build/tools/cook/meridian-cook"
 if [[ ! -x "$cook" ]]; then
   echo "Build the project, then re-run this script to cook the assets."
@@ -93,5 +134,21 @@ for texture in forest_ground_04 forest_leaves_04 rock_face_03; do
       "$cook" --texture "${source}_${suffix}_2k.jpg" "$dest/$name.ktx2" "$usage"
   done
 done
+
+# Napf heightfield (page [0] of each tile; the rest are overviews): rows north to south, tiles west to east, float32 meters.
+if [[ ! -f "$root/assets/terrain/napf.height" ]]; then
+  rows=()
+  for n in $(seq 1212 -1 1198); do
+    row="$napf_tiles/row-$n.miff"
+    tiles=()
+    for e in $(seq 2631 2645); do tiles+=("$napf_tiles/$e-$n.tif[0]"); done
+    magick "${tiles[@]}" +append "$row"
+    rows+=("$row")
+  done
+  magick "${rows[@]}" -append -define quantum:format=floating-point -depth 32 -endian LSB \
+    "gray:$napf_tiles/napf.f32"
+  "$cook" --heightfield "$napf_tiles/napf.f32" 7500 7500 2 "$root/assets/terrain/napf.height"
+  rm -f "${rows[@]}"
+fi
 
 echo "Assets in $root/assets"

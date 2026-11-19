@@ -9,6 +9,7 @@
 #include <basisu_comp.h>
 #include <fastgltf/core.hpp>
 #include <fastgltf/tools.hpp>
+#include <meridian/terrain.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -236,6 +237,31 @@ void cookTexture(const std::filesystem::path &input,
   std::printf("Wrote %s\n", output.string().c_str());
 }
 
+// Raw float32 meters (little-endian, row 0 north) -> 16-bit .height file.
+void cookHeightfield(const std::filesystem::path &input, uint32_t width,
+                     uint32_t height, float spacing,
+                     const std::filesystem::path &output) {
+  const std::vector<uint8_t> bytes = readFile(input);
+  if (bytes.size() != static_cast<size_t>(width) * height * sizeof(float)) {
+    throw std::runtime_error("input size does not match width x height float32");
+  }
+  std::vector<float> heights(static_cast<size_t>(width) * height);
+  std::memcpy(heights.data(), bytes.data(), bytes.size());
+  // Float32 no-data (swisstopo uses large negatives) must not reach the range.
+  if (std::any_of(heights.begin(), heights.end(),
+                  [](float h) { return !(h >= -100.0f); })) {
+    throw std::runtime_error("input has no-data samples (< -100 m)");
+  }
+  const meridian::Heightfield field =
+      meridian::quantizeHeightfield(heights, width, height, spacing);
+  if (output.has_parent_path()) {
+    std::filesystem::create_directories(output.parent_path());
+  }
+  meridian::saveHeightfield(field, output);
+  std::printf("Wrote %s (%ux%u, %.1f..%.1f m)\n", output.string().c_str(), width,
+              height, field.minHeight, field.minHeight + field.heightScale * 65535.0f);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -243,11 +269,24 @@ int main(int argc, char **argv) {
       {"color", Usage::Color}, {"data", Usage::Data}, {"normal", Usage::Normal}};
   const bool texture = argc == 5 && std::strcmp(argv[1], "--texture") == 0 &&
                        usages.contains(argv[4]);
+  if (argc == 7 && std::strcmp(argv[1], "--heightfield") == 0) {
+    try {
+      cookHeightfield(argv[2], static_cast<uint32_t>(std::stoul(argv[3])),
+                      static_cast<uint32_t>(std::stoul(argv[4])), std::stof(argv[5]),
+                      argv[6]);
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "error: %s\n", error.what());
+      return 1;
+    }
+    return 0;
+  }
   if (argc != 3 && !texture) {
     std::fprintf(stderr,
                  "usage: meridian-cook <input.gltf|.glb> <output-dir>\n"
                  "       meridian-cook --texture <input.png|.jpg> <output.ktx2> "
-                 "<color|data|normal>\n");
+                 "<color|data|normal>\n"
+                 "       meridian-cook --heightfield <in.f32> <width> <height> "
+                 "<spacing> <out.height>\n");
     return 2;
   }
   try {

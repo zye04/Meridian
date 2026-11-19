@@ -26,9 +26,10 @@ before re-researching anything.
 cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
 ./build/game/game                                # interactive (WASD, mouse, Esc)
-./tools/fetch-sample-assets.sh                   # test models into assets/
+./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
+./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 ```
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
@@ -183,6 +184,11 @@ images are shared between them, and barriers account for that.
   from release tarballs.
 - Hyprland is configured in Lua: `hyprctl dispatch "hl.dsp.window.close({
   window = \"address:0x...\" })"`.
+- Terrain data is swissALTI3D 2 m (swisstopo open government data):
+  Napf region, E 2631..2645, N 1198..1212 (LV95 km), cooked to
+  `assets/terrain/napf.height` (7500x7500, 16-bit). Any use must credit
+  "© swisstopo". The heightfield maps crop center = origin, east = +x,
+  north = -z; outside the grid indices mirror (MIRRORED_REPEAT).
 - `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`
   (needs `jq`); once the project is built it also cooks every model and the
   terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
