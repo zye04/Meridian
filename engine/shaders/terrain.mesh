@@ -52,8 +52,11 @@ vec3 terrainVertex(Terrain terrain, vec2 grid, uvec2 local, uint level, float qu
 void main() {
     SceneBuffer scene = pc.scene;
     Terrain terrain = scene.terrain;
-    uint node = terrain.nodes.nodes[gl_WorkGroupID.x / kTerrainTasksPerNode];
-    uint block = gl_WorkGroupID.x % kTerrainTasksPerNode;
+    // Selection lists coarse (far) levels first; drawing the list backwards
+    // goes near to far, so early-Z rejects hidden terrain before shading.
+    uint task = gl_NumWorkGroups.x - 1u - gl_WorkGroupID.x;
+    uint node = terrain.nodes.nodes[task / kTerrainTasksPerNode];
+    uint block = task % kTerrainTasksPerNode;
     uvec3 n = terrainDecodeNode(node);
     uint level = n.x;
     float quad = terrainNodeSize(level) / float(kTerrainNodeQuads);

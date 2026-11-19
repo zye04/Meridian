@@ -186,7 +186,8 @@ images are shared between them, and barriers account for that.
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges
   double per level, vertices morph over the last 30% of their level's
   span. Levels 0-1 (finer than the data) add up to 0.3 m of detail noise.
-  The terrain is not in the TLAS.
+  Nodes are drawn near to far (the selected list read backwards) so
+  early-Z rejects hidden terrain. The terrain is not in the TLAS.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
   together (static_asserts check the sizes).
@@ -232,8 +233,7 @@ images are shared between them, and barriers account for that.
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
   leaks partial Vulkan state if it throws; the terrain casts no shadows yet
-  (not in the TLAS) and the horizon is flat; on the Napf's steep slopes
-  the terrain material's triplanar rock costs ~1.8 ms at the open view.
+  (not in the TLAS) and the horizon is flat.
   RT shadows trace full-detail BLAS while the raster draws LOD
   clusters; shadow rays start the cluster's simplification error above the
   surface to avoid acne (virtualized geometry slice 2 traces the clusters

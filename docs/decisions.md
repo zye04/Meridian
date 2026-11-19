@@ -353,11 +353,17 @@ foliage that survives simplification).
   early. About 377-393 nodes (0.77-0.80M triangles) at eye height; 173
   nodes (0.35M) from 3000 m. GPU memory: height image 113 MB, normal map
   300 MB with mips, pyramid 75 MB.
-- **Known cost (content, not this technique):** the unchanged terrain
-  material costs ~1.8 ms on the Napf at the open view, against ~0.35 ms
-  on the old, mostly flat ground. The steep slopes are mostly triplanar
-  rock (12 anisotropic fetches per pixel). With the material, the open
-  view's scene early is 2.35 ms and the frame 2.7 ms.
+- **Draw order: near to far.** Selection lists nodes coarse level first,
+  which is far first; `terrain.mesh` reads the list backwards, so nearer
+  terrain fills depth first and early-Z rejects the hills behind it
+  before the (expensive) terrain fragment shader runs. Open view, Release,
+  median of 5: scene early 2.37 -> 1.08 ms, frame 2.95 -> 1.76 ms, image
+  identical. The ~1.8 ms first measured as the material's cost on the
+  Napf was mostly this overdraw.
+- **Known cost (content, not this technique):** the terrain material is
+  mostly triplanar rock on the steep slopes (12 anisotropic fetches per
+  pixel); with near-to-far drawing, the open view's scene early is
+  1.08 ms with the material.
 - Coarse LOD triangles don't gate the sun on terrain: their facing
   differs from the per-pixel normal on steep slopes and cut the light
   per triangle.
