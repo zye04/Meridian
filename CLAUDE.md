@@ -402,7 +402,7 @@ barriers account for that.
   layout set 0 = the cloud noise and weather map storage images, set 1 =
   bindless. The bindless table also holds the cloud noise volumes as 3D
   views, read through `textures3D[]` (clouds.glsl, same binding), and
-  the weather map in GENERAL layout.
+  the weather map; all four stay in GENERAL layout.
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges

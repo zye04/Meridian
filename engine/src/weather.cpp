@@ -5,6 +5,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace meridian {
 namespace {
@@ -18,6 +19,16 @@ float profileScale(float altitude) {
 // Relative to the 10 m wind, which WindState describes.
 float veerAngle(float altitude) {
   return kWindVeer * std::clamp((altitude - 10.0f) / (kWindVeerAltitude - 10.0f), 0.0f, 1.0f);
+}
+
+// The 10 m offset carried to `altitude`: scaled and veered like the
+// velocity (both are time-invariant), in double.
+std::pair<double, double> offsetAloft(double x, double z, float altitude) {
+  const double angle = veerAngle(altitude);
+  const double scale = profileScale(altitude);
+  const double c = std::cos(angle);
+  const double s = std::sin(angle);
+  return {(x * c - z * s) * scale, (x * s + z * c) * scale};
 }
 
 } // namespace
@@ -165,25 +176,17 @@ WeatherState Weather::stateAt(Vec3 worldPosition) const {
 }
 
 Vec3 Weather::windOffset(float altitude) const {
-  const double angle = veerAngle(altitude);
-  const double scale = profileScale(altitude);
-  const double c = std::cos(angle);
-  const double s = std::sin(angle);
-  return {static_cast<float>((offsetX_ * c - offsetZ_ * s) * scale), 0.0f,
-          static_cast<float>((offsetX_ * s + offsetZ_ * c) * scale)};
+  const auto [x, z] = offsetAloft(offsetX_, offsetZ_, altitude);
+  return {static_cast<float>(x), 0.0f, static_cast<float>(z)};
 }
 
 Vec3 Weather::windOffsetModulo(float altitude, double period) const {
-  const double angle = veerAngle(altitude);
-  const double scale = profileScale(altitude);
-  const double c = std::cos(angle);
-  const double s = std::sin(angle);
+  const auto [x, z] = offsetAloft(offsetX_, offsetZ_, altitude);
   auto wrap = [&](double v) {
     const double r = std::fmod(v, period);
     return static_cast<float>(r < 0.0 ? r + period : r);
   };
-  return {wrap((offsetX_ * c - offsetZ_ * s) * scale), 0.0f,
-          wrap((offsetX_ * s + offsetZ_ * c) * scale)};
+  return {wrap(x), 0.0f, wrap(z)};
 }
 
 double Weather::travel() const { return travel_; }
