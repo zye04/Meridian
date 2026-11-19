@@ -486,6 +486,13 @@ void Renderer::setWeather(const Weather &weather) {
   wind.gustPhase = static_cast<float>(
       std::fmod(weather.time() * kGustPhaseRate, kGustPhasePeriod));
 
+  GpuClouds &clouds = impl_->clouds;
+  const Vec3 cloudOffset = weather.windOffsetModulo(kCloudWindAltitude, kCloudNoisePeriod);
+  clouds.windOffset[0] = cloudOffset.x;
+  clouds.windOffset[1] = cloudOffset.z;
+  clouds.time = static_cast<float>(
+      std::fmod(weather.time() / kWeatherCellLifetime, double{kWeatherTimePeriod}));
+
   GpuWeather &gpu = impl_->weather;
   gpu.coverage = state.coverage;
   gpu.type = state.type;
@@ -693,6 +700,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->previousWind = impl_->wind;
   scene.weather = impl_->weather;
   scene.weather.history = frame.weatherHistory.address;
+  impl_->placeWeatherMap(camera.position);
+  scene.clouds = impl_->clouds;
   std::memcpy(frame.weatherHistory.mapped, impl_->weatherHistory.data(),
               impl_->weather.historyCount * sizeof(WeatherHistorySample));
   check(vmaFlushAllocation(impl_->allocator, frame.weatherHistory.allocation, 0,
@@ -752,8 +761,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
 
-  // The LUTs are shared by both frames in flight; wait for the previous
-  // frame's reads before overwriting them.
+  // The LUTs and the weather map are shared by both frames in flight; wait
+  // for the previous frame's reads before overwriting them.
   VkMemoryBarrier2 atmosphereBarrier{};
   atmosphereBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
   atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
@@ -765,6 +774,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   atmosphereDependency.memoryBarrierCount = 1;
   atmosphereDependency.pMemoryBarriers = &atmosphereBarrier;
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+  impl_->drawWeatherMap(cmd, frame);
+  endPass("weather");
 
   // From here on, each pass reads what the one before it wrote.
   atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;

@@ -1724,3 +1724,65 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   - UE WindDirectionalSource: https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/WindDirectionalSourceComponent
   - Power-law wind profile (1/7 for neutral stability): https://en.wikipedia.org/wiki/Wind_profile_power_law
   - Ekman spiral: https://en.wikipedia.org/wiki/Ekman_spiral
+
+## Cloud noise and the weather map (M4 clouds, 2026-11-19)
+
+- **Noise volumes (Approaches 1, Density):** generated on the GPU once at
+  load (`cloud_noise.comp`, one dispatch, then box-filtered 3D mips by
+  blits, `lod` in `cloudDensity` picks them). Base 128^3 RGBA8: R
+  Perlin-Worley (Perlin fBm dilated by Worley fBm, `remap(perlin, 0, 1,
+  worley, 1)`), GBA Worley fBm at 4, 8, 16 cells per tile; detail 32^3
+  RGBA8: Worley fBm at 2, 4, 8 cells; curl 128^2 RGBA16F: the curl of 2D
+  Perlin fBm (divergence-free, so the detail lookup swirls without
+  bunching). World tiles: base 8192 m (64 m texels, ~2 km cells), detail
+  1024 m (32 m texels), curl 4096 m. Every lattice wraps, so all of them
+  tile seamlessly.
+  - Schneider, Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
+  - Hillaire, TileableVolumeNoise (Perlin-Worley construction): https://github.com/sebh/TileableVolumeNoise
+- **Density (`clouds.glsl` `cloudDensity`):** weather coverage x vertical
+  profile x base shape (HZD: `remap(R, worleyFbm - 1, 1)`), thresholded
+  by coverage (`remap(shape * profile, 1 - coverage, 1) * coverage`),
+  then eroded by the curl-distorted detail (150 m of distortion fading
+  toward the top; wispy at the base, billowy above; up to 0.35 of the
+  shape carved). Output is in [0, 1]; the march scales it to extinction.
+  `world.y` is the altitude on the curved shell, so the caller decides
+  the curvature. Profiles are analytic smoothsteps by normalized height
+  (stratus a soft slab, cumulus a flat base thinning upward) instead of
+  the spec's small type texture: two curves don't need a texture, and
+  the type axis stays continuous. Layer per type: stratus 1.8-3.0 km,
+  cumulus base 2.5 km with tops from 3.3 km rising to 4.5 km with
+  coverage (towers), interpolated by type.
+- **Weather map (Approaches 2):** every frame (`weather_map.comp`, pass
+  `weather`, before the atmosphere LUTs), 512^2 RGBA8 over 60 km
+  (117 m texels) centered on the camera, its corner snapped to whole
+  texels in double so it doesn't swim. Per texel: the local state from
+  `weatherAt` (history rule), weather noise at `xz - windOffset(3 km)`
+  with a time coordinate (one lattice unit per 30 game minutes, so cells
+  form and dissolve without wind), coverage `remap(n, 1 - c, 1)`, type
+  the local type +-0.16 of 32 km Perlin variation, precipitation the
+  local value. The noise: inverted Worley fBm in 4 km cells times
+  Perlin fBm 16 km wide (`mix(0.5, 1.5, p)`), mapped to about uniform
+  with a logistic approximation of the normal CDF (mean 0.46 and
+  single-octave deviation 0.18 measured on dumps; the deviation scales
+  like a weighted mean of independent octaves), so coverage c covers
+  ~c of the sky (measured: fair 0.35 -> 35.1%, broken 0.65 -> 62.5%).
+  - Logistic approximation of the normal CDF (1.702): https://doi.org/10.3926/jiem.2009.v2n1.p114-127
+- **Fallback beyond the window:** `weatherMapAt` reads the map inside its
+  texel centers, beyond them the same noise with one octave instead of
+  three. The map's outer 64 texels (7.5 km) blend to that one-octave
+  value, so its edge texels equal the fallback and the boundary is
+  continuous (checked: two maps one window apart differ across the
+  shared edge as much as neighbouring texels do). Calibrating each
+  octave count to the same distribution keeps coverage statistics equal
+  on both sides.
+- **Precision:** all cloud noise tiles with 2^18 m (262 km; the map's
+  Worley cells, the base, detail and curl periods divide it), so the
+  cloud wind offset is uploaded modulo 2^18 m, reduced in double
+  (`Weather::windOffsetModulo`): positions keep 1.6 cm resolution after
+  any amount of play instead of degrading with the unbounded float offset
+  (6 cm after 1000 km). The time coordinate wraps the same way at its
+  period (64 units, 32 game hours). The gust noise period now reaches
+  wind.glsl through `GpuWind::gustPhasePeriod`, one constant instead of
+  two copies.
+- Cost: `weather` 0.11 ms at 2560x1440 (per-texel history lookup and
+  3D Worley); noise generation at load is one dispatch.

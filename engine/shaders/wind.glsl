@@ -2,10 +2,9 @@
 // in meters above the ground (vegetation) or sea level (clouds). Consumers
 // evaluate these with scene.wind and scene.previousWind for motion vectors.
 
-// Gusts: noise cells of this size (m), wrapping along the phase at the
-// period kGustPhasePeriod in gpu_types.h.
+// Gusts: noise cells of this size (m), wrapping along the phase at
+// w.gustPhasePeriod.
 const float kGustCell = 40.0;
-const int kGustPhasePeriod = 256;
 
 // Clockwise seen from above, like the Ekman spiral (veer), relative to the
 // 10 m wind.
@@ -45,8 +44,9 @@ float gust(Wind w, vec2 worldXZ) {
     ivec3 i = ivec3(floor(p));
     vec3 f = p - vec3(i);
     f = f * f * (3.0 - 2.0 * f);
-    int z0 = i.z % kGustPhasePeriod;
-    int z1 = (i.z + 1) % kGustPhasePeriod;
+    int period = int(w.gustPhasePeriod);
+    int z0 = i.z % period;
+    int z1 = (i.z + 1) % period;
     float n0 = mix(mix(gustHash(ivec3(i.xy, z0)), gustHash(ivec3(i.x + 1, i.y, z0)), f.x),
                    mix(gustHash(ivec3(i.x, i.y + 1, z0)), gustHash(ivec3(i.xy + 1, z0)), f.x), f.y);
     float n1 = mix(mix(gustHash(ivec3(i.xy, z1)), gustHash(ivec3(i.x + 1, i.y, z1)), f.x),

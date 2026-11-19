@@ -72,6 +72,10 @@ public:
   WeatherState stateAt(Vec3 worldPosition) const;
   // Integral of windVelocityAt over game time (xz, y = 0).
   Vec3 windOffset(float altitude) const;
+  // windOffset modulo `period` (x and z in [0, period)), reduced in double
+  // precision: for scrolling noise that tiles with that period, which stays
+  // precise however far the air has moved.
+  Vec3 windOffsetModulo(float altitude, double period) const;
   // Integral of the 10 m wind speed over game time (m).
   double travel() const;
   double time() const;

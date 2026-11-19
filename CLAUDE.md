@@ -102,6 +102,10 @@ SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
 with the wind). Capture runs print the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
+`--dump-weather-map out.png` saves the weather map after the last frame
+(R coverage, G type, B precipitation; row 0 = north) and prints its
+window; two dumps at `--time-scale 0` and `--time-scale 60 --frames 60`
+show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--no-occlusion` draws everything in the frustum
@@ -113,7 +117,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, weather, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -225,6 +229,8 @@ engine/src/render/         renderer internals:
   taa_upscaler.*           the core Upscaler backend: taa.comp and
                            sharpen.comp, their pipelines and the
                            ping-pong history
+  renderer_clouds.cpp      cloud noise volumes (at load), weather map
+                           window and pass, dumpWeatherMap
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -244,7 +250,11 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cluster_traverse.comp -> work items for
                            cluster_cull.comp.
                            wind.glsl (windVelocity, windOffset, gust),
-                           weather.glsl (weatherAt: history lookup)
+                           weather.glsl (weatherAt: history lookup),
+                           clouds.glsl (tileable noise, weatherMapAt +
+                           analytic fallback, layer profiles,
+                           cloudDensity), cloud_noise.comp,
+                           weather_map.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten, leaf diffuse transmission),
@@ -281,7 +291,8 @@ clusters) -> cull clusters (cluster_cull.comp, dispatched indirectly:
 Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
-single/double-sided) -> atmosphere LUTs
+single/double-sided) -> weather map (weather_map.comp: 512^2 over 60 km
+around the camera, texel-snapped) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
@@ -395,7 +406,11 @@ barriers account for that.
   (`resolved`), grade LUT sampled and as storage (one set); TaaUpscaler
   set 0 = HDR, motion, history read/write, output (two ping-pong sets,
   shared by taa.comp and sharpen.comp); pyramid layout set 0 = source + destination level (one
-  set per level); cull layout set 0 = depth pyramid (min sampler).
+  set per level); cull layout set 0 = depth pyramid (min sampler); cloud
+  layout set 0 = the cloud noise and weather map storage images, set 1 =
+  bindless. The bindless table also holds the cloud noise volumes as 3D
+  views, read through `textures3D[]` (clouds.glsl, same binding), and
+  the weather map in GENERAL layout.
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges
@@ -417,7 +432,11 @@ barriers account for that.
   (`windVelocityAt`, wind.glsl `windVelocity`). Anything carried by the
   wind scrolls by `windOffset` (the time integral of the velocity, never
   velocity x time, so speed changes don't jump), and computes motion with
-  `scene.wind` and `scene.previousWind`. The weather at a position comes
+  `scene.wind` and `scene.previousWind`. Tileable noise scrolls by an
+  offset reduced modulo its period in double on the CPU
+  (`Weather::windOffsetModulo`; clouds: `scene.clouds.windOffset` at
+  3 km, modulo 2^18 m, which every cloud noise period divides), so float
+  precision doesn't degrade with play time. The weather at a position comes
   from `Weather::stateAt` / `weatherAt` (the history rule), never from
   the current state directly.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in

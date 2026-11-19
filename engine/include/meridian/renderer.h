@@ -270,6 +270,11 @@ public:
   // visual checks; stalls that frame until the GPU is done.
   void requestCapture(const std::filesystem::path &path);
 
+  // Debug: waits for the GPU, then saves the weather map the last frame drew
+  // as a PNG (R coverage, G type, B precipitation; row 0 = north) and prints
+  // its window.
+  void dumpWeatherMap(const std::filesystem::path &path);
+
   // Vulkan validation errors reported so far (Debug builds only).
   uint32_t validationErrorCount() const;
 

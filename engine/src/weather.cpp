@@ -173,6 +173,19 @@ Vec3 Weather::windOffset(float altitude) const {
           static_cast<float>((offsetX_ * s + offsetZ_ * c) * scale)};
 }
 
+Vec3 Weather::windOffsetModulo(float altitude, double period) const {
+  const double angle = veerAngle(altitude);
+  const double scale = profileScale(altitude);
+  const double c = std::cos(angle);
+  const double s = std::sin(angle);
+  auto wrap = [&](double v) {
+    const double r = std::fmod(v, period);
+    return static_cast<float>(r < 0.0 ? r + period : r);
+  };
+  return {wrap((offsetX_ * c - offsetZ_ * s) * scale), 0.0f,
+          wrap((offsetX_ * s + offsetZ_ * c) * scale)};
+}
+
 double Weather::travel() const { return travel_; }
 
 double Weather::time() const { return now_; }

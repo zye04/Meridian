@@ -82,6 +82,8 @@ struct Renderer::Impl {
   GpuWind previousWind;
   GpuWeather weather;
   std::array<WeatherHistorySample, kWeatherHistoryCapacity> weatherHistory{};
+  // Wind offset and time from setWeather, the map window from draw.
+  GpuClouds clouds;
   // The depth pyramid holds last frame's depth at the current size, so the
   // early cluster cull can test against it.
   bool pyramidValid = false;
@@ -272,6 +274,21 @@ struct Renderer::Impl {
   VkPipelineLayout gradeLayout = VK_NULL_HANDLE;
   VkPipeline gradeLutPipeline = VK_NULL_HANDLE;
 
+  // Clouds (renderer_clouds.cpp), in the bindless table: noise volumes
+  // generated at load, and the weather map rewritten every frame (always in
+  // GENERAL layout). One storage set holds all four for the generators.
+  Image cloudBaseNoise;
+  Image cloudDetailNoise;
+  Image cloudCurlNoise;
+  Image weatherMap;
+  // Level 0 of each noise volume, for storage writes.
+  std::array<VkImageView, 2> cloudNoiseLevel0{};
+  VkDescriptorSetLayout cloudSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool cloudPool = VK_NULL_HANDLE;
+  VkDescriptorSet cloudSet = VK_NULL_HANDLE;
+  VkPipelineLayout cloudLayout = VK_NULL_HANDLE;
+  VkPipeline weatherMapPipeline = VK_NULL_HANDLE;
+
   std::vector<GpuMesh> meshes;
 
   std::optional<std::filesystem::path> capturePath;
@@ -287,6 +304,10 @@ struct Renderer::Impl {
   void createGrade();
   void createMaterialSystem();
   void computeDfgLut();
+  void createClouds();
+  void destroyClouds();
+  void placeWeatherMap(Vec3 cameraPosition);
+  void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
 
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect,
@@ -305,7 +326,8 @@ struct Renderer::Impl {
   // if `pool` already does.
   Buffer grownPool(const Buffer &pool, VkDeviceSize bytes, VkBufferUsageFlags usage);
   Buffer uploadStorage(const void *data, VkDeviceSize bytes);
-  void writeTexture(uint32_t index, VkImageView view, VkSampler sampler);
+  void writeTexture(uint32_t index, VkImageView view, VkSampler sampler,
+                    VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   void uploadTerrainHeights(const Heightfield &field);
   void buildTerrainNormals(const Heightfield &field);
 
