@@ -37,6 +37,11 @@ validation error):
 ./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] --capture out.png [--frames N]
 ```
 
+Motion sharpness: add `--camera-velocity X Y Z` (m/s, fixed 1/60 s steps,
+ending at `--camera`) and compare with the still capture of the same view:
+`magick out.png -colorspace gray -morphology Convolve Laplacian:0 -format
+"%[fx:standard_deviation]\n" info:` (higher = sharper).
+
 Useful views: default start `0 300 700 0 -0.35`; sample models
 `-1.6 299.2 700 -0.35 -0.12`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
 

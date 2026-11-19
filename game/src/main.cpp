@@ -64,6 +64,8 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
 struct Options {
   std::optional<meridian::Camera> camera;
   std::optional<meridian::Vec3> sunDirection;
+  // Scripted runs move the camera at this velocity (m/s), ending at --camera.
+  std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::filesystem::path> capturePath;
   // Frames to render before exiting; 0 runs until the window closes.
   int frames = 0;
@@ -88,6 +90,8 @@ Options parseOptions(int argc, char **argv) {
     } else if (arg == "--sun") {
       options.sunDirection =
           meridian::normalize({number(i), number(i), number(i)});
+    } else if (arg == "--camera-velocity") {
+      options.cameraVelocity = {number(i), number(i), number(i)};
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--frames") {
@@ -95,12 +99,16 @@ Options parseOptions(int argc, char **argv) {
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
-                               "--capture file.png, --frames n)");
+                               "--camera-velocity x y z, --capture file.png, "
+                               "--frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
   if (options.capturePath && options.frames == 0) {
     options.frames = 120;
+  }
+  if (options.cameraVelocity && options.frames == 0) {
+    throw std::runtime_error("--camera-velocity needs --capture or --frames");
   }
   return options;
 }
@@ -156,6 +164,12 @@ int main(int argc, char **argv) {
   if (options.camera) {
     camera = *options.camera;
   }
+  // Scripted motion uses a fixed step so runs repeat exactly.
+  constexpr float kScriptedStep = 1.0f / 60.0f;
+  if (options.cameraVelocity) {
+    camera.position = camera.position - *options.cameraVelocity *
+                                            (kScriptedStep * options.frames);
+  }
 
   using Clock = std::chrono::steady_clock;
   auto lastFrame = Clock::now();
@@ -182,6 +196,9 @@ int main(int argc, char **argv) {
       updateFlyCamera(camera, window, deltaSeconds);
     }
     ++totalFrames;
+    if (options.cameraVelocity) {
+      camera.position = camera.position + *options.cameraVelocity * kScriptedStep;
+    }
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
     }
