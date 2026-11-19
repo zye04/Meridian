@@ -40,7 +40,7 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
 // Frustum-culls every instance on the GPU and fills the indirect draw lists.
 void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame) {
   // The draw lists are shared by both frames in flight.
-  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, 0,
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT, 0,
                 VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   vkCmdFillBuffer(cmd, drawCounts.buffer, 0, VK_WHOLE_SIZE, 0);
@@ -61,8 +61,10 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame) 
 
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+  const VkBufferCopy copy{0, 0, kDrawBuckets * sizeof(uint32_t)};
+  vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
 }
 
 // Rebuilds the TLAS over all instances (including those outside the view:
@@ -132,6 +134,12 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
 
 float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
 
+uint32_t Renderer::drawnInstanceCount() const { return impl_->drawnInstances; }
+
+void Renderer::setOcclusionCulling(bool enabled) {
+  impl_->occlusionCulling = enabled;
+}
+
 void Renderer::requestCapture(const std::filesystem::path &path) {
   impl_->capturePath = path;
 }
@@ -173,6 +181,16 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
                             VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
     impl_->gpuFrameMs = static_cast<float>(timestamps[1] - timestamps[0]) *
                         impl_->timestampPeriodNs * 1e-6f;
+  }
+  if (impl_->frameNumber >= kFramesInFlight) {
+    check(vmaInvalidateAllocation(impl_->allocator, frame.drawCountReadback.allocation,
+                                  0, VK_WHOLE_SIZE),
+          "vmaInvalidateAllocation");
+    const auto *counts = static_cast<const uint32_t *>(frame.drawCountReadback.mapped);
+    impl_->drawnInstances = 0;
+    for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
+      impl_->drawnInstances += counts[bucket];
+    }
   }
 
   uint32_t imageIndex = 0;

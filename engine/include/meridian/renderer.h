@@ -146,6 +146,14 @@ public:
   // GPU time of a recent frame, measured with timestamp queries.
   float gpuFrameMs() const;
 
+  // Opaque and alpha-masked instances drawn in a recent frame (blended
+  // instances are drawn from the CPU and not counted).
+  uint32_t drawnInstanceCount() const;
+
+  // On by default; off draws everything in the view frustum (for A/B
+  // comparisons).
+  void setOcclusionCulling(bool enabled);
+
   // Saves the next drawn frame (after tonemapping) as a PNG. For automated
   // visual checks; stalls that frame until the GPU is done.
   void requestCapture(const std::filesystem::path &path);

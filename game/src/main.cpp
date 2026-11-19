@@ -170,6 +170,7 @@ struct Options {
   std::optional<std::filesystem::path> capturePath;
   // Poly Haven models to scatter on the ground around the start.
   int scatter = 0;
+  bool occlusion = true;
   // Frames to render before exiting; 0 runs until the window closes.
   int frames = 0;
 };
@@ -197,6 +198,8 @@ Options parseOptions(int argc, char **argv) {
       options.cameraVelocity = {number(i), number(i), number(i)};
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
+    } else if (arg == "--no-occlusion") {
+      options.occlusion = false;
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--frames") {
@@ -204,7 +207,7 @@ Options parseOptions(int argc, char **argv) {
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
-                               "--camera-velocity x y z, --scatter n, "
+                               "--camera-velocity x y z, --scatter n, --no-occlusion, "
                                "--capture file.png, --frames n)");
     }
   }
@@ -228,6 +231,7 @@ int main(int argc, char **argv) {
   meridian::Window window(1280, 720, "Meridian");
   meridian::Renderer renderer(window);
   window.setCursorCaptured(interactive);
+  renderer.setOcclusionCulling(options.occlusion);
 
   const meridian::TerrainSettings terrainSettings;
   meridian::MaterialData terrainMaterial;
@@ -327,8 +331,9 @@ int main(int argc, char **argv) {
   }
 
   if (!interactive) {
-    std::printf("Rendered %d frames, GPU %.2f ms, %u validation errors\n",
-                totalFrames, renderer.gpuFrameMs(),
+    std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, "
+                "%u validation errors\n",
+                totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.validationErrorCount());
   }
   return renderer.validationErrorCount() == 0 ? 0 : 1;

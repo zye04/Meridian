@@ -153,6 +153,10 @@ void Renderer::Impl::createFrames() {
         kMaxInstances * sizeof(InstanceData), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    frame.drawCountReadback = createBuffer(
+        kDrawBuckets * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
         kMaxInstances * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -523,7 +527,7 @@ void Renderer::Impl::createScene() {
   drawCounts = createBuffer(
       kDrawBuckets * sizeof(uint32_t),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
 }
@@ -786,6 +790,7 @@ Renderer::~Renderer() {
     impl_->destroyBuffer(frame.instanceBuffer);
     impl_->destroyBuffer(frame.instanceStaging);
     impl_->destroyBuffer(frame.sceneBuffer);
+    impl_->destroyBuffer(frame.drawCountReadback);
     vkDestroySemaphore(dev, frame.imageAvailable, nullptr);
     vkDestroyFence(dev, frame.renderFence, nullptr);
     vkDestroyCommandPool(dev, frame.commandPool, nullptr);

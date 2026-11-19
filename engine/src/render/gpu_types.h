@@ -304,6 +304,8 @@ struct FrameData {
   // CPU-visible copy of the instance table, uploaded when instances change.
   Buffer instanceStaging;
   Buffer tlasScratch;
+  // This frame's draw counts, copied back to count drawn instances.
+  Buffer drawCountReadback;
 };
 
 // The NVIDIA driver leaks a few KB during device creation and on the first

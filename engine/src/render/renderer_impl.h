@@ -59,6 +59,8 @@ struct Renderer::Impl {
   VkQueryPool timestampPool = VK_NULL_HANDLE;
   float timestampPeriodNs = 0.0f;
   float gpuFrameMs = 0.0f;
+  uint32_t drawnInstances = 0;
+  bool occlusionCulling = true;
 
   VkCommandPool uploadPool = VK_NULL_HANDLE;
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
