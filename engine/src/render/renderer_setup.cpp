@@ -102,6 +102,7 @@ void Renderer::Impl::createSwapchain() {
     vkUpdateDescriptorSets(device.device, 5, writes, 0, nullptr);
   }
 
+  createCloudTargets();
   swapchainOutOfDate = false;
 
   std::cout << "Swapchain: " << swapchainImages.size() << " images, "
@@ -178,6 +179,7 @@ void Renderer::Impl::createDepthPyramid() {
 }
 
 void Renderer::Impl::destroySwapchain() {
+  destroyCloudTargets();
   for (Image &image : history) {
     destroyImage(image);
   }
