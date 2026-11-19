@@ -14,10 +14,15 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer {
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
+    // Jittered for temporal anti-aliasing; used to rasterize.
     mat4 viewProjection;
+    // Without jitter, this frame and last frame; used for motion vectors.
+    mat4 currentViewProjection;
+    mat4 previousViewProjection;
     vec3 sunDirection;
     float exposure;
     vec3 sunIlluminance;
+    uint frameIndex;
     vec3 skyLuminance;
     // Device address of the scene's top-level acceleration structure.
     uvec2 tlas;

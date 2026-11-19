@@ -30,6 +30,10 @@ constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 // 16-bit float keeps smooth gradients across the full HDR range.
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+// Screen-space motion vectors for temporal anti-aliasing (and later DLSS).
+constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
+// Halton(2,3) jitter cycle length.
+constexpr uint32_t kJitterPhases = 8;
 // Upper bound on draw items per frame, sizing each frame's TLAS.
 constexpr uint32_t kMaxInstances = 4096;
 
@@ -69,16 +73,23 @@ struct GpuMesh {
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
+  Mat4 currentViewProjection;
+  Mat4 previousViewProjection;
   Vec3 sunDirection;
   float exposure = 1.0f;
   Vec3 sunIlluminance;
-  float pad0 = 0.0f;
+  uint32_t frameIndex = 0;
   Vec3 skyLuminance;
-  float pad1 = 0.0f;
+  float pad0 = 0.0f;
   VkDeviceAddress tlas = 0;
-  uint64_t pad2 = 0;
+  uint64_t pad1 = 0;
 };
-static_assert(sizeof(SceneData) == 128);
+static_assert(sizeof(SceneData) == 256);
+
+// Must match the push_constant block in post.glsl.
+struct PostConstants {
+  uint32_t historyValid = 0;
+};
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
@@ -109,6 +120,18 @@ using DriverLeakScope = __lsan::ScopedDisabler;
 #else
 struct DriverLeakScope {};
 #endif
+
+// Low-discrepancy sequence used for sub-pixel jitter; returns [0, 1).
+float halton(uint32_t index, uint32_t base) {
+  float result = 0.0f;
+  float fraction = 1.0f;
+  while (index > 0) {
+    fraction /= static_cast<float>(base);
+    result += fraction * static_cast<float>(index % base);
+    index /= base;
+  }
+  return result;
+}
 
 void check(VkResult result, const char *what) {
   if (result != VK_SUCCESS) {
@@ -176,7 +199,7 @@ struct PipelineDesc {
   const char *vertexShader = nullptr;
   const char *fragmentShader = nullptr;
   VkPipelineLayout layout = VK_NULL_HANDLE;
-  VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+  std::span<const VkFormat> colorFormats;
   VkFormat depthFormat = VK_FORMAT_UNDEFINED;
   VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
 };
@@ -232,11 +255,13 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   blendAttachment.colorWriteMask =
       VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(
+      desc.colorFormats.size(), blendAttachment);
 
   VkPipelineColorBlendStateCreateInfo colorBlend{};
   colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-  colorBlend.attachmentCount = 1;
-  colorBlend.pAttachments = &blendAttachment;
+  colorBlend.attachmentCount = static_cast<uint32_t>(blendAttachments.size());
+  colorBlend.pAttachments = blendAttachments.data();
 
   // Viewport and scissor are set per frame, so a resize doesn't need a new
   // pipeline.
@@ -249,8 +274,9 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
 
   VkPipelineRenderingCreateInfo renderingInfo{};
   renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachmentFormats = &desc.colorFormat;
+  renderingInfo.colorAttachmentCount =
+      static_cast<uint32_t>(desc.colorFormats.size());
+  renderingInfo.pColorAttachmentFormats = desc.colorFormats.data();
   renderingInfo.depthAttachmentFormat = desc.depthFormat;
 
   VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -274,6 +300,26 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   vkDestroyShaderModule(device, vertModule, nullptr);
   vkDestroyShaderModule(device, fragModule, nullptr);
   check(result, "vkCreateGraphicsPipelines");
+  return pipeline;
+}
+
+VkPipeline createComputePipeline(VkDevice device, const char *shader,
+                                 VkPipelineLayout layout) {
+  VkShaderModule module = loadShader(device, shader);
+
+  VkComputePipelineCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  info.stage.module = module;
+  info.stage.pName = "main";
+  info.layout = layout;
+
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info,
+                                             nullptr, &pipeline);
+  vkDestroyShaderModule(device, module, nullptr);
+  check(result, "vkCreateComputePipelines");
   return pipeline;
 }
 
@@ -304,6 +350,12 @@ struct Renderer::Impl {
   // Sized like the swapchain and recreated with it.
   Image depth;
   Image hdr;
+  Image motion;
+  // Temporal anti-aliasing history, ping-ponged: each frame reads one and
+  // writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
+  std::array<Image, 2> history;
+  bool historyValid = false;
+  Mat4 previousViewProjection;
 
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
@@ -321,10 +373,13 @@ struct Renderer::Impl {
   VkPipeline meshPipeline = VK_NULL_HANDLE;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
-  VkDescriptorSetLayout tonemapSetLayout = VK_NULL_HANDLE;
+  VkSampler linearSampler = VK_NULL_HANDLE;
+  VkDescriptorSetLayout postSetLayout = VK_NULL_HANDLE;
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-  VkDescriptorSet tonemapSet = VK_NULL_HANDLE;
-  VkPipelineLayout tonemapLayout = VK_NULL_HANDLE;
+  // postSets[i] reads history[i] and writes history[1 - i].
+  std::array<VkDescriptorSet, 2> postSets{};
+  VkPipelineLayout postLayout = VK_NULL_HANDLE;
+  VkPipeline taaPipeline = VK_NULL_HANDLE;
   VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
   std::vector<GpuMesh> meshes;
@@ -590,22 +645,51 @@ void Renderer::Impl::createSwapchain() {
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                         VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT);
+  motion = createImage(kMotionFormat,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT,
+                       VK_IMAGE_ASPECT_COLOR_BIT);
+  for (Image &image : history) {
+    image = createImage(kHdrFormat,
+                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_ASPECT_COLOR_BIT);
+  }
+  submitNow([&](VkCommandBuffer cmd) {
+    for (Image &image : history) {
+      transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            VK_PIPELINE_STAGE_2_NONE, 0,
+                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+    }
+  });
+  historyValid = false;
 
-  // Point the tonemap pass at the new HDR image. Safe because the device is
-  // idle whenever the swapchain is (re)created.
-  VkDescriptorImageInfo hdrInfo{};
-  hdrInfo.sampler = nearestSampler;
-  hdrInfo.imageView = hdr.view;
-  hdrInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-  VkWriteDescriptorSet write{};
-  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write.dstSet = tonemapSet;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  write.pImageInfo = &hdrInfo;
-  vkUpdateDescriptorSets(device.device, 1, &write, 0, nullptr);
+  // Point the post-processing sets at the new images. Safe because the
+  // device is idle whenever the swapchain is (re)created.
+  for (int i = 0; i < 2; ++i) {
+    const Image &previous = history[i];
+    const Image &next = history[1 - i];
+    VkDescriptorImageInfo images[] = {
+        {nearestSampler, hdr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {nearestSampler, motion.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {linearSampler, previous.view, VK_IMAGE_LAYOUT_GENERAL},
+        {VK_NULL_HANDLE, next.view, VK_IMAGE_LAYOUT_GENERAL},
+        {nearestSampler, next.view, VK_IMAGE_LAYOUT_GENERAL},
+    };
+    VkWriteDescriptorSet writes[5]{};
+    for (uint32_t b = 0; b < 5; ++b) {
+      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[b].dstSet = postSets[i];
+      writes[b].dstBinding = b;
+      writes[b].descriptorCount = 1;
+      writes[b].descriptorType = b == 3
+                                     ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                     : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writes[b].pImageInfo = &images[b];
+    }
+    vkUpdateDescriptorSets(device.device, 5, writes, 0, nullptr);
+  }
 
   swapchainOutOfDate = false;
 
@@ -615,6 +699,10 @@ void Renderer::Impl::createSwapchain() {
 }
 
 void Renderer::Impl::destroySwapchain() {
+  for (Image &image : history) {
+    destroyImage(image);
+  }
+  destroyImage(motion);
   destroyImage(hdr);
   destroyImage(depth);
 
@@ -733,36 +821,50 @@ void Renderer::Impl::createDescriptors() {
   samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   check(vkCreateSampler(dev, &samplerInfo, nullptr, &nearestSampler),
         "vkCreateSampler");
+  samplerInfo.magFilter = VK_FILTER_LINEAR;
+  samplerInfo.minFilter = VK_FILTER_LINEAR;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &linearSampler),
+        "vkCreateSampler");
 
-  VkDescriptorSetLayoutBinding binding{};
-  binding.binding = 0;
-  binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  binding.descriptorCount = 1;
-  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  // Must match post.glsl.
+  constexpr VkShaderStageFlags kPostStages =
+      VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutBinding bindings[5]{};
+  for (uint32_t b = 0; b < 5; ++b) {
+    bindings[b].binding = b;
+    bindings[b].descriptorType = b == 3
+                                     ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                     : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[b].descriptorCount = 1;
+    bindings[b].stageFlags = kPostStages;
+  }
 
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = 1;
-  layoutInfo.pBindings = &binding;
-  check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr,
-                                    &tonemapSetLayout),
+  layoutInfo.bindingCount = 5;
+  layoutInfo.pBindings = bindings;
+  check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &postSetLayout),
         "vkCreateDescriptorSetLayout");
 
-  VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+  VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2},
+  };
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.maxSets = 1;
-  poolInfo.poolSizeCount = 1;
-  poolInfo.pPoolSizes = &poolSize;
+  poolInfo.maxSets = 2;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
   check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &descriptorPool),
         "vkCreateDescriptorPool");
 
+  VkDescriptorSetLayout setLayouts[] = {postSetLayout, postSetLayout};
   VkDescriptorSetAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocInfo.descriptorPool = descriptorPool;
-  allocInfo.descriptorSetCount = 1;
-  allocInfo.pSetLayouts = &tonemapSetLayout;
-  check(vkAllocateDescriptorSets(dev, &allocInfo, &tonemapSet),
+  allocInfo.descriptorSetCount = 2;
+  allocInfo.pSetLayouts = setLayouts;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, postSets.data()),
         "vkAllocateDescriptorSets");
 }
 
@@ -780,26 +882,36 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &meshLayoutInfo, nullptr, &meshLayout),
         "vkCreatePipelineLayout");
 
+  const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat};
   meshPipeline = createGraphicsPipeline(dev, {.vertexShader = "mesh.vert",
                                               .fragmentShader = "mesh.frag",
                                               .layout = meshLayout,
-                                              .colorFormat = kHdrFormat,
+                                              .colorFormats = sceneFormats,
                                               .depthFormat = kDepthFormat,
                                               .cullMode = VK_CULL_MODE_BACK_BIT});
 
-  VkPipelineLayoutCreateInfo tonemapLayoutInfo{};
-  tonemapLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  tonemapLayoutInfo.setLayoutCount = 1;
-  tonemapLayoutInfo.pSetLayouts = &tonemapSetLayout;
-  check(vkCreatePipelineLayout(dev, &tonemapLayoutInfo, nullptr,
-                               &tonemapLayout),
+  VkPushConstantRange postPushRange{};
+  postPushRange.stageFlags =
+      VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  postPushRange.size = sizeof(PostConstants);
+
+  VkPipelineLayoutCreateInfo postLayoutInfo{};
+  postLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  postLayoutInfo.setLayoutCount = 1;
+  postLayoutInfo.pSetLayouts = &postSetLayout;
+  postLayoutInfo.pushConstantRangeCount = 1;
+  postLayoutInfo.pPushConstantRanges = &postPushRange;
+  check(vkCreatePipelineLayout(dev, &postLayoutInfo, nullptr, &postLayout),
         "vkCreatePipelineLayout");
 
+  taaPipeline = createComputePipeline(dev, "taa.comp", postLayout);
+
+  const VkFormat swapchainFormat[] = {swapchain.image_format};
   tonemapPipeline =
       createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
                                    .fragmentShader = "tonemap.frag",
-                                   .layout = tonemapLayout,
-                                   .colorFormat = swapchain.image_format});
+                                   .layout = postLayout,
+                                   .colorFormats = swapchainFormat});
 }
 
 Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
@@ -1089,8 +1201,27 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // Exposure is applied while shading ("pre-exposure") so the HDR target
   // holds display-range values: physical luminances like the sun disk would
   // overflow 16-bit floats.
+  // Sub-pixel jitter in pixels, cycling through Halton(2,3). The temporal
+  // resolve turns it into anti-aliasing (and DLSS will need it too).
+  const uint32_t phase =
+      static_cast<uint32_t>(impl_->frameNumber % kJitterPhases) + 1;
+  const float jitterX = halton(phase, 2) - 0.5f;
+  const float jitterY = halton(phase, 3) - 0.5f;
+
+  const Mat4 view = camera.view();
+  const Mat4 projection = camera.projection(aspect);
+  Mat4 jitteredProjection = projection;
+  jitteredProjection.m[2][0] += 2.0f * jitterX / static_cast<float>(extent.width);
+  jitteredProjection.m[2][1] += 2.0f * jitterY / static_cast<float>(extent.height);
+
   SceneData scene;
-  scene.viewProjection = camera.projection(aspect) * camera.view();
+  scene.viewProjection = jitteredProjection * view;
+  scene.currentViewProjection = projection * view;
+  scene.previousViewProjection = impl_->historyValid
+                                     ? impl_->previousViewProjection
+                                     : scene.currentViewProjection;
+  scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
+  impl_->previousViewProjection = scene.currentViewProjection;
   scene.sunDirection = lighting.sunDirection;
   scene.exposure = camera.exposure();
   scene.sunIlluminance = lighting.sunIlluminance;
@@ -1125,12 +1256,14 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // The HDR and depth images are shared by both frames in flight, so each
   // barrier also waits for the previous frame's use of the image.
-  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT});
+  for (VkImage target : {impl_->hdr.image, impl_->motion.image}) {
+    transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT});
+  }
 
   constexpr VkPipelineStageFlags2 kDepthStages =
       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
@@ -1165,8 +1298,17 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   sceneRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
   sceneRendering.renderArea = {{0, 0}, extent};
   sceneRendering.layerCount = 1;
-  sceneRendering.colorAttachmentCount = 1;
-  sceneRendering.pColorAttachments = &hdrAttachment;
+  VkRenderingAttachmentInfo motionAttachment{};
+  motionAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  motionAttachment.imageView = impl_->motion.view;
+  motionAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  motionAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  motionAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+  const VkRenderingAttachmentInfo sceneAttachments[] = {hdrAttachment,
+                                                        motionAttachment};
+  sceneRendering.colorAttachmentCount = 2;
+  sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
   vkCmdBeginRendering(cmd, &sceneRendering);
@@ -1193,15 +1335,54 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   vkCmdEndRendering(cmd);
 
-  // --- Tonemap pass: HDR target -> swapchain image.
+  // --- Temporal resolve: scene color + history -> new history.
 
-  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  for (VkImage target : {impl_->hdr.image, impl_->motion.image}) {
+    transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  }
+
+  // The history images stay in GENERAL. This frame reads what the previous
+  // frame wrote, and overwrites the image the previous frame's tonemap read.
+  VkMemoryBarrier2 historyBarrier{};
+  historyBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  historyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  historyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  VkDependencyInfo historyDependency{};
+  historyDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  historyDependency.memoryBarrierCount = 1;
+  historyDependency.pMemoryBarriers = &historyBarrier;
+  vkCmdPipelineBarrier2(cmd, &historyDependency);
+
+  VkDescriptorSet postSet = impl_->postSets[impl_->frameNumber % 2];
+  PostConstants postConstants;
+  postConstants.historyValid = impl_->historyValid ? 1 : 0;
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->taaPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          impl_->postLayout, 0, 1, &postSet, 0, nullptr);
+  vkCmdPushConstants(cmd, impl_->postLayout,
+                     VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                     0, sizeof(postConstants), &postConstants);
+  vkCmdDispatch(cmd, (extent.width + 7) / 8, (extent.height + 7) / 8, 1);
+
+  historyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  historyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+  vkCmdPipelineBarrier2(cmd, &historyDependency);
+  impl_->historyValid = true;
+
+  // --- Tonemap pass: resolved HDR -> swapchain image.
 
   VkImage swapchainImage = impl_->swapchainImages[imageIndex];
   transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1229,8 +1410,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     impl_->tonemapPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          impl_->tonemapLayout, 0, 1, &impl_->tonemapSet, 0,
-                          nullptr);
+                          impl_->postLayout, 0, 1, &postSet, 0, nullptr);
   vkCmdSetViewport(cmd, 0, 1, &viewport);
   vkCmdSetScissor(cmd, 0, 1, &scissor);
   vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -1302,7 +1482,8 @@ Renderer::~Renderer() {
   }
 
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
-  vkDestroyPipelineLayout(dev, impl_->tonemapLayout, nullptr);
+  vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->meshLayout, nullptr);
 
@@ -1321,7 +1502,8 @@ Renderer::~Renderer() {
 
   impl_->destroySwapchain();
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
-  vkDestroyDescriptorSetLayout(dev, impl_->tonemapSetLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);
+  vkDestroySampler(dev, impl_->linearSampler, nullptr);
   vkDestroySampler(dev, impl_->nearestSampler, nullptr);
   vmaDestroyAllocator(impl_->allocator);
 

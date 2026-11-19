@@ -5,8 +5,13 @@
 
 layout(location = 0) in vec3 inWorldPosition;
 layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec4 inCurrentClip;
+layout(location = 3) in vec4 inPreviousClip;
 
 layout(location = 0) out vec4 outColor;
+// Screen-space motion in UV units, pointing from this frame's position to
+// last frame's (the convention DLSS also uses).
+layout(location = 1) out vec2 outMotion;
 
 // Albedos are linear reflectances, roughly matching real materials.
 const vec3 kGrass = vec3(0.06, 0.13, 0.03);
@@ -66,4 +71,8 @@ void main() {
                                 normal.y * 0.5 + 0.5);
 
     outColor = vec4((direct + ambient) * pc.scene.exposure, 1.0);
+
+    vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
+    vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;
+    outMotion = previousUv - currentUv;
 }

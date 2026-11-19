@@ -5,7 +5,8 @@
 // primaries, so the scene's linear Rec.709 color is converted on the way in
 // and out. Input is already exposed (pre-exposure happens in the scene pass).
 
-layout(set = 0, binding = 0) uniform sampler2D hdrColor;
+#extension GL_GOOGLE_include_directive : require
+#include "post.glsl"
 
 layout(location = 0) out vec4 outColor;
 
@@ -43,7 +44,7 @@ vec3 agx(vec3 color) {
 }
 
 void main() {
-    vec3 color = texelFetch(hdrColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 color = texelFetch(resolved, ivec2(gl_FragCoord.xy), 0).rgb;
     // Linear output; the sRGB swapchain applies the display encoding.
     outColor = vec4(max(agx(color), 0.0), 1.0);
 }
