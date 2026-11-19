@@ -271,6 +271,11 @@ struct Renderer::Impl {
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
 
+  // Two GPU timestamps per frame in flight: start and end of the frame.
+  VkQueryPool timestampPool = VK_NULL_HANDLE;
+  float timestampPeriodNs = 0.0f;
+  float gpuFrameMs = 0.0f;
+
   VkCommandPool uploadPool = VK_NULL_HANDLE;
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
   VkFence uploadFence = VK_NULL_HANDLE;
@@ -524,6 +529,13 @@ void Renderer::Impl::createFrames() {
   fenceInfo.flags = 0;
   check(vkCreateFence(dev, &fenceInfo, nullptr, &uploadFence),
         "vkCreateFence");
+
+  VkQueryPoolCreateInfo queryInfo{};
+  queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+  queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+  queryInfo.queryCount = kFramesInFlight * 2;
+  check(vkCreateQueryPool(dev, &queryInfo, nullptr, &timestampPool),
+        "vkCreateQueryPool");
 }
 
 void Renderer::Impl::createDescriptors() {
@@ -664,6 +676,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   check(vmaCreateAllocator(&allocatorInfo, &impl_->allocator),
         "vmaCreateAllocator");
 
+  impl_->timestampPeriodNs = physical.value().properties.limits.timestampPeriod;
   impl_->createFrames();
   impl_->createDescriptors();
   impl_->createSwapchain();
@@ -728,6 +741,8 @@ MeshId Renderer::uploadMesh(const MeshData &data) {
   return {static_cast<uint32_t>(impl_->meshes.size() - 1)};
 }
 
+float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
+
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     std::span<const DrawItem> items) {
   VkDevice dev = impl_->device.device;
@@ -749,9 +764,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->createSwapchain();
   }
 
-  FrameData &frame = impl_->frames[impl_->frameNumber % kFramesInFlight];
+  const uint32_t frameSlot =
+      static_cast<uint32_t>(impl_->frameNumber % kFramesInFlight);
+  FrameData &frame = impl_->frames[frameSlot];
   check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
         "vkWaitForFences");
+
+  // Once each slot has been submitted, the fence guarantees its previous
+  // timestamps are written.
+  uint64_t timestamps[2] = {};
+  if (impl_->frameNumber >= kFramesInFlight &&
+      vkGetQueryPoolResults(dev, impl_->timestampPool, frameSlot * 2, 2,
+                            sizeof(timestamps), timestamps, sizeof(uint64_t),
+                            VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+    impl_->gpuFrameMs = static_cast<float>(timestamps[1] - timestamps[0]) *
+                        impl_->timestampPeriodNs * 1e-6f;
+  }
 
   uint32_t imageIndex = 0;
   VkResult acquired = vkAcquireNextImageKHR(
@@ -793,6 +821,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   check(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
+
+  vkCmdResetQueryPool(cmd, impl_->timestampPool, frameSlot * 2, 2);
+  vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, impl_->timestampPool,
+                       frameSlot * 2);
 
   VkViewport viewport{};
   viewport.width = static_cast<float>(extent.width);
@@ -922,6 +954,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_NONE, 0});
 
+  vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                       impl_->timestampPool, frameSlot * 2 + 1);
+
   check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 
   VkCommandBufferSubmitInfo cmdInfo{};
@@ -981,6 +1016,7 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->meshLayout, nullptr);
 
+  vkDestroyQueryPool(dev, impl_->timestampPool, nullptr);
   vkDestroyFence(dev, impl_->uploadFence, nullptr);
   vkDestroyCommandPool(dev, impl_->uploadPool, nullptr);
   for (FrameData &frame : impl_->frames) {

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -74,6 +75,7 @@ int main() {
   auto lastFrame = Clock::now();
   auto fpsStart = lastFrame;
   int frames = 0;
+  float gpuMsSum = 0.0f;
 
   while (!window.shouldClose()) {
     auto now = Clock::now();
@@ -92,10 +94,15 @@ int main() {
     renderer.draw(camera, lighting, scene);
 
     ++frames;
+    gpuMsSum += renderer.gpuFrameMs();
     if (now - fpsStart >= std::chrono::seconds(1)) {
-      std::string title = "Meridian - " + std::to_string(frames) + " FPS";
+      char gpuMs[16];
+      std::snprintf(gpuMs, sizeof(gpuMs), "%.2f", gpuMsSum / frames);
+      std::string title = "Meridian - " + std::to_string(frames) + " FPS, GPU " +
+                          gpuMs + " ms";
       window.setTitle(title.c_str());
       frames = 0;
+      gpuMsSum = 0.0f;
       fpsStart = now;
     }
   }

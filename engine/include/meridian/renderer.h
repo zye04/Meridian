@@ -43,6 +43,9 @@ public:
   void draw(const Camera &camera, const Lighting &lighting,
             std::span<const DrawItem> items);
 
+  // GPU time of a recent frame, measured with timestamp queries.
+  float gpuFrameMs() const;
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
