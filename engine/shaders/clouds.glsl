@@ -15,10 +15,12 @@ layout(set = 1, binding = 1) uniform sampler3D textures3D[];
 const int kWeatherMapOctaves = 3;
 const int kWeatherFallbackOctaves = 1;
 const float kWeatherMapBlendTexels = 64.0;
+// Width of the coverage threshold's soft edge in weather noise units.
+const float kCoverageEdge = 0.15;
 // Detail erosion: how far curl noise displaces the detail lookup (m) and how
-// much of the base shape the detail can carve away.
+// much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
-const float kDetailErosion = 0.35;
+const vec2 kDetailErosion = vec2(0.5, 0.35);
 
 float remap(float v, float lo, float hi, float newLo, float newHi) {
     return newLo + (v - lo) * (newHi - newLo) / (hi - lo);
@@ -107,8 +109,9 @@ float worleyOctaves(vec3 p, ivec3 period, int octaves) {
 // and timePeriod in time. Mapped to about uniform on [0, 1] (a logistic
 // approximation of the normal CDF; mean and single-octave deviation
 // measured on map dumps, the deviation shrinking like a weighted mean of
-// independent octaves), so a coverage c covers about c of the sky whatever
-// the octave count, and the fallback matches the map's statistics.
+// independent octaves), so the coverage threshold covers the same
+// fraction of sky whatever the octave count, and the fallback matches the
+// map's statistics.
 float weatherNoise(vec2 xz, int octaves) {
     Clouds c = pc.scene.clouds;
     int cells = int(c.noisePeriod / c.weatherCell);
@@ -125,18 +128,21 @@ float weatherNoise(vec2 xz, int octaves) {
 
 // The weather map's texel value (R coverage, G type, B precipitation) at
 // world xz for the weather noise value n: the local state (weatherAt, the
-// history rule), with coverage applied as a threshold so cells grow from
-// their cores and dissolve back, and the type varying slowly around the
-// local one.
+// history rule), with coverage applied once, as a soft threshold, so cells
+// grow from their cores and dissolve back, and the type varying slowly
+// around the local one. The threshold's edge slides from above the noise's
+// range (coverage 0: R = 0) to below it (coverage 1: R = 1 everywhere);
+// with n about uniform, R > 0.5 covers c (1 + w) - w / 2 of the sky.
 vec4 weatherFromNoise(vec2 xz, float n) {
     WeatherSample local = weatherAt(pc.scene, vec3(xz.x, 0.0, xz.y));
-    float coverage =
-        local.coverage > 0.0 ? clamp(remap(n, 1.0 - local.coverage, 1.0, 0.0, 1.0), 0.0, 1.0) : 0.0;
+    float lo = (1.0 - local.coverage) * (1.0 + kCoverageEdge) - kCoverageEdge;
+    float coverage = clamp((n - lo) / kCoverageEdge, 0.0, 1.0);
     Clouds c = pc.scene.clouds;
     int cells = int(c.noisePeriod / c.weatherCell) / 8;
     vec3 p = vec3((xz - c.windOffset) / (8.0 * c.weatherCell), c.time / 8.0);
     float variation = 0.8 * (gradientNoise(p, ivec3(cells, cells, int(c.timePeriod) / 8)) - 0.5);
-    float type = clamp(local.type + variation, 0.0, max(local.type, 1.0));
+    // Clamped like the RGBA8 map stores it, so the window edge matches.
+    float type = clamp(local.type + variation, 0.0, 1.0);
     return vec4(coverage, type, local.precipitation, 0.0);
 }
 
@@ -173,8 +179,9 @@ float cloudProfile(float type, float h) {
 // Cloud density in [0, 1] (the march scales it to extinction) at world xz
 // and altitude world.y (m above sea level, on the curved layer); lod is the
 // noise mip level (0 near the camera, coarser for longer steps). Weather
-// coverage x vertical profile x the base Perlin-Worley shape, eroded by
-// curl-distorted detail Worley noise (Schneider 2015).
+// coverage x vertical profile x the base Perlin-Worley shape (coverage is
+// thresholded once, in the map), eroded by curl-distorted detail Worley
+// noise (Schneider 2015).
 float cloudDensity(vec3 world, float lod) {
     vec4 weather = weatherMapAt(world);
     float coverage = weather.r;
@@ -190,10 +197,8 @@ float cloudDensity(vec3 world, float lod) {
     vec3 p = vec3(world.x - c.windOffset.x, world.y, world.z - c.windOffset.y);
     vec4 base = textureLod(textures3D[c.baseNoise], p / c.baseNoisePeriod, lod);
     float worley = dot(base.gba, vec3(0.625, 0.25, 0.125));
-    float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
-    float cloud =
-        clamp(remap(shape * cloudProfile(weather.g, h), 1.0 - coverage, 1.0, 0.0, 1.0), 0.0, 1.0) *
-        coverage;
+    float shape = clamp(remap(base.r, worley - 1.0, 1.0, 0.0, 1.0), 0.0, 1.0);
+    float cloud = coverage * cloudProfile(weather.g, h) * shape;
     if (cloud <= 0.0) {
         return 0.0;
     }
@@ -201,9 +206,12 @@ float cloudDensity(vec3 world, float lod) {
     vec3 q = p + vec3(curl.x, 0.0, curl.y) * (kCurlDistortion * (1.0 - h));
     float detail = dot(textureLod(textures3D[c.detailNoise], q / c.detailNoisePeriod, lod).rgb,
                        vec3(0.625, 0.25, 0.125));
-    // Wispy at the base, billowy toward the top.
-    float erosion = mix(detail, 1.0 - detail, clamp(h * 4.0, 0.0, 1.0));
-    return clamp(remap(cloud, erosion * kDetailErosion, 1.0, 0.0, 1.0), 0.0, 1.0);
+    // Cumulus: wispy at the base, billowy toward the top; stratus wispy and
+    // eroded more throughout.
+    float type = clamp(weather.g, 0.0, 1.0);
+    float billow = type * clamp(h * 4.0, 0.0, 1.0);
+    float erosion = mix(detail, 1.0 - detail, billow) * mix(kDetailErosion.x, kDetailErosion.y, type);
+    return clamp(remap(cloud, erosion, 1.0, 0.0, 1.0), 0.0, 1.0);
 }
 
 #endif

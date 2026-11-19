@@ -267,8 +267,9 @@ struct Renderer::Impl {
   VkPipeline gradeLutPipeline = VK_NULL_HANDLE;
 
   // Clouds (renderer_clouds.cpp), in the bindless table: noise volumes
-  // generated at load, and the weather map rewritten every frame (always in
-  // GENERAL layout). One storage set holds all four for the generators.
+  // generated at load, and the weather map rewritten every frame. All four
+  // stay in GENERAL layout, matching both the storage set the generators
+  // write through and the bindless descriptors.
   Image cloudBaseNoise;
   Image cloudDetailNoise;
   Image cloudCurlNoise;
