@@ -1,0 +1,71 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "cull.glsl"
+
+// Cluster culling and LOD selection, one workgroup per work item and one
+// thread per cluster. A cluster is drawn when Nanite's cut rule picks it
+// (its coarser replacement's error is over the threshold on screen, its own
+// is at or under) and it is in the view frustum. Survivors append to the
+// draw list of their mesh's bucket for mesh.mesh.
+
+layout(local_size_x = 64) in;
+
+// Simplification error in pixels of LOD bounds already in world space
+// (clusterlod's estimate; must match meridian::projectedErrorPixels).
+float projectedError(vec3 center, float radius, float error) {
+    SceneBuffer scene = cull.scene;
+    float distance = max(length(center - scene.cameraPosition) - radius,
+                         scene.nearPlane);
+    return error / distance * abs(scene.projectionScale.y) * 0.5 /
+           scene.inverseResolution.y;
+}
+
+void main() {
+    uint itemIndex = gl_WorkGroupID.x;
+    if (itemIndex >= kMaxWorkItems) {
+        return;
+    }
+    uvec2 item = cull.work.items[itemIndex];
+    if (gl_LocalInvocationID.x > (item.y >> 26)) {
+        return;
+    }
+    uint instanceIndex = item.x;
+    uint clusterIndex = (item.y & 0x3FFFFFFu) + gl_LocalInvocationID.x;
+    InstanceData instance = cull.scene.instances.instances[instanceIndex];
+    ClusterInfo cluster = cull.scene.clusters.clusters[clusterIndex];
+    mat4 transform = instance.transform;
+    float scale = maxScale(transform);
+
+    float threshold = cull.scene.lodErrorPixels;
+    // Terminal clusters carry FLT_MAX: always too coarse to replace.
+    bool replacementTooCoarse =
+        projectedError((transform * vec4(cluster.selfCenter, 1.0)).xyz,
+                       cluster.selfRadius * scale, cluster.selfError * scale) >
+        threshold;
+    bool fineEnough =
+        cluster.refinedError < 0.0 ||
+        projectedError((transform * vec4(cluster.refinedCenter, 1.0)).xyz,
+                       cluster.refinedRadius * scale,
+                       cluster.refinedError * scale) <= threshold;
+    if (!replacementTooCoarse || !fineEnough) {
+        return;
+    }
+
+    vec3 center = (transform * vec4(cluster.boundsCenter, 1.0)).xyz;
+    if (!inFrustum(center, cluster.boundsRadius * scale)) {
+        return;
+    }
+
+    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
+    uint list = cull.phase * kDrawBuckets + mesh.drawBucket;
+    uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
+    if (slot >= kMaxDrawnClusters) {
+        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+        return;
+    }
+    cull.scene.drawLists.entries[list * kMaxDrawnClusters + slot] =
+        uvec2(instanceIndex, clusterIndex);
+    atomicAdd(cull.counters.counters[kCounterTriangles], cluster.triangleCount);
+}

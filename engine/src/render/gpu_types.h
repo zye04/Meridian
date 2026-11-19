@@ -39,14 +39,23 @@ constexpr uint32_t kDfgLutSize = 128;
 // Depth pyramid levels: enough for a 32768-pixel-wide screen.
 constexpr uint32_t kMaxPyramidLevels = 16;
 // Shared geometry pools (bump-allocated; real streaming will need an
-// allocator with frees): 4M vertices = 192 MB, 16M indices = 64 MB.
-constexpr uint32_t kVertexPoolCapacity = 4u << 20;
-constexpr uint32_t kIndexPoolCapacity = 16u << 20;
+// allocator with frees): 8M vertices = 384 MB, 32M indices = 128 MB; cluster
+// hierarchies: 1M clusters = 80 MB, 32M vertex references and 32M
+// triangles = 128 MB each.
+constexpr uint32_t kVertexPoolCapacity = 8u << 20;
+constexpr uint32_t kIndexPoolCapacity = 32u << 20;
 constexpr uint32_t kMaxMeshes = 65536;
-// Indirect draw lists: opaque, opaque double-sided, masked, masked
+constexpr uint32_t kMaxClusters = 1u << 20;
+constexpr uint32_t kClusterVertexCapacity = 32u << 20;
+constexpr uint32_t kClusterTriangleCapacity = 32u << 20;
+// Cluster draw lists: opaque, opaque double-sided, masked, masked
 // double-sided. Blended meshes (kDrawBucketBlended) are drawn from the CPU,
 // sorted back to front.
 constexpr uint32_t kDrawBuckets = 4;
+// Per culling phase: work items (up to 64 clusters of one instance each) and
+// drawn clusters per draw list. Overflow is dropped and counted.
+constexpr uint32_t kMaxWorkItems = 1u << 19;
+constexpr uint32_t kMaxDrawnClusters = 1u << 20;
 constexpr uint32_t kDrawBucketBlended = 4;
 
 #ifdef NDEBUG
@@ -185,9 +194,15 @@ struct SceneData {
   Mat4 view;
   float projectionScale[2] = {};
   float nearPlane = 0.0f;
-  float pad2 = 0.0f;
+  // LOD selection: the largest allowed simplification error on screen.
+  float lodErrorPixels = 1.0f;
+  // Cluster hierarchies and the culled cluster draw lists.
+  VkDeviceAddress clusters = 0;
+  VkDeviceAddress clusterVertices = 0;
+  VkDeviceAddress clusterTriangles = 0;
+  VkDeviceAddress drawLists = 0;
 };
-static_assert(sizeof(SceneData) == 720);
+static_assert(sizeof(SceneData) == 752);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -198,9 +213,47 @@ struct MeshInfo {
   int32_t vertexOffset = 0;
   uint32_t materialIndex = 0;
   uint32_t drawBucket = 0;
-  uint32_t pad[3] = {};
+  uint32_t firstCluster = 0;
+  uint32_t clusterCount = 0;
+  uint32_t pad = 0;
 };
 static_assert(sizeof(MeshInfo) == 48);
+
+// Must match ClusterInfo in common.glsl. See meridian::Cluster.
+struct ClusterInfo {
+  Vec3 boundsCenter;
+  float boundsRadius = 0.0f;
+  Vec3 selfCenter;
+  float selfRadius = 0.0f;
+  Vec3 refinedCenter;
+  float refinedRadius = 0.0f;
+  float selfError = 0.0f;
+  float refinedError = 0.0f;
+  // Into the cluster vertex pool (mesh-local vertex indices) and the
+  // triangle pool (three 8-bit cluster-local indices per uint).
+  uint32_t firstVertex = 0;
+  uint32_t firstTriangle = 0;
+  uint32_t vertexCount = 0;
+  uint32_t triangleCount = 0;
+  uint32_t pad[2] = {};
+};
+static_assert(sizeof(ClusterInfo) == 80);
+
+// Must match DrawCounters in cull.glsl. Indirect arguments and statistics
+// written by the culling passes, reset every frame.
+struct DrawCounters {
+  // Per phase: vkCmdDispatchIndirect arguments for the cluster cull, one
+  // workgroup per work item.
+  uint32_t workDispatch[2][3];
+  // Per phase and draw list: vkCmdDrawMeshTasksIndirectEXT arguments, one
+  // mesh workgroup per cluster.
+  uint32_t meshTasks[2][kDrawBuckets][3];
+  uint32_t instances;
+  uint32_t triangles;
+  uint32_t overflow;
+  uint32_t pad;
+};
+static_assert(sizeof(DrawCounters) == 136);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -210,7 +263,8 @@ struct InstanceData {
 };
 static_assert(sizeof(InstanceData) == 80);
 
-// Must match CullConstants in cull.comp.
+// Must match CullConstants in cull.glsl; shared by cull.comp and
+// cluster_cull.comp.
 // Must match depth_pyramid.comp.
 struct PyramidConstants {
   int32_t sourceSize[2] = {};
@@ -222,15 +276,16 @@ static_assert(sizeof(PyramidConstants) == 32);
 
 struct CullConstants {
   VkDeviceAddress sceneBuffer = 0;
-  VkDeviceAddress drawCommands = 0;
-  VkDeviceAddress drawCounts = 0;
+  // This phase's work items.
+  VkDeviceAddress workItems = 0;
+  VkDeviceAddress counters = 0;
   VkDeviceAddress visibility = 0;
-  uint32_t bucketCapacity = 0;
   uint32_t phase = 0;
   uint32_t occlusion = 0;
   uint32_t pyramidLevels = 0;
+  uint32_t pad0 = 0;
   float pyramidSize[2] = {};
-  uint32_t pad[2] = {};
+  uint32_t pad1[2] = {};
 };
 static_assert(sizeof(CullConstants) == 64);
 
@@ -259,7 +314,9 @@ static_assert(sizeof(PostConstants) == 32);
 // Must match the push_constant block in the shaders.
 struct PushConstants {
   VkDeviceAddress sceneBuffer = 0;
-  uint64_t pad = 0;
+  // The cluster draw list mesh.mesh reads: phase * kDrawBuckets + bucket.
+  uint32_t drawList = 0;
+  uint32_t pad = 0;
 };
 static_assert(sizeof(PushConstants) == 16);
 
@@ -309,9 +366,9 @@ inline GpuMaterial toGpu(const MaterialData &m) {
             (m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u);
   return g;
 }
-constexpr VkShaderStageFlags kScenePushStages = VK_SHADER_STAGE_VERTEX_BIT |
-                                                VK_SHADER_STAGE_FRAGMENT_BIT |
-                                                VK_SHADER_STAGE_COMPUTE_BIT;
+constexpr VkShaderStageFlags kScenePushStages =
+    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_MESH_BIT_EXT |
+    VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 struct FrameData {
   VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -326,7 +383,7 @@ struct FrameData {
   // CPU-visible copy of the instance table, uploaded when instances change.
   Buffer instanceStaging;
   Buffer tlasScratch;
-  // This frame's draw counts, copied back to count drawn instances.
+  // This frame's DrawCounters, copied back for statistics.
   Buffer drawCountReadback;
 };
 

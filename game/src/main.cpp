@@ -171,6 +171,8 @@ struct Options {
   // Poly Haven models to scatter on the ground around the start.
   int scatter = 0;
   bool occlusion = true;
+  // Largest simplification error on screen in pixels (0: full detail).
+  float lodError = 1.0f;
   // Fullscreen by default: consistent size for GPU timings, and the way the
   // game is played.
   bool fullscreen = true;
@@ -205,6 +207,8 @@ Options parseOptions(int argc, char **argv) {
       options.fullscreen = false;
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
+    } else if (arg == "--lod-error") {
+      options.lodError = number(i);
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--frames") {
@@ -213,6 +217,7 @@ Options parseOptions(int argc, char **argv) {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, --scatter n, --no-occlusion, "
+                               "--lod-error px, "
                                "--windowed, "
                                "--capture file.png, --frames n)");
     }
@@ -238,6 +243,7 @@ int main(int argc, char **argv) {
   meridian::Renderer renderer(window);
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
+  renderer.setLodErrorPixels(options.lodError);
 
   const meridian::TerrainSettings terrainSettings;
   meridian::MaterialData terrainMaterial;
@@ -337,9 +343,10 @@ int main(int argc, char **argv) {
   }
 
   if (!interactive) {
-    std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, "
-                "%u validation errors\n",
+    std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
+                "%u triangles, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
+                renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.validationErrorCount());
   }
   return renderer.validationErrorCount() == 0 ? 0 : 1;

@@ -1,0 +1,63 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+// One workgroup per culled cluster (see cluster_cull.comp): its vertices
+// and triangles, with the same outputs as mesh.vert.
+
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 128, max_primitives = 128) out;
+
+layout(location = 0) out vec3 outWorldPosition[];
+layout(location = 1) out vec3 outNormal[];
+layout(location = 2) out vec4 outCurrentClip[];
+layout(location = 3) out vec4 outPreviousClip[];
+layout(location = 4) out vec2 outUv[];
+layout(location = 5) out vec4 outTangent[];
+layout(location = 6) flat out uint outMaterialIndex[];
+// The cluster's simplification error (m): the shadow rays are traced against
+// the full-detail surface, which this one may lie under by up to that much.
+layout(location = 7) flat out float outLodError[];
+
+void main() {
+    // Entries past the list's capacity were dropped by the cull.
+    if (gl_WorkGroupID.x >= kMaxDrawnClusters) {
+        SetMeshOutputsEXT(0, 0);
+        return;
+    }
+    SceneBuffer scene = pc.scene;
+    uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
+                                          gl_WorkGroupID.x];
+    InstanceData instance = scene.instances.instances[entry.x];
+    MeshInfo mesh = scene.meshes.meshes[instance.meshIndex];
+    ClusterInfo cluster = scene.clusters.clusters[entry.y];
+    SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
+
+    // Normals use the inverse transpose so non-uniform scale stays correct.
+    mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
+    mat3 m = mat3(instance.transform);
+    float lodError = max(cluster.refinedError, 0.0) *
+                     sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
+    for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
+        uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
+                     uint(mesh.vertexOffset);
+        Vertex vertex = scene.vertices.vertices[index];
+        vec4 world = instance.transform * vec4(vertex.position, 1.0);
+        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * world;
+        outWorldPosition[i] = world.xyz;
+        outNormal[i] = normalMatrix * vertex.normal;
+        outTangent[i] = vec4(mat3(instance.transform) * vertex.tangent.xyz,
+                             vertex.tangent.w);
+        outUv[i] = vec2(vertex.uvX, vertex.uvY);
+        outMaterialIndex[i] = mesh.materialIndex;
+        outLodError[i] = lodError;
+        // Static geometry for now: only the camera moves between frames.
+        outCurrentClip[i] = scene.currentViewProjection * world;
+        outPreviousClip[i] = scene.previousViewProjection * world;
+    }
+    for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {
+        uint t = scene.clusterTriangles.triangles[cluster.firstTriangle + i];
+        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, t >> 16);
+    }
+}

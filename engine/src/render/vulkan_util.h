@@ -46,7 +46,10 @@ void memoryBarrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage,
 VkShaderModule loadShader(VkDevice device, const std::string &name);
 
 struct PipelineDesc {
+  // Exactly one of the two: a vertex shader, or a mesh shader (no task
+  // shader, no vertex input).
   const char *vertexShader = nullptr;
+  const char *meshShader = nullptr;
   const char *fragmentShader = nullptr;
   VkPipelineLayout layout = VK_NULL_HANDLE;
   std::span<const VkFormat> colorFormats;

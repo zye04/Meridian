@@ -47,6 +47,7 @@ layout(buffer_reference, std430) readonly buffer IndexBuffer {
 
 // One per uploaded mesh. Its geometry lives in the shared vertex and index
 // pools. Must match MeshInfo in C++.
+const uint kDrawBuckets = 4u;
 const uint kDrawBucketBlended = 4u;
 
 struct MeshInfo {
@@ -57,16 +58,61 @@ struct MeshInfo {
     uint indexCount;
     int vertexOffset;
     uint materialIndex;
-    // Indirect draw list (see cull.comp); kDrawBucketBlended is drawn from
+    // Cluster draw list (see cluster_cull.comp); kDrawBucketBlended is drawn from
     // the CPU, sorted back to front.
     uint drawBucket;
+    // Its cluster LOD hierarchy (none for blended meshes).
+    uint firstCluster;
+    uint clusterCount;
     uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 layout(buffer_reference, std430) readonly buffer MeshBuffer {
     MeshInfo meshes[];
+};
+
+// Up to 128 triangles of one level of a mesh's LOD DAG, in mesh space.
+// Must match ClusterInfo in C++ (see meridian::Cluster).
+struct ClusterInfo {
+    // Culling sphere.
+    vec3 boundsCenter;
+    float boundsRadius;
+    // LOD spheres of the coarser replacement (error FLT_MAX if none) and of
+    // the finer group this cluster replaces (error -1 for original geometry).
+    vec3 selfCenter;
+    float selfRadius;
+    vec3 refinedCenter;
+    float refinedRadius;
+    float selfError;
+    float refinedError;
+    // Into ClusterVertexBuffer (mesh-local vertex indices) and
+    // ClusterTriangleBuffer (three 8-bit cluster-local indices per uint).
+    uint firstVertex;
+    uint firstTriangle;
+    uint vertexCount;
+    uint triangleCount;
+    uint pad0;
+    uint pad1;
+};
+
+layout(buffer_reference, std430) readonly buffer ClusterBuffer {
+    ClusterInfo clusters[];
+};
+
+layout(buffer_reference, std430) readonly buffer ClusterVertexBuffer {
+    uint vertices[];
+};
+
+layout(buffer_reference, std430) readonly buffer ClusterTriangleBuffer {
+    uint triangles[];
+};
+
+// Culled clusters, kDrawBuckets lists per culling phase of
+// kMaxDrawnClusters entries each: (instance, cluster).
+const uint kMaxDrawnClusters = 1u << 20;
+
+layout(buffer_reference, std430) buffer DrawListBuffer {
+    uvec2 entries[];
 };
 
 // One per placed instance; gl_InstanceIndex and the TLAS instance custom
@@ -167,7 +213,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     mat4 view;
     vec2 projectionScale;
     float nearPlane;
-    float pad2;
+    // LOD selection: the largest allowed simplification error on screen.
+    float lodErrorPixels;
+    ClusterBuffer clusters;
+    ClusterVertexBuffer clusterVertices;
+    ClusterTriangleBuffer clusterTriangles;
+    DrawListBuffer drawLists;
 };
 
 // Shaders with their own push constants (cull.comp) define
@@ -175,5 +226,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
 #ifndef MERIDIAN_CUSTOM_PUSH_CONSTANTS
 layout(push_constant) uniform PushConstants {
     SceneBuffer scene;
+    // The cluster draw list mesh.mesh draws.
+    uint drawList;
 } pc;
 #endif

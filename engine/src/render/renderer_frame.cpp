@@ -37,31 +37,43 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
   instancesDirty = false;
 }
 
-// Culls every instance on the GPU and fills one phase's indirect draw lists.
-// Phase 0 takes last frame's visible instances (frustum test only); phase 1
-// tests all of them against the depth pyramid, adds the newly visible ones
-// and records visibility for the next frame.
+// Culls on the GPU and fills one phase's cluster draw lists. Phase 0 takes
+// last frame's visible instances (frustum test only); phase 1 tests all of
+// them against the depth pyramid, adds the newly visible ones and records
+// visibility for the next frame. In each phase the instance cull emits work
+// items, which the cluster cull LOD-selects and frustum-culls.
 void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                                    uint32_t phase) {
   if (phase == 0) {
-    // The draw lists are shared by both frames in flight.
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                  0, VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-    vkCmdFillBuffer(cmd, drawCounts.buffer, 0, VK_WHOLE_SIZE, 0);
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+    // The work items, draw lists and counters are shared by both frames in
+    // flight.
+    memoryBarrier(cmd,
+                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+                      VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+                  0, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    DrawCounters initial{};
+    for (auto &dispatch : initial.workDispatch) {
+      dispatch[1] = dispatch[2] = 1;
+    }
+    for (auto &lists : initial.meshTasks) {
+      for (auto &tasks : lists) {
+        tasks[1] = tasks[2] = 1;
+      }
+    }
+    vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                       VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   }
 
-  constexpr VkDeviceSize kListBytes = kMaxInstances * sizeof(VkDrawIndexedIndirectCommand);
   CullConstants constants;
   constants.sceneBuffer = frame.sceneBuffer.address;
-  constants.drawCommands = drawCommands.address + phase * kDrawBuckets * kListBytes;
-  constants.drawCounts = drawCounts.address + phase * kDrawBuckets * sizeof(uint32_t);
+  constants.workItems =
+      workItems.address + VkDeviceSize{phase} * kMaxWorkItems * 2 * sizeof(uint32_t);
+  constants.counters = drawCounters.address;
   constants.visibility = visibility.address;
-  constants.bucketCapacity = kMaxInstances;
   constants.phase = phase;
   constants.occlusion = occlusionCulling ? 1 : 0;
   constants.pyramidSize[0] = static_cast<float>(depthPyramidExtent.width);
@@ -77,14 +89,25 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
   // Phase 1 also waits on phase 0's visibility reads before writing.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, clusterCullPipeline);
+  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+                        offsetof(DrawCounters, workDispatch) +
+                            phase * sizeof(DrawCounters::workDispatch[0]));
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+                    VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                    VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   if (phase == 1) {
-    const VkBufferCopy copy{0, 0, 2 * kDrawBuckets * sizeof(uint32_t)};
-    vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
+    const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
+    vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
     // A fence wait alone doesn't make device writes visible to the host.
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
@@ -202,6 +225,12 @@ float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
 
 uint32_t Renderer::drawnInstanceCount() const { return impl_->drawnInstances; }
 
+uint32_t Renderer::drawnClusterCount() const { return impl_->drawnClusters; }
+
+uint32_t Renderer::drawnTriangleCount() const { return impl_->drawnTriangles; }
+
+void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
+
 void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
@@ -252,10 +281,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
     check(vmaInvalidateAllocation(impl_->allocator, frame.drawCountReadback.allocation,
                                   0, VK_WHOLE_SIZE),
           "vmaInvalidateAllocation");
-    const auto *counts = static_cast<const uint32_t *>(frame.drawCountReadback.mapped);
-    impl_->drawnInstances = 0;
-    for (uint32_t list = 0; list < 2 * kDrawBuckets; ++list) {
-      impl_->drawnInstances += counts[list];
+    const auto *counters =
+        static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
+    impl_->drawnInstances = counters->instances;
+    impl_->drawnTriangles = counters->triangles;
+    impl_->drawnClusters = 0;
+    for (const auto &lists : counters->meshTasks) {
+      for (const auto &tasks : lists) {
+        impl_->drawnClusters += std::min(tasks[0], kMaxDrawnClusters);
+      }
     }
   }
 
@@ -320,6 +354,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   scene.instances = impl_->instanceTable.address;
   scene.materials = impl_->materialBuffer.address;
   scene.instanceCount = static_cast<uint32_t>(impl_->instances.size());
+  scene.lodErrorPixels = impl_->lodErrorPixels;
+  scene.clusters = impl_->clusterPool.address;
+  scene.clusterVertices = impl_->clusterVertexPool.address;
+  scene.clusterTriangles = impl_->clusterTrianglePool.address;
+  scene.drawLists = impl_->drawLists.address;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
@@ -466,7 +505,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
 
   // Two phases (occlusion culling): first what was visible last frame, then,
   // tested against a depth pyramid of that, whatever has become visible.
-  constexpr VkDeviceSize kCommandSize = sizeof(VkDrawIndexedIndirectCommand);
   auto beginScene = [&] {
     vkCmdBeginRendering(cmd, &sceneRendering);
     const VkDescriptorSet sceneSets[] = {impl_->atmosphereSet, impl_->materialSet};
@@ -478,21 +516,27 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
                        sizeof(scenePush), &scenePush);
     vkCmdBindIndexBuffer(cmd, impl_->indexPool.buffer, 0, VK_INDEX_TYPE_UINT32);
   };
-  // The GPU-culled indirect draw lists: opaque, then alpha-masked, each
-  // single- and double-sided.
+  // The GPU-culled cluster draw lists: opaque, then alpha-masked, each
+  // single- and double-sided, one mesh workgroup per cluster.
   auto drawCulled = [&](uint32_t phase) {
     for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
       const bool masked = bucket >= 2;
       const bool doubleSided = bucket % 2 == 1;
-      const uint32_t list = phase * kDrawBuckets + bucket;
+      PushConstants listPush = scenePush;
+      listPush.drawList = phase * kDrawBuckets + bucket;
+      vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                         sizeof(listPush), &listPush);
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                         masked ? impl_->maskedMeshPipeline : impl_->meshPipeline);
       vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
-      vkCmdDrawIndexedIndirectCount(
-          cmd, impl_->drawCommands.buffer, list * kMaxInstances * kCommandSize,
-          impl_->drawCounts.buffer, list * sizeof(uint32_t), kMaxInstances,
-          kCommandSize);
+      impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
+          cmd, impl_->drawCounters.buffer,
+          offsetof(DrawCounters, meshTasks) +
+              listPush.drawList * sizeof(DrawCounters::meshTasks[0][0]),
+          1, sizeof(DrawCounters::meshTasks[0][0]));
     }
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                       sizeof(scenePush), &scenePush);
   };
 
   beginScene();

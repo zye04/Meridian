@@ -226,7 +226,7 @@ void Renderer::Impl::createFrames() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.drawCountReadback = createBuffer(
-        2 * kDrawBuckets * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        sizeof(DrawCounters), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
@@ -644,18 +644,25 @@ void Renderer::Impl::createScene() {
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   meshTable = createBuffer(kMaxMeshes * sizeof(MeshInfo), kTableUsage, 0);
+  clusterPool = createBuffer(VkDeviceSize{kMaxClusters} * sizeof(ClusterInfo),
+                             kTableUsage, 0);
+  clusterVertexPool = createBuffer(
+      VkDeviceSize{kClusterVertexCapacity} * sizeof(uint32_t), kTableUsage, 0);
+  clusterTrianglePool = createBuffer(
+      VkDeviceSize{kClusterTriangleCapacity} * sizeof(uint32_t), kTableUsage, 0);
   instanceTable =
       createBuffer(kMaxInstances * sizeof(InstanceData), kTableUsage, 0);
 
-  // Two phases of draw lists (see cullInstances).
-  drawCommands = createBuffer(
-      VkDeviceSize{2 * kDrawBuckets} * kMaxInstances *
-          sizeof(VkDrawIndexedIndirectCommand),
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-      0);
-  drawCounts = createBuffer(
-      2 * kDrawBuckets * sizeof(uint32_t),
+  // Two phases of work items and draw lists (see cullInstances).
+  constexpr VkBufferUsageFlags kListUsage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  workItems = createBuffer(VkDeviceSize{2} * kMaxWorkItems * 2 * sizeof(uint32_t),
+                           kListUsage, 0);
+  drawLists = createBuffer(VkDeviceSize{2 * kDrawBuckets} * kMaxDrawnClusters * 2 *
+                               sizeof(uint32_t),
+                           kListUsage, 0);
+  drawCounters = createBuffer(
+      sizeof(DrawCounters),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
           VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -690,7 +697,9 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
 
   const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat};
-  PipelineDesc meshDesc{.vertexShader = "mesh.vert",
+  // Opaque and masked geometry is drawn as culled clusters (mesh shader),
+  // blended geometry as whole meshes from the CPU (vertex shader).
+  PipelineDesc meshDesc{.meshShader = "mesh.mesh",
                         .fragmentShader = "mesh.frag",
                         .layout = sceneLayout,
                         .colorFormats = sceneFormats,
@@ -701,6 +710,8 @@ void Renderer::Impl::createPipelines() {
   // materials get their own pipeline instead of slowing down opaque ones.
   meshDesc.fragmentShader = "mesh_masked.frag";
   maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.meshShader = nullptr;
+  meshDesc.vertexShader = "mesh.vert";
   meshDesc.fragmentShader = "mesh_blended.frag";
   meshDesc.alphaBlend = true;
   blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
@@ -732,6 +743,7 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),
         "vkCreatePipelineLayout");
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
+  clusterCullPipeline = createComputePipeline(dev, "cluster_cull.comp", cullLayout);
 
   VkPushConstantRange pyramidPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                        sizeof(PyramidConstants)};
@@ -800,10 +812,6 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features.samplerAnisotropy = VK_TRUE;
   // Blended surfaces blend color but leave motion vectors untouched.
   features.independentBlend = VK_TRUE;
-  // GPU-driven rendering: many indirect draws per call, each pointing at its
-  // instance through firstInstance.
-  features.multiDrawIndirect = VK_TRUE;
-  features.drawIndirectFirstInstance = VK_TRUE;
 
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -817,8 +825,6 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features12.descriptorBindingPartiallyBound = VK_TRUE;
   features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
   features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-  // The GPU culling pass decides how many draws each list holds.
-  features12.drawIndirectCount = VK_TRUE;
 
   VkPhysicalDeviceVulkan13Features features13{};
   features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -826,6 +832,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   features13.synchronization2 = VK_TRUE;
   // discard (alpha masking) compiles to demote-to-helper in SPIR-V 1.6.
   features13.shaderDemoteToHelperInvocation = VK_TRUE;
+  // glslc declares mesh shader workgroup sizes with LocalSizeId.
+  features13.maintenance4 = VK_TRUE;
 
   // Hardware ray tracing is required: shadows (and later reflections and GI)
   // are traced with ray queries.
@@ -833,6 +841,10 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   accelerationFeatures.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
   accelerationFeatures.accelerationStructure = VK_TRUE;
+
+  VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures{};
+  meshShaderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+  meshShaderFeatures.meshShader = VK_TRUE;
 
   VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
   rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
@@ -850,6 +862,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
               VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
           .add_required_extension_features(accelerationFeatures)
           .add_required_extension_features(rayQueryFeatures)
+          .add_required_extension(VK_EXT_MESH_SHADER_EXTENSION_NAME)
+          .add_required_extension_features(meshShaderFeatures)
           .set_surface(impl_->surface)
           .select();
   if (!physical) {
@@ -914,7 +928,8 @@ Renderer::~Renderer() {
   }
   for (Buffer *buffer :
        {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
-        &impl_->instanceTable, &impl_->drawCommands, &impl_->drawCounts,
+        &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,
+        &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->visibility}) {
     impl_->destroyBuffer(*buffer);
   }
@@ -931,6 +946,7 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->pyramidPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
   vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->clusterCullPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);

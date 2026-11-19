@@ -239,13 +239,56 @@ MaterialId Renderer::createMaterial(const MaterialData &material) {
 MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const auto vertexCount = static_cast<uint32_t>(data.vertices.size());
   const auto indexCount = static_cast<uint32_t>(data.indices.size());
+  const MaterialData &materialData = impl_->materials[material.index];
+
+  // Opaque and masked meshes are drawn as clusters; blended ones whole.
+  ClusterLod builtClusters;
+  const bool clustered = materialData.alphaMode != AlphaMode::Blend;
+  if (clustered && data.clusters.clusters.empty()) {
+    builtClusters = buildClusterLod(data);
+  }
+  const ClusterLod &lod = data.clusters.clusters.empty() ? builtClusters : data.clusters;
+  std::vector<ClusterInfo> clusterInfos;
+  std::vector<uint32_t> clusterTriangles;
+  if (clustered) {
+    clusterInfos.reserve(lod.clusters.size());
+    for (const Cluster &c : lod.clusters) {
+      ClusterInfo info;
+      info.boundsCenter = c.boundsCenter;
+      info.boundsRadius = c.boundsRadius;
+      info.selfCenter = c.self.center;
+      info.selfRadius = c.self.radius;
+      info.selfError = c.self.error;
+      info.refinedCenter = c.refined.center;
+      info.refinedRadius = c.refined.radius;
+      info.refinedError = c.refined.error;
+      info.firstVertex = impl_->clusterVertexCount + c.firstVertex;
+      info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;
+      info.vertexCount = c.vertexCount;
+      info.triangleCount = c.triangleCount;
+      clusterInfos.push_back(info);
+    }
+    clusterTriangles.reserve(lod.triangles.size() / 3);
+    for (size_t i = 0; i < lod.triangles.size(); i += 3) {
+      clusterTriangles.push_back(uint32_t{lod.triangles[i]} |
+                                 uint32_t{lod.triangles[i + 1]} << 8 |
+                                 uint32_t{lod.triangles[i + 2]} << 16);
+    }
+  }
+  const auto clusterCount = static_cast<uint32_t>(clusterInfos.size());
+  const auto clusterVertexCount =
+      clustered ? static_cast<uint32_t>(lod.vertices.size()) : 0u;
+  const auto clusterTriangleCount = static_cast<uint32_t>(clusterTriangles.size());
+
   if (impl_->vertexCount + vertexCount > kVertexPoolCapacity ||
       impl_->indexCount + indexCount > kIndexPoolCapacity ||
+      impl_->clusterCount + clusterCount > kMaxClusters ||
+      impl_->clusterVertexCount + clusterVertexCount > kClusterVertexCapacity ||
+      impl_->clusterTriangleCount + clusterTriangleCount > kClusterTriangleCapacity ||
       impl_->meshes.size() == kMaxMeshes) {
     throw std::runtime_error("geometry pools are full");
   }
 
-  const MaterialData &materialData = impl_->materials[material.index];
   GpuMesh mesh;
   mesh.firstIndex = impl_->indexCount;
   mesh.indexCount = indexCount;
@@ -266,6 +309,12 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   }
   impl_->vertexCount += vertexCount;
   impl_->indexCount += indexCount;
+  const uint32_t firstCluster = impl_->clusterCount;
+  const uint32_t firstClusterVertex = impl_->clusterVertexCount;
+  const uint32_t firstClusterTriangle = impl_->clusterTriangleCount;
+  impl_->clusterCount += clusterCount;
+  impl_->clusterVertexCount += clusterVertexCount;
+  impl_->clusterTriangleCount += clusterTriangleCount;
 
   // Bounding sphere around the bounding box: cheap and good enough for
   // culling.
@@ -288,6 +337,8 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   info.vertexOffset = mesh.vertexOffset;
   info.materialIndex = mesh.materialIndex;
   info.drawBucket = mesh.drawBucket;
+  info.firstCluster = firstCluster;
+  info.clusterCount = clusterCount;
 
   const VkDeviceSize vertexBytes = VkDeviceSize{vertexCount} * sizeof(Vertex);
   const VkDeviceSize indexBytes = VkDeviceSize{indexCount} * sizeof(uint32_t);
@@ -298,13 +349,31 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
 
   // GPU-only memory is fastest to read but the CPU can't write it, so the
   // data goes through a temporary CPU-visible staging buffer.
+  const VkDeviceSize clusterBytes = VkDeviceSize{clusterCount} * sizeof(ClusterInfo);
+  const VkDeviceSize clusterVertexBytes =
+      VkDeviceSize{clusterVertexCount} * sizeof(uint32_t);
+  const VkDeviceSize clusterTriangleBytes =
+      VkDeviceSize{clusterTriangleCount} * sizeof(uint32_t);
+  // Staging layout: vertices, indices, clusters, cluster vertices, cluster
+  // triangles.
+  const VkDeviceSize stagingOffsets[] = {
+      0, vertexBytes, vertexBytes + indexBytes,
+      vertexBytes + indexBytes + clusterBytes,
+      vertexBytes + indexBytes + clusterBytes + clusterVertexBytes};
   Buffer staging = impl_->createBuffer(
-      vertexBytes + indexBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      stagingOffsets[4] + clusterTriangleBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
           VMA_ALLOCATION_CREATE_MAPPED_BIT);
-  std::memcpy(staging.mapped, data.vertices.data(), vertexBytes);
-  std::memcpy(static_cast<char *>(staging.mapped) + vertexBytes,
-              data.indices.data(), indexBytes);
+  auto *stagingBytes = static_cast<char *>(staging.mapped);
+  std::memcpy(stagingBytes, data.vertices.data(), vertexBytes);
+  std::memcpy(stagingBytes + stagingOffsets[1], data.indices.data(), indexBytes);
+  if (clusterCount > 0) {
+    std::memcpy(stagingBytes + stagingOffsets[2], clusterInfos.data(), clusterBytes);
+    std::memcpy(stagingBytes + stagingOffsets[3], lod.vertices.data(),
+                clusterVertexBytes);
+    std::memcpy(stagingBytes + stagingOffsets[4], clusterTriangles.data(),
+                clusterTriangleBytes);
+  }
   check(vmaFlushAllocation(impl_->allocator, staging.allocation, 0,
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
@@ -356,6 +425,20 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     vkCmdCopyBuffer(cmd, staging.buffer, impl_->vertexPool.buffer, 1, &vertexCopy);
     VkBufferCopy indexCopy{vertexBytes, indexPoolOffset, indexBytes};
     vkCmdCopyBuffer(cmd, staging.buffer, impl_->indexPool.buffer, 1, &indexCopy);
+    if (clusterCount > 0) {
+      const VkBufferCopy clusterCopy{stagingOffsets[2],
+                                     firstCluster * sizeof(ClusterInfo), clusterBytes};
+      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterPool.buffer, 1, &clusterCopy);
+      const VkBufferCopy vertexRefCopy{
+          stagingOffsets[3], firstClusterVertex * sizeof(uint32_t), clusterVertexBytes};
+      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterVertexPool.buffer, 1,
+                      &vertexRefCopy);
+      const VkBufferCopy triangleCopy{stagingOffsets[4],
+                                      firstClusterTriangle * sizeof(uint32_t),
+                                      clusterTriangleBytes};
+      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterTrianglePool.buffer, 1,
+                      &triangleCopy);
+    }
     vkCmdUpdateBuffer(cmd, impl_->meshTable.buffer, meshIndex * sizeof(MeshInfo),
                       sizeof(info), &info);
 
@@ -364,7 +447,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_CLEAR_BIT;
     copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     copied.dstStageMask =
-        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
         VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |

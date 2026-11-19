@@ -101,12 +101,14 @@ VkShaderModule loadShader(VkDevice device, const std::string &name) {
 }
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
-  VkShaderModule vertModule = loadShader(device, desc.vertexShader);
+  VkShaderModule vertModule = loadShader(
+      device, desc.meshShader ? desc.meshShader : desc.vertexShader);
   VkShaderModule fragModule = loadShader(device, desc.fragmentShader);
 
   VkPipelineShaderStageCreateInfo stages[2]{};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].stage =
+      desc.meshShader ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT;
   stages[0].module = vertModule;
   stages[0].pName = "main";
   stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -196,8 +198,9 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   pipelineInfo.pNext = &renderingInfo;
   pipelineInfo.stageCount = 2;
   pipelineInfo.pStages = stages;
-  pipelineInfo.pVertexInputState = &vertexInput;
-  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  // Mesh pipelines have no vertex input or input assembly.
+  pipelineInfo.pVertexInputState = desc.meshShader ? nullptr : &vertexInput;
+  pipelineInfo.pInputAssemblyState = desc.meshShader ? nullptr : &inputAssembly;
   pipelineInfo.pViewportState = &viewportState;
   pipelineInfo.pRasterizationState = &rasterizer;
   pipelineInfo.pMultisampleState = &multisample;

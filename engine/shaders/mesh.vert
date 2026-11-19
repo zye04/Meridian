@@ -9,6 +9,7 @@ layout(location = 3) out vec4 outPreviousClip;
 layout(location = 4) out vec2 outUv;
 layout(location = 5) out vec4 outTangent;
 layout(location = 6) flat out uint outMaterialIndex;
+layout(location = 7) flat out float outLodError;
 
 void main() {
     // Indirect draws set firstInstance to the instance's index; the indexed
@@ -26,6 +27,7 @@ void main() {
     outTangent = vec4(mat3(instance.transform) * vertex.tangent.xyz, vertex.tangent.w);
     outUv = vec2(vertex.uvX, vertex.uvY);
     outMaterialIndex = mesh.materialIndex;
+    outLodError = 0.0;
     // Static geometry for now: only the camera moves between frames.
     outCurrentClip = pc.scene.currentViewProjection * world;
     outPreviousClip = pc.scene.previousViewProjection * world;

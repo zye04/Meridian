@@ -184,3 +184,37 @@ sources. Check here before re-researching a topic.
   - https://zeux.io/2023/01/12/approximate-projected-bounds/
   - https://vkguide.dev/docs/gpudriven/compute_culling/
 
+
+## Virtualized geometry (GPU-driven phase 3, 2026-11-19)
+
+Design: `docs/superpowers/specs/2026-11-19-virtualized-geometry-design.md`
+(five slices; differentiators over Nanite: RT that matches the raster,
+foliage that survives simplification).
+
+- **Slice 1, cluster LOD raster.** meshoptimizer 1.0 `clusterlod.h`
+  builds a Nanite-style DAG per primitive (128-triangle clusters,
+  permissive simplification weighted by normals, UV seams protected),
+  cached as `<name>.clusters` beside the glTF (keyed by a hash of the
+  loaded geometry; one code path instead of a cooker step). Writing our own
+  builder bought nothing for slice 1; slice 3 changes its simplifier for
+  foliage.
+  - https://github.com/zeux/meshoptimizer/blob/v1.0/demo/clusterlod.h
+  - https://zeux.io/2025/09/30/billions-of-triangles-in-minutes/
+- **LOD cut** (Karis 2021): a cluster is drawn when its group's coarser
+  replacement projects over the threshold (1 pixel) and the group it came
+  from projects at or under it; clusterlod's monotonic bounds make the cut
+  crack-free. Projected error ignores perspective distortion (clusterlod's
+  estimate) and scales with the instance's largest axis scale.
+- **Raster: `VK_EXT_mesh_shader`**, one workgroup (32 threads, up to 128
+  vertices/triangles) per culled cluster, `vkCmdDrawMeshTasksIndirectEXT`
+  per draw list with the cull writing the group count. Cross-vendor
+  (NVIDIA Turing+, AMD RDNA2+, Intel Arc); no index expansion, unlike a
+  compute-expanded index buffer. Culling is two-level: instances emit work
+  items of up to 64 clusters, a cluster pass (indirect dispatch) applies
+  the LOD cut and frustum test.
+- **RT mismatch, interim:** shadows still trace full-detail BLAS, and the
+  coarser raster surface can lie under it (acne blotches over distant
+  terrain at 1 px). Shadow rays start the cluster's own simplification
+  error above the surface; that removed them (overview mean difference
+  vs the pre-cluster renderer 5.9/255 -> 0.29/255, the rest is LOD
+  shading). Slice 2 traces the clusters themselves.

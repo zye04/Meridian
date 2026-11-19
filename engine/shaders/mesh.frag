@@ -12,6 +12,9 @@ layout(location = 3) in vec4 inPreviousClip;
 layout(location = 4) in vec2 inUv;
 layout(location = 5) in vec4 inTangent;
 layout(location = 6) flat in uint inMaterialIndex;
+// How far (m) this LOD cluster may deviate from the full-detail surface the
+// shadow rays are traced against; 0 at full detail.
+layout(location = 7) flat in float inLodError;
 
 layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
@@ -84,7 +87,7 @@ float sunVisibility(vec3 position, vec3 geometricNormal) {
     rayQueryEXT query;
     rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
                           gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
-                          position + geometricNormal * kShadowRayBias, 0.0,
+                          position + geometricNormal * max(kShadowRayBias, inLodError), 0.0,
                           sampleSunDirection(gl_FragCoord.xy), kShadowRayLength);
     while (rayQueryProceedEXT(query)) {
         if (rayQueryGetIntersectionTypeEXT(query, false) ==

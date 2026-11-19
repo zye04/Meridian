@@ -2,99 +2,19 @@
 #extension GL_GOOGLE_include_directive : require
 #define MERIDIAN_CUSTOM_PUSH_CONSTANTS
 #include "common.glsl"
+#include "cull.glsl"
 
-// GPU-driven culling, one thread per instance, in two phases around a
-// depth pyramid (two-phase occlusion culling, as in niagara and Nanite):
-//   0: draw what was visible last frame, testing only the view frustum;
-//   1: test everything against the pyramid of phase 0's depth, draw what is
-//      visible but wasn't drawn, and record visibility for the next frame.
-// Survivors append a draw command to their bucket; the scene pass consumes
-// the buckets with vkCmdDrawIndexedIndirectCount.
+// GPU-driven instance culling, one thread per instance, in two phases
+// around a depth pyramid (two-phase occlusion culling, as in niagara and
+// Nanite):
+//   0: what was visible last frame, testing only the view frustum;
+//   1: everything against the pyramid of phase 0's depth: what is visible
+//      but wasn't processed in phase 0, recording visibility for the next
+//      frame.
+// Survivors append work items covering their clusters; cluster_cull.comp
+// then culls and LOD-selects the clusters themselves.
 
 layout(local_size_x = 64) in;
-
-// Must match VkDrawIndexedIndirectCommand.
-struct DrawCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int vertexOffset;
-    uint firstInstance;
-};
-
-layout(buffer_reference, std430) writeonly buffer DrawCommandBuffer {
-    DrawCommand commands[];
-};
-
-layout(buffer_reference, std430) buffer DrawCountBuffer {
-    uint counts[];
-};
-
-layout(buffer_reference, std430) buffer VisibilityBuffer {
-    uint visible[];
-};
-
-// Min-reduced: a linear fetch returns the farthest depth under its 2x2
-// footprint.
-layout(set = 0, binding = 0) uniform sampler2D depthPyramid;
-
-// Must match CullConstants in C++.
-layout(push_constant) uniform CullConstants {
-    SceneBuffer scene;
-    DrawCommandBuffer commands;
-    DrawCountBuffer counts;
-    VisibilityBuffer visibility;
-    // Commands per bucket; bucket b starts at commands[b * capacity].
-    uint bucketCapacity;
-    uint phase;
-    uint occlusion;
-    uint pyramidLevels;
-    vec2 pyramidSize;
-} cull;
-
-// Screen-space bounds (UV) of a view-space sphere, camera looking down +z
-// here (Mara & McGuire 2013, via zeux's niagara). False if it crosses the
-// near plane, where the bounds are unbounded.
-bool projectSphere(vec3 c, float r, out vec4 bounds) {
-    SceneBuffer scene = cull.scene;
-    if (c.z < r + scene.nearPlane) {
-        return false;
-    }
-    vec3 cr = c * r;
-    float czr2 = c.z * c.z - r * r;
-    float vx = sqrt(c.x * c.x + czr2);
-    float minX = (vx * c.x - cr.z) / (vx * c.z + cr.x);
-    float maxX = (vx * c.x + cr.z) / (vx * c.z - cr.x);
-    float vy = sqrt(c.y * c.y + czr2);
-    float minY = (vy * c.y - cr.z) / (vy * c.z + cr.y);
-    float maxY = (vy * c.y + cr.z) / (vy * c.z - cr.y);
-    // To NDC (the y scale is negative: Vulkan's y points down), then UV.
-    vec4 ndc = vec4(minX, minY, maxX, maxY) * scene.projectionScale.xyxy;
-    vec4 uv = ndc * 0.5 + 0.5;
-    bounds = vec4(min(uv.xy, uv.zw), max(uv.xy, uv.zw));
-    return true;
-}
-
-bool occluded(vec3 worldCenter, float radius) {
-    vec3 c = (cull.scene.view * vec4(worldCenter, 1.0)).xyz;
-    c.z = -c.z;
-    vec4 bounds;
-    if (!projectSphere(c, radius, bounds)) {
-        return false;
-    }
-    // The pyramid comes from jittered depth (up to half a pixel each way);
-    // one level-0 texel of margin keeps the test conservative under it.
-    bounds += vec4(-1.0, -1.0, 1.0, 1.0) / cull.pyramidSize.xyxy;
-    vec2 size = (bounds.zw - bounds.xy) * cull.pyramidSize;
-    // The level where the bounds span at most one texel; the 2x2 fetch at
-    // their center then covers every texel they touch.
-    float level = clamp(ceil(log2(max(size.x, size.y))), 0.0,
-                        float(cull.pyramidLevels - 1u));
-    float farthest = textureLod(depthPyramid, (bounds.xy + bounds.zw) * 0.5, level).r;
-    // Reverse-Z with an infinite far plane: depth = near / distance.
-    float nearest = cull.scene.nearPlane / (c.z - radius);
-    return nearest < farthest;
-}
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
@@ -108,32 +28,35 @@ void main() {
     }
 
     vec3 center = (instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz;
-    // Conservative radius under non-uniform scale: the largest axis scale.
-    mat3 m = mat3(instance.transform);
-    float scale = sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
-    float radius = mesh.boundsRadius * scale;
-    bool inFrustum = true;
-    for (int i = 0; i < 6; ++i) {
-        vec4 plane = cull.scene.frustumPlanes[i];
-        inFrustum = inFrustum && dot(plane.xyz, center) + plane.w >= -radius;
-    }
+    float radius = mesh.boundsRadius * maxScale(instance.transform);
+    bool visibleInFrustum = inFrustum(center, radius);
 
     bool wasVisible = cull.visibility.visible[index] != 0u;
     if (cull.phase == 0u) {
-        if (cull.occlusion == 0u || !wasVisible || !inFrustum) {
+        if (cull.occlusion == 0u || !wasVisible || !visibleInFrustum) {
             return;
         }
     } else {
-        bool visible = inFrustum &&
+        bool visible = visibleInFrustum &&
                        (cull.occlusion == 0u || !occluded(center, radius));
         cull.visibility.visible[index] = visible ? 1u : 0u;
-        // Visible instances drawn in phase 0 aren't drawn again.
+        // Instances processed in phase 0 aren't processed again.
         if (!visible || (cull.occlusion != 0u && wasVisible)) {
             return;
         }
     }
 
-    uint slot = atomicAdd(cull.counts.counts[mesh.drawBucket], 1u);
-    cull.commands.commands[mesh.drawBucket * cull.bucketCapacity + slot] =
-        DrawCommand(mesh.indexCount, 1u, mesh.firstIndex, mesh.vertexOffset, index);
+    atomicAdd(cull.counters.counters[kCounterInstances], 1u);
+    uint itemCount = (mesh.clusterCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
+    uint first = atomicAdd(cull.counters.counters[cull.phase * 3u], itemCount);
+    for (uint i = 0u; i < itemCount; ++i) {
+        if (first + i >= kMaxWorkItems) {
+            atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+            return;
+        }
+        uint offset = i * kClustersPerWorkItem;
+        uint count = min(kClustersPerWorkItem, mesh.clusterCount - offset);
+        cull.work.items[first + i] =
+            uvec2(index, (mesh.firstCluster + offset) | ((count - 1u) << 26));
+    }
 }

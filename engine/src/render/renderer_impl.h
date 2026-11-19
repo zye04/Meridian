@@ -65,6 +65,9 @@ struct Renderer::Impl {
   float timestampPeriodNs = 0.0f;
   float gpuFrameMs = 0.0f;
   uint32_t drawnInstances = 0;
+  uint32_t drawnClusters = 0;
+  uint32_t drawnTriangles = 0;
+  float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
 
   VkCommandPool uploadPool = VK_NULL_HANDLE;
@@ -79,6 +82,7 @@ struct Renderer::Impl {
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
   VkPipeline cullPipeline = VK_NULL_HANDLE;
+  VkPipeline clusterCullPipeline = VK_NULL_HANDLE;
   VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
   // The depth pyramid, sampled through minSampler.
   VkDescriptorSet cullSet = VK_NULL_HANDLE;
@@ -95,8 +99,18 @@ struct Renderer::Impl {
   Buffer instanceTable;
   std::vector<InstanceData> instances;
   bool instancesDirty = false;
-  Buffer drawCommands;
-  Buffer drawCounts;
+  // Cluster hierarchies of every mesh, bump-allocated like the pools above.
+  Buffer clusterPool;
+  Buffer clusterVertexPool;
+  Buffer clusterTrianglePool;
+  uint32_t clusterCount = 0;
+  uint32_t clusterVertexCount = 0;
+  uint32_t clusterTriangleCount = 0;
+  // Culling output, both phases: work items for the cluster cull, cluster
+  // draw lists, and the DrawCounters (indirect arguments and statistics).
+  Buffer workItems;
+  Buffer drawLists;
+  Buffer drawCounters;
   // Per instance: visible at the end of last frame's culling (1) or not.
   Buffer visibility;
 

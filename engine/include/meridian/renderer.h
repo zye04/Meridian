@@ -149,6 +149,13 @@ public:
   // Opaque and alpha-masked instances drawn in a recent frame (blended
   // instances are drawn from the CPU and not counted).
   uint32_t drawnInstanceCount() const;
+  // Clusters and triangles of those instances drawn in a recent frame.
+  uint32_t drawnClusterCount() const;
+  uint32_t drawnTriangleCount() const;
+
+  // Level of detail: the largest simplification error allowed on screen, in
+  // pixels (default 1; 0 draws full detail).
+  void setLodErrorPixels(float pixels);
 
   // On by default; off draws everything in the view frustum (for A/B
   // comparisons).
