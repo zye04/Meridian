@@ -36,6 +36,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | XeSS backend | Intel's upscaler; no Linux binaries | Motion-clarity spec non-goal | When Linux binaries exist and a non-NVIDIA target needs it |
 | FSR 4 backend | Better than TAA v2 on AMD RDNA 2-4 (FidelityFX SDK 2.4, MIT, Vulkan); Linux binaries unverified | Motion-clarity spec non-goal | When a non-NVIDIA target exists |
 | Grade look tuning | Grading system lands with an identity grade; the measured reference starting set (decisions.md) waits for real lighting | Motion-clarity spec | After sky occlusion, leaf translucency and forests in frame |
+| Clouds in the DLSS transparency mask | The cloud composite blends over HDR but leaves `transparencyMask` at 0, so DLSS would treat cloud pixels as opaque | Clouds rebase onto the render/display split, 2026-11-20 | With the DLSS module |
 
 ## Geometry and vegetation
 

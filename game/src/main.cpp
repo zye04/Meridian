@@ -308,6 +308,8 @@ struct Options {
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::pair<float, float>> cameraAngularVelocity;
+  // Also saves <capture stem>_NNN.png every this many frames (sequences).
+  int captureSequence = 0;
   std::optional<std::filesystem::path> capturePath;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
@@ -365,6 +367,10 @@ Options parseOptions(int argc, char **argv) {
     } else if (arg == "--camera-angular-velocity") {
       const float yawRate = number(i);
       options.cameraAngularVelocity = {yawRate, number(i)};
+    } else if (arg == "--camera-yaw-rate") {
+      options.cameraAngularVelocity = {number(i), 0.0f};
+    } else if (arg == "--capture-sequence") {
+      options.captureSequence = static_cast<int>(number(i));
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
@@ -418,14 +424,14 @@ Options parseOptions(int argc, char **argv) {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
-                               "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
-                               "--no-occlusion, "
+                               "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
+                               "--scatter n, --placement off, --no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, --render-scale s, "
                                "--windowed, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
-                               "--capture file.png|file.pfm, --frames n)");
+                               "--capture file.png|file.pfm, --capture-sequence n, --frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
@@ -437,6 +443,9 @@ Options parseOptions(int argc, char **argv) {
     throw std::runtime_error(
         "--camera-velocity and --camera-angular-velocity need --capture or "
         "--frames");
+  }
+  if (options.captureSequence > 0 && !options.capturePath) {
+    throw std::runtime_error("--capture-sequence needs --capture");
   }
   return options;
 }
@@ -592,6 +601,12 @@ int main(int argc, char **argv) {
     }
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
+    } else if (options.captureSequence > 0 && totalFrames % options.captureSequence == 0) {
+      char suffix[24];
+      std::snprintf(suffix, sizeof(suffix), "_%03d.png",
+                    totalFrames / options.captureSequence - 1);
+      std::filesystem::path path = *options.capturePath;
+      renderer.requestCapture(path.replace_filename(path.stem().string() + suffix));
     }
     const float frameSeconds = interactive ? deltaSeconds : kScriptedStep;
     gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;

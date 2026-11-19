@@ -1,0 +1,138 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "clouds_temporal.glsl"
+
+// Temporal resolve of the cloud march at its own resolution: accumulates the
+// per-frame jittered march into a history reprojected by the cloud's mean
+// depth and the wind displacement since last frame, with the history clipped
+// to the current neighborhood (variance clipping, as taa.comp). Depth < 0
+// marks texels where scene geometry hid the layer; history from there is
+// rejected (disocclusion), so clear air from behind a silhouette doesn't
+// linger over newly revealed clouds.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 1, rgba16f) uniform readonly image2D cloudColor;
+layout(set = 2, binding = 2, r32f) uniform readonly image2D cloudDepth;
+layout(set = 2, binding = 3) uniform sampler2D historyColor;
+layout(set = 2, binding = 4) uniform sampler2D historyDepth;
+layout(set = 2, binding = 5, rgba16f) uniform writeonly image2D resolvedColor;
+layout(set = 2, binding = 6, r32f) uniform writeonly image2D resolvedDepth;
+
+// Weight of this frame; inside the layer clouds move fast across the view,
+// so less history.
+const float kCurrentWeight = 0.1;
+const float kCurrentWeightInLayer = 0.25;
+const float kVarianceGamma = 1.0;
+
+// 9-tap Catmull-Rom (as taa.comp): bilinear would blur the history a little
+// every frame.
+vec4 sampleCatmullRom(vec2 uv, vec2 texSize) {
+    vec2 samplePos = uv * texSize;
+    vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    vec2 f = samplePos - texPos1;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 texPos0 = (texPos1 - 1.0) / texSize;
+    vec2 texPos3 = (texPos1 + 2.0) / texSize;
+    vec2 texPos12 = (texPos1 + w2 / w12) / texSize;
+    vec4 result = vec4(0.0);
+    result += textureLod(historyColor, vec2(texPos0.x, texPos0.y), 0.0) * w0.x * w0.y;
+    result += textureLod(historyColor, vec2(texPos12.x, texPos0.y), 0.0) * w12.x * w0.y;
+    result += textureLod(historyColor, vec2(texPos3.x, texPos0.y), 0.0) * w3.x * w0.y;
+    result += textureLod(historyColor, vec2(texPos0.x, texPos12.y), 0.0) * w0.x * w12.y;
+    result += textureLod(historyColor, vec2(texPos12.x, texPos12.y), 0.0) * w12.x * w12.y;
+    result += textureLod(historyColor, vec2(texPos3.x, texPos12.y), 0.0) * w3.x * w12.y;
+    result += textureLod(historyColor, vec2(texPos0.x, texPos3.y), 0.0) * w0.x * w3.y;
+    result += textureLod(historyColor, vec2(texPos12.x, texPos3.y), 0.0) * w12.x * w3.y;
+    result += textureLod(historyColor, vec2(texPos3.x, texPos3.y), 0.0) * w3.x * w3.y;
+    return result;
+}
+
+// Pulls the history toward the center of the neighborhood box until it fits.
+vec4 clipToBox(vec4 history, vec4 boxMin, vec4 boxMax) {
+    vec4 center = 0.5 * (boxMax + boxMin);
+    vec4 extents = 0.5 * (boxMax - boxMin) + 1e-6;
+    vec4 offset = history - center;
+    vec4 units = abs(offset / extents);
+    float maxUnit = max(max(units.x, units.y), max(units.z, units.w));
+    return maxUnit > 1.0 ? center + offset / maxUnit : history;
+}
+
+void main() {
+    ivec2 size = imageSize(cloudColor);
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, size))) {
+        return;
+    }
+    vec4 current = imageLoad(cloudColor, id);
+    float depth = imageLoad(cloudDepth, id).r;
+
+    // Neighborhood statistics over the texels that saw the layer (geometry
+    // texels say nothing about the clouds here).
+    vec4 mean = vec4(0.0);
+    vec4 meanSquared = vec4(0.0);
+    float count = 0.0;
+    float nearbyDepth = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 p = clamp(id + ivec2(x, y), ivec2(0), size - 1);
+            float d = imageLoad(cloudDepth, p).r;
+            if (d >= 0.0) {
+                vec4 c = imageLoad(cloudColor, p);
+                mean += c;
+                meanSquared += c * c;
+                count += 1.0;
+                nearbyDepth = max(nearbyDepth, d);
+            }
+        }
+    }
+    mean /= max(count, 1.0);
+
+    // Clear texels next to clouds move with them.
+    float reprojectDepth = depth > 0.0 ? depth : nearbyDepth;
+    vec2 uv = (vec2(id) + 0.5) / vec2(size);
+    vec4 previousClip = cloudPreviousClip(cloudRay(uv), reprojectDepth);
+    vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
+    bool valid = pc.historyValid != 0u && depth >= 0.0 && previousClip.w > 0.0 &&
+                 all(greaterThanEqual(previousUv, vec2(0.0))) &&
+                 all(lessThanEqual(previousUv, vec2(1.0)));
+    vec4 depths = textureGather(historyDepth, previousUv, 0);
+    if (!valid || any(lessThan(depths, vec4(0.0)))) {
+        // No history: start from the neighborhood mean, which hides most of
+        // a single frame's jitter noise (a new resolution, disocclusion).
+        imageStore(resolvedColor, id, depth < 0.0 ? current : mean);
+        imageStore(resolvedDepth, id, vec4(depth));
+        return;
+    }
+
+    vec4 sigma = sqrt(max(meanSquared / count - mean * mean, 0.0));
+    vec4 history = sampleCatmullRom(previousUv, vec2(size));
+    history = vec4(max(history.rgb, 0.0), clamp(history.a, 0.0, 1.0));
+    history = clipToBox(history, mean - kVarianceGamma * sigma, mean + kVarianceGamma * sigma);
+
+    // History depth: the gathered texels weighted bilinearly and by opacity
+    // (gather order: (0,1), (1,1), (1,0), (0,0)).
+    vec2 f = fract(previousUv * vec2(size) - 0.5);
+    vec4 opacities = 1.0 - textureGather(historyColor, previousUv, 3);
+    vec4 weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y)) *
+                   opacities * vec4(greaterThan(depths, vec4(0.0)));
+    float weightSum = dot(weights, vec4(1.0));
+    float historyDistance = weightSum > 0.0 ? dot(weights, depths) / weightSum : reprojectDepth;
+
+    float w = pc.inLayer != 0u ? kCurrentWeightInLayer : kCurrentWeight;
+    vec4 resolved = mix(history, current, w);
+    float currentOpacity = (1.0 - current.a) * w;
+    float historyOpacity = (1.0 - history.a) * (1.0 - w);
+    float opacity = currentOpacity + historyOpacity;
+    float resolvedDistance = opacity > 1e-6
+        ? (reprojectDepth * currentOpacity + historyDistance * historyOpacity) / opacity
+        : 0.0;
+    imageStore(resolvedColor, id, resolved);
+    imageStore(resolvedDepth, id, vec4(resolvedDistance));
+}

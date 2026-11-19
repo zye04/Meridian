@@ -482,6 +482,19 @@ void Renderer::setWeather(const Weather &weather) {
   const Vec3 cloudOffset = weather.windOffsetModulo(kCloudWindAltitude, kCloudNoisePeriod);
   clouds.windOffset[0] = cloudOffset.x;
   clouds.windOffset[1] = cloudOffset.z;
+  // The displacement since last frame, from offsets wrapped by a short
+  // period (precise in float, reduced in double) rather than by
+  // differencing the noise offsets, which jump where they wrap.
+  constexpr double kDisplacementPeriod = 4096.0;
+  const Vec3 local = weather.windOffsetModulo(kCloudWindAltitude, kDisplacementPeriod);
+  for (int i = 0; i < 2; ++i) {
+    const float now = i == 0 ? local.x : local.z;
+    const double moved = std::remainder(double{now} - impl_->cloudWindLocal[i],
+                                        kDisplacementPeriod);
+    clouds.windDisplacement[i] = impl_->cloudWindLocalValid ? static_cast<float>(moved) : 0.0f;
+    impl_->cloudWindLocal[i] = now;
+  }
+  impl_->cloudWindLocalValid = true;
   clouds.time = static_cast<float>(
       std::fmod(weather.time() / kWeatherCellLifetime, double{kWeatherTimePeriod}));
 
@@ -995,16 +1008,27 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // --- Temporal resolve: scene color + history -> new history.
 
-  for (VkImage target : {impl_->hdr.image, impl_->motion.image,
-                          impl_->transparencyMask.image}) {
+  // The cloud composite (compute) leaves HDR and motion in GENERAL.
+  const bool clouds = impl_->cloudsEnabled;
+  for (VkImage target : {impl_->hdr.image, impl_->motion.image}) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
-                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          clouds ? VK_IMAGE_LAYOUT_GENERAL
+                                 : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          clouds ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+                                 : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          clouds ? VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT
+                                 : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
   }
+  transitionImage(cmd, {impl_->transparencyMask.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
 
   // The history images stay in GENERAL. This frame reads what the previous
   // frame wrote, and overwrites the image the previous frame's tonemap read.

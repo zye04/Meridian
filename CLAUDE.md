@@ -68,12 +68,15 @@ A `.pfm` capture path writes the linear HDR image the tonemap reads
 (post-TAA, pre-exposed) instead, for luminance ratios.
 
 Motion sharpness: add `--camera-velocity X Y Z` (m/s) and/or
-`--camera-angular-velocity YAW PITCH` (rad/s), fixed 1/60 s steps ending at
+`--camera-angular-velocity YAW PITCH` (rad/s; `--camera-yaw-rate YAW` is
+short for `YAW 0`), fixed 1/60 s steps ending at
 `--camera`, and compare with the still capture of the same view:
 `python3 -I tools/image-gates.py ratio motion.png still.png` (Laplacian
 std ratio; also `laplacian`, `shimmer`, `ssim`, `diff`). The whole motion
 gate set runs with `tools/motion-gates.sh BUILD OUT [game args]`
-(`GPU_RUNS=5` adds per-pass GPU medians).
+(`GPU_RUNS=5` adds per-pass GPU medians). `--capture-sequence N` also
+saves `<capture stem>_NNN.png` every N frames (fly-throughs,
+time-lapses); per-pass GPU ms of such runs are inflated by the readbacks.
 
 `--haze clean|summer|summer-hazy` picks the aerosol (default summer:
 Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
@@ -134,7 +137,15 @@ ground `1119 1355.9 -431 -1.55 0.15`; above the layer `1119 6500 -431
 inside the layer (half-resolution march) `1119 3200 -431 -1.55 0`; the
 summit silhouette against clouds `1119 1356 -431 -1.55 0.03`; dusk
 clouds `1119 1355.9 -431 -1.55 0.15 --sun -0.7 0.035 0.7` (sun 2 deg up;
-`-0.05` for just below the horizon).
+`-0.05` for just below the horizon). Cloud motion checks (Laplacian vs
+the still, and vs `--clouds off`): fast turn, the fair view with
+`--camera-yaw-rate 1`; toward the layer `1119 1900 -431 -1.55 0.1
+--camera-velocity -60 20 0`; across the base (quarter -> half switch at
+2250 m, base 2500 m) `1119 2650 -431 -1.55 0.1 --camera-velocity -30 250
+0` (with `--capture-sequence 2` for the sequence); silhouettes (the
+marble wall's top and the summit) `1119 1356 -431 -1.55 0.03
+--time-scale 1.5` (clouds drift ~10 m/s; still: `--time-scale 0`; add
+`--camera-velocity 0 0 10` to strafe past them).
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
@@ -212,7 +223,8 @@ engine/src/render/         renderer internals:
                            draw()
   renderer_clouds.cpp      cloud noise volumes (at load), weather map
                            window and pass, dumpWeatherMap, cloud march
-                           targets (quarter/half res) and pass
+                           targets and histories (quarter/half res) and
+                           the cloud pass (march, resolve, composite)
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -237,7 +249,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            analytic fallback, layer profiles,
                            cloudDensity), cloud_noise.comp,
                            weather_map.comp, clouds_march.comp,
-                           clouds_composite.frag
+                           clouds_resolve.comp, clouds_composite.comp,
+                           clouds_temporal.glsl (their push constants,
+                           cloud reprojection)
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten), ktx2.cpp (shared encoder)
@@ -292,9 +306,11 @@ buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it: luminance with
-haze + transmittance, mean cloud depth; then clouds_composite.frag
-blends it over HDR, bilinear, skipping pixels whose surface is nearer
-than the clouds) -> TAA resolve
+haze + transmittance, mean cloud depth, -1 where geometry hides the
+layer; clouds_resolve.comp accumulates it into a per-resolution history
+reprojected by cloud depth + wind; clouds_composite.comp upsamples it
+bilaterally on scene depth over HDR (as storage, GENERAL) and writes
+cloud motion where opacity > 0.5) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
@@ -302,9 +318,9 @@ check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
 AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. Everything up
 to the TAA resolve runs at the render size (`renderExtent`: depth, HDR,
-motion, depth pyramid, Halton(2,3) jitter in render pixels over
-`jitterPhaseCount` phases, material mip bias `textureMipBias`, both in
-upscaler.h); the resolve and everything after it at the display size
+motion, depth pyramid, cloud targets at 1/4 or 1/2 of it, Halton(2,3)
+jitter in render pixels over `jitterPhaseCount` phases, material mip bias
+`textureMipBias`, both in upscaler.h); the resolve and everything after it at the display size
 (swapchain). Both sets of images are created in `createSwapchain` and
 destroyed in `destroySwapchain`; `setAntiAliasing` recreates them. 2
 frames in flight; the HDR/depth/LUT/history images are shared between
@@ -371,7 +387,10 @@ them, and barriers account for that.
   views, read through `textures3D[]` (clouds.glsl, same binding), and
   the weather map; all four stay in GENERAL layout. Cloud march layout:
   set 0 = atmosphere LUTs, set 1 = bindless, set 2 = scene depth + the
-  march targets (storage and sampled, GENERAL), one set per resolution.
+  march targets, the history to read (sampled) and to write, HDR and
+  motion (storage), all GENERAL; one set per resolution and frame parity
+  (`r * 2 + frameNumber % 2`), shared by the march, resolve and composite
+  (push constants `CloudConstants`: scene, historyValid, inLayer).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges
@@ -397,11 +416,15 @@ them, and barriers account for that.
   offset reduced modulo its period in double on the CPU
   (`Weather::windOffsetModulo`; clouds: `scene.clouds.windOffset` at
   3 km, modulo 2^18 m, which every cloud noise period divides), so float
-  precision doesn't degrade with play time. The weather at a position comes
+  precision doesn't degrade with play time. Cloud reprojection and motion
+  use `scene.clouds.windDisplacement` (the move since last frame, from
+  offsets modulo 4096 m differenced in double), never a difference of
+  the wrapped offsets. The weather at a position comes
   from `Weather::stateAt` / `weatherAt` (the history rule), never from
   the current state directly.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
-  `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
+  `shaders/common.glsl`, `post.glsl`, `exposure.glsl` or
+  `clouds_temporal.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
   `ScanConstants` in scan.comp, `TlasFillConstants` in tlas_fill.comp,
   `GpuGrade`/`GradeConstants` in grade_lut.comp; `PlacedInstance` in placement.h); change

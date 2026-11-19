@@ -1277,7 +1277,7 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
 - The depth buffer needs no transparent-pixel fix: it clears to 0 (reverse-Z
   far) and the sky pipeline has no depth test and so writes none, while
   blended surfaces write no depth.
-- Clouds, when they exist, write this mask too.
+- Clouds should write this mask too; they don't yet (`docs/backlog.md`).
 - Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).
 
 ## Weather state and wind (M4 clouds, 2026-11-19)
@@ -1458,10 +1458,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   by type: `density = coverage x saturate(remap(profile x shape, cut,
   1))`, then eroded. Coverage stays a plain multiplier (the Task 2
   ruling: thresholded once, in the map).
-- **Composite (`clouds_composite.frag`, replaced by Task 4):** bilinear
-  upsample blended over HDR (premultiplied: clouds + background x T),
-  skipped where the full-resolution surface is nearer than the clouds'
-  mean depth, so clouds don't draw over terrain; HDR only, no motion.
+- **Composite:** replaced by the temporal resolve and depth-aware
+  composite below.
 - Cost (`clouds` GPU ms, 2560x1440, Debug build, one run each): fair
   ground 0.89, above the layer 0.84, inside (half res) 1.37; clear 0.46,
   the floor of marching empty layer through the weather lookups (the
@@ -1474,3 +1472,61 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   - Schneider, Nubis Evolved (2022): https://advances.realtimerendering.com/s2022/SIGGRAPH2022-Advances-NubisEvolved-NoVideos.pdf
   - Bruneton, Precomputed Atmospheric Scattering (transmittance between two points): https://ebruneton.github.io/precomputed_atmospheric_scattering/
   - Jimenez, Next Generation Post Processing in Call of Duty: Advanced Warfare (2014, interleaved gradient noise): https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
+
+## Cloud temporal resolve, composite and motion (M4 clouds, 2026-11-19)
+
+- **Resolve (`clouds_resolve.comp`, at the march's resolution):** each
+  march texel is reprojected by its transmittance-weighted mean depth
+  (clear texels: the deepest cloud in their 3x3, else at infinity) and
+  the wind displacement since last frame, into last frame's view (each
+  camera through its own curvature warp). History: 9-tap Catmull-Rom,
+  clipped toward the 3x3 neighborhood's mean +- 1 sigma in RGBA
+  (luminance and transmittance; Salvi's variance clipping as in
+  taa.comp), blended with 10% of the current frame, 25% inside or near
+  the layer, where clouds sweep across the view. A plain blend (no
+  luminance weighting): clouds are smooth, so flicker suppression isn't
+  needed and would bias bright edges. Depth is blended by opacity.
+  Histories are ping-ponged per resolution and restart when the
+  resolution changes (HZD/Frostbite-style reprojection; rejected:
+  HZD's 1-of-16 updates, see the spec).
+- **Disocclusion:** the march writes depth -1 where scene geometry is in
+  front of the layer (no cloud information). History whose bilinear
+  footprint touches such a texel is rejected, and a restarted texel
+  takes its 3x3 mean (texels that saw the layer) instead of the single
+  jittered sample, which otherwise left a noisy strip behind moving
+  silhouettes for ~20 frames (wall corner strafe at 10 m/s, inspected).
+  Neighborhood statistics skip geometry texels, so a silhouette's box
+  can't keep clear air over clouds.
+- **Wind displacement:** `scene.clouds.windDisplacement` is computed on
+  the CPU from the cloud wind offset modulo 4096 m (reduced in double,
+  float-precise to ~0.25 mm), differenced with last frame's and
+  re-wrapped (`std::remainder`); the 2^18 m noise offsets jump where
+  they wrap, and the full offset loses float precision with play time.
+- **Composite (`clouds_composite.comp`, full resolution, compute):** joint
+  bilateral upsample (Kopf et al.) in its simplest, classifying form:
+  the 2x2 bilinear taps, each kept only where it agrees with the pixel's
+  surface: a geometry texel (-1) counts as clear air for a geometry pixel
+  and is skipped for a sky pixel; a cloud texel deeper than the pixel's
+  surface counts as clear. A sky pixel whose four taps all saw geometry
+  (thin gaps) uses the surrounding 4x4 texels that saw the sky. Blended
+  premultiplied over HDR (read-modify-write as a storage image, which
+  is why HDR and motion gained STORAGE usage). Where cloud opacity
+  exceeds 0.5 the motion target gets the clouds' motion (previous -
+  current UV) from the opacity-weighted depth with the current and
+  previous camera plus the wind displacement, so TAA (and later DLSS)
+  moves clouds with the clouds; reads depth, writes HDR and motion only.
+- Measured (Debug, 2560x1440, Laplacian moving / still, clouds on vs
+  `--clouds off`): fast turn (1 rad/s) 0.735 vs 0.735; toward the layer
+  (60 m/s) 0.757 vs 0.755; across the base (250 m/s up) 0.709 vs 0.710;
+  silhouettes with clouds drifting at ~10 m/s 1.000 vs 1.000, strafing
+  past them at 10 m/s 0.738 vs 0.738. Cloud motion vectors vs the sky's
+  rotation-only motion: no measurable difference at normal speeds
+  (clouds are kilometers away), +5% sky Laplacian at a 200x time-lapse
+  (~1.4 km/s lateral drift), which also confirms their sign. Fly-through
+  sequence across the quarter -> half switch: frame-to-frame MAE stays
+  at its neighbors' level (no pop). `clouds` GPU ms: ground 0.82-0.97,
+  above 0.87, inside 1.48-1.6 (Task 3: 0.89, 0.84, 1.37).
+  - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
+  - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
+  - Salvi, An Excursion in Temporal Supersampling (GDC 2016, variance clipping): http://behindthepixels.io/assets/files/TemporalAA.pdf
+  - Kopf, Cohen, Lischinski, Uyttendaele: Joint Bilateral Upsampling (SIGGRAPH 2007): https://johanneskopf.de/publications/jbu/
