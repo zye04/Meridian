@@ -36,6 +36,8 @@ constexpr float kInitialEv100 = 15.0f;
 constexpr uint32_t kMaxMaterials = 16384;
 constexpr uint32_t kMaxTextures = 16384;
 constexpr uint32_t kDfgLutSize = 128;
+// Depth pyramid levels: enough for a 32768-pixel-wide screen.
+constexpr uint32_t kMaxPyramidLevels = 16;
 // Shared geometry pools (bump-allocated; real streaming will need an
 // allocator with frees): 4M vertices = 192 MB, 16M indices = 64 MB.
 constexpr uint32_t kVertexPoolCapacity = 4u << 20;
@@ -203,6 +205,15 @@ struct InstanceData {
 static_assert(sizeof(InstanceData) == 80);
 
 // Must match CullConstants in cull.comp.
+// Must match depth_pyramid.comp.
+struct PyramidConstants {
+  int32_t sourceSize[2] = {};
+  int32_t destinationSize[2] = {};
+  uint32_t level = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(PyramidConstants) == 32);
+
 struct CullConstants {
   VkDeviceAddress sceneBuffer = 0;
   VkDeviceAddress drawCommands = 0;

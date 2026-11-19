@@ -67,6 +67,48 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame) 
   vkCmdCopyBuffer(cmd, drawCounts.buffer, frame.drawCountReadback.buffer, 1, &copy);
 }
 
+// Reduces the scene depth into the pyramid, one level per dispatch.
+void Renderer::Impl::buildDepthPyramid(VkCommandBuffer cmd) {
+  transitionImage(cmd, {depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  // The pyramid is shared by both frames in flight: wait for the previous
+  // frame's reads before overwriting it.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline);
+  int32_t sourceWidth = static_cast<int32_t>(swapchain.extent.width);
+  int32_t sourceHeight = static_cast<int32_t>(swapchain.extent.height);
+  for (uint32_t level = 0; level < depthPyramidLevels.size(); ++level) {
+    PyramidConstants constants;
+    constants.sourceSize[0] = sourceWidth;
+    constants.sourceSize[1] = sourceHeight;
+    constants.destinationSize[0] =
+        std::max(1, static_cast<int32_t>(depthPyramidExtent.width >> level));
+    constants.destinationSize[1] =
+        std::max(1, static_cast<int32_t>(depthPyramidExtent.height >> level));
+    constants.level = level;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidLayout, 0,
+                            1, &pyramidSets[level], 0, nullptr);
+    vkCmdPushConstants(cmd, pyramidLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(constants), &constants);
+    vkCmdDispatch(cmd, (constants.destinationSize[0] + 7) / 8,
+                  (constants.destinationSize[1] + 7) / 8, 1);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    sourceWidth = constants.destinationSize[0];
+    sourceHeight = constants.destinationSize[1];
+  }
+}
+
 // Rebuilds the TLAS over all instances (including those outside the view:
 // they still cast shadows into it).
 void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
@@ -353,7 +395,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
       VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, kDepthStages,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        kDepthStages | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                         kDepthStages,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
@@ -372,7 +415,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   depthAttachment.imageView = impl_->depth.view;
   depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  // Kept for the depth pyramid.
+  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depthAttachment.clearValue.depthStencil.depth = 0.0f;
 
   VkRenderingInfo sceneRendering{};
@@ -444,6 +488,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   }
 
   vkCmdEndRendering(cmd);
+  impl_->buildDepthPyramid(cmd);
 
   // --- Temporal resolve: scene color + history -> new history.
 

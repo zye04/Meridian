@@ -1,0 +1,42 @@
+#version 460
+
+// One level of the depth pyramid for occlusion culling. Reverse-Z, so each
+// texel keeps the farthest (smallest) depth it covers.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D source;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D destination;
+
+// Must match PyramidConstants in C++.
+layout(push_constant) uniform PyramidConstants {
+    ivec2 sourceSize;
+    ivec2 destinationSize;
+    uint level;
+} pc;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, pc.destinationSize))) {
+        return;
+    }
+    float depth = 1.0;
+    if (pc.level == 0u) {
+        // Level 0 is the screen rounded down to powers of two, so a texel
+        // covers one to two unaligned pixels per axis: take every pixel it
+        // touches.
+        vec2 scale = vec2(pc.sourceSize) / vec2(pc.destinationSize);
+        ivec2 first = ivec2(floor(vec2(texel) * scale));
+        ivec2 last = min(ivec2(ceil(vec2(texel + 1) * scale)) - 1, pc.sourceSize - 1);
+        for (int y = first.y; y <= last.y; ++y) {
+            for (int x = first.x; x <= last.x; ++x) {
+                depth = min(depth, texelFetch(source, ivec2(x, y), 0).r);
+            }
+        }
+    } else {
+        // Exactly 2x2 texels of the level above; the min-reduction sampler
+        // returns their minimum in one fetch.
+        depth = textureLod(source, (vec2(texel) + 0.5) / vec2(pc.destinationSize), 0.0).r;
+    }
+    imageStore(destination, texel, vec4(depth));
+}

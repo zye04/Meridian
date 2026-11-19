@@ -2,6 +2,7 @@
 
 #include <meridian/window.h>
 
+#include <bit>
 #include <iostream>
 #include <stdexcept>
 
@@ -37,8 +38,11 @@ void Renderer::Impl::createSwapchain() {
           "vkCreateSemaphore");
   }
 
-  depth = createScreenImage(kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                      VK_IMAGE_ASPECT_DEPTH_BIT);
+  depth = createScreenImage(kDepthFormat,
+                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT,
+                            VK_IMAGE_ASPECT_DEPTH_BIT);
+  createDepthPyramid();
   hdr = createScreenImage(kHdrFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                         VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -96,12 +100,71 @@ void Renderer::Impl::createSwapchain() {
             << "\n";
 }
 
+void Renderer::Impl::createDepthPyramid() {
+  depthPyramidExtent = {std::bit_floor(swapchain.extent.width),
+                        std::bit_floor(swapchain.extent.height)};
+  const auto levels = static_cast<uint32_t>(std::bit_width(
+      std::max(depthPyramidExtent.width, depthPyramidExtent.height)));
+  if (levels > kMaxPyramidLevels) {
+    throw std::runtime_error("screen too large for the depth pyramid");
+  }
+  depthPyramid = createImage(VK_FORMAT_R32_SFLOAT,
+                             {depthPyramidExtent.width, depthPyramidExtent.height, 1},
+                             VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                             VK_IMAGE_ASPECT_COLOR_BIT, levels);
+  depthPyramidLevels.resize(levels);
+  for (uint32_t level = 0; level < levels; ++level) {
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = depthPyramid.image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R32_SFLOAT;
+    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
+    check(vkCreateImageView(device.device, &viewInfo, nullptr,
+                            &depthPyramidLevels[level]),
+          "vkCreateImageView");
+  }
+  submitNow([&](VkCommandBuffer cmd) {
+    transitionImage(cmd, {depthPyramid.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+  });
+
+  for (uint32_t level = 0; level < levels; ++level) {
+    const VkDescriptorImageInfo source =
+        level == 0 ? VkDescriptorImageInfo{nearestSampler, depth.view,
+                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+                   : VkDescriptorImageInfo{minSampler, depthPyramidLevels[level - 1],
+                                           VK_IMAGE_LAYOUT_GENERAL};
+    const VkDescriptorImageInfo destination{VK_NULL_HANDLE, depthPyramidLevels[level],
+                                            VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet writes[2]{};
+    for (uint32_t b = 0; b < 2; ++b) {
+      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[b].dstSet = pyramidSets[level];
+      writes[b].dstBinding = b;
+      writes[b].descriptorCount = 1;
+      writes[b].descriptorType = b == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                        : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      writes[b].pImageInfo = b == 0 ? &source : &destination;
+    }
+    vkUpdateDescriptorSets(device.device, 2, writes, 0, nullptr);
+  }
+}
+
 void Renderer::Impl::destroySwapchain() {
   for (Image &image : history) {
     destroyImage(image);
   }
   destroyImage(motion);
   destroyImage(hdr);
+  for (VkImageView view : depthPyramidLevels) {
+    vkDestroyImageView(device.device, view, nullptr);
+  }
+  depthPyramidLevels.clear();
+  destroyImage(depthPyramid);
   destroyImage(depth);
 
   for (VkSemaphore semaphore : renderFinished) {
@@ -231,6 +294,50 @@ void Renderer::Impl::createDescriptors() {
   samplerInfo.minFilter = VK_FILTER_LINEAR;
   check(vkCreateSampler(dev, &samplerInfo, nullptr, &linearSampler),
         "vkCreateSampler");
+  VkSamplerReductionModeCreateInfo reduction{};
+  reduction.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO;
+  reduction.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
+  samplerInfo.pNext = &reduction;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &minSampler),
+        "vkCreateSampler");
+  samplerInfo.pNext = nullptr;
+
+  VkDescriptorSetLayoutBinding pyramidBindings[2]{};
+  for (uint32_t b = 0; b < 2; ++b) {
+    pyramidBindings[b].binding = b;
+    pyramidBindings[b].descriptorType = b == 0
+                                            ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                            : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    pyramidBindings[b].descriptorCount = 1;
+    pyramidBindings[b].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  }
+  VkDescriptorSetLayoutCreateInfo pyramidLayoutInfo{};
+  pyramidLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  pyramidLayoutInfo.bindingCount = 2;
+  pyramidLayoutInfo.pBindings = pyramidBindings;
+  check(vkCreateDescriptorSetLayout(dev, &pyramidLayoutInfo, nullptr,
+                                    &pyramidSetLayout),
+        "vkCreateDescriptorSetLayout");
+  VkDescriptorPoolSize pyramidPoolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPyramidLevels},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kMaxPyramidLevels},
+  };
+  VkDescriptorPoolCreateInfo pyramidPoolInfo{};
+  pyramidPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pyramidPoolInfo.maxSets = kMaxPyramidLevels;
+  pyramidPoolInfo.poolSizeCount = 2;
+  pyramidPoolInfo.pPoolSizes = pyramidPoolSizes;
+  check(vkCreateDescriptorPool(dev, &pyramidPoolInfo, nullptr, &pyramidPool),
+        "vkCreateDescriptorPool");
+  std::array<VkDescriptorSetLayout, kMaxPyramidLevels> pyramidSetLayouts;
+  pyramidSetLayouts.fill(pyramidSetLayout);
+  VkDescriptorSetAllocateInfo pyramidAlloc{};
+  pyramidAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  pyramidAlloc.descriptorPool = pyramidPool;
+  pyramidAlloc.descriptorSetCount = kMaxPyramidLevels;
+  pyramidAlloc.pSetLayouts = pyramidSetLayouts.data();
+  check(vkAllocateDescriptorSets(dev, &pyramidAlloc, pyramidSets.data()),
+        "vkAllocateDescriptorSets");
 
   // Must match post.glsl.
   constexpr VkShaderStageFlags kPostStages =
@@ -591,6 +698,18 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),
         "vkCreatePipelineLayout");
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
+
+  VkPushConstantRange pyramidPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                       sizeof(PyramidConstants)};
+  VkPipelineLayoutCreateInfo pyramidLayoutInfo{};
+  pyramidLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pyramidLayoutInfo.setLayoutCount = 1;
+  pyramidLayoutInfo.pSetLayouts = &pyramidSetLayout;
+  pyramidLayoutInfo.pushConstantRangeCount = 1;
+  pyramidLayoutInfo.pPushConstantRanges = &pyramidPushRange;
+  check(vkCreatePipelineLayout(dev, &pyramidLayoutInfo, nullptr, &pyramidLayout),
+        "vkCreatePipelineLayout");
+  pyramidPipeline = createComputePipeline(dev, "depth_pyramid.comp", pyramidLayout);
   histogramPipeline =
       createComputePipeline(dev, "histogram.comp", postLayout);
   exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
@@ -655,6 +774,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
   features12.bufferDeviceAddress = VK_TRUE;
+  // Min-reduction sampling builds the occlusion depth pyramid.
+  features12.samplerFilterMinmax = VK_TRUE;
   // Bindless textures: one large, partially filled array indexed per pixel.
   features12.descriptorIndexing = VK_TRUE;
   features12.runtimeDescriptorArray = VK_TRUE;
@@ -772,6 +893,8 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->transmittanceLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->exposurePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->pyramidPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
   vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
@@ -812,6 +935,9 @@ Renderer::~Renderer() {
   impl_->destroyBuffer(impl_->exposureBuffer);
   impl_->destroyBuffer(impl_->histogramBuffer);
   impl_->destroySwapchain();
+  vkDestroyDescriptorPool(dev, impl_->pyramidPool, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->pyramidSetLayout, nullptr);
+  vkDestroySampler(dev, impl_->minSampler, nullptr);
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->atmosphereSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);

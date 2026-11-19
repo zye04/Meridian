@@ -49,6 +49,11 @@ struct Renderer::Impl {
   // Temporal anti-aliasing history, ping-ponged: each frame reads one and
   // writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
   std::array<Image, 2> history;
+  // Min-reduced depth for occlusion culling: the screen rounded down to
+  // powers of two, one view per level. Always in VK_IMAGE_LAYOUT_GENERAL.
+  Image depthPyramid;
+  std::vector<VkImageView> depthPyramidLevels;
+  VkExtent2D depthPyramidExtent{};
   bool historyValid = false;
   Mat4 previousViewProjection;
 
@@ -92,6 +97,14 @@ struct Renderer::Impl {
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
+  // Linear filtering that returns the minimum of the footprint.
+  VkSampler minSampler = VK_NULL_HANDLE;
+  VkDescriptorSetLayout pyramidSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool pyramidPool = VK_NULL_HANDLE;
+  // pyramidSets[i] reads level i - 1 (the depth image for i = 0), writes i.
+  std::array<VkDescriptorSet, kMaxPyramidLevels> pyramidSets{};
+  VkPipelineLayout pyramidLayout = VK_NULL_HANDLE;
+  VkPipeline pyramidPipeline = VK_NULL_HANDLE;
   VkDescriptorSetLayout postSetLayout = VK_NULL_HANDLE;
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
   // postSets[i] reads history[i] and writes history[1 - i].
@@ -174,6 +187,8 @@ struct Renderer::Impl {
   void buildTlas(VkCommandBuffer cmd, FrameData &frame);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
   void cullInstances(VkCommandBuffer cmd, const FrameData &frame);
+  void buildDepthPyramid(VkCommandBuffer cmd);
+  void createDepthPyramid();
 
   template <typename Record> void submitNow(Record &&record);
 };
