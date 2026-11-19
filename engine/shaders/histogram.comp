@@ -1,0 +1,41 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "post.glsl"
+
+// Builds a histogram of the frame's log luminance from every second pixel in
+// each direction; a quarter of the samples meters just as well. Each workgroup
+// counts into shared memory first, so only one global atomic per bin per group
+// is needed.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+shared uint localBins[kHistogramBins];
+
+uint luminanceToBin(float luminance) {
+    if (luminance <= 0.0) {
+        return 0u;
+    }
+    float t = (log2(luminance) - kMinLogLuminance) / kLogLuminanceRange;
+    return uint(clamp(t * float(kHistogramBins), 0.0, float(kHistogramBins - 1u)));
+}
+
+void main() {
+    localBins[gl_LocalInvocationIndex] = 0u;
+    barrier();
+
+    ivec2 size = textureSize(resolved, 0);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) * 2;
+    if (all(lessThan(pixel, size))) {
+        vec3 color = texelFetch(resolved, pixel, 0).rgb;
+        // Undo pre-exposure to get back to physical luminance.
+        float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722)) /
+                          post.exposure.exposure;
+        atomicAdd(localBins[luminanceToBin(luminance)], 1u);
+    }
+    barrier();
+
+    uint count = localBins[gl_LocalInvocationIndex];
+    if (count > 0u) {
+        atomicAdd(post.histogram.bins[gl_LocalInvocationIndex], count);
+    }
+}

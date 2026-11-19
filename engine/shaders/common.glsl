@@ -1,6 +1,7 @@
 // Shared by all mesh shaders. Layouts must match Vertex, SceneData and
 // PushConstants in C++.
 #extension GL_EXT_buffer_reference : require
+#include "exposure.glsl"
 
 struct Vertex {
     vec3 position;
@@ -20,13 +21,16 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     mat4 currentViewProjection;
     mat4 previousViewProjection;
     vec3 sunDirection;
-    float exposure;
+    float pad0;
     vec3 sunIlluminance;
     uint frameIndex;
     vec3 skyLuminance;
     float sunAngularRadius;
     // Device address of the scene's top-level acceleration structure.
     uvec2 tlas;
+    // Written by last frame's exposure pass; the scene is shaded with it
+    // ("pre-exposure") so the HDR target holds display-range values.
+    ExposureBuffer exposure;
 };
 
 layout(push_constant) uniform PushConstants {

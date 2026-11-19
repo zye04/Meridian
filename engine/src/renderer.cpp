@@ -14,6 +14,7 @@
 #endif
 
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -34,6 +35,8 @@ constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 // Halton(2,3) jitter cycle length.
 constexpr uint32_t kJitterPhases = 8;
+// Exposure for the very first frame, before any histogram exists: a sunny day.
+constexpr float kInitialEv100 = 15.0f;
 // Upper bound on draw items per frame, sizing each frame's TLAS.
 constexpr uint32_t kMaxInstances = 4096;
 
@@ -76,20 +79,33 @@ struct SceneData {
   Mat4 currentViewProjection;
   Mat4 previousViewProjection;
   Vec3 sunDirection;
-  float exposure = 1.0f;
+  float pad0 = 0.0f;
   Vec3 sunIlluminance;
   uint32_t frameIndex = 0;
   Vec3 skyLuminance;
   float sunAngularRadius = 0.0f;
   VkDeviceAddress tlas = 0;
-  uint64_t pad1 = 0;
+  VkDeviceAddress exposure = 0;
 };
 static_assert(sizeof(SceneData) == 256);
+
+// Must match ExposureBuffer in exposure.glsl.
+struct ExposureState {
+  float exposure = 0.0f;
+  float ev100 = 0.0f;
+};
+
+constexpr uint32_t kHistogramBins = 256;
 
 // Must match the push_constant block in post.glsl.
 struct PostConstants {
   uint32_t historyValid = 0;
+  float deltaSeconds = 0.0f;
+  VkDeviceAddress histogram = 0;
+  VkDeviceAddress exposure = 0;
+  float exposureCompensation = 0.0f;
 };
+static_assert(sizeof(PostConstants) == 32);
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
@@ -202,6 +218,7 @@ struct PipelineDesc {
   std::span<const VkFormat> colorFormats;
   VkFormat depthFormat = VK_FORMAT_UNDEFINED;
   VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
+  bool depthTest = true;
 };
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
@@ -247,8 +264,10 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   // Reverse-Z: nearer surfaces have larger depth values.
   VkPipelineDepthStencilStateCreateInfo depthStencil{};
   depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  depthStencil.depthTestEnable = desc.depthFormat != VK_FORMAT_UNDEFINED;
-  depthStencil.depthWriteEnable = desc.depthFormat != VK_FORMAT_UNDEFINED;
+  const bool depthTest =
+      desc.depthTest && desc.depthFormat != VK_FORMAT_UNDEFINED;
+  depthStencil.depthTestEnable = depthTest;
+  depthStencil.depthWriteEnable = depthTest;
   depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 
   VkPipelineColorBlendAttachmentState blendAttachment{};
@@ -380,6 +399,15 @@ struct Renderer::Impl {
   std::array<VkDescriptorSet, 2> postSets{};
   VkPipelineLayout postLayout = VK_NULL_HANDLE;
   VkPipeline taaPipeline = VK_NULL_HANDLE;
+  VkPipeline histogramPipeline = VK_NULL_HANDLE;
+  VkPipeline exposurePipeline = VK_NULL_HANDLE;
+  VkPipeline skyPipeline = VK_NULL_HANDLE;
+
+  // Auto-exposure: a luminance histogram and the adapted exposure, both
+  // GPU-only. Each frame shades with the exposure the previous frame computed.
+  Buffer histogramBuffer;
+  Buffer exposureBuffer;
+  std::chrono::steady_clock::time_point lastDrawTime;
   VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
   std::vector<GpuMesh> meshes;
@@ -389,6 +417,7 @@ struct Renderer::Impl {
   void createFrames();
   void createDescriptors();
   void createPipelines();
+  void createExposureBuffers();
 
   Image createImage(VkFormat format, VkImageUsageFlags usage,
                     VkImageAspectFlags aspect);
@@ -868,6 +897,38 @@ void Renderer::Impl::createDescriptors() {
         "vkAllocateDescriptorSets");
 }
 
+void Renderer::Impl::createExposureBuffers() {
+  constexpr VkBufferUsageFlags kUsage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  histogramBuffer =
+      createBuffer(kHistogramBins * sizeof(uint32_t), kUsage, 0);
+  exposureBuffer = createBuffer(sizeof(ExposureState), kUsage, 0);
+
+  ExposureState initial;
+  initial.ev100 = kInitialEv100;
+  initial.exposure = 1.0f / (1.2f * std::exp2(kInitialEv100));
+  submitNow([&](VkCommandBuffer cmd) {
+    vkCmdFillBuffer(cmd, histogramBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
+    vkCmdUpdateBuffer(cmd, exposureBuffer.buffer, 0, sizeof(initial),
+                      &initial);
+
+    VkMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    VkDependencyInfo dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+  });
+}
+
 void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
@@ -905,6 +966,16 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
 
   taaPipeline = createComputePipeline(dev, "taa.comp", postLayout);
+  histogramPipeline =
+      createComputePipeline(dev, "histogram.comp", postLayout);
+  exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
+
+  skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
+                                             .fragmentShader = "sky.frag",
+                                             .layout = meshLayout,
+                                             .colorFormats = sceneFormats,
+                                             .depthFormat = kDepthFormat,
+                                             .depthTest = false});
 
   const VkFormat swapchainFormat[] = {swapchain.image_format};
   tonemapPipeline =
@@ -1008,6 +1079,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->createDescriptors();
   impl_->createSwapchain();
   impl_->createPipelines();
+  impl_->createExposureBuffers();
+  impl_->lastDrawTime = std::chrono::steady_clock::now();
 
   std::cout << "GPU: " << physical.value().name << "\n";
 }
@@ -1198,9 +1271,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   const float aspect =
       static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
-  // Exposure is applied while shading ("pre-exposure") so the HDR target
-  // holds display-range values: physical luminances like the sun disk would
-  // overflow 16-bit floats.
   // Sub-pixel jitter in pixels, cycling through Halton(2,3). The temporal
   // resolve turns it into anti-aliasing (and DLSS will need it too).
   const uint32_t phase =
@@ -1223,7 +1293,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
   impl_->previousViewProjection = scene.currentViewProjection;
   scene.sunDirection = lighting.sunDirection;
-  scene.exposure = camera.exposure();
+  scene.exposure = impl_->exposureBuffer.address;
   scene.sunIlluminance = lighting.sunIlluminance;
   scene.skyLuminance = lighting.skyLuminance;
   scene.sunAngularRadius = lighting.sunAngularRadius;
@@ -1277,15 +1347,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT});
 
-  const Vec3 sky = lighting.skyLuminance * scene.exposure;
-
   VkRenderingAttachmentInfo hdrAttachment{};
   hdrAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
   hdrAttachment.imageView = impl_->hdr.view;
   hdrAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  hdrAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  // The sky pass covers every pixel, so nothing needs clearing.
+  hdrAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   hdrAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  hdrAttachment.clearValue.color = {{sky.x, sky.y, sky.z, 1.0f}};
 
   VkRenderingAttachmentInfo depthAttachment{};
   depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1303,7 +1371,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   motionAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
   motionAttachment.imageView = impl_->motion.view;
   motionAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  motionAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  motionAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   motionAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
   const VkRenderingAttachmentInfo sceneAttachments[] = {hdrAttachment,
@@ -1313,10 +1381,19 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   sceneRendering.pDepthAttachment = &depthAttachment;
 
   vkCmdBeginRendering(cmd, &sceneRendering);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    impl_->meshPipeline);
   vkCmdSetViewport(cmd, 0, 1, &viewport);
   vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+  PushConstants skyPush;
+  skyPush.sceneBuffer = frame.sceneBuffer.address;
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
+  vkCmdPushConstants(cmd, impl_->meshLayout,
+                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                     0, sizeof(skyPush), &skyPush);
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    impl_->meshPipeline);
 
   for (const DrawItem &item : items) {
     const GpuMesh &mesh = impl_->meshes[item.mesh.index];
@@ -1365,8 +1442,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdPipelineBarrier2(cmd, &historyDependency);
 
   VkDescriptorSet postSet = impl_->postSets[impl_->frameNumber % 2];
+  const auto now = std::chrono::steady_clock::now();
   PostConstants postConstants;
   postConstants.historyValid = impl_->historyValid ? 1 : 0;
+  postConstants.deltaSeconds = std::min(
+      std::chrono::duration<float>(now - impl_->lastDrawTime).count(), 0.1f);
+  postConstants.histogram = impl_->histogramBuffer.address;
+  postConstants.exposure = impl_->exposureBuffer.address;
+  postConstants.exposureCompensation = camera.exposureCompensation;
+  impl_->lastDrawTime = now;
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->taaPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1376,12 +1460,31 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                      0, sizeof(postConstants), &postConstants);
   vkCmdDispatch(cmd, (extent.width + 7) / 8, (extent.height + 7) / 8, 1);
 
+  // Every pass below reads what the previous one wrote, so one barrier
+  // shape (compute writes -> compute/fragment reads) serves all of them.
   historyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
   historyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
   vkCmdPipelineBarrier2(cmd, &historyDependency);
   impl_->historyValid = true;
+
+  // --- Auto-exposure: histogram of the resolved frame, then adaptation.
+  // The new exposure is used by the next frame's scene pass.
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->histogramPipeline);
+  // One thread per 2x2 pixels (see histogram.comp).
+  vkCmdDispatch(cmd, (extent.width + 31) / 32, (extent.height + 31) / 32, 1);
+  vkCmdPipelineBarrier2(cmd, &historyDependency);
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->exposurePipeline);
+  vkCmdDispatch(cmd, 1, 1, 1);
+  vkCmdPipelineBarrier2(cmd, &historyDependency);
 
   // --- Tonemap pass: resolved HDR -> swapchain image.
 
@@ -1483,6 +1586,9 @@ Renderer::~Renderer() {
   }
 
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->skyPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->exposurePipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
@@ -1501,6 +1607,8 @@ Renderer::~Renderer() {
     vkDestroyCommandPool(dev, frame.commandPool, nullptr);
   }
 
+  impl_->destroyBuffer(impl_->exposureBuffer);
+  impl_->destroyBuffer(impl_->histogramBuffer);
   impl_->destroySwapchain();
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);

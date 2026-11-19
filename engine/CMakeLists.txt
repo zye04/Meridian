@@ -17,7 +17,10 @@ set(SHADER_SOURCES
     shaders/mesh.frag
     shaders/fullscreen.vert
     shaders/tonemap.frag
-    shaders/taa.comp)
+    shaders/taa.comp
+    shaders/histogram.comp
+    shaders/exposure.comp
+    shaders/sky.frag)
 foreach(source ${SHADER_SOURCES})
   get_filename_component(name ${source} NAME)
   set(output ${SHADER_DIR}/${name}.spv)
@@ -29,6 +32,7 @@ foreach(source ${SHADER_SOURCES})
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source}
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/common.glsl
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/post.glsl
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/exposure.glsl
     VERBATIM)
   list(APPEND SHADER_OUTPUTS ${output})
 endforeach()

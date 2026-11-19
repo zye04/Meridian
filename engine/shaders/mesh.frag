@@ -96,7 +96,7 @@ void main() {
     vec3 ambient = albedo * mix(groundLuminance, pc.scene.skyLuminance,
                                 normal.y * 0.5 + 0.5);
 
-    outColor = vec4((direct + ambient) * pc.scene.exposure, 1.0);
+    outColor = vec4((direct + ambient) * pc.scene.exposure.exposure, 1.0);
 
     vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;

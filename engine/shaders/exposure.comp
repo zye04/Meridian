@@ -1,0 +1,56 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "post.glsl"
+
+// Turns the luminance histogram into a new exposure. Averages the middle of
+// the histogram (ignoring the darkest and brightest 10%, so the sun or deep
+// shadows don't swing it), converts to EV100 (Lagarde & de Rousiers 2014),
+// and eases toward it like an eye adapting. Also clears the histogram.
+// 256 bins are trivial work, so one thread does it all.
+
+layout(local_size_x = 1) in;
+
+const float kLowPercentile = 0.1;
+const float kHighPercentile = 0.9;
+const float kMinEv100 = -6.0;
+const float kMaxEv100 = 18.0;
+const float kAdaptationSpeed = 1.5;
+
+void main() {
+    uint total = 0u;
+    for (uint i = 0u; i < kHistogramBins; ++i) {
+        total += post.histogram.bins[i];
+    }
+
+    float low = float(total) * kLowPercentile;
+    float high = float(total) * kHighPercentile;
+    float cumulative = 0.0;
+    float logSum = 0.0;
+    float weightSum = 0.0;
+    for (uint i = 0u; i < kHistogramBins; ++i) {
+        float count = float(post.histogram.bins[i]);
+        post.histogram.bins[i] = 0u;
+
+        float inRange = max(min(cumulative + count, high) - max(cumulative, low), 0.0);
+        cumulative += count;
+        float logLuminance = kMinLogLuminance +
+            (float(i) + 0.5) / float(kHistogramBins) * kLogLuminanceRange;
+        logSum += inRange * logLuminance;
+        weightSum += inRange;
+    }
+
+    float current = post.exposure.ev100;
+    float target = current;
+    if (weightSum > 0.0) {
+        // EV100 = log2(L * S / K) with ISO S = 100 and calibration K = 12.5.
+        target = logSum / weightSum + log2(100.0 / 12.5) -
+                 post.exposureCompensation;
+        target = clamp(target, kMinEv100, kMaxEv100);
+    }
+
+    float ev100 = current + (target - current) *
+                  (1.0 - exp(-post.deltaSeconds * kAdaptationSpeed));
+    post.exposure.ev100 = ev100;
+    // The luminance that saturates a sensor at this EV maps to 1.0.
+    post.exposure.exposure = 1.0 / (1.2 * exp2(ev100));
+}
