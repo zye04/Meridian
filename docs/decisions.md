@@ -556,3 +556,78 @@ foliage that survives simplification).
   - https://developer.nvidia.com/blog/rtx-best-practices/
   - https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-pipeline-barriers
   - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/partitions_and_ptlas.md
+
+## Tree import: Megascans Megaplants USD (M2a, 2026-11-19)
+
+- **Two stages.** `tools/usd2gltf/usd2gltf.py` reads the USD with Pixar's
+  `usd-core` (pinned 26.11 in `requirements.txt`, installed into a
+  git-ignored venv by `setup.sh`) and writes an *unflattened* glTF: one
+  mesh per mesh prim (one primitive per bound material, from the
+  `materialBind` GeomSubsets), one node per place it is drawn, with
+  transforms composed through the nested PointInstancers
+  (`ComputeInstanceTransformsAtTime`, prototype-root transform included).
+  It only converts: polygons are fanned, leftHanded winding is flipped,
+  face-varying `st`/normals split vertices (V flipped for glTF), and
+  materials keep the UsdPreviewSurface flat color and roughness. Leaf
+  materials are found by Megascans' `TwoSided_Material` name (the meshes
+  leave `doubleSided` unset). Skinning primvars are ignored (no wind).
+  `meridian-cook --tree` (C++, meshoptimizer) does all geometry work.
+- **Why `usd-core`:** Pixar's own reader as an official binary wheel (no
+  build), the only reader certain to handle nested PointInstancers and
+  every usdc crate version Fab ships; an offline import dependency only,
+  outside the engine and the CMake build. Rejected: OpenUSD from source in
+  `meridian-cook` (a large C++ build with TBB for an offline step);
+  tinyusdz (single C++ library that would fit FetchContent, but its usdc
+  and nested PointInstancer support is unverified for these files, and a
+  half-imported tree is worse than a Python step); Blender as converter
+  (not installed, heavy, its USD instancer import another unknown).
+  Megaplants specifics the importer relies on: prototypes live under
+  `class` prims (traversed without the abstract filter only inside
+  prototypes), a prototype root's `invisible` hides only its source
+  definition, Skeleton prims are `guide` purpose.
+- **Budget.** One simplification ratio for every prototype (each gets a
+  share of the budget weighted by its instance count), lowered until the
+  flattened tree fits or meshoptimizer stops at its error limit:
+  `meshopt_simplifyWithAttributes` with normals (weight 0.5) and an
+  absolute 1 cm error in prototype space, for wood and for each leaf
+  piece (position-connected component, simplified on its own after
+  dropping its UVs). Still over budget, whole leaf pieces are pruned in a
+  hashed random order and the survivors scaled about their centroids so
+  the total leaf area stays the same (stochastic pruning with area
+  compensation). The six vertices holding the tree's bounds are locked and
+  their pieces kept unscaled; each scale is clamped to the bounds, so
+  bounds stay exact. A 5 mm leaf error left beech needing 44% of its leaf
+  pieces pruned (scale 1.35); 1 cm keeps 95% (scale 1.05) with the same
+  silhouette (offline coverage of the source vs. the cook differs by 0.7%
+  of pixels, side view).
+- **Per-leaf tint.** The leaf material's base color is a 16x16 palette of
+  the species color jittered by +-3% hue and +-8% brightness; every vertex
+  of a leaf piece gets one hashed texel-center UV (constant UV, no bleed at
+  mip 0). No vertex-format or shader change.
+- **Bark.** ambientCG Bark012 (CC0, 2K): Color, NormalGL, and
+  AmbientOcclusion + Roughness packed as glTF ORM, cooked to KTX2 through
+  the existing encoder. The base color factor is the species color divided
+  by the texture's linear mean, so the bark averages to the authored color
+  at a distance.
+- **Measured** (Debug cook, variant A; budget 4M for canopy trees, 1M for
+  saplings, a few meters tall):
+
+| Tree | Source tris | Cooked tris | Leaf area m^2 (delta) | Height m | Cook s | Clusters s / MB |
+|---|---|---|---|---|---|---|
+| european beech 01 | 46.1M | 4.00M (wood 0.75M) | 533.4 (0.00%, 95% of pieces kept, x1.049) | 26.6 | 78 | 15.4 / 59 |
+| english oak forest 01 | 14.2M | 4.00M (wood 0.68M) | 67.8 (0.00%, x1.012) | 17.7 | 61 | 14.8 / 57 |
+| norway maple 01 | 5.90M | 4.00M (wood 1.84M) | 218.8 (0.00%) | 15.5 | 44 | 11.3 / 52 |
+| european beech saplings 01 | 0.86M | 0.86M | 6.3 | 3.0 | 27 | 1.9 / 11 |
+| rowan sapling | 3.46M | 1.00M (wood 0.06M) | 1.6 (0.00%, all pieces kept) | 2.8 | 31 | 2.5 / 14 |
+
+  Cook time includes ~20 s of bark encoding per tree; usd2gltf takes 12-14 s
+  for beech and oak, 1-2 s for the others. Geometry pools grow to fit the
+  scatter with all five (12.9M vertices, 51M indices, 30M + 34M cluster
+  vertex references and triangles): 16M vertices, 64M indices, 48M + 48M.
+  - https://pypi.org/project/usd-core/
+  - https://openusd.org/release/api/class_usd_geom_point_instancer.html
+  - https://openusd.org/release/api/usd_preview_surface.html
+  - https://github.com/lighttransport/tinyusdz
+  - https://graphics.pixar.com/library/StochasticSimplification/ (Cook, Halstead, Planck, Ryu 2007)
+  - https://meshoptimizer.org/#simplification
+  - https://ambientcg.com/view?id=Bark012

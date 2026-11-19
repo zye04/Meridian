@@ -30,6 +30,9 @@ flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
+./tools/fetch-sample-assets.sh ~/Downloads       # + imports the Megascans Megaplants tree_*_usd.zip found there
+tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd2gltf.py in.usd out.gltf   # USD tree -> unflattened glTF
+./build/tools/cook/meridian-cook --tree in.gltf outDir --triangles N [--bark-texture dir]   # flatten to <= N tris
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 ```
 
@@ -75,9 +78,11 @@ sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 0`; float precision far out, at the crop's corner (ground 1286.5 m),
 `7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
 Laplacian with the still's).
-`--scatter N` places N random Poly Haven models within 150 m of the start
-(fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
-startup ~60 s); over the scatter: `1119 1362 -431 -1.55 -0.25`. Debug
+`--scatter N` places N random Poly Haven models and imported Megaplants
+trees within 150 m of the start (fixed seed; loading 21 models, 14M
+triangles, makes Debug startup ~3.7 min); over the scatter:
+`1119 1362 -431 -1.55 -0.25`; a 27 m beech (with `--scatter 100`):
+`1115.47 1366.85 -429.72 1.223 0`. Debug
 startup without scatter is ~12 s (heightfield pyramid and normal map).
 
 ## Testing policy (usage matters)
@@ -134,7 +139,10 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain_select.comp, terrain.mesh, terrain.frag
                            (mesh.frag with TERRAIN), terrain_normals.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
-tools/cook/                meridian-cook
+tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
+                           prune, flatten), ktx2.cpp (shared encoder)
+tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
+                           in a git-ignored venv made by setup.sh)
 tests/                     doctest unit tests
 docs/decisions.md          technique decisions with sources
 ```
@@ -256,6 +264,13 @@ images are shared between them, and barriers account for that.
   terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
+- Megaplants trees: `assets/source/megascans/_extract/<zip>/` (untrusted
+  archive contents, one fresh directory each), `_usd/<tree>.gltf`
+  (usd2gltf output), `<tree>/<tree>.gltf` (cooked, 4M triangles, saplings
+  1M, Bark012 bark). Their USD has no normals on most meshes (the cook computes them),
+  leftHanded winding (usd2gltf flips it), and leaf materials named
+  `TwoSided_Material` (usd2gltf marks them double-sided; the cook treats
+  double-sided materials as leaves).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building

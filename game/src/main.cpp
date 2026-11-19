@@ -127,9 +127,18 @@ int scatterModels(meridian::Renderer &renderer, const meridian::Heightfield &ter
                        "dead_tree_trunk_02", "dry_branches_medium_01", "pine_roots",
                        "fern_02", "nettle_plant", "shrub_02", "dandelion_01",
                        "fir_sapling", "pine_sapling_small", "island_tree_01"};
-  std::vector<meridian::Model> models;
+  std::vector<std::string> paths;
   for (const char *id : ids) {
-    const std::string path = std::string(id) + "/" + id + "_2k.gltf";
+    paths.push_back(std::string(id) + "/" + id + "_2k.gltf");
+  }
+  // Megascans Megaplants, imported by tools/fetch-sample-assets.sh.
+  for (const char *tree : {"tree_european_beech_01_a", "tree_english_oak_forest_01_a",
+                           "tree_norway_maple_01_a", "tree_european_beech_saplings_01_a",
+                           "tree_rowan_sapling_a"}) {
+    paths.push_back(std::string("source/megascans/") + tree + "/" + tree + ".gltf");
+  }
+  std::vector<meridian::Model> models;
+  for (const std::string &path : paths) {
     if (auto model = loadModel(renderer, path.c_str())) {
       models.push_back(std::move(*model));
     }
@@ -178,7 +187,7 @@ struct Options {
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::filesystem::path> capturePath;
-  // Poly Haven models to scatter on the ground around the start.
+  // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
   bool occlusion = true;
   // Largest simplification error on screen in pixels (0: full detail).

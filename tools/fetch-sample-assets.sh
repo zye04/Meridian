@@ -14,10 +14,15 @@
 # attribution "© swisstopo"): the 2 m elevation tiles of the Napf region,
 # E 2631..2645, N 1198..1212 (LV95 km, 15 x 15 tiles), mosaicked and cooked
 # to assets/terrain/napf.height. Needs magick.
+# From ambientCG (CC0): a bark texture set (Bark012, 2K) for imported trees.
+# Megascans Megaplants trees (Fab, need a login, so not downloaded): pass the
+# directory holding the tree_*_usd.zip downloads as the first argument to
+# import variant A of each through tools/usd2gltf and meridian-cook --tree.
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
+megaplants="${1:-}"
 
-for tool in curl jq magick; do
+for tool in curl jq magick unzip; do
   command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
 done
 
@@ -74,6 +79,18 @@ for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_0
   done < <(polyhaven_files "$texture" |
       jq -r '.Diffuse, .nor_gl, .arm, .Displacement | .["2k"].jpg.url')
 done
+
+bark="$root/assets/source/textures/Bark012"
+if [[ ! -f "$bark/Bark012_2K-JPG_Color.jpg" ]]; then
+  echo "Downloading Bark012"
+  mkdir -p "$bark"
+  curl -fsSL -A meridian-fetch "https://ambientcg.com/get?file=Bark012_2K-JPG.zip" \
+    -o "$bark/Bark012.zip"
+  unzip -q -o "$bark/Bark012.zip" -d "$bark" Bark012_2K-JPG_Color.jpg \
+    Bark012_2K-JPG_NormalGL.jpg Bark012_2K-JPG_Roughness.jpg \
+    Bark012_2K-JPG_AmbientOcclusion.jpg
+  rm "$bark/Bark012.zip"
+fi
 
 # Latest year available per tile; the survey is flown in rotation, so a tile
 # can be missing from the newest year.
@@ -149,6 +166,40 @@ if [[ ! -f "$root/assets/terrain/napf.height" ]]; then
     "gray:$napf_tiles/napf.f32"
   "$cook" --heightfield "$napf_tiles/napf.f32" 7500 7500 2 "$root/assets/terrain/napf.height"
   rm -f "${rows[@]}"
+fi
+
+# Megaplants: each zip is extracted into its own empty directory (untrusted
+# data, kept apart from the scripts that read it), converted to an
+# unflattened glTF, then cooked to 4M triangles (saplings 1M).
+megascans="$root/assets/source/megascans"
+if [[ -z "$megaplants" ]]; then
+  echo "Skipping Megascans trees: pass the directory with the tree_*_usd.zip downloads"
+else
+  "$root/tools/usd2gltf/setup.sh"
+  for zip in "$megaplants"/tree_*_usd.zip; do
+    [[ -f "$zip" ]] || continue
+    extract="$megascans/_extract/$(basename "$zip" .zip)"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part"
+      mv "$extract.part" "$extract"
+    fi
+    usd="$(find "$extract" -maxdepth 1 -iname '*_A.usd' | head -n 1)"
+    if [[ -z "$usd" ]]; then
+      echo "No variant A (*_A.usd) in $zip" >&2
+      continue
+    fi
+    name="$(basename "${usd%.*}" | tr '[:upper:]' '[:lower:]')"
+    [[ -f "$megascans/$name/$name.gltf" ]] && continue
+    "$root/tools/usd2gltf/.venv/bin/python" -I "$root/tools/usd2gltf/usd2gltf.py" "$usd" \
+      "$megascans/_usd/$name.gltf"
+    # Saplings are a few meters tall: a quarter of a canopy tree's budget.
+    triangles=4000000
+    [[ "$name" == *sapling* ]] && triangles=1000000
+    "$cook" --tree "$megascans/_usd/$name.gltf" "$megascans/$name" --triangles "$triangles" \
+      --bark-texture "$bark"
+  done
 fi
 
 echo "Assets in $root/assets"

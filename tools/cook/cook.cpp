@@ -6,6 +6,9 @@
 // BC7 at load time. Color textures are encoded and mip-filtered as sRGB;
 // normal maps keep unit-length normals in every mip.
 
+#include "ktx2.h"
+#include "tree.h"
+
 #include <basisu_comp.h>
 #include <fastgltf/core.hpp>
 #include <fastgltf/tools.hpp>
@@ -25,19 +28,7 @@
 
 namespace {
 
-enum class Usage { Color, Data, Normal };
-
-std::vector<uint8_t> readFile(const std::filesystem::path &path) {
-  std::ifstream stream(path, std::ios::binary | std::ios::ate);
-  if (!stream) {
-    throw std::runtime_error("cannot open " + path.string());
-  }
-  std::vector<uint8_t> bytes(static_cast<size_t>(stream.tellg()));
-  stream.seekg(0);
-  stream.read(reinterpret_cast<char *>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
-  return bytes;
-}
+using namespace meridian::cook;
 
 std::vector<uint8_t> sourceImageBytes(const fastgltf::Asset &asset,
                                       const fastgltf::Image &image,
@@ -61,43 +52,6 @@ std::vector<uint8_t> sourceImageBytes(const fastgltf::Asset &asset,
     return {begin, begin + bufferView.byteLength};
   }
   throw std::runtime_error("unsupported image source");
-}
-
-basisu::image decode(const std::vector<uint8_t> &bytes) {
-  basisu::image image;
-  const bool isPng = bytes.size() > 4 && bytes[0] == 0x89 && bytes[1] == 'P';
-  const bool ok = isPng ? basisu::load_png(bytes.data(), bytes.size(), image)
-                        : basisu::load_jpg(bytes.data(), bytes.size(), image);
-  if (!ok) {
-    throw std::runtime_error("cannot decode PNG/JPEG image");
-  }
-  return image;
-}
-
-std::vector<uint8_t> encodeKtx2(const basisu::image &image, Usage usage,
-                                basisu::job_pool &jobPool) {
-  basisu::basis_compressor_params params;
-  params.m_source_images.push_back(image);
-  params.set_format_mode(basist::basis_tex_format::cUASTC_LDR_4x4);
-  params.m_pack_uastc_ldr_4x4_flags = basisu::cPackUASTCLevelSlower;
-  params.m_create_ktx2_file = true;
-  params.m_ktx2_uastc_supercompression = basist::KTX2_SS_ZSTANDARD;
-  params.m_mip_gen = true;
-  // Perceptual error metric, sRGB mip filtering and the KTX2 sRGB transfer
-  // function, all on for color and off for data.
-  params.set_srgb_options(usage == Usage::Color);
-  params.m_mip_renormalize = usage == Usage::Normal;
-  params.m_status_output = false;
-  params.m_multithreading = true;
-  params.m_pJob_pool = &jobPool;
-
-  basisu::basis_compressor compressor;
-  if (!compressor.init(params) ||
-      compressor.process() != basisu::basis_compressor::cECSuccess) {
-    throw std::runtime_error("KTX2 encoding failed");
-  }
-  const auto &ktx2 = compressor.get_output_ktx2_file();
-  return {ktx2.begin(), ktx2.end()};
 }
 
 // Which way each image is sampled decides how it's encoded.
@@ -280,13 +234,32 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if ((argc == 6 || argc == 8) && std::strcmp(argv[1], "--tree") == 0 &&
+      std::strcmp(argv[4], "--triangles") == 0 &&
+      (argc == 6 || std::strcmp(argv[6], "--bark-texture") == 0)) {
+    try {
+      const TreeCookResult result =
+          cookTree(argv[2], argv[3], std::stoull(argv[5]), argc == 8 ? argv[7] : "");
+      std::printf("source %zu tris -> %zu tris, leaf area %.2f -> %.2f m^2 (%+.2f%%)\n",
+                  result.sourceTriangles, result.triangles, result.leafAreaBefore,
+                  result.leafAreaAfter,
+                  100.0 * (result.leafAreaAfter - result.leafAreaBefore) /
+                      result.leafAreaBefore);
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "error: %s\n", error.what());
+      return 1;
+    }
+    return 0;
+  }
   if (argc != 3 && !texture) {
     std::fprintf(stderr,
                  "usage: meridian-cook <input.gltf|.glb> <output-dir>\n"
                  "       meridian-cook --texture <input.png|.jpg> <output.ktx2> "
                  "<color|data|normal>\n"
                  "       meridian-cook --heightfield <in.f32> <width> <height> "
-                 "<spacing> <out.height>\n");
+                 "<spacing> <out.height>\n"
+                 "       meridian-cook --tree <in.gltf> <output-dir> --triangles <n> "
+                 "[--bark-texture <dir>]\n");
     return 2;
   }
   try {

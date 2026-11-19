@@ -42,15 +42,17 @@ constexpr uint32_t kDfgLutSize = 128;
 // Depth pyramid levels: enough for a 32768-pixel-wide screen.
 constexpr uint32_t kMaxPyramidLevels = 16;
 // Shared geometry pools (bump-allocated; real streaming will need an
-// allocator with frees): 8M vertices = 384 MB, 32M indices = 128 MB; cluster
-// hierarchies: 1M clusters = 80 MB, 32M vertex references and 32M
-// triangles = 128 MB each.
-constexpr uint32_t kVertexPoolCapacity = 8u << 20;
-constexpr uint32_t kIndexPoolCapacity = 32u << 20;
+// allocator with frees), sized for the scatter with the five imported
+// Megaplants trees (12.9M vertices, 51M indices, 30M + 34M cluster vertex
+// references and triangles): 16M vertices = 768 MB, 64M indices = 256 MB;
+// cluster hierarchies: 1M clusters = 80 MB, 48M vertex references and 48M
+// triangles = 192 MB each.
+constexpr uint32_t kVertexPoolCapacity = 16u << 20;
+constexpr uint32_t kIndexPoolCapacity = 64u << 20;
 constexpr uint32_t kMaxMeshes = 65536;
 constexpr uint32_t kMaxClusters = 1u << 20;
-constexpr uint32_t kClusterVertexCapacity = 32u << 20;
-constexpr uint32_t kClusterTriangleCapacity = 32u << 20;
+constexpr uint32_t kClusterVertexCapacity = 48u << 20;
+constexpr uint32_t kClusterTriangleCapacity = 48u << 20;
 // Cluster draw lists: opaque, opaque double-sided, masked, masked
 // double-sided. Blended meshes (kDrawBucketBlended) are drawn from the CPU,
 // sorted back to front.

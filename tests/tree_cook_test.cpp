@@ -1,0 +1,283 @@
+#include <doctest/doctest.h>
+#include <fastgltf/core.hpp>
+#include <fastgltf/tools.hpp>
+
+#include "tree.h"
+
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <numeric>
+#include <random>
+#include <string>
+#include <vector>
+
+namespace {
+
+struct Bounds {
+  std::array<float, 3> min{1e30f, 1e30f, 1e30f}, max{-1e30f, -1e30f, -1e30f};
+  void add(const std::array<float, 3> &p) {
+    for (int c = 0; c < 3; ++c) {
+      min[c] = std::min(min[c], p[c]);
+      max[c] = std::max(max[c], p[c]);
+    }
+  }
+};
+
+using Matrix = std::array<float, 16>; // column-major
+
+std::array<float, 3> transform(const Matrix &m, const float *p) {
+  return {m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+          m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+          m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]};
+}
+
+// Rotation about Y, uniform scale and a translation.
+Matrix placement(float yaw, float scale, float x, float y, float z) {
+  const float c = std::cos(yaw) * scale, s = std::sin(yaw) * scale;
+  return {c, 0, -s, 0, 0, scale, 0, 0, s, 0, c, 0, x, y, z, 1};
+}
+
+struct Mesh {
+  std::vector<float> positions, normals, uvs;
+  std::vector<uint32_t> indices;
+};
+
+// A 2 m open tube of 32 x 16 quads: 1024 triangles of wood.
+Mesh tube() {
+  Mesh mesh;
+  for (int ring = 0; ring <= 16; ++ring) {
+    for (int side = 0; side <= 32; ++side) {
+      const float angle = 6.2831853f * side / 32;
+      mesh.positions.insert(mesh.positions.end(),
+                            {0.1f * std::cos(angle), 2.0f * ring / 16, 0.1f * std::sin(angle)});
+      mesh.normals.insert(mesh.normals.end(), {std::cos(angle), 0.0f, std::sin(angle)});
+      mesh.uvs.insert(mesh.uvs.end(), {side / 32.0f, ring / 16.0f});
+    }
+  }
+  for (uint32_t ring = 0; ring < 16; ++ring) {
+    for (uint32_t side = 0; side < 32; ++side) {
+      const uint32_t a = ring * 33 + side, b = a + 1, c = a + 33, d = c + 1;
+      mesh.indices.insert(mesh.indices.end(), {a, c, b, b, c, d});
+    }
+  }
+  return mesh;
+}
+
+// 200 disjoint 10 x 6 cm quads scattered around a 1 m crown.
+Mesh leaves() {
+  Mesh mesh;
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+  for (uint32_t leaf = 0; leaf < 200; ++leaf) {
+    const float cx = unit(rng) - 0.5f, cy = 1.5f + unit(rng), cz = unit(rng) - 0.5f;
+    const float angle = 6.2831853f * unit(rng);
+    const float ux = 0.05f * std::cos(angle), uz = 0.05f * std::sin(angle);
+    const float corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    const uint32_t base = static_cast<uint32_t>(mesh.positions.size() / 3);
+    for (const auto &[u, v] : corners) {
+      mesh.positions.insert(mesh.positions.end(), {cx + u * ux, cy + v * 0.03f, cz + u * uz});
+      mesh.normals.insert(mesh.normals.end(), {-std::sin(angle), 0.0f, std::cos(angle)});
+      mesh.uvs.insert(mesh.uvs.end(), {(u + 1) / 2, (v + 1) / 2});
+    }
+    mesh.indices.insert(mesh.indices.end(),
+                        {base, base + 1, base + 2, base, base + 2, base + 3});
+  }
+  return mesh;
+}
+
+double triangleArea(const std::array<float, 3> &a, const std::array<float, 3> &b,
+                    const std::array<float, 3> &c) {
+  const double e[2][3] = {{b[0] - a[0], b[1] - a[1], b[2] - a[2]},
+                          {c[0] - a[0], c[1] - a[1], c[2] - a[2]}};
+  const double x = e[0][1] * e[1][2] - e[0][2] * e[1][1];
+  const double y = e[0][2] * e[1][0] - e[0][0] * e[1][2];
+  const double z = e[0][0] * e[1][1] - e[0][1] * e[1][0];
+  return 0.5 * std::sqrt(x * x + y * y + z * z);
+}
+
+std::string floatList(const float *values, size_t count) {
+  std::string out;
+  for (size_t i = 0; i < count; ++i) {
+    out += (i ? "," : "") + std::to_string(values[i]);
+  }
+  return out;
+}
+
+// Writes the two prototypes as an unflattened glTF like usd2gltf's: one mesh
+// each, one node per instance.
+void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
+                 const std::vector<std::pair<int, Matrix>> &nodes) {
+  std::vector<char> bin;
+  std::string views, accessors, meshJson;
+  int view = 0;
+  auto add = [&](const void *data, size_t bytes, size_t count, const char *type,
+                 int component, const std::string &extra) {
+    views += std::string(view ? "," : "") + "{\"buffer\":0,\"byteOffset\":" +
+             std::to_string(bin.size()) + ",\"byteLength\":" + std::to_string(bytes) + "}";
+    bin.insert(bin.end(), static_cast<const char *>(data),
+               static_cast<const char *>(data) + bytes);
+    accessors += std::string(view ? "," : "") + "{\"bufferView\":" + std::to_string(view) +
+                 ",\"componentType\":" + std::to_string(component) +
+                 ",\"count\":" + std::to_string(count) + ",\"type\":\"" + type + "\"" +
+                 extra + "}";
+    return view++;
+  };
+  for (int m = 0; m < 2; ++m) {
+    const Mesh &mesh = meshes[m];
+    Bounds bounds;
+    for (size_t i = 0; i < mesh.positions.size(); i += 3) {
+      bounds.add({mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]});
+    }
+    const size_t vertices = mesh.positions.size() / 3;
+    const int position = add(mesh.positions.data(), mesh.positions.size() * 4, vertices,
+                             "VEC3", 5126,
+                             ",\"min\":[" + floatList(bounds.min.data(), 3) + "],\"max\":[" +
+                                 floatList(bounds.max.data(), 3) + "]");
+    const int normal = add(mesh.normals.data(), mesh.normals.size() * 4, vertices, "VEC3",
+                           5126, "");
+    const int uv = add(mesh.uvs.data(), mesh.uvs.size() * 4, vertices, "VEC2", 5126, "");
+    const int index = add(mesh.indices.data(), mesh.indices.size() * 4,
+                          mesh.indices.size(), "SCALAR", 5125, "");
+    meshJson += std::string(m ? "," : "") + "{\"primitives\":[{\"attributes\":{" +
+                "\"POSITION\":" + std::to_string(position) +
+                ",\"NORMAL\":" + std::to_string(normal) +
+                ",\"TEXCOORD_0\":" + std::to_string(uv) + "},\"indices\":" +
+                std::to_string(index) + ",\"material\":" + std::to_string(m) + "}]}";
+  }
+  std::string nodeJson, sceneNodes;
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    nodeJson += std::string(i ? "," : "") + "{\"mesh\":" + std::to_string(nodes[i].first) +
+                ",\"matrix\":[" + floatList(nodes[i].second.data(), 16) + "]}";
+    sceneNodes += std::string(i ? "," : "") + std::to_string(i);
+  }
+  const std::string binName = path.stem().string() + ".bin";
+  std::ofstream(path.parent_path() / binName, std::ios::binary)
+      .write(bin.data(), static_cast<std::streamsize>(bin.size()));
+  std::ofstream(path)
+      << "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,\"scenes\":[{\"nodes\":[" << sceneNodes
+      << "]}],\"nodes\":[" << nodeJson << "],\"meshes\":[" << meshJson
+      << "],\"materials\":["
+         "{\"name\":\"Bark\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.142,0.066,"
+         "0.031,1],\"metallicFactor\":0,\"roughnessFactor\":0.5}},"
+         "{\"name\":\"Leaves\",\"doubleSided\":true,\"pbrMetallicRoughness\":{"
+         "\"baseColorFactor\":[0.087,0.153,0.021,1],\"metallicFactor\":0,"
+         "\"roughnessFactor\":0.5}}],\"accessors\":["
+      << accessors << "],\"bufferViews\":[" << views << "],\"buffers\":[{\"uri\":\""
+      << binName << "\",\"byteLength\":" << bin.size() << "}]}";
+}
+
+size_t findRoot(std::vector<size_t> &parent, size_t i) {
+  while (parent[i] != i) {
+    i = parent[i] = parent[parent[i]];
+  }
+  return i;
+}
+
+} // namespace
+
+TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
+  const auto dir = std::filesystem::temp_directory_path() / "meridian_tree_cook_test";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  const Mesh meshes[2] = {tube(), leaves()};
+  std::vector<std::pair<int, Matrix>> nodes;
+  for (int i = 0; i < 10; ++i) {
+    nodes.emplace_back(0, placement(0.6f * i, 0.8f + 0.04f * i, 3.0f * i, 0.0f, 0.0f));
+  }
+  for (int i = 0; i < 50; ++i) {
+    nodes.emplace_back(1, placement(0.3f * i, 0.9f + 0.005f * i, 0.6f * i, 0.0f, 1.0f));
+  }
+  writeSource(dir / "tree.gltf", meshes, nodes);
+
+  Bounds sourceBounds;
+  double sourceLeafArea = 0.0;
+  for (const auto &[mesh, matrix] : nodes) {
+    const Mesh &m = meshes[mesh];
+    std::vector<std::array<float, 3>> world;
+    for (size_t i = 0; i < m.positions.size(); i += 3) {
+      world.push_back(transform(matrix, &m.positions[i]));
+      sourceBounds.add(world.back());
+    }
+    for (size_t i = 0; mesh == 1 && i < m.indices.size(); i += 3) {
+      sourceLeafArea +=
+          triangleArea(world[m.indices[i]], world[m.indices[i + 1]], world[m.indices[i + 2]]);
+    }
+  }
+
+  // Leaf quads can't be simplified, so the budget forces pruning.
+  const size_t budget = 15000;
+  const meridian::cook::TreeCookResult result =
+      meridian::cook::cookTree(dir / "tree.gltf", dir / "out", budget, {});
+  CHECK(result.sourceTriangles == 10 * 1024 + 50 * 400);
+  CHECK(result.triangles <= budget);
+  CHECK(result.triangles > budget * 9 / 10);
+  CHECK(result.leafAreaBefore == doctest::Approx(sourceLeafArea).epsilon(1e-4));
+  CHECK(std::abs(result.leafAreaAfter - result.leafAreaBefore) / result.leafAreaBefore <=
+        0.05);
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+
+  Bounds cookedBounds;
+  size_t triangles = 0;
+  double leafArea = 0.0;
+  bool sawLeaves = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    REQUIRE(mesh.primitives.size() == 1);
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const auto &positionAccessor =
+        asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+    std::vector<std::array<float, 3>> positions(positionAccessor.count);
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+        asset, positionAccessor, [&](fastgltf::math::fvec3 p, size_t i) {
+          positions[i] = {p.x(), p.y(), p.z()};
+          cookedBounds.add(positions[i]);
+        });
+    const auto &indexAccessor = asset.accessors[*primitive.indicesAccessor];
+    std::vector<uint32_t> indices(indexAccessor.count);
+    fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
+    triangles += indices.size() / 3;
+    if (!asset.materials[*primitive.materialIndex].doubleSided) {
+      continue;
+    }
+    sawLeaves = true;
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      leafArea += triangleArea(positions[indices[i]], positions[indices[i + 1]],
+                               positions[indices[i + 2]]);
+    }
+    std::vector<std::array<float, 2>> uvs(positions.size());
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
+        asset, asset.accessors[primitive.findAttribute("TEXCOORD_0")->accessorIndex],
+        [&](fastgltf::math::fvec2 uv, size_t i) { uvs[i] = {uv.x(), uv.y()}; });
+    std::vector<size_t> parent(positions.size());
+    std::iota(parent.begin(), parent.end(), size_t{0});
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      for (int k = 1; k < 3; ++k) {
+        parent[findRoot(parent, indices[i + k])] = findRoot(parent, indices[i]);
+      }
+    }
+    for (uint32_t index : indices) {
+      const auto &uv = uvs[index];
+      CHECK(uv == uvs[findRoot(parent, index)]);
+      for (float coordinate : uv) {
+        const float texel = coordinate * meridian::cook::kLeafPaletteSize - 0.5f;
+        CHECK(std::abs(texel - std::round(texel)) < 1e-3f);
+      }
+    }
+  }
+  CHECK(sawLeaves);
+  CHECK(triangles == result.triangles);
+  CHECK(leafArea == doctest::Approx(result.leafAreaAfter).epsilon(1e-3));
+  for (int c = 0; c < 3; ++c) {
+    CHECK(std::abs(cookedBounds.min[c] - sourceBounds.min[c]) <= 1e-3f);
+    CHECK(std::abs(cookedBounds.max[c] - sourceBounds.max[c]) <= 1e-3f);
+  }
+  std::filesystem::remove_all(dir);
+}
