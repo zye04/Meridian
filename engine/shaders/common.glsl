@@ -405,8 +405,7 @@ struct Clouds {
     uint detailNoise;
     uint curlNoise;
     uint pad0;
-    uint pad1;
-    uint pad2;
+    vec2 windDisplacement;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

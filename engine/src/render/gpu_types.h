@@ -362,9 +362,13 @@ struct GpuClouds {
   uint32_t baseNoise = 0;
   uint32_t detailNoise = 0;
   uint32_t curlNoise = 0;
-  uint32_t pad[3] = {};
+  uint32_t pad = 0;
+  // How far the cloud air moved since last frame (xz, m), for reprojection
+  // and motion vectors.
+  float windDisplacement[2] = {};
 };
 static_assert(sizeof(GpuClouds) == 96);
+static_assert(offsetof(GpuClouds, windDisplacement) == 88);
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
@@ -768,6 +772,16 @@ struct PushConstants {
   uint32_t pad = 0;
 };
 static_assert(sizeof(PushConstants) == 16);
+
+// Must match CloudConstants in clouds_temporal.glsl; the cloud march reads
+// only the scene buffer.
+struct CloudConstants {
+  VkDeviceAddress sceneBuffer = 0;
+  // 0 on the first frame at this cloud resolution (no usable history).
+  uint32_t historyValid = 0;
+  uint32_t inLayer = 0;
+};
+static_assert(sizeof(CloudConstants) == 16);
 
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
