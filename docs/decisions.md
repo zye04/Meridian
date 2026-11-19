@@ -39,7 +39,8 @@ sources. Check here before re-researching a topic.
 - **Hardware ray-traced sun shadows** (ray queries in the fragment shader),
   not cascaded shadow maps: no cascade seams or shimmer, per-pixel accuracy,
   and published comparisons show equal or lower cost. RT is required. The
-  TLAS is rebuilt per frame (sized for 4096 instances).
+  TLAS is built once for the static world and again only when instances
+  change (see "Static TLAS" below).
   - https://github.com/ZihanWG/VulkanEngine/pull/69
   - https://www.gamedeveloper.com/programming/an-optimal-implementation-of-fast-ray-traced-soft-shadows-in-a-game-engine
 - **Soft shadows**: one ray per pixel toward a point on the sun disk
@@ -531,3 +532,27 @@ foliage that survives simplification).
   The terrain raster and its shadow march sit in scene early; everything
   else is under 0.3 ms. The 3 degree sunset view (the costliest march,
   ~1.15 ms) was not re-measured here.
+
+## Static TLAS and one instance id space (M2a, 2026-11-19)
+
+- **One TLAS, built when the instance set changes** (the first frame, and
+  after `addInstance`), not every frame: the world is static, and M2a's
+  millions of placed instances make a per-frame rebuild unaffordable.
+  Per-frame TLAS copies and scratch left `FrameData`; the CPU-written
+  instance records stay per frame (the CPU may write them while the other
+  frame's commands still read its own). Sync for the shared TLAS: before a
+  build, a barrier waits for earlier fragment-shader ray queries (WAR) and
+  earlier builds (scratch and TLAS WAW); after it, a build -> fragment
+  shader AS read barrier, whose second scope covers every later frame in
+  queue submission order. `upload + tlas` drops from ~0.14 ms to 0.00 ms
+  on later frames with 3000 scattered models (Debug, 2560x1440); captures
+  match the per-frame build within 0.03/255.
+- **One instance id space**: culling, draw lists, visibility and the TLAS
+  custom index share 24-bit ids (`kMaxInstanceId`, statically checked
+  against the custom index field). Ids below `kPlacedBase` (=
+  `kMaxInstances`) index `InstanceData`; the rest are reserved for placed
+  instances. Every shader reads instances through `loadInstance`
+  (common.glsl), so placed instances join without touching the readers.
+  - https://developer.nvidia.com/blog/rtx-best-practices/
+  - https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-pipeline-barriers
+  - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/partitions_and_ptlas.md

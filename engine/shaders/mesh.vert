@@ -14,8 +14,8 @@ layout(location = 7) flat out float outLodError;
 void main() {
     // Blended draws set firstInstance to the instance's index; the indexed
     // draw has already added the mesh's vertexOffset to gl_VertexIndex.
-    InstanceData instance = pc.scene.instances.instances[gl_InstanceIndex];
-    MeshInfo mesh = pc.scene.meshes.meshes[instance.meshIndex];
+    LoadedInstance instance = loadInstance(pc.scene, uint(gl_InstanceIndex));
+    MeshInfo mesh = pc.scene.meshes.meshes[instance.meshOrPrototype];
     Vertex vertex = pc.scene.vertices.vertices[gl_VertexIndex];
 
     vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;

@@ -351,6 +351,19 @@ struct InstanceData {
 };
 static_assert(sizeof(InstanceData) == 80);
 
+// One instance id space (see loadInstance in common.glsl): ids below
+// kPlacedBase index InstanceData, the rest are placed instances. Every id is
+// also a TLAS instance custom index, which has 24 bits.
+constexpr uint32_t kMaxInstanceId = (1u << 24) - 1;
+// Must match kPlacedBase in common.glsl.
+constexpr uint32_t kPlacedBase = kMaxInstances;
+static_assert(kPlacedBase - 1 <= kMaxInstanceId);
+static_assert([] {
+  VkAccelerationStructureInstanceKHR instance{};
+  instance.instanceCustomIndex = kMaxInstanceId;
+  return instance.instanceCustomIndex == kMaxInstanceId;
+}());
+
 // Must match depth_pyramid.comp.
 struct PyramidConstants {
   int32_t sourceSize[2] = {};
@@ -492,13 +505,11 @@ struct FrameData {
   VkFence renderFence = VK_NULL_HANDLE;
   VkSemaphore imageAvailable = VK_NULL_HANDLE;
   Buffer sceneBuffer;
-  // Top-level acceleration structure over all instances, rebuilt every
-  // frame from the TLAS instance buffer.
-  Buffer instanceBuffer;
-  AccelerationStructure tlas;
-  // CPU-visible copy of the instance table, uploaded when instances change.
+  // CPU-written when instances change: the instance table's upload source
+  // and the TLAS build's instance records. Per frame because the CPU may
+  // write them while the other frame's commands still read its own.
   Buffer instanceStaging;
-  Buffer tlasScratch;
+  Buffer instanceBuffer;
   // This frame's DrawCounters, copied back for statistics.
   Buffer drawCountReadback;
 };

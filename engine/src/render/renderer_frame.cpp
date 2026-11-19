@@ -20,11 +20,11 @@ float wrapAround(float x, double period) {
 
 } // namespace
 
-// Writes the CPU instance list to the GPU instance table when it changed.
-// The table is shared by both frames in flight, so the copy waits for the
-// previous frame's reads.
+// Writes the CPU instance list to the GPU instance table. The table is
+// shared by both frames in flight, so the copy waits for the previous
+// frame's reads.
 void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
-  if (!instancesDirty) {
+  if (instances.empty()) {
     return;
   }
   const VkDeviceSize bytes = instances.size() * sizeof(InstanceData);
@@ -34,6 +34,7 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
 
   constexpr VkPipelineStageFlags2 kReaders =
       VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+      VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
   memoryBarrier(cmd, kReaders, 0, VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -44,7 +45,6 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT, kReaders,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-  instancesDirty = false;
 }
 
 // Clears the DrawCounters before the terrain selection and both culling
@@ -180,8 +180,10 @@ void Renderer::Impl::buildDepthPyramid(VkCommandBuffer cmd) {
   }
 }
 
-// Rebuilds the TLAS over all instances (including those outside the view:
-// they still cast shadows into it).
+// Builds the TLAS over all instances (including those outside the view:
+// they still cast shadows into it). Both frames in flight share it, so the
+// build waits for earlier frames' ray queries and builds, and the barrier
+// after it covers every later frame on the queue.
 void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   auto *tlasInstances = static_cast<VkAccelerationStructureInstanceKHR *>(
       frame.instanceBuffer.mapped);
@@ -206,6 +208,20 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
+  VkMemoryBarrier2 barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                         VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                          VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  VkDependencyInfo dependency{};
+  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  dependency.memoryBarrierCount = 1;
+  dependency.pMemoryBarriers = &barrier;
+  vkCmdPipelineBarrier2(cmd, &dependency);
+
   VkAccelerationStructureGeometryKHR geometry{};
   geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -218,10 +234,10 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
   build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
   build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-  build.dstAccelerationStructure = frame.tlas.handle;
+  build.dstAccelerationStructure = tlas.handle;
   build.geometryCount = 1;
   build.pGeometries = &geometry;
-  build.scratchData.deviceAddress = frame.tlasScratch.address;
+  build.scratchData.deviceAddress = tlasScratch.address;
 
   VkAccelerationStructureBuildRangeInfoKHR range{};
   range.primitiveCount = static_cast<uint32_t>(instances.size());
@@ -231,17 +247,10 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
     dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build, &ranges);
   }
 
-  VkMemoryBarrier2 barrier{};
-  barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
   barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
   barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
   barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
   barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-
-  VkDependencyInfo dependency{};
-  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-  dependency.memoryBarrierCount = 1;
-  dependency.pMemoryBarriers = &barrier;
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
@@ -411,7 +420,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.projectionScale[0] = projection.m[0][0];
   scene.projectionScale[1] = projection.m[1][1];
   scene.nearPlane = camera.nearPlane;
-  scene.tlas = frame.tlas.address;
+  scene.tlas = impl_->tlas.address;
   scene.vertices = impl_->vertexPool.address;
   scene.indices = impl_->indexPool.address;
   scene.meshes = impl_->meshTable.address;
@@ -458,8 +467,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   viewport.maxDepth = 1.0f;
   VkRect2D scissor = {{0, 0}, extent};
 
-  impl_->uploadInstances(cmd, frame);
-  impl_->buildTlas(cmd, frame);
+  if (impl_->instancesDirty) {
+    impl_->uploadInstances(cmd, frame);
+    impl_->buildTlas(cmd, frame);
+    impl_->instancesDirty = false;
+  }
   endPass("upload + tlas");
   impl_->resetDrawCounters(cmd);
   impl_->selectTerrain(cmd, frame);

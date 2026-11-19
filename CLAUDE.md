@@ -122,8 +122,9 @@ engine/src/render/         renderer internals:
   renderer_resources.cpp   buffers, images, BLAS, texture/material/mesh upload
   renderer_terrain.cpp     setTerrain (height image, normal map, pyramid),
                            CDLOD selection dispatches, terrain draw
-  renderer_frame.cpp       per-frame: instance upload, TLAS, GPU culling,
-                           all passes in draw()
+  renderer_frame.cpp       per-frame: instance upload + TLAS build when
+                           instances change, GPU culling, all passes in
+                           draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, window.cpp
@@ -140,7 +141,8 @@ docs/decisions.md          technique decisions with sources
 
 ## Frame (renderer_frame.cpp, in order)
 
-Instance table upload (when changed) -> TLAS build over all instances ->
+Instance table upload + TLAS build over all instances (only on the first
+frame and after instances change; one TLAS shared by both frames) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the
@@ -191,13 +193,17 @@ images are shared between them, and barriers account for that.
   Culling tests displayed bounds (`displayedSphere` in cull.glsl; terrain
   boxes in terrain_select.comp); LOD distances stay flat.
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
-  allocated); `MeshInfo` and `InstanceData` tables are on the GPU; the TLAS
-  custom index is the instance index. Opaque/masked meshes are drawn as
-  clusters of their LOD DAG (cluster, cluster-vertex and cluster-triangle
-  pools; draw list entries are (instance, cluster)); blended meshes and
-  the BLAS use the original indices. Push constants carry the scene buffer
-  address (plus the draw list index for mesh.mesh); everything else is
-  reached through it (buffer device addresses).
+  allocated); `MeshInfo` and `InstanceData` tables are on the GPU. One
+  24-bit instance id space (`kMaxInstanceId`) serves culling, draw lists,
+  visibility and the TLAS custom index: ids below `kPlacedBase` index
+  `InstanceData`, the rest are reserved for placed instances; shaders read
+  instances only through `loadInstance` (common.glsl). Opaque/masked
+  meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
+  and cluster-triangle pools; draw list entries are (instance, cluster));
+  blended meshes and the BLAS use the original indices. Push constants
+  carry the scene buffer address (plus the draw list index for
+  mesh.mesh); everything else is reached through it (buffer device
+  addresses).
   Descriptor sets: scene layout set 0 = atmosphere LUTs, set 1 = DFG LUT
   + bindless `textures[]` (also read by terrain.mesh: the terrain's
   R16_UNORM height image, via texelFetch so it matches `heightAt`

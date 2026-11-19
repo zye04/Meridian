@@ -114,8 +114,8 @@ layout(buffer_reference, std430) buffer DrawListBuffer {
     uvec2 entries[];
 };
 
-// One per placed instance; gl_InstanceIndex and the TLAS instance custom
-// index both refer to it. Must match InstanceData in C++.
+// One per hand-placed instance (id < kPlacedBase). Must match InstanceData
+// in C++.
 struct InstanceData {
     mat4 transform;
     uint meshIndex;
@@ -256,6 +256,37 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     ClusterTriangleBuffer clusterTriangles;
     DrawListBuffer drawLists;
 };
+
+// Largest axis scale of a transform: a conservative bound under
+// non-uniform scale.
+float maxScale(mat4 transform) {
+    mat3 m = mat3(transform);
+    return sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
+}
+
+// One instance id space for culling, draw lists, visibility and the TLAS
+// custom index: ids below kPlacedBase index InstanceBuffer, ids from it are
+// reserved for placed instances. Must match kPlacedBase in C++.
+const uint kPlacedBase = 65536u;
+
+struct LoadedInstance {
+    mat4 transform;
+    // maxScale(transform).
+    float scale;
+    // A mesh index, or a prototype index when placed.
+    uint meshOrPrototype;
+    bool placed;
+};
+
+LoadedInstance loadInstance(SceneBuffer scene, uint id) {
+    InstanceData instance = scene.instances.instances[id];
+    LoadedInstance loaded;
+    loaded.transform = instance.transform;
+    loaded.scale = maxScale(instance.transform);
+    loaded.meshOrPrototype = instance.meshIndex;
+    loaded.placed = false;
+    return loaded;
+}
 
 // Curvature as a display warp: the world stays flat (lighting, shadow rays,
 // the TLAS), but rasterized positions drop by d^2 / 2R below the camera's

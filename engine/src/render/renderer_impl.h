@@ -106,7 +106,13 @@ struct Renderer::Impl {
   Buffer meshTable;
   Buffer instanceTable;
   std::vector<InstanceData> instances;
-  bool instancesDirty = false;
+  // The instance table and the TLAS are built on the first frame and again
+  // after instances change.
+  bool instancesDirty = true;
+  // Top-level acceleration structure over all instances, shared by both
+  // frames in flight.
+  AccelerationStructure tlas;
+  Buffer tlasScratch;
   // Cluster hierarchies of every mesh, bump-allocated like the pools above.
   Buffer clusterPool;
   Buffer clusterVertexPool;

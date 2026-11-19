@@ -26,8 +26,8 @@ float projectedError(vec3 center, float radius, float error) {
 }
 
 void draw(uint instanceIndex, uint clusterIndex, uint triangleCount) {
-    InstanceData instance = cull.scene.instances.instances[instanceIndex];
-    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
+    LoadedInstance instance = loadInstance(cull.scene, instanceIndex);
+    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshOrPrototype];
     // Retested clusters are drawn in the late pass.
     uint list = min(cull.phase, 1u) * kDrawBuckets + mesh.drawBucket;
     uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
@@ -48,11 +48,11 @@ void retest() {
         return;
     }
     uvec2 entry = cull.retest.entries[index];
-    mat4 transform = cull.scene.instances.instances[entry.x].transform;
+    LoadedInstance instance = loadInstance(cull.scene, entry.x);
     ClusterInfo cluster = cull.scene.clusters.clusters[entry.y];
-    vec4 sphere = displayedSphere((transform * vec4(cluster.boundsCenter, 1.0)).xyz -
+    vec4 sphere = displayedSphere((instance.transform * vec4(cluster.boundsCenter, 1.0)).xyz -
                                       cull.scene.cameraPosition,
-                                  cluster.boundsRadius * maxScale(transform));
+                                  cluster.boundsRadius * instance.scale);
     if (!occluded(sphere, cull.scene.view)) {
         draw(entry.x, entry.y, cluster.triangleCount);
     }
@@ -73,10 +73,10 @@ void main() {
     }
     uint instanceIndex = item.x;
     uint clusterIndex = (item.y & 0x3FFFFFFu) + gl_LocalInvocationID.x;
-    InstanceData instance = cull.scene.instances.instances[instanceIndex];
+    LoadedInstance instance = loadInstance(cull.scene, instanceIndex);
     ClusterInfo cluster = cull.scene.clusters.clusters[clusterIndex];
     mat4 transform = instance.transform;
-    float scale = maxScale(transform);
+    float scale = instance.scale;
 
     float threshold = cull.scene.lodErrorPixels;
     // Terminal clusters carry FLT_MAX: always too coarse to replace.

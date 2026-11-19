@@ -59,13 +59,6 @@ layout(push_constant) uniform CullConstants {
     RetestBuffer retest;
 } cull;
 
-// Largest axis scale of a transform: a conservative bound under
-// non-uniform scale.
-float maxScale(mat4 transform) {
-    mat3 m = mat3(transform);
-    return sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
-}
-
 // A sphere (relative to the camera it is seen from) as displayed under the
 // curvature warp: its points drop between the drop at its nearest and
 // farthest horizontal distance, so lower it by the first and grow it by the

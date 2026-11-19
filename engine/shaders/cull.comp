@@ -21,15 +21,15 @@ void main() {
     if (index >= cull.scene.instanceCount) {
         return;
     }
-    InstanceData instance = cull.scene.instances.instances[index];
-    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshIndex];
+    LoadedInstance instance = loadInstance(cull.scene, index);
+    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshOrPrototype];
     if (mesh.drawBucket == kDrawBucketBlended) {
         return;
     }
 
     vec4 sphere = displayedSphere((instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz -
                                       cull.scene.cameraPosition,
-                                  mesh.boundsRadius * maxScale(instance.transform));
+                                  mesh.boundsRadius * instance.scale);
     bool visibleInFrustum = inFrustum(sphere.xyz, sphere.w);
 
     bool wasVisible = cull.visibility.visible[index] != 0u;

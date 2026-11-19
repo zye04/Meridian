@@ -29,16 +29,14 @@ void main() {
     SceneBuffer scene = pc.scene;
     uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
                                           gl_WorkGroupID.x];
-    InstanceData instance = scene.instances.instances[entry.x];
-    MeshInfo mesh = scene.meshes.meshes[instance.meshIndex];
+    LoadedInstance instance = loadInstance(scene, entry.x);
+    MeshInfo mesh = scene.meshes.meshes[instance.meshOrPrototype];
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
 
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
-    mat3 m = mat3(instance.transform);
-    float lodError = max(cluster.refinedError, 0.0) *
-                     sqrt(max(dot(m[0], m[0]), max(dot(m[1], m[1]), dot(m[2], m[2]))));
+    float lodError = max(cluster.refinedError, 0.0) * instance.scale;
     for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
         uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
                      uint(mesh.vertexOffset);

@@ -238,8 +238,8 @@ void Renderer::Impl::createFrames() {
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
   }
 
-  // Size each TLAS for the maximum instance count once, so per-frame
-  // rebuilds never allocate.
+  // Size the TLAS for the maximum instance count once, so rebuilds never
+  // allocate.
   VkAccelerationStructureGeometryKHR tlasGeometry{};
   tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -260,16 +260,12 @@ void Renderer::Impl::createFrames() {
       VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuild,
       &kMaxInstances, &tlasSizes);
 
-  for (FrameData &frame : frames) {
-    frame.tlas = createAccelerationStructure(
-        VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        tlasSizes.accelerationStructureSize);
-    frame.tlasScratch = createBuffer(
-        tlasSizes.buildScratchSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        0, scratchAlignment);
-  }
+  tlas = createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+                                     tlasSizes.accelerationStructureSize);
+  tlasScratch = createBuffer(
+      tlasSizes.buildScratchSize,
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0, scratchAlignment);
 
   check(vkCreateCommandPool(dev, &poolInfo, nullptr, &uploadPool),
         "vkCreateCommandPool");
@@ -1011,9 +1007,9 @@ Renderer::~Renderer() {
   vkDestroyQueryPool(dev, impl_->timestampPool, nullptr);
   vkDestroyFence(dev, impl_->uploadFence, nullptr);
   vkDestroyCommandPool(dev, impl_->uploadPool, nullptr);
+  impl_->destroyAccelerationStructure(impl_->tlas);
+  impl_->destroyBuffer(impl_->tlasScratch);
   for (FrameData &frame : impl_->frames) {
-    impl_->destroyAccelerationStructure(frame.tlas);
-    impl_->destroyBuffer(frame.tlasScratch);
     impl_->destroyBuffer(frame.instanceBuffer);
     impl_->destroyBuffer(frame.instanceStaging);
     impl_->destroyBuffer(frame.sceneBuffer);
