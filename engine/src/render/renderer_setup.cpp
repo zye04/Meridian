@@ -168,6 +168,7 @@ void Renderer::Impl::createSwapchain() {
   resolvedWrite.pImageInfo = &resolved;
   vkUpdateDescriptorSets(device.device, 1, &resolvedWrite, 0, nullptr);
 
+  createCloudTargets();
   swapchainOutOfDate = false;
 
   std::cout << "Swapchain: " << swapchainImages.size() << " images, "
@@ -333,6 +334,7 @@ void Renderer::Impl::createBloomChain() {
 }
 
 void Renderer::Impl::destroySwapchain() {
+  destroyCloudTargets();
   upscaler.reset();
   vkDestroyDescriptorPool(device.device, bloomPool, nullptr);
   for (VkImageView view : bloomLevels) {

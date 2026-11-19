@@ -2052,7 +2052,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   fading toward the top). Coverage is thresholded once, in the map; a
   second HZD-style `remap(shape, 1 - coverage, 1)` on top of it would
   punch holes in overcast (R spread over [0, 1] at coverage 1) and shrink
-  fair well below its coverage. Erosion depends on type like the
+  fair well below its coverage (the march then cuts the product at a
+  fixed, type-dependent level; see Cloud march). Erosion depends on type like the
   profile: cumulus wispy at the base and billowy above, carving up to
   0.35; stratus wispy throughout, carving up to 0.5. Output is in [0, 1]; the march scales it to extinction.
   `world.y` is the altitude on the curved shell, so the caller decides
@@ -2105,3 +2106,66 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   two copies.
 - Cost: `weather` 0.11 ms at 2560x1440 (per-texel history lookup and
   3D Worley); noise generation at load is one dispatch.
+
+## Cloud march, lighting and haze (M4 clouds, 2026-11-19)
+
+- **March (`clouds_march.comp`, pass `clouds` after the late scene
+  pass):** quarter resolution (640x360 at 1440p), half when the camera is
+  inside the local layer or within 250 m of it (`cameraInCloudLayer`; the
+  local layer is the type at last frame's camera through `stateAt`, with
+  the tallest cumulus top). Separate targets per resolution (Task 4 keeps
+  a history per resolution). Rays are straight in the displayed frame
+  and the layer is the shell of the type envelope (1.8-4.5 km) around
+  the planet center below the camera, so clouds curve under the horizon
+  with M1's curvature warp; shell intersections use the stable quadratic
+  with `c = (h - a)(2R + h + a)`, since `|o|^2 - r^2` loses everything in
+  float at planet scale. Steps: 64 across the segment, at least 60 m,
+  growing as 1.2% of the distance (about a quarter-res pixel), at most
+  128, start jittered by interleaved gradient noise per frame (no blue
+  noise texture in the engine yet; IGN is the engine's existing
+  low-discrepancy per-pixel sequence); the march stops at the scene
+  depth, the sea-level sphere, 300 km, or transmittance 0.01.
+- **Lighting:** extinction 0.06/m at density 1, albedo 0.98 lowered
+  toward 0.5 below density 0.15 (edge darkening by albedo, the spec's
+  choice over the powder term); sun transmittance by a 5-step light
+  march (40 m doubling, 1.2 km); sun color from the transmittance LUT at
+  the sample, zero in the planet's shadow (the LUT alone returns the
+  transmittance to the ground there, which made clouds glow after
+  sunset); dual-lobe Henyey-Greenstein (0.8 and -0.5, 30% backward);
+  Wrenninge octaves, 3, extinction x0.25, contribution x0.7, eccentricity
+  x0.5 (a <= b keeps it energy-conserving; b = 0.5 left sunlit tops
+  grey); ambient = sky irradiance / 2 pi (isotropic in-scattering from
+  a uniform upper hemisphere) times a 0.35-to-1 bottom-to-top gradient;
+  Frostbite's energy-conserving integration per step. Mean depth
+  weights each step by its opacity contribution; 0 = no cloud.
+- **Haze:** at the mean depth d, `L = L_haze(0..d) (1 - T) + T_haze L_cloud`
+  (the background already carries the haze in front of the clouds, so
+  the composite's `L + T x background` counts it once). Within the
+  aerial perspective LUT's 128 km from it (as mesh.frag); beyond, the
+  LUT's last value extended by the transmittance between 128 km and d
+  (Bruneton's ratio of transmittances to the atmosphere's edge, taken
+  upward) and the sky-view luminance, capped at the sky's own.
+- **Shape (clouds.glsl):** the base Perlin-Worley shape measured only
+  about 0.78-0.92 (6% below 0.8, median 0.84, 4% above 0.9), so the
+  product coverage x profile x shape gave flat-topped, vertical-walled
+  slabs; the shape is stretched over that range, then the product is cut
+  at 0.35 for cumulus (gaps, domed tops where the profile thins, cells
+  shrinking with coverage at their edges) and 0.1 for stratus. Overcast
+  still had holes, so stratus coverage lifts the shape toward 1
+  (`shape = mix(shape, 1, 0.6 coverage (1 - type))`): a continuous sheet,
+  rough only where the profile thins and the detail erodes it.
+- **Composite (`clouds_composite.frag`, replaced by Task 4):** bilinear
+  upsample blended over HDR (premultiplied: clouds + background x T),
+  skipped where the full-resolution surface is nearer than the clouds'
+  mean depth, so clouds don't draw over terrain; HDR only, no motion.
+- Cost (`clouds` GPU ms, 2560x1440, Debug build, one run each): fair
+  ground 0.49, above the layer 0.61, inside (half res) 0.84; clear 0.33
+  at both, the floor of marching empty layer through the weather lookups
+  (the analytic fallback beyond 30 km, with its history search and
+  Worley noise, on every step). Levers: coarser steps or a cheaper
+  weather lookup beyond the window, fewer light steps.
+  - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
+  - Wrenninge, Kulla, Lundqvist, Oz: The Great and Volumetric (SIGGRAPH 2013 talk): https://doi.org/10.1145/2504459.2504518
+  - Schneider, Nubis Evolved (2022): https://advances.realtimerendering.com/s2022/SIGGRAPH2022-Advances-NubisEvolved-NoVideos.pdf
+  - Bruneton, Precomputed Atmospheric Scattering (transmittance between two points): https://ebruneton.github.io/precomputed_atmospheric_scattering/
+  - Jimenez, Next Generation Post Processing in Call of Duty: Advanced Warfare (2014, interleaved gradient noise): https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
