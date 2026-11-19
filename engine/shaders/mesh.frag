@@ -206,7 +206,7 @@ void main() {
         normal = -normal;
     }
 
-    Surface s = (material.flags & kMaterialProceduralTerrain) != 0u
+    Surface s = (material.flags & kMaterialTerrain) != 0u
                     ? proceduralTerrain(normal)
                     : materialSurface(material, normal);
 #ifdef ALPHA_MASK

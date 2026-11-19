@@ -1,6 +1,7 @@
 #include <meridian/model.h>
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
+#include <meridian/texture.h>
 #include <meridian/window.h>
 
 #include <algorithm>
@@ -57,6 +58,34 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
   }
   camera.position =
       camera.position + meridian::normalize(move) * (speed * deltaSeconds);
+}
+
+// Loads one cooked Poly Haven ground texture set from assets/terrain/<id>/.
+// Returns nothing (after saying which file) if any map is missing.
+std::optional<meridian::TerrainLayer>
+loadTerrainLayer(meridian::Renderer &renderer, const char *id, float tileSize) {
+  const auto directory = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / id;
+  const char *names[] = {"base_color", "normal", "arm", "height"};
+  for (const char *name : names) {
+    const auto path = directory / (std::string(name) + ".ktx2");
+    if (!std::filesystem::exists(path)) {
+      std::printf("Missing %s; terrain stays procedural (see "
+                  "tools/fetch-sample-assets.sh)\n",
+                  path.c_str());
+      return std::nullopt;
+    }
+  }
+  auto load = [&](const char *name, meridian::ColorSpace colorSpace) {
+    return renderer.uploadTexture(
+        meridian::loadKtx2(directory / (std::string(name) + ".ktx2"), colorSpace));
+  };
+  meridian::TerrainLayer layer;
+  layer.baseColor = load("base_color", meridian::ColorSpace::Srgb);
+  layer.normal = load("normal", meridian::ColorSpace::Linear);
+  layer.arm = load("arm", meridian::ColorSpace::Linear);
+  layer.height = load("height", meridian::ColorSpace::Linear);
+  layer.tileSize = tileSize;
+  return layer;
 }
 
 // Command-line options for deterministic, automated runs, e.g.
@@ -125,11 +154,20 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
 
   meridian::MaterialData terrainMaterial;
-  terrainMaterial.proceduralTerrain = true;
+  terrainMaterial.terrain = true;
   meridian::MeshId terrain =
       renderer.uploadMesh(meridian::generateTerrain({}),
                           renderer.createMaterial(terrainMaterial));
   renderer.addInstance(terrain, meridian::Mat4::identity());
+  // Tile sizes are the scans' real-world sizes.
+  const auto soil = loadTerrainLayer(renderer, "forest_ground_04", 3.15f);
+  const auto needles = soil ? loadTerrainLayer(renderer, "forest_leaves_04", 1.5f)
+                            : std::nullopt;
+  const auto rock = needles ? loadTerrainLayer(renderer, "rock_face_03", 2.7f)
+                            : std::nullopt;
+  if (rock) {
+    renderer.setTerrainMaterial({*soil, *needles, *rock});
+  }
 
   // Sample assets from tools/fetch-sample-assets.sh (AlphaBlendModeTest must
   // be cooked first), placed a few meters in front of the starting camera.

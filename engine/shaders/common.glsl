@@ -14,7 +14,7 @@ struct Vertex {
 
 // glTF metallic-roughness material. Must match GpuMaterial in C++.
 const uint kNoTexture = 0xFFFFFFFFu;
-const uint kMaterialProceduralTerrain = 1u;
+const uint kMaterialTerrain = 1u;
 const uint kMaterialAlphaMask = 2u;
 
 struct Material {
@@ -110,6 +110,27 @@ layout(buffer_reference, std430) buffer SkyIrradianceBuffer {
     vec3 irradiance;
 };
 
+// Must match GpuTerrainLayer in C++.
+struct TerrainLayer {
+    uint baseColor;
+    uint normal;
+    uint arm;
+    uint height;
+    float tileSize;
+    float pad0;
+    float pad1;
+    float pad2;
+};
+
+// Must match GpuTerrain in C++. Layers: soil, needles, rock.
+struct Terrain {
+    TerrainLayer layers[3];
+    uint enabled;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // Jittered for temporal anti-aliasing; used to rasterize.
     mat4 viewProjection;
@@ -140,6 +161,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // World-space planes (xyz normal, w distance), inside where >= 0.
     vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
+    Terrain terrain;
 };
 
 // Shaders with their own push constants (cull.comp) define

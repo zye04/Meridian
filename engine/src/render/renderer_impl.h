@@ -124,6 +124,7 @@ struct Renderer::Impl {
   std::vector<Image> textures;
   // CPU copy of what draw ordering and acceleration structures need.
   std::vector<MaterialData> materials;
+  GpuTerrain terrain;
   Image dfgLut;
   VkSampler textureSampler = VK_NULL_HANDLE;
   VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;

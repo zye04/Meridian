@@ -131,6 +131,30 @@ inline GpuAtmosphere toGpu(const Atmosphere &a) {
   return g;
 }
 
+// Must match TerrainLayer in common.glsl.
+struct GpuTerrainLayer {
+  uint32_t baseColor = 0;
+  uint32_t normal = 0;
+  uint32_t arm = 0;
+  uint32_t height = 0;
+  float tileSize = 0.0f;
+  float pad[3] = {};
+};
+static_assert(sizeof(GpuTerrainLayer) == 32);
+
+// Must match Terrain in common.glsl. Layers: soil, needles, rock.
+struct GpuTerrain {
+  GpuTerrainLayer layers[3];
+  uint32_t enabled = 0;
+  uint32_t pad[3] = {};
+};
+static_assert(sizeof(GpuTerrain) == 112);
+
+inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
+  return {layer.baseColor.index, layer.normal.index, layer.arm.index,
+          layer.height.index, layer.tileSize};
+}
+
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
@@ -155,8 +179,9 @@ struct SceneData {
   uint32_t pad1 = 0;
   float frustumPlanes[6][4] = {};
   GpuAtmosphere atmosphere;
+  GpuTerrain terrain;
 };
-static_assert(sizeof(SceneData) == 528);
+static_assert(sizeof(SceneData) == 640);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -220,7 +245,7 @@ static_assert(sizeof(PushConstants) == 16);
 
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
-constexpr uint32_t kMaterialProceduralTerrain = 1u;
+constexpr uint32_t kMaterialTerrain = 1u;
 constexpr uint32_t kMaterialAlphaMask = 2u;
 
 struct GpuMaterial {
@@ -260,7 +285,7 @@ inline GpuMaterial toGpu(const MaterialData &m) {
   g.occlusionTexture = textureIndex(m.occlusionTexture);
   g.emissiveTexture = textureIndex(m.emissiveTexture);
   g.alphaCutoff = m.alphaCutoff;
-  g.flags = (m.proceduralTerrain ? kMaterialProceduralTerrain : 0u) |
+  g.flags = (m.terrain ? kMaterialTerrain : 0u) |
             (m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u);
   return g;
 }

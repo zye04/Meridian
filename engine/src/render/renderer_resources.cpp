@@ -204,6 +204,13 @@ TextureId Renderer::uploadTexture(const TextureData &texture) {
   return {index};
 }
 
+void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
+  impl_->terrain.layers[0] = toGpu(material.soil);
+  impl_->terrain.layers[1] = toGpu(material.needles);
+  impl_->terrain.layers[2] = toGpu(material.rock);
+  impl_->terrain.enabled = 1;
+}
+
 MaterialId Renderer::createMaterial(const MaterialData &material) {
   if (impl_->materialCount == kMaxMaterials) {
     throw std::runtime_error("material table is full");

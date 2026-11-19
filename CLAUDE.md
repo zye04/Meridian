@@ -65,8 +65,9 @@ Useful views: default start `0 300 700 0 -0.35`; sample models
 
 ```
 engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
-                           createMaterial, uploadTexture, addInstance, draw;
-                           Lighting, Atmosphere, MaterialData), camera.h, mesh.h,
+                           createMaterial, uploadTexture, setTerrainMaterial,
+                           addInstance, draw; Lighting, Atmosphere,
+                           MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf), texture.h (loadKtx2),
                            terrain.h, window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
@@ -143,8 +144,9 @@ images are shared between them, and barriers account for that.
   window = \"address:0x...\" })"`.
 - `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`
   (needs `jq`); once the project is built it also cooks every model and the
-  terrain layers (`assets/terrain/<id>/*.ktx2`). Loading these models prints UBSan shift warnings from inside
-  MikkTSpace (third-party code, not ours).
+  terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
+  models prints UBSan shift warnings from inside MikkTSpace (third-party
+  code, not ours).
 - Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
   history isn't rescaled on exposure change; the Renderer constructor
   leaks partial Vulkan state if it throws; terrain is one 2 km mesh with no

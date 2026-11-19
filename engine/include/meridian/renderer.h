@@ -57,9 +57,25 @@ struct MaterialData {
   float alphaCutoff = 0.5f;
   // Render back faces too (thin geometry such as leaves).
   bool doubleSided = false;
-  // Temporary: grass/rock/snow by slope and height, until terrain gets real
-  // material layers.
-  bool proceduralTerrain = false;
+  // Shaded with the renderer's TerrainMaterial; procedural colors until one
+  // is set.
+  bool terrain = false;
+};
+
+// One ground texture set, projected in world space.
+struct TerrainLayer {
+  TextureId baseColor;
+  TextureId normal;
+  TextureId arm; // ambient occlusion, roughness, metalness
+  TextureId height;
+  float tileSize = 2.0f; // meters per texture repeat
+};
+
+// Flat ground mixes soil and needles; steep slopes are rock.
+struct TerrainMaterial {
+  TerrainLayer soil;
+  TerrainLayer needles;
+  TerrainLayer rock;
 };
 
 // A planet's atmosphere, in kilometers and per-kilometer coefficients.
@@ -110,6 +126,9 @@ public:
   TextureId uploadTexture(const TextureData &texture);
 
   MaterialId createMaterial(const MaterialData &material);
+
+  // Textures for every material marked `terrain`.
+  void setTerrainMaterial(const TerrainMaterial &material);
 
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
   MeshId uploadMesh(const MeshData &mesh, MaterialId material);

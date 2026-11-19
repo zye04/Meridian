@@ -224,6 +224,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting) {
   scene.inverseResolution[0] = 1.0f / static_cast<float>(extent.width);
   scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
   scene.atmosphere = toGpu(lighting.atmosphere);
+  scene.terrain = impl_->terrain;
   scene.tlas = frame.tlas.address;
   scene.vertices = impl_->vertexPool.address;
   scene.indices = impl_->indexPool.address;
