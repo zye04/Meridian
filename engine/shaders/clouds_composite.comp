@@ -30,8 +30,9 @@ float depthSum;
 float depthWeight;
 
 // Adds a low-resolution texel as seen from this pixel's surface (distance
-// along the ray; kSky for none): a texel where geometry hid the layer says
-// nothing about the sky here, and clouds behind the surface are hidden.
+// along the ray; kSky for none): a texel whose march geometry cut short
+// (stored -1 - depth) says nothing about the sky here, and clouds behind
+// the surface are hidden.
 void accumulate(ivec2 texel, float weight, float sceneDistance) {
     vec4 cloud = imageLoad(resolvedColor, texel);
     float d = imageLoad(resolvedDepth, texel).r;
@@ -39,8 +40,9 @@ void accumulate(ivec2 texel, float weight, float sceneDistance) {
         if (sceneDistance == kSky) {
             return;
         }
-        cloud = vec4(0.0, 0.0, 0.0, 1.0);
-    } else if (d > sceneDistance) {
+        d = -1.0 - d;
+    }
+    if (d > sceneDistance) {
         cloud = vec4(0.0, 0.0, 0.0, 1.0);
     }
     cloudSum += cloud * weight;
