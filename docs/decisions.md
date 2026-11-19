@@ -272,7 +272,8 @@ foliage that survives simplification).
 - Verified against the previous build: mean difference 0.50/255 at the
   default view, 0.12 high, 0.10 scatter at 5 m/s. The `view()` fix alone
   moves the default view 0.55/255: any float-math change re-rolls the
-  ground texture's sub-texel noise. Brightness, draw counts, validation
+  ground texture's sub-texel noise. (The integer hashes under "Terrain
+  texture coordinates" later replaced those sin hashes.) Brightness, draw counts, validation
   and motion sharpness are unchanged.
 - Rejected: tile + offset coordinates (Unreal's large world coordinates).
   They buy precision far beyond 15 km that this world doesn't need.
@@ -453,3 +454,46 @@ foliage that survives simplification).
   so nodes are two uints ((level | x << 5), z); the root's sub-sample
   shift is added after the node offset, since at ~524 km float rounds it
   to 3 cm.
+
+## Terrain texture coordinates: wrapped offsets (2026-11-19)
+
+- **Relative position plus a wrapped camera offset.** World-projected
+  terrain UVs built from `relative + cameraPosition` round to ~0.5 mm at
+  7 km (about a texel of the 1.5 m needles tile), so textures step and
+  jitter as the camera moves. Each layer instead gets the camera position
+  minus the nearest multiple of its period, computed on the CPU in double
+  each frame (`GpuTerrainLayer::offset`), and the shader uses
+  `relative + offset`: UVs stay within about half a period plus the view
+  distance anywhere on the map. The common "origin rebasing" of world UVs;
+  everything the material derives from the position is periodic with the
+  period, so a wrap changes nothing on screen.
+- **Periods:** 256 tiles on every axis (soil 806 m, needles 384 m, rock
+  691 m; triplanar rock wraps y too), except along z on the hex-tiled
+  layers: the grid's rows are sqrt(3)/4 tiles apart, so no whole number of
+  tiles is a whole number of rows, and they wrap z every 592 rows (256.3
+  tiles). Each cell's rotation, offset and *center* come from its index
+  wrapped to 512 columns x 592 rows (centered on the origin), so the
+  texture copy a cell shows doesn't depend on the texture repeating with
+  the period. The 40 m soil/needles noise wraps every 4000 m (100 cells;
+  its 2.7x octave 270 cells) with its lattice wrapped the same way.
+- **Integer hashes** (`terrainHash`, the detail noise's) of the wrapped
+  integer cell index for the hex offsets and rotations and the mix noise,
+  replacing `fract(sin(x) * 43758.5)` hashes and the reference's
+  `mod(x * y, 2 pi)` rotation. Those amplify last-bit float differences:
+  the same integer cells re-rolled when unrelated code changed how the
+  compiler evaluated them, so the look depended on the build, compiler and
+  GPU. The look re-rolled once with this change (same character, no
+  visible tiling in the ground or overview views).
+- **Not wrapped:** the detail displacement and its normals
+  (`terrainDetail`), the heightfield normal map's UVs and the snow line
+  still use the float world position: their ~0.5 mm rounding at 7.5 km is
+  under 0.1% of their shortest wavelength (0.5 m detail octave, 2 m
+  heightfield samples).
+- **Measured** (Debug, 2560x1440): every offset moved by one whole period
+  (temporary build) vs normal, same camera: mean difference 0.015-0.049/255
+  over six views (overview, start, ground, origin, corner, a needles
+  wrap boundary), unstructured float noise, no cell- or tile-shaped
+  differences. Corner view (7000, 1288.2, 7000) at 5 m/s along x:
+  Laplacian ratio motion/still 0.914, previously 0.904 (0.918 with the old
+  hashes, so the content re-roll moves it too); the start's full-ground
+  view 0.957 (0.966 before; different needles/soil layout).

@@ -31,8 +31,9 @@ const float kMinPerceptualRoughness = 0.045;
 
 // inRelativePosition + cameraPosition, set first thing in main(); both are
 // in the flat world, before the curvature warp (common.glsl). World
-// positions place textures and the shadow rays; derivatives and distances
-// use the relative position, which keeps its precision far from the origin.
+// positions place the shadow rays; derivatives, distances and terrain
+// texture coordinates use the relative position, which keeps its precision
+// far from the origin.
 vec3 worldPosition;
 
 // ---------------------------------------------------------------- Shadows
@@ -191,7 +192,11 @@ Surface proceduralTerrain(vec3 normal) {
 // ---------------------------------------------------------------- Terrain
 // Scanned ground layers projected in world space. Every sample uses
 // explicit gradients so layers can be skipped per pixel without breaking
-// mip selection.
+// mip selection. Texture coordinates come from the relative position plus
+// the camera position wrapped by the layer's period (renderer_frame.cpp):
+// world coordinates would lose float precision kilometers from the origin
+// (stepping and jittering in motion), and everything below is periodic
+// with that period, so a wrap changes nothing on screen.
 
 struct TerrainTexel {
     vec3 baseColor;
@@ -224,17 +229,37 @@ const float kHexExponent = 7.0;
 // repeat make most of the surface a blend of copies (visible ghosting); one
 // cell per repeat shows seams; two keeps blend zones thin without seams.
 const float kHexCellsPerRepeat = 2.0;
+// The wrap period in cells: 512 columns (256 repeats along u) by 592 rows
+// (592 * sqrt(3)/4 = 256.3 repeats along v). These and kHexCellsPerRepeat
+// must match gpu_types.h.
+const int kHexWrapColumns = 512;
+const int kHexWrapRows = 592;
 
-vec2 hexHash(vec2 p) {
-    return fract(sin(p * mat2(127.1, 311.7, 269.5, 183.3)) * 43758.5453);
+// Rounds toward minus infinity (b > 0); integer division truncates.
+int floorDiv(int a, int b) {
+    return (a >= 0 ? a : a - b + 1) / b;
+}
+
+// A cell's index wrapped to the period, centered on the origin (identity
+// within half a period), so every cell's rotation and offset repeat with
+// it. Moving one period along v is the lattice step (-296, 592).
+ivec2 wrapHexVertex(ivec2 v) {
+    int rows = floorDiv(v.y + kHexWrapRows / 2, kHexWrapRows);
+    v += rows * ivec2(kHexWrapRows / 2, -kHexWrapRows);
+    v.x -= floorDiv(2 * v.x + v.y + kHexWrapColumns, 2 * kHexWrapColumns) * kHexWrapColumns;
+    return v;
+}
+
+// Integer hashes (terrain.glsl) of the wrapped cell index: sin-based hashes
+// and the reference's mod(x * y, 2 pi) rotation amplify last-bit float
+// differences, so their tiles changed with the compiler, the GPU or any
+// unrelated edit. Seeds 0-3 are the detail noise's.
+vec2 hexHash(ivec2 vertex) {
+    return vec2(terrainHash(vertex, 16u), terrainHash(vertex, 17u));
 }
 
 mat2 hexRotation(ivec2 vertex) {
-    float angle = abs(float(vertex.x * vertex.y)) + abs(float(vertex.x + vertex.y)) + kPi;
-    angle = mod(angle, 2.0 * kPi);
-    if (angle > kPi) {
-        angle -= 2.0 * kPi;
-    }
+    float angle = (terrainHash(vertex, 18u) * 2.0 - 1.0) * kPi;
     float c = cos(angle);
     float s = sin(angle);
     return mat2(c, -s, s, c);
@@ -265,8 +290,13 @@ HexTiles hexTiles(vec2 uv, vec2 dx, vec2 dy) {
     for (int i = 0; i < 3; ++i) {
         vec2 center = (vec2(vertices[i]) * mat2(1.0, 0.5, 0.0, 1.0 / 1.15470054)) /
                       kHexCellsPerRepeat;
-        mat2 rotation = hexRotation(vertices[i]);
-        tiles.uv[i] = rotation * (uv - center) + center + hexHash(vec2(vertices[i]));
+        ivec2 wrapped = wrapHexVertex(vertices[i]);
+        // A period along v isn't a whole number of texture repeats, so the
+        // copy is placed from the wrapped cell's center.
+        vec2 wrappedCenter = (vec2(wrapped) * mat2(1.0, 0.5, 0.0, 1.0 / 1.15470054)) /
+                             kHexCellsPerRepeat;
+        mat2 rotation = hexRotation(wrapped);
+        tiles.uv[i] = rotation * (uv - center) + wrappedCenter + hexHash(wrapped);
         tiles.dx[i] = rotation * dx;
         tiles.dy[i] = rotation * dy;
         tiles.rotation[i] = rotation;
@@ -289,10 +319,15 @@ vec2 normalToDerivative(vec3 n) {
     return -n.xy / max(a.z, max(a.x, a.y) / 128.0);
 }
 
+vec3 layerPosition(TerrainLayer layer) {
+    return inRelativePosition + vec3(layer.offset[0], layer.offset[1], layer.offset[2]);
+}
+
 // Top-down projection, uv = (x, -z): tangent +X, bitangent -Z, normal +Y.
 TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
     float scale = 1.0 / layer.tileSize;
-    HexTiles tiles = hexTiles(vec2(worldPosition.x, -worldPosition.z) * scale,
+    vec3 position = layerPosition(layer);
+    HexTiles tiles = hexTiles(vec2(position.x, -position.z) * scale,
                               vec2(dpdx.x, -dpdx.z) * scale,
                               vec2(dpdy.x, -dpdy.z) * scale);
 
@@ -352,8 +387,8 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     // along +y on the sides and +z on top, as the Whiteout swizzles expect;
     // it also keeps cliffs upright.
     const vec2 kV = vec2(1.0, -1.0);
-    vec2 uvs[3] = vec2[3](worldPosition.zy * kV, worldPosition.xz * kV,
-                          worldPosition.xy * kV);
+    vec3 position = layerPosition(layer);
+    vec2 uvs[3] = vec2[3](position.zy * kV, position.xz * kV, position.xy * kV);
     vec2 dxs[3] = vec2[3](dpdx.zy * kV, dpdx.xz * kV, dpdx.xy * kV);
     vec2 dys[3] = vec2[3](dpdy.zy * kV, dpdy.xz * kV, dpdy.xy * kV);
 
@@ -395,27 +430,39 @@ float heightBlend(float heightA, float heightB, float t) {
     return b / (a + b);
 }
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+// Repeats every `period` cells: lattice points are wrapped to the period,
+// centered on the origin, then hashed as integers (see hexHash).
+float periodicHash(ivec2 cell, int period, uint seed) {
+    ivec2 wrapped = ivec2(cell.x - period * floorDiv(cell.x + period / 2, period),
+                          cell.y - period * floorDiv(cell.y + period / 2, period));
+    return terrainHash(wrapped, seed);
 }
 
-float valueNoise(vec2 p) {
-    vec2 cell = floor(p);
+float valueNoise(vec2 p, int period, uint seed) {
+    ivec2 cell = ivec2(floor(p));
     vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(cell), hash(cell + vec2(1, 0)), f.x),
-               mix(hash(cell + vec2(0, 1)), hash(cell + vec2(1, 1)), f.x), f.y);
+    return mix(mix(periodicHash(cell, period, seed),
+                   periodicHash(cell + ivec2(1, 0), period, seed), f.x),
+               mix(periodicHash(cell + ivec2(0, 1), period, seed),
+                   periodicHash(cell + ivec2(1, 1), period, seed), f.x),
+               f.y);
 }
 
+// The soil/needles mix noise's cell (m) and its wrap in cells; must match
+// gpu_types.h. The 2.7x octave wraps every 270 cells.
+const float kNoiseCell = 40.0;
+const int kNoiseWrapCells = 100;
+
 Surface terrainSurface(vec3 normal) {
-    const float kNoisePeriod = 40.0; // meters
     const vec3 kSnow = vec3(0.80, 0.82, 0.85);
     vec3 dpdx = dFdx(inRelativePosition);
     vec3 dpdy = dFdy(inRelativePosition);
     Terrain terrain = pc.scene.terrain;
 
-    vec2 p = worldPosition.xz / kNoisePeriod;
-    float noise = 0.65 * valueNoise(p) + 0.35 * valueNoise(p * 2.7 + 13.0);
+    vec2 p = (inRelativePosition.xz + terrain.noiseOffset) / kNoiseCell;
+    float noise = 0.65 * valueNoise(p, kNoiseWrapCells, 19u) +
+                  0.35 * valueNoise(p * 2.7, kNoiseWrapCells * 27 / 10, 20u);
     float needles = smoothstep(0.45, 0.55, noise);
     float rock = 1.0 - smoothstep(0.75, 0.9, normal.y);
 

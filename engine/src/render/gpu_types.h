@@ -152,9 +152,32 @@ struct GpuTerrainLayer {
   uint32_t arm = 0;
   uint32_t height = 0;
   float tileSize = 0.0f;
-  float pad[3] = {};
+  // The camera position wrapped by the layer's period (renderer_frame.cpp).
+  float offset[3] = {};
 };
 static_assert(sizeof(GpuTerrainLayer) == 32);
+
+// Terrain texture coordinates (mesh.frag) are the camera-relative position
+// plus the camera position wrapped by a period, so they stay small and
+// precise anywhere on the map. Layers repeat every kTerrainWrapTiles tiles;
+// along z, the hex-tiled layers repeat every kTerrainHexWrapRows rows of
+// hex cells (sqrt(3)/4 tiles each, so 256.3 tiles), since no whole number
+// of tiles is a whole number of rows. The soil/needles mix noise repeats
+// every kTerrainNoiseWrap meters.
+// Must match kHexCellsPerRepeat, kHexWrapColumns, kHexWrapRows,
+// kNoiseCell and kNoiseWrapCells in mesh.frag.
+constexpr int kTerrainWrapTiles = 256;
+constexpr int kTerrainHexCellsPerRepeat = 2;
+constexpr int kTerrainHexWrapColumns = 512;
+constexpr int kTerrainHexWrapRows = 592;
+constexpr double kTerrainNoiseCell = 40.0;
+constexpr int kTerrainNoiseWrapCells = 100;
+constexpr double kTerrainNoiseWrap = kTerrainNoiseCell * kTerrainNoiseWrapCells;
+static_assert(kTerrainHexWrapColumns == kTerrainHexCellsPerRepeat * kTerrainWrapTiles);
+static_assert(kTerrainHexWrapRows % 2 == 0,
+              "a period along z is the hex lattice step (-rows / 2, rows)");
+static_assert(kTerrainNoiseWrapCells * 27 % 10 == 0,
+              "the mix noise's 2.7x octave needs a whole number of cells per wrap");
 
 // CDLOD terrain quadtree (terrain.glsl): level 0 nodes are 16 m, 32x32
 // quads of 0.5 m; each level doubles. The root covers 1049 km around the
@@ -196,8 +219,11 @@ struct GpuTerrain {
   float heightScale = 0.0f;
   float lodRange0 = 0.0f;
   uint32_t rootLevel = 0;
+  // The camera's x/z wrapped by kTerrainNoiseWrap.
+  float noiseOffset[2] = {};
+  float pad[2] = {};
 };
-static_assert(sizeof(GpuTerrain) == 224);
+static_assert(sizeof(GpuTerrain) == 240);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
@@ -246,7 +272,7 @@ struct SceneData {
   VkDeviceAddress clusterTriangles = 0;
   VkDeviceAddress drawLists = 0;
 };
-static_assert(sizeof(SceneData) == 944);
+static_assert(sizeof(SceneData) == 960);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

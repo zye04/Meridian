@@ -162,9 +162,8 @@ struct TerrainLayer {
     uint arm;
     uint height;
     float tileSize;
-    float pad0;
-    float pad1;
-    float pad2;
+    // The camera position wrapped by the layer's period (renderer_frame.cpp).
+    float offset[3];
 };
 
 layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
@@ -201,6 +200,9 @@ struct Terrain {
     // Level 0's LOD range (m); each level doubles it.
     float lodRange0;
     uint rootLevel;
+    // The camera's x/z wrapped by the mix noise's period (renderer_frame.cpp).
+    vec2 noiseOffset;
+    vec2 pad;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

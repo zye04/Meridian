@@ -10,6 +10,15 @@
 
 namespace meridian {
 
+namespace {
+
+// x minus the nearest multiple of period: identity within half a period of
+// the origin.
+float wrapAround(float x, double period) {
+  return static_cast<float>(x - period * std::round(x / period));
+}
+
+} // namespace
 
 // Writes the CPU instance list to the GPU instance table when it changed.
 // The table is shared by both frames in flight, so the copy waits for the
@@ -384,6 +393,20 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
+  if (impl_->terrain.enabled) {
+    for (int i = 0; i < 3; ++i) {
+      GpuTerrainLayer &layer = scene.terrain.layers[i];
+      const double period = kTerrainWrapTiles * static_cast<double>(layer.tileSize);
+      // Soil and needles (0, 1) are hex-tiled; rock is triplanar.
+      const double periodZ =
+          i < 2 ? kTerrainHexWrapRows * std::sqrt(3.0) / 4.0 * layer.tileSize : period;
+      layer.offset[0] = wrapAround(camera.position.x, period);
+      layer.offset[1] = wrapAround(camera.position.y, period);
+      layer.offset[2] = wrapAround(camera.position.z, periodZ);
+    }
+    scene.terrain.noiseOffset[0] = wrapAround(camera.position.x, kTerrainNoiseWrap);
+    scene.terrain.noiseOffset[1] = wrapAround(camera.position.z, kTerrainNoiseWrap);
+  }
   scene.view = view;
   scene.projectionScale[0] = projection.m[0][0];
   scene.projectionScale[1] = projection.m[1][1];

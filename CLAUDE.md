@@ -64,7 +64,9 @@ overview (3000 m above the ground) `1119 4354 -431 -1.55 -0.35`; across
 the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`;
 sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 --sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
-0`.
+0`; float precision far out, at the crop's corner (ground 1286.5 m),
+`7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
+Laplacian with the still's).
 `--scatter N` places N random Poly Haven models within 150 m of the start
 (fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
 startup ~60 s); over the scatter: `1119 1362 -431 -1.55 -0.25`. Debug
