@@ -40,6 +40,7 @@ void transitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
 } // namespace
 
 struct Renderer::Impl {
+  GLFWwindow *window = nullptr;
   vkb::Instance instance;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   vkb::Device device;
@@ -59,7 +60,58 @@ struct Renderer::Impl {
   // One per swapchain image: the presentation engine may still be reading a
   // semaphore after our fence signals, so it can't be shared across images.
   std::vector<VkSemaphore> renderFinished;
+
+  bool swapchainOutOfDate = false;
+
+  void createSwapchain();
+  void destroySwapchain();
 };
+
+void Renderer::Impl::createSwapchain() {
+  int width = 0;
+  int height = 0;
+  glfwGetFramebufferSize(window, &width, &height);
+
+  auto built =
+      vkb::SwapchainBuilder{device}
+          .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB,
+                               VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+          .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+          .set_desired_extent(width, height)
+          .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+          .build();
+  if (!built) {
+    throw std::runtime_error(built.error().message());
+  }
+  swapchain = built.value();
+  swapchainImages = swapchain.get_images().value();
+  swapchainImageViews = swapchain.get_image_views().value();
+
+  VkSemaphoreCreateInfo semaphoreInfo{};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  renderFinished.resize(swapchainImages.size());
+  for (VkSemaphore &semaphore : renderFinished) {
+    if (vkCreateSemaphore(device.device, &semaphoreInfo, nullptr,
+                          &semaphore) != VK_SUCCESS) {
+      throw std::runtime_error("vkCreateSemaphore failed");
+    }
+  }
+
+  swapchainOutOfDate = false;
+
+  std::cout << "Swapchain: " << swapchainImages.size() << " images, "
+            << swapchain.extent.width << "x" << swapchain.extent.height
+            << "\n";
+}
+
+void Renderer::Impl::destroySwapchain() {
+  for (VkSemaphore semaphore : renderFinished) {
+    vkDestroySemaphore(device.device, semaphore, nullptr);
+  }
+  renderFinished.clear();
+  swapchain.destroy_image_views(swapchainImageViews);
+  vkb::destroy_swapchain(swapchain);
+}
 
 Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   auto instance = vkb::InstanceBuilder{}
@@ -103,24 +155,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->graphicsQueueFamily =
       impl_->device.get_queue_index(vkb::QueueType::graphics).value();
 
-  int width = 0;
-  int height = 0;
-  glfwGetFramebufferSize(window.handle(), &width, &height);
-
-  auto swapchain =
-      vkb::SwapchainBuilder{impl_->device}
-          .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB,
-                               VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
-          .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-          .set_desired_extent(width, height)
-          .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-          .build();
-  if (!swapchain) {
-    throw std::runtime_error(swapchain.error().message());
-  }
-  impl_->swapchain = swapchain.value();
-  impl_->swapchainImages = impl_->swapchain.get_images().value();
-  impl_->swapchainImageViews = impl_->swapchain.get_image_views().value();
+  impl_->window = window.handle();
+  impl_->createSwapchain();
 
   VkDevice dev = impl_->device.device;
 
@@ -157,29 +193,44 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
                         &impl_->imageAvailable) != VK_SUCCESS) {
     throw std::runtime_error("vkCreateSemaphore failed");
   }
-  impl_->renderFinished.resize(impl_->swapchainImages.size());
-  for (VkSemaphore &semaphore : impl_->renderFinished) {
-    if (vkCreateSemaphore(dev, &semaphoreInfo, nullptr, &semaphore) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("vkCreateSemaphore failed");
-    }
-  }
 
   std::cout << "GPU: " << physical.value().name << "\n";
-  std::cout << "Swapchain: " << impl_->swapchainImages.size() << " images, "
-            << impl_->swapchain.extent.width << "x"
-            << impl_->swapchain.extent.height << "\n";
 }
 
 void Renderer::draw() {
   VkDevice dev = impl_->device.device;
 
+  int width = 0;
+  int height = 0;
+  glfwGetFramebufferSize(impl_->window, &width, &height);
+  if (width == 0 || height == 0) {
+    return;
+  }
+
+  // Wayland never reports the swapchain as out of date on resize, so the
+  // size has to be compared by hand.
+  if (impl_->swapchainOutOfDate ||
+      static_cast<uint32_t>(width) != impl_->swapchain.extent.width ||
+      static_cast<uint32_t>(height) != impl_->swapchain.extent.height) {
+    vkDeviceWaitIdle(dev);
+    impl_->destroySwapchain();
+    impl_->createSwapchain();
+  }
+
   vkWaitForFences(dev, 1, &impl_->renderFence, VK_TRUE, UINT64_MAX);
-  vkResetFences(dev, 1, &impl_->renderFence);
 
   uint32_t imageIndex = 0;
-  vkAcquireNextImageKHR(dev, impl_->swapchain.swapchain, UINT64_MAX,
-                        impl_->imageAvailable, VK_NULL_HANDLE, &imageIndex);
+  VkResult acquired = vkAcquireNextImageKHR(
+      dev, impl_->swapchain.swapchain, UINT64_MAX, impl_->imageAvailable,
+      VK_NULL_HANDLE, &imageIndex);
+  if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+    impl_->swapchainOutOfDate = true;
+    return;
+  }
+
+  // Reset only once we know we'll submit, or the next wait never returns.
+  vkResetFences(dev, 1, &impl_->renderFence);
+
   VkImage image = impl_->swapchainImages[imageIndex];
 
   VkCommandBuffer cmd = impl_->commandBuffer;
@@ -237,22 +288,22 @@ void Renderer::draw() {
   present.swapchainCount = 1;
   present.pSwapchains = &impl_->swapchain.swapchain;
   present.pImageIndices = &imageIndex;
-  vkQueuePresentKHR(impl_->graphicsQueue, &present);
+  VkResult presented = vkQueuePresentKHR(impl_->graphicsQueue, &present);
+  if (presented == VK_ERROR_OUT_OF_DATE_KHR ||
+      presented == VK_SUBOPTIMAL_KHR) {
+    impl_->swapchainOutOfDate = true;
+  }
 }
 
 Renderer::~Renderer() {
   VkDevice dev = impl_->device.device;
   vkDeviceWaitIdle(dev);
 
-  for (VkSemaphore semaphore : impl_->renderFinished) {
-    vkDestroySemaphore(dev, semaphore, nullptr);
-  }
   vkDestroySemaphore(dev, impl_->imageAvailable, nullptr);
   vkDestroyFence(dev, impl_->renderFence, nullptr);
   vkDestroyCommandPool(dev, impl_->commandPool, nullptr);
 
-  impl_->swapchain.destroy_image_views(impl_->swapchainImageViews);
-  vkb::destroy_swapchain(impl_->swapchain);
+  impl_->destroySwapchain();
 
   vkb::destroy_device(impl_->device);
   vkb::destroy_surface(impl_->instance, impl_->surface);
