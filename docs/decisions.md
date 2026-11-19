@@ -240,3 +240,10 @@ foliage that survives simplification).
   at the start view 11534 -> 3367 with occlusion, open view 9694 -> 6382;
   images match occlusion off (mean 0.04/255 still, 0.09/255 moving at
   5 m/s, below the 0.12/255 run-to-run noise).
+- **Measured (slice 1, Release, 2560x1440, `--scatter 3000`, GPU ms,
+  median of 5)**, vs the renderer before slice 1 (51faf7f) on the same
+  15-model scene: start 3.46 -> 1.82, open 6.12 -> 1.58, overview
+  2.43 -> 1.46, scatter close-up (`7.2 83 706 0 0.15`) 7.48 -> 1.87.
+  Adding Poly Haven's island_tree_01 (1.6M triangles, ~190 instances):
+  1.54-2.12 ms in every view; the close-up draws 1.57M triangles at 1 px
+  vs 78.5M (12.70 ms) at `--lod-error 0`.

@@ -6,6 +6,8 @@
 #   meridian-cook. Tests opaque, masked and blended materials.
 # From Poly Haven (CC0), 2K, resolved through its public API:
 # - Forest rocks, litter and small plants as glTF, to cook with meridian-cook.
+# - One film-weight tree (island_tree_01, 1.6M triangles) for virtualized
+#   geometry.
 # - Ground textures as JPEG (base color, OpenGL normal, AO/roughness/metal,
 #   height).
 # Once the project is built, everything is also cooked to KTX2.
@@ -46,7 +48,7 @@ polyhaven_files() {
 for model in rock_moss_set_01 rock_moss_set_02 boulder_01 namaqualand_boulder_04 \
     tree_stump_01 tree_stump_02 dead_tree_trunk_02 dry_branches_medium_01 \
     pine_roots fern_02 nettle_plant shrub_02 dandelion_01 fir_sapling \
-    pine_sapling_small; do
+    pine_sapling_small island_tree_01; do
   dest="$root/assets/source/$model"
   # Each file has its own URL (the .bin is shared across resolutions).
   while read -r file url; do

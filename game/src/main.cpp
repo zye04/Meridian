@@ -116,7 +116,7 @@ int scatterModels(meridian::Renderer &renderer,
                        "namaqualand_boulder_04", "tree_stump_01", "tree_stump_02",
                        "dead_tree_trunk_02", "dry_branches_medium_01", "pine_roots",
                        "fern_02", "nettle_plant", "shrub_02", "dandelion_01",
-                       "fir_sapling", "pine_sapling_small"};
+                       "fir_sapling", "pine_sapling_small", "island_tree_01"};
   std::vector<meridian::Model> models;
   for (const char *id : ids) {
     const std::string path = std::string(id) + "/" + id + "_2k.gltf";

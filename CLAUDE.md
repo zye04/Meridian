@@ -52,7 +52,8 @@ looking at the sample models; ground detail `0 80.8 700 0 -0.25`; open
 view over the scatter `0 80.8 700 3.14 -0.05`; high overview
 `0 300 700 0 -0.35`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
 `--scatter N` places N random Poly Haven models within 150 m of the start
-(fixed seed; loading 15 models makes Debug startup ~30 s).
+(fixed seed; loading 16 models, one a 1.6M-triangle tree, makes Debug
+startup ~60 s). Scatter close-up with the tree: `7.2 83 706 0 0.15`.
 
 ## Testing policy (usage matters)
 
@@ -178,7 +179,9 @@ images are shared between them, and barriers account for that.
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry; the first load
   after a change prints "Building clusters" and rewrites it.
-- Known gaps: masked-geometry RT shadows are not visually verified yet; TAA
+- Known gaps: blended instances are drawn at full detail with no culling
+  (every instance, every frame; harmless while no scattered model is
+  blended); masked-geometry RT shadows are not visually verified yet; TAA
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
