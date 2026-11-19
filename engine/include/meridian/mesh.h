@@ -14,8 +14,10 @@ struct Vertex {
   float uvX = 0.0f;
   Vec3 normal;
   float uvY = 0.0f;
+  // xyz: tangent along +U; w: bitangent sign (glTF/MikkTSpace convention).
+  float tangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
 };
-static_assert(sizeof(Vertex) == 32);
+static_assert(sizeof(Vertex) == 48);
 
 struct MeshData {
   std::vector<Vertex> vertices;

@@ -1,0 +1,63 @@
+#version 460
+
+// Precomputes the DFG term of the split-sum approximation with Filament's
+// multiple-scattering formulation (libs/ibl/src/CubemapIBL.cpp,
+// DFV_Multiscatter, Apache-2.0):
+//   x = 4/N * sum(Fc * V * N.L * V.H / N.H)
+//   y = 4/N * sum(     V * N.L * V.H / N.H)
+// so that specular reflectance Er = mix(x, y, f0) and the energy lost to
+// single scattering can be restored with 1 + f0 * (1 / y - 1).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 2, rg16f) uniform writeonly image2D dfgOut;
+
+const float kPi = 3.14159265;
+const uint kSampleCount = 1024u;
+
+vec2 hammersley(uint i) {
+    return vec2(float(i) / float(kSampleCount),
+                float(bitfieldReverse(i)) * 2.3283064365386963e-10);
+}
+
+// Height-correlated Smith visibility (Heitz 2014).
+float visibility(float NoV, float NoL, float a) {
+    float a2 = a * a;
+    float ggxL = NoV * sqrt((NoL - NoL * a2) * NoL + a2);
+    float ggxV = NoL * sqrt((NoV - NoV * a2) * NoV + a2);
+    return 0.5 / (ggxV + ggxL);
+}
+
+void main() {
+    ivec2 size = imageSize(dfgOut);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    float NoV = max((float(pixel.x) + 0.5) / float(size.x), 1e-4);
+    float perceptualRoughness = (float(pixel.y) + 0.5) / float(size.y);
+    float a = perceptualRoughness * perceptualRoughness;
+
+    vec3 V = vec3(sqrt(1.0 - NoV * NoV), 0.0, NoV);
+    vec2 r = vec2(0.0);
+    for (uint i = 0u; i < kSampleCount; ++i) {
+        vec2 u = hammersley(i);
+        // GGX importance sampling of the half vector (pdf = D * cos).
+        float phi = 2.0 * kPi * u.x;
+        float cosTheta2 = (1.0 - u.y) / (1.0 + (a + 1.0) * ((a - 1.0) * u.y));
+        float cosTheta = sqrt(cosTheta2);
+        float sinTheta = sqrt(1.0 - cosTheta2);
+        vec3 H = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+        vec3 L = 2.0 * dot(V, H) * H - V;
+
+        float VoH = clamp(dot(V, H), 0.0, 1.0);
+        float NoL = clamp(L.z, 0.0, 1.0);
+        float NoH = clamp(H.z, 0.0, 1.0);
+        if (NoL > 0.0) {
+            float v = visibility(NoV, NoL, a) * NoL * (VoH / NoH);
+            float Fc = pow(1.0 - VoH, 5.0);
+            r.x += v * Fc;
+            r.y += v;
+        }
+    }
+    imageStore(dfgOut, pixel, vec4(r * (4.0 / float(kSampleCount)), 0.0, 0.0));
+}

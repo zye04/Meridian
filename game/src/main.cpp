@@ -62,8 +62,11 @@ int main() {
   meridian::Renderer renderer(window);
   window.setCursorCaptured(true);
 
+  meridian::MaterialData terrainMaterial;
+  terrainMaterial.proceduralTerrain = true;
   meridian::MeshId terrain =
-      renderer.uploadMesh(meridian::generateTerrain({}));
+      renderer.uploadMesh(meridian::generateTerrain({}),
+                          renderer.createMaterial(terrainMaterial));
   std::vector<meridian::DrawItem> scene = {{terrain}};
 
   meridian::Lighting lighting;

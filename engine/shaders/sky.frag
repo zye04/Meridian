@@ -20,14 +20,9 @@ void main() {
 
     vec3 luminance = vec3(0.0);
     if (viewHeight < pc.scene.atmosphere.topRadius) {
-        vec3 side = normalize(cross(up, direction));
-        vec3 forward = normalize(cross(side, up));
-        vec2 lightOnPlane = normalize(vec2(dot(sun, forward), dot(sun, side)) + 1e-6);
+        luminance = skyLuminance(camera, direction);
         bool intersectsGround = raySphereIntersectNearest(
             camera, direction, pc.scene.atmosphere.bottomRadius) >= 0.0;
-        vec2 uv = skyViewLutUv(intersectsGround, dot(direction, up), lightOnPlane.x,
-                               viewHeight);
-        luminance = textureLod(skyViewLut, uv, 0.0).rgb;
 
         // Sun disk: its illuminance spread over its solid angle, dimmed by the
         // atmosphere along the view ray.

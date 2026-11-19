@@ -13,6 +13,7 @@
 #endif
 #endif
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <chrono>
@@ -38,6 +39,10 @@ constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 constexpr uint32_t kJitterPhases = 8;
 // Exposure for the very first frame, before any histogram exists: a sunny day.
 constexpr float kInitialEv100 = 15.0f;
+// Capacities of the bindless material and texture tables.
+constexpr uint32_t kMaxMaterials = 16384;
+constexpr uint32_t kMaxTextures = 16384;
+constexpr uint32_t kDfgLutSize = 128;
 // Upper bound on draw items per frame, sizing each frame's TLAS.
 constexpr uint32_t kMaxInstances = 4096;
 
@@ -70,6 +75,7 @@ struct GpuMesh {
   Buffer vertices;
   Buffer indices;
   uint32_t indexCount = 0;
+  uint32_t materialIndex = 0;
   // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
   AccelerationStructure blas;
 };
@@ -159,8 +165,55 @@ struct PushConstants {
   Mat4 model;
   VkDeviceAddress vertexBuffer = 0;
   VkDeviceAddress sceneBuffer = 0;
+  VkDeviceAddress materialBuffer = 0;
+  uint32_t materialIndex = 0;
+  uint32_t pad = 0;
 };
-static_assert(sizeof(PushConstants) == 80);
+static_assert(sizeof(PushConstants) == 96);
+
+// Must match Material in common.glsl.
+constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
+constexpr uint32_t kMaterialProceduralTerrain = 1u;
+
+struct GpuMaterial {
+  float baseColorFactor[4] = {};
+  Vec3 emissiveFactor;
+  float metallicFactor = 0.0f;
+  float roughnessFactor = 0.0f;
+  float normalScale = 0.0f;
+  float occlusionStrength = 0.0f;
+  float alphaCutoff = 0.0f;
+  uint32_t baseColorTexture = kNoTexture;
+  uint32_t metallicRoughnessTexture = kNoTexture;
+  uint32_t normalTexture = kNoTexture;
+  uint32_t occlusionTexture = kNoTexture;
+  uint32_t emissiveTexture = kNoTexture;
+  uint32_t flags = 0;
+  uint32_t pad[2] = {};
+};
+static_assert(sizeof(GpuMaterial) == 80);
+
+uint32_t textureIndex(const std::optional<TextureId> &texture) {
+  return texture ? texture->index : kNoTexture;
+}
+
+GpuMaterial toGpu(const MaterialData &m) {
+  GpuMaterial g;
+  std::copy(std::begin(m.baseColorFactor), std::end(m.baseColorFactor),
+            g.baseColorFactor);
+  g.emissiveFactor = m.emissiveFactor;
+  g.metallicFactor = m.metallicFactor;
+  g.roughnessFactor = m.roughnessFactor;
+  g.normalScale = m.normalScale;
+  g.occlusionStrength = m.occlusionStrength;
+  g.baseColorTexture = textureIndex(m.baseColorTexture);
+  g.metallicRoughnessTexture = textureIndex(m.metallicRoughnessTexture);
+  g.normalTexture = textureIndex(m.normalTexture);
+  g.occlusionTexture = textureIndex(m.occlusionTexture);
+  g.emissiveTexture = textureIndex(m.emissiveTexture);
+  g.flags = m.proceduralTerrain ? kMaterialProceduralTerrain : 0u;
+  return g;
+}
 constexpr VkShaderStageFlags kScenePushStages = VK_SHADER_STAGE_VERTEX_BIT |
                                                 VK_SHADER_STAGE_FRAGMENT_BIT |
                                                 VK_SHADER_STAGE_COMPUTE_BIT;
@@ -473,6 +526,15 @@ struct Renderer::Impl {
   // atmosphere; they're rebuilt when it changes.
   std::optional<Atmosphere> builtAtmosphere;
 
+  // Materials and textures, bound once per frame as set 1 ("bindless").
+  Buffer materialBuffer;
+  uint32_t materialCount = 0;
+  Image dfgLut;
+  VkSampler textureSampler = VK_NULL_HANDLE;
+  VkDescriptorSetLayout materialSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool materialPool = VK_NULL_HANDLE;
+  VkDescriptorSet materialSet = VK_NULL_HANDLE;
+
   // Auto-exposure: a luminance histogram and the adapted exposure, both
   // GPU-only. Each frame shades with the exposure the previous frame computed.
   Buffer histogramBuffer;
@@ -489,6 +551,8 @@ struct Renderer::Impl {
   void createPipelines();
   void createExposureBuffers();
   void createAtmosphere();
+  void createMaterialSystem();
+  void computeDfgLut();
 
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect);
@@ -1086,6 +1150,127 @@ void Renderer::Impl::createExposureBuffers() {
   });
 }
 
+void Renderer::Impl::createMaterialSystem() {
+  VkDevice dev = device.device;
+
+  materialBuffer = createBuffer(
+      kMaxMaterials * sizeof(GpuMaterial),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+
+  // Trilinear with 16x anisotropy: textures stay sharp at grazing angles.
+  VkSamplerCreateInfo samplerInfo{};
+  samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  samplerInfo.magFilter = VK_FILTER_LINEAR;
+  samplerInfo.minFilter = VK_FILTER_LINEAR;
+  samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.anisotropyEnable = VK_TRUE;
+  samplerInfo.maxAnisotropy = 16.0f;
+  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &textureSampler),
+        "vkCreateSampler");
+
+  // Must match material.glsl and dfg_lut.comp.
+  VkDescriptorSetLayoutBinding bindings[3]{};
+  bindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  bindings[1] = {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures,
+                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  bindings[2] = {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1,
+                 VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+  // Textures can be added while frames using the set are in flight, and
+  // unused slots never need to be valid.
+  VkDescriptorBindingFlags bindingFlags[3] = {
+      0,
+      VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+          VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+      0};
+  VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+  flagsInfo.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+  flagsInfo.bindingCount = 3;
+  flagsInfo.pBindingFlags = bindingFlags;
+
+  VkDescriptorSetLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layoutInfo.pNext = &flagsInfo;
+  layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+  layoutInfo.bindingCount = 3;
+  layoutInfo.pBindings = bindings;
+  check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr,
+                                    &materialSetLayout),
+        "vkCreateDescriptorSetLayout");
+
+  VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures + 1},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+  };
+  VkDescriptorPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+  poolInfo.maxSets = 1;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
+  check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &materialPool),
+        "vkCreateDescriptorPool");
+
+  VkDescriptorSetAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocInfo.descriptorPool = materialPool;
+  allocInfo.descriptorSetCount = 1;
+  allocInfo.pSetLayouts = &materialSetLayout;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, &materialSet),
+        "vkAllocateDescriptorSets");
+
+  dfgLut = createImage(VK_FORMAT_R16G16_SFLOAT, {kDfgLutSize, kDfgLutSize, 1},
+                       VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                       VK_IMAGE_ASPECT_COLOR_BIT);
+  VkDescriptorImageInfo dfgSampled{linearSampler, dfgLut.view,
+                                   VK_IMAGE_LAYOUT_GENERAL};
+  VkDescriptorImageInfo dfgStorage{VK_NULL_HANDLE, dfgLut.view,
+                                   VK_IMAGE_LAYOUT_GENERAL};
+  VkWriteDescriptorSet writes[2]{};
+  writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[0].dstSet = materialSet;
+  writes[0].dstBinding = 0;
+  writes[0].descriptorCount = 1;
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[0].pImageInfo = &dfgSampled;
+  writes[1] = writes[0];
+  writes[1].dstBinding = 2;
+  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  writes[1].pImageInfo = &dfgStorage;
+  vkUpdateDescriptorSets(dev, 2, writes, 0, nullptr);
+}
+
+// The DFG LUT depends on nothing but the BRDF, so it's computed once.
+void Renderer::Impl::computeDfgLut() {
+  VkPipeline pipeline =
+      createComputePipeline(device.device, "dfg_lut.comp", sceneLayout);
+  submitNow([&](VkCommandBuffer cmd) {
+    transitionImage(cmd, {dfgLut.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sceneLayout,
+                            1, 1, &materialSet, 0, nullptr);
+    vkCmdDispatch(cmd, kDfgLutSize / 8, kDfgLutSize / 8, 1);
+    transitionImage(cmd, {dfgLut.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  });
+  vkDestroyPipeline(device.device, pipeline, nullptr);
+}
+
 void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
@@ -1095,8 +1280,10 @@ void Renderer::Impl::createPipelines() {
 
   VkPipelineLayoutCreateInfo sceneLayoutInfo{};
   sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  sceneLayoutInfo.setLayoutCount = 1;
-  sceneLayoutInfo.pSetLayouts = &atmosphereSetLayout;
+  const VkDescriptorSetLayout sceneSetLayouts[] = {atmosphereSetLayout,
+                                                   materialSetLayout};
+  sceneLayoutInfo.setLayoutCount = 2;
+  sceneLayoutInfo.pSetLayouts = sceneSetLayouts;
   sceneLayoutInfo.pushConstantRangeCount = 1;
   sceneLayoutInfo.pPushConstantRanges = &pushRange;
   check(vkCreatePipelineLayout(dev, &sceneLayoutInfo, nullptr, &sceneLayout),
@@ -1173,9 +1360,19 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
                                 nullptr, &impl_->surface),
         "glfwCreateWindowSurface");
 
+  VkPhysicalDeviceFeatures features{};
+  features.samplerAnisotropy = VK_TRUE;
+
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
   features12.bufferDeviceAddress = VK_TRUE;
+  // Bindless textures: one large, partially filled array indexed per pixel.
+  features12.descriptorIndexing = VK_TRUE;
+  features12.runtimeDescriptorArray = VK_TRUE;
+  features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+  features12.descriptorBindingPartiallyBound = VK_TRUE;
+  features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
+  features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 
   VkPhysicalDeviceVulkan13Features features13{};
   features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -1196,6 +1393,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   auto physical =
       vkb::PhysicalDeviceSelector{impl_->instance}
           .set_minimum_version(1, 3)
+          .set_required_features(features)
           .set_required_features_12(features12)
           .set_required_features_13(features13)
           .add_required_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
@@ -1248,7 +1446,9 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->createFrames();
   impl_->createDescriptors();
   impl_->createSwapchain();
+  impl_->createMaterialSystem();
   impl_->createPipelines();
+  impl_->computeDfgLut();
   impl_->createExposureBuffers();
   impl_->createAtmosphere();
   impl_->lastDrawTime = std::chrono::steady_clock::now();
@@ -1256,12 +1456,37 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   std::cout << "GPU: " << physical.value().name << "\n";
 }
 
-MeshId Renderer::uploadMesh(const MeshData &data) {
+MaterialId Renderer::createMaterial(const MaterialData &material) {
+  if (impl_->materialCount == kMaxMaterials) {
+    throw std::runtime_error("material table is full");
+  }
+  const uint32_t index = impl_->materialCount++;
+  const GpuMaterial gpu = toGpu(material);
+  impl_->submitNow([&](VkCommandBuffer cmd) {
+    vkCmdUpdateBuffer(cmd, impl_->materialBuffer.buffer,
+                      index * sizeof(GpuMaterial), sizeof(gpu), &gpu);
+    VkMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+    VkDependencyInfo dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+  });
+  return {index};
+}
+
+MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const VkDeviceSize vertexBytes = data.vertices.size() * sizeof(Vertex);
   const VkDeviceSize indexBytes = data.indices.size() * sizeof(uint32_t);
 
   GpuMesh mesh;
   mesh.indexCount = static_cast<uint32_t>(data.indices.size());
+  mesh.materialIndex = material.index;
   constexpr VkBufferUsageFlags kRayTracingInput =
       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -1613,9 +1838,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   sceneRendering.pDepthAttachment = &depthAttachment;
 
   vkCmdBeginRendering(cmd, &sceneRendering);
+  const VkDescriptorSet sceneSets[] = {impl_->atmosphereSet, impl_->materialSet};
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          impl_->sceneLayout, 0, 1, &impl_->atmosphereSet, 0,
-                          nullptr);
+                          impl_->sceneLayout, 0, 2, sceneSets, 0, nullptr);
   vkCmdSetViewport(cmd, 0, 1, &viewport);
   vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -1634,6 +1859,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     push.model = item.transform;
     push.vertexBuffer = mesh.vertices.address;
     push.sceneBuffer = frame.sceneBuffer.address;
+    push.materialBuffer = impl_->materialBuffer.address;
+    push.materialIndex = mesh.materialIndex;
     vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
                        sizeof(push), &push);
 
@@ -1842,6 +2069,11 @@ Renderer::~Renderer() {
     vkDestroyCommandPool(dev, frame.commandPool, nullptr);
   }
 
+  impl_->destroyImage(impl_->dfgLut);
+  impl_->destroyBuffer(impl_->materialBuffer);
+  vkDestroyDescriptorPool(dev, impl_->materialPool, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->materialSetLayout, nullptr);
+  vkDestroySampler(dev, impl_->textureSampler, nullptr);
   impl_->destroyBuffer(impl_->skyIrradianceBuffer);
   impl_->destroyImage(impl_->aerialPerspectiveLut);
   impl_->destroyImage(impl_->skyViewLut);

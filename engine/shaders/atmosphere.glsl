@@ -194,6 +194,22 @@ void skyViewLutParameters(vec2 uv, float viewHeight, out float viewZenithCos,
     lightViewCos = -(coord * 2.0 - 1.0);
 }
 
+// Sky luminance seen from atmosphere-space position `camera` toward
+// `direction` (sun illuminance 1, without the sun disk).
+vec3 skyLuminance(vec3 camera, vec3 direction) {
+    float viewHeight = length(camera);
+    vec3 up = camera / viewHeight;
+    vec3 sun = pc.scene.sunDirection;
+    vec3 side = normalize(cross(up, direction));
+    vec3 forward = normalize(cross(side, up));
+    vec2 lightOnPlane = normalize(vec2(dot(sun, forward), dot(sun, side)) + 1e-6);
+    bool intersectsGround = raySphereIntersectNearest(
+        camera, direction, pc.scene.atmosphere.bottomRadius) >= 0.0;
+    vec2 uv = skyViewLutUv(intersectsGround, dot(direction, up), lightOnPlane.x,
+                           viewHeight);
+    return textureLod(skyViewLut, uv, 0.0).rgb;
+}
+
 // Moves a point outside the atmosphere onto its boundary along the ray.
 bool moveToTopAtmosphere(inout vec3 position, vec3 direction) {
     float height = length(position);

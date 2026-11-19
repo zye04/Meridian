@@ -8,6 +8,32 @@ struct Vertex {
     float uvX;
     vec3 normal;
     float uvY;
+    // xyz: tangent direction; w: bitangent sign (glTF/MikkTSpace convention).
+    vec4 tangent;
+};
+
+// glTF metallic-roughness material. Must match GpuMaterial in C++.
+const uint kNoTexture = 0xFFFFFFFFu;
+const uint kMaterialProceduralTerrain = 1u;
+
+struct Material {
+    vec4 baseColorFactor;
+    vec3 emissiveFactor;
+    float metallicFactor;
+    float roughnessFactor;
+    float normalScale;
+    float occlusionStrength;
+    float alphaCutoff;
+    uint baseColorTexture;
+    uint metallicRoughnessTexture;
+    uint normalTexture;
+    uint occlusionTexture;
+    uint emissiveTexture;
+    uint flags;
+};
+
+layout(buffer_reference, std430) readonly buffer MaterialBuffer {
+    Material materials[];
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
@@ -67,4 +93,6 @@ layout(push_constant) uniform PushConstants {
     mat4 model;
     VertexBuffer vertexBuffer;
     SceneBuffer scene;
+    MaterialBuffer materialBuffer;
+    uint materialIndex;
 } pc;

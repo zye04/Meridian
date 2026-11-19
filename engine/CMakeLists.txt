@@ -26,7 +26,8 @@ set(SHADER_SOURCES
     shaders/multiscattering_lut.comp
     shaders/sky_view_lut.comp
     shaders/aerial_perspective_lut.comp
-    shaders/sky_irradiance.comp)
+    shaders/sky_irradiance.comp
+    shaders/dfg_lut.comp)
 foreach(source ${SHADER_SOURCES})
   get_filename_component(name ${source} NAME)
   set(output ${SHADER_DIR}/${name}.spv)
@@ -40,6 +41,7 @@ foreach(source ${SHADER_SOURCES})
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/post.glsl
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/exposure.glsl
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere.glsl
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/material.glsl
     VERBATIM)
   list(APPEND SHADER_OUTPUTS ${output})
 endforeach()

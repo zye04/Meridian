@@ -83,6 +83,11 @@ MeshData generateTerrain(const TerrainSettings &settings) {
       vertex.normal = normalize({heightAt(x - 1, z) - heightAt(x + 1, z),
                                  2.0f * spacing,
                                  heightAt(x, z - 1) - heightAt(x, z + 1)});
+      Vec3 tangent = normalize(
+          {2.0f * spacing, heightAt(x + 1, z) - heightAt(x - 1, z), 0.0f});
+      vertex.tangent[0] = tangent.x;
+      vertex.tangent[1] = tangent.y;
+      vertex.tangent[2] = tangent.z;
       vertex.uvX = static_cast<float>(x) / settings.resolution;
       vertex.uvY = static_cast<float>(z) / settings.resolution;
       mesh.vertices.push_back(vertex);

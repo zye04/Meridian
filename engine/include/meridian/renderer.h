@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace meridian {
@@ -14,6 +15,32 @@ class Window;
 
 struct MeshId {
   uint32_t index = 0;
+};
+
+struct MaterialId {
+  uint32_t index = 0;
+};
+
+struct TextureId {
+  uint32_t index = 0;
+};
+
+// glTF metallic-roughness material. Factors multiply the textures.
+struct MaterialData {
+  float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  Vec3 emissiveFactor; // cd/m^2
+  float metallicFactor = 1.0f;
+  float roughnessFactor = 1.0f;
+  float normalScale = 1.0f;
+  float occlusionStrength = 1.0f;
+  std::optional<TextureId> baseColorTexture;
+  std::optional<TextureId> metallicRoughnessTexture;
+  std::optional<TextureId> normalTexture;
+  std::optional<TextureId> occlusionTexture;
+  std::optional<TextureId> emissiveTexture;
+  // Temporary: grass/rock/snow by slope and height, until terrain gets real
+  // material layers.
+  bool proceduralTerrain = false;
 };
 
 // A planet's atmosphere, in kilometers and per-kilometer coefficients.
@@ -59,8 +86,10 @@ public:
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
 
+  MaterialId createMaterial(const MaterialData &material);
+
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
-  MeshId uploadMesh(const MeshData &mesh);
+  MeshId uploadMesh(const MeshData &mesh, MaterialId material);
 
   void draw(const Camera &camera, const Lighting &lighting,
             std::span<const DrawItem> items);
