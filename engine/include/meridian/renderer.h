@@ -41,6 +41,9 @@ enum class AlphaMode {
 };
 
 // glTF metallic-roughness material. Factors multiply the textures.
+// Upper bound on instances, sizing the instance table and each frame's TLAS.
+constexpr uint32_t kMaxInstances = 65536;
+
 struct MaterialData {
   float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   Vec3 emissiveFactor; // cd/m^2
@@ -136,6 +139,7 @@ public:
   // Places a mesh in the world. Instances persist and live on the GPU, which
   // culls them and builds the draw lists itself each frame.
   InstanceId addInstance(MeshId mesh, const Mat4 &transform);
+  uint32_t instanceCount() const;
 
   void draw(const Camera &camera, const Lighting &lighting);
 

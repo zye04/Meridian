@@ -35,7 +35,7 @@ Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):
 
 ```bash
-./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] --capture out.png [--frames N]
+./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] --capture out.png [--frames N]
 ```
 
 Motion sharpness: add `--camera-velocity X Y Z` (m/s, fixed 1/60 s steps,
@@ -43,10 +43,12 @@ ending at `--camera`) and compare with the still capture of the same view:
 `magick out.png -colorspace gray -morphology Convolve Laplacian:0 -format
 "%[fx:standard_deviation]\n" info:` (higher = sharper).
 
-Useful views: default start `0 300 700 0 -0.35`; sample models
-`-1.6 299.2 700 -0.35 -0.12`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
-These are ~220 m above the terrain (ground there is ~79 m); for ground
-detail use eye height `0 80.8 700 0 -0.25`.
+Useful views: the default start is eye height on the ground at (0, 700),
+looking at the sample models; ground detail `0 80.8 700 0 -0.25`; open
+view over the scatter `0 80.8 700 3.14 -0.05`; high overview
+`0 300 700 0 -0.35`; sunset `--sun 0.9 0.05 -0.4` with yaw 1.15.
+`--scatter N` places N random Poly Haven models within 150 m of the start
+(fixed seed; loading 15 models makes Debug startup ~30 s).
 
 ## Testing policy (usage matters)
 
@@ -71,7 +73,8 @@ engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            addInstance, draw; Lighting, Atmosphere,
                            MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf), texture.h (loadKtx2),
-                           terrain.h, window.h, math/{vec3,mat4}.h
+                           terrain.h (generateTerrain, terrainHeight),
+                           window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders

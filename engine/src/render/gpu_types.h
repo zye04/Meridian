@@ -36,8 +36,6 @@ constexpr float kInitialEv100 = 15.0f;
 constexpr uint32_t kMaxMaterials = 16384;
 constexpr uint32_t kMaxTextures = 16384;
 constexpr uint32_t kDfgLutSize = 128;
-// Upper bound on draw items per frame, sizing each frame's TLAS.
-constexpr uint32_t kMaxInstances = 65536;
 // Shared geometry pools (bump-allocated; real streaming will need an
 // allocator with frees): 4M vertices = 192 MB, 16M indices = 64 MB.
 constexpr uint32_t kVertexPoolCapacity = 4u << 20;

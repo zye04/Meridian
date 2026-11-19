@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -88,6 +89,77 @@ loadTerrainLayer(meridian::Renderer &renderer, const char *id, float tileSize) {
   return layer;
 }
 
+// Loads a model from assets/, or says what's missing and returns nothing.
+std::optional<meridian::Model> loadModel(meridian::Renderer &renderer,
+                                         const char *relativePath) {
+  const auto path = std::filesystem::path(MERIDIAN_ASSET_DIR) / relativePath;
+  if (!std::filesystem::exists(path)) {
+    std::printf("Missing %s; see tools/fetch-sample-assets.sh\n", relativePath);
+    return std::nullopt;
+  }
+  return meridian::loadGltf(renderer, path);
+}
+
+void addModel(meridian::Renderer &renderer, const meridian::Model &model,
+              const meridian::Mat4 &placement) {
+  for (const meridian::DrawItem &item : model.drawItems) {
+    renderer.addInstance(item.mesh, placement * item.transform);
+  }
+}
+
+// Places models at random on the ground within `radius` of `center`, with a
+// fixed seed so runs repeat. Returns how many were placed.
+int scatterModels(meridian::Renderer &renderer,
+                  const meridian::TerrainSettings &terrain, meridian::Vec3 center,
+                  float radius, int count) {
+  const char *ids[] = {"rock_moss_set_01", "rock_moss_set_02", "boulder_01",
+                       "namaqualand_boulder_04", "tree_stump_01", "tree_stump_02",
+                       "dead_tree_trunk_02", "dry_branches_medium_01", "pine_roots",
+                       "fern_02", "nettle_plant", "shrub_02", "dandelion_01",
+                       "fir_sapling", "pine_sapling_small"};
+  std::vector<meridian::Model> models;
+  for (const char *id : ids) {
+    const std::string path = std::string(id) + "/" + id + "_2k.gltf";
+    if (auto model = loadModel(renderer, path.c_str())) {
+      models.push_back(std::move(*model));
+    }
+  }
+  if (models.empty()) {
+    return 0;
+  }
+  std::mt19937 rng(1);
+  std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+  std::uniform_int_distribution<size_t> pick(0, models.size() - 1);
+  uint32_t instances = renderer.instanceCount();
+  for (int placed = 0; placed < count; ++placed) {
+    const meridian::Model &model = models[pick(rng)];
+    if (instances + model.drawItems.size() > meridian::kMaxInstances) {
+      std::printf("Instance table full after %d scattered models\n", placed);
+      return placed;
+    }
+    const float angle = 2.0f * 3.14159265f * unit(rng);
+    const float distance = radius * std::sqrt(unit(rng));
+    const float x = center.x + distance * std::cos(angle);
+    const float z = center.z + distance * std::sin(angle);
+    const float yaw = 2.0f * 3.14159265f * unit(rng);
+    const float scale = 0.8f + 0.4f * unit(rng);
+    // Sunk slightly so bases don't float where the ground curves.
+    const float y = meridian::terrainHeight(terrain, x, z) - 0.05f;
+    meridian::Mat4 placement = meridian::Mat4::identity();
+    placement.m[0][0] = scale * std::cos(yaw);
+    placement.m[0][2] = -scale * std::sin(yaw);
+    placement.m[1][1] = scale;
+    placement.m[2][0] = scale * std::sin(yaw);
+    placement.m[2][2] = scale * std::cos(yaw);
+    placement.m[3][0] = x;
+    placement.m[3][1] = y;
+    placement.m[3][2] = z;
+    addModel(renderer, model, placement);
+    instances += static_cast<uint32_t>(model.drawItems.size());
+  }
+  return count;
+}
+
 // Command-line options for deterministic, automated runs, e.g.
 //   game --camera 0 300 700 0 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
@@ -96,6 +168,8 @@ struct Options {
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::filesystem::path> capturePath;
+  // Poly Haven models to scatter on the ground around the start.
+  int scatter = 0;
   // Frames to render before exiting; 0 runs until the window closes.
   int frames = 0;
 };
@@ -123,13 +197,15 @@ Options parseOptions(int argc, char **argv) {
       options.cameraVelocity = {number(i), number(i), number(i)};
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
+    } else if (arg == "--scatter") {
+      options.scatter = static_cast<int>(number(i));
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
-                               "--camera-velocity x y z, --capture file.png, "
-                               "--frames n)");
+                               "--camera-velocity x y z, --scatter n, "
+                               "--capture file.png, --frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
@@ -153,10 +229,11 @@ int main(int argc, char **argv) {
   meridian::Renderer renderer(window);
   window.setCursorCaptured(interactive);
 
+  const meridian::TerrainSettings terrainSettings;
   meridian::MaterialData terrainMaterial;
   terrainMaterial.terrain = true;
   meridian::MeshId terrain =
-      renderer.uploadMesh(meridian::generateTerrain({}),
+      renderer.uploadMesh(meridian::generateTerrain(terrainSettings),
                           renderer.createMaterial(terrainMaterial));
   renderer.addInstance(terrain, meridian::Mat4::identity());
   // Tile sizes are the scans' real-world sizes.
@@ -169,27 +246,20 @@ int main(int argc, char **argv) {
     renderer.setTerrainMaterial({*soil, *needles, *rock});
   }
 
-  // Sample assets from tools/fetch-sample-assets.sh (AlphaBlendModeTest must
-  // be cooked first), placed a few meters in front of the starting camera.
-  struct SampleModel {
-    const char *path;
-    meridian::Vec3 position;
+  // Sample assets from tools/fetch-sample-assets.sh, on the ground a few
+  // meters in front of the start.
+  const meridian::Vec3 start = {0.0f, 0.0f, 700.0f};
+  auto ground = [&](float x, float z) {
+    return meridian::Vec3{x, meridian::terrainHeight(terrainSettings, x, z), z};
   };
-  const SampleModel samples[] = {
-      {"FlightHelmet/FlightHelmet.gltf", {0.0f, 298.4f, 697.0f}},
-      {"AlphaBlendModeTest/AlphaBlendModeTest.gltf", {-3.0f, 298.4f, 695.0f}},
-  };
-  for (const SampleModel &sample : samples) {
-    const auto path = std::filesystem::path(MERIDIAN_ASSET_DIR) / sample.path;
-    if (!std::filesystem::exists(path)) {
-      std::printf("Missing %s; see tools/fetch-sample-assets.sh\n", sample.path);
-      continue;
-    }
-    meridian::Model model = meridian::loadGltf(renderer, path);
-    const meridian::Mat4 placement = meridian::translation(sample.position);
-    for (const meridian::DrawItem &item : model.drawItems) {
-      renderer.addInstance(item.mesh, placement * item.transform);
-    }
+  if (auto helmet = loadModel(renderer, "FlightHelmet/FlightHelmet.gltf")) {
+    addModel(renderer, *helmet, meridian::translation(ground(0.0f, 697.0f)));
+  }
+  if (auto alpha = loadModel(renderer, "AlphaBlendModeTest/AlphaBlendModeTest.gltf")) {
+    addModel(renderer, *alpha, meridian::translation(ground(-3.0f, 693.0f)));
+  }
+  if (options.scatter > 0) {
+    scatterModels(renderer, terrainSettings, start, 150.0f, options.scatter);
   }
 
   meridian::Lighting lighting;
@@ -197,8 +267,8 @@ int main(int argc, char **argv) {
     lighting.sunDirection = *options.sunDirection;
   }
   meridian::Camera camera;
-  camera.position = {0.0f, 300.0f, 700.0f};
-  camera.pitch = -0.35f;
+  camera.position = ground(start.x, start.z) + meridian::Vec3{0.0f, 1.7f, 0.0f};
+  camera.pitch = -0.1f;
   if (options.camera) {
     camera = *options.camera;
   }

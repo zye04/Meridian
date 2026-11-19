@@ -1,5 +1,6 @@
 #include <meridian/terrain.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace meridian {
@@ -49,7 +50,32 @@ float fractalNoise(float x, float z, uint32_t seed) {
   return sum / total;
 }
 
+float vertexHeight(const TerrainSettings &settings, float x, float z) {
+  const float n = fractalNoise(x, z, settings.seed);
+  // Squaring flattens the lowlands and sharpens the peaks.
+  return n * n * settings.maxHeight;
+}
+
 } // namespace
+
+float terrainHeight(const TerrainSettings &settings, float x, float z) {
+  const float spacing = settings.size / static_cast<float>(settings.resolution);
+  const float origin = -settings.size * 0.5f;
+  const float gx = std::clamp((x - origin) / spacing, 0.0f,
+                              static_cast<float>(settings.resolution));
+  const float gz = std::clamp((z - origin) / spacing, 0.0f,
+                              static_cast<float>(settings.resolution));
+  const int x0 = std::min(static_cast<int>(gx), settings.resolution - 1);
+  const int z0 = std::min(static_cast<int>(gz), settings.resolution - 1);
+  const float fx = gx - x0;
+  const float fz = gz - z0;
+  auto h = [&](int ix, int iz) {
+    return vertexHeight(settings, origin + ix * spacing, origin + iz * spacing);
+  };
+  const float top = h(x0, z0) + (h(x0 + 1, z0) - h(x0, z0)) * fx;
+  const float bottom = h(x0, z0 + 1) + (h(x0 + 1, z0 + 1) - h(x0, z0 + 1)) * fx;
+  return top + (bottom - top) * fz;
+}
 
 MeshData generateTerrain(const TerrainSettings &settings) {
   const int verticesPerSide = settings.resolution + 1;
@@ -60,10 +86,8 @@ MeshData generateTerrain(const TerrainSettings &settings) {
                              verticesPerSide);
   for (int z = 0; z < verticesPerSide; ++z) {
     for (int x = 0; x < verticesPerSide; ++x) {
-      float n = fractalNoise(origin + x * spacing, origin + z * spacing,
-                             settings.seed);
-      // Squaring flattens the lowlands and sharpens the peaks.
-      heights[z * verticesPerSide + x] = n * n * settings.maxHeight;
+      heights[z * verticesPerSide + x] =
+          vertexHeight(settings, origin + x * spacing, origin + z * spacing);
     }
   }
 

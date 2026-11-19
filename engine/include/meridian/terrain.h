@@ -16,4 +16,8 @@ struct TerrainSettings {
 // A square grid centered on the origin, shaped by fractal value noise.
 MeshData generateTerrain(const TerrainSettings &settings);
 
+// Height of the generated mesh's surface at (x, z), for placing things on
+// the ground: exact at vertices, bilinear in between.
+float terrainHeight(const TerrainSettings &settings, float x, float z);
+
 } // namespace meridian

@@ -409,6 +409,10 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   return {meshIndex};
 }
 
+uint32_t Renderer::instanceCount() const {
+  return static_cast<uint32_t>(impl_->instances.size());
+}
+
 InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
   if (impl_->instances.size() == kMaxInstances) {
     throw std::runtime_error("instance table is full");
