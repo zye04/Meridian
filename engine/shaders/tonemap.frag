@@ -43,8 +43,30 @@ vec3 agx(vec3 color) {
     return kRec2020ToRec709 * v;
 }
 
+vec3 linearToSrgb(vec3 c) {
+    return mix(12.92 * c, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055,
+               step(0.0031308, c));
+}
+
+vec3 srgbToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)),
+               step(0.04045, c));
+}
+
+// Triangular-PDF noise in [-1, 1] (Gjøl, "Banding in Games", GDC 2016) from
+// interleaved gradient noise (Jimenez 2014). Triangular rather than uniform
+// so the noise's variance doesn't depend on the signal.
+float ditherNoise(vec2 pixel) {
+    float n = fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+    n = n * 2.0 - 1.0;
+    return sign(n) * (1.0 - sqrt(1.0 - abs(n)));
+}
+
 void main() {
     vec3 color = texelFetch(resolved, ivec2(gl_FragCoord.xy), 0).rgb;
-    // Linear output; the sRGB swapchain applies the display encoding.
-    outColor = vec4(max(agx(color), 0.0), 1.0);
+    // The swapchain is sRGB, so the 8-bit steps are uniform in encoded
+    // space: dither there by +-1 step, then hand the hardware linear again.
+    vec3 encoded = linearToSrgb(clamp(agx(color), 0.0, 1.0));
+    encoded += ditherNoise(gl_FragCoord.xy) / 255.0;
+    outColor = vec4(srgbToLinear(clamp(encoded, 0.0, 1.0)), 1.0);
 }

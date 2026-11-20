@@ -27,6 +27,22 @@ sources. Check here before re-researching a topic.
   remembered polynomial turned out outdated, so it was verified against the
   source.
   - https://www.khronos.org/news/press/khronos-pbr-neutral-tone-mapper-released-for-true-to-life-color-rendering-of-3d-products
+- **Output dither** (2026-11-20): the sky showed concentric bands. Measured
+  along sky lines, every step was exactly 1 LSB of the 8-bit output, in
+  plateaus 10-150 px wide, so the FP32 sky-view LUT and FP16 HDR target
+  were not the cause. The tonemap pass adds triangular-PDF noise of +-1
+  LSB in sRGB-encoded space (the swapchain is `B8G8R8A8_SRGB`, so it
+  encodes, dithers and decodes, and the hardware re-encodes), the
+  approach of Gjøl's "Banding in Games" (Playdead, GDC 2016); the noise is
+  interleaved gradient noise (Jimenez 2014) remapped to a triangular PDF,
+  whose error variance doesn't depend on the signal. Static per pixel:
+  the dither runs after TAA, so nothing accumulates it, and at +-1 LSB a
+  per-frame shift buys nothing visible. Result: averaged sky profiles step
+  <= 0.5 LSB, mean image change ~1e-4/255, tonemap 0.02 -> 0.04 ms at
+  2560x1440. A 10-bit or HDR swapchain would need the same dither at its
+  own LSB.
+  - https://loopit.dk/banding_in_games.pdf
+  - https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
 - **Auto exposure**: log-luminance histogram (256 bins, shared-memory
   atomics, quarter-resolution sampling: +0.1 ms instead of +0.34 ms at full
   resolution), averaging the 10th-90th percentile, exponential adaptation.

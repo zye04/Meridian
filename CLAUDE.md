@@ -195,8 +195,9 @@ against the new pyramid; writes the per-instance visibility buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> AgX
-tonemap into the swapchain. 2 frames in flight; the HDR/depth/LUT/history
-images are shared between them, and barriers account for that.
+tonemap + +-1 LSB dither into the sRGB swapchain. 2 frames in flight; the
+HDR/depth/LUT/history images are shared between them, and barriers
+account for that.
 
 ## Conventions
 
