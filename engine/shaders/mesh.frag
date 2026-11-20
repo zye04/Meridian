@@ -153,7 +153,7 @@ struct Surface {
 };
 
 vec4 sampleTexture(uint index, vec2 uv) {
-    return texture(textures[nonuniformEXT(index)], uv);
+    return texture(textures[nonuniformEXT(index)], uv, pc.scene.mipBias);
 }
 
 #ifdef TERRAIN
@@ -232,7 +232,9 @@ TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
 }
 
 vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
-    return textureGrad(textures[nonuniformEXT(index)], uv, dx, dy);
+    // textureGrad takes no bias: scaling the gradients by 2^bias is the same.
+    float scale = exp2(pc.scene.mipBias);
+    return textureGrad(textures[nonuniformEXT(index)], uv, dx * scale, dy * scale);
 }
 
 // Hex-tiling (Mikkelsen 2022, "Practical Real-Time Hex-Tiling", JCGT;

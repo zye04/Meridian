@@ -32,8 +32,6 @@ constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 // Screen-space motion vectors for temporal anti-aliasing (and later DLSS).
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
-// Halton(2,3) jitter cycle length.
-constexpr uint32_t kJitterPhases = 8;
 // Exposure for the very first frame, before any histogram exists: a sunny day.
 constexpr float kInitialEv100 = 15.0f;
 // Capacities of the bindless material and texture tables.
@@ -260,7 +258,7 @@ struct SceneData {
   Mat4 currentViewProjection;
   Mat4 previousViewProjection;
   Vec3 sunDirection;
-  float pad0 = 0.0f;
+  float mipBias = 0.0f;
   Vec3 sunIlluminance;
   uint32_t frameIndex = 0;
   Vec3 cameraPosition;

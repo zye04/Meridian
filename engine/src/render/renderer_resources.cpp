@@ -235,9 +235,16 @@ Image Renderer::Impl::createImage(VkFormat format, VkExtent3D extent,
   return image;
 }
 
-Image Renderer::Impl::createScreenImage(VkFormat format,
+Image Renderer::Impl::createRenderImage(VkFormat format,
                                         VkImageUsageFlags usage,
                                         VkImageAspectFlags aspect) {
+  return createImage(format, {renderExtent.width, renderExtent.height, 1}, usage,
+                     aspect);
+}
+
+Image Renderer::Impl::createDisplayImage(VkFormat format,
+                                         VkImageUsageFlags usage,
+                                         VkImageAspectFlags aspect) {
   return createImage(format,
                      {swapchain.extent.width, swapchain.extent.height, 1},
                      usage, aspect);

@@ -38,21 +38,24 @@ void Renderer::Impl::createSwapchain() {
           "vkCreateSemaphore");
   }
 
-  depth = createScreenImage(kDepthFormat,
+  const Extent display{swapchain.extent.width, swapchain.extent.height};
+  const Extent render = scaledExtent(display, aaSettings.renderScale);
+  renderExtent = {render.width, render.height};
+  depth = createRenderImage(kDepthFormat,
                             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
                                 VK_IMAGE_USAGE_SAMPLED_BIT,
                             VK_IMAGE_ASPECT_DEPTH_BIT);
   createDepthPyramid();
-  hdr = createScreenImage(kHdrFormat,
+  hdr = createRenderImage(kHdrFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                         VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT);
-  motion = createScreenImage(kMotionFormat,
+  motion = createRenderImage(kMotionFormat,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                            VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT);
   for (Image &image : history) {
-    image = createScreenImage(kHdrFormat,
+    image = createDisplayImage(kHdrFormat,
                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                         VK_IMAGE_ASPECT_COLOR_BIT);
@@ -74,7 +77,8 @@ void Renderer::Impl::createSwapchain() {
     const Image &previous = history[i];
     const Image &next = history[1 - i];
     VkDescriptorImageInfo images[] = {
-        {nearestSampler, hdr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        // Linear: the resolve reads the scene colour at display pixel centers.
+        {linearSampler, hdr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {nearestSampler, motion.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {linearSampler, previous.view, VK_IMAGE_LAYOUT_GENERAL},
         {VK_NULL_HANDLE, next.view, VK_IMAGE_LAYOUT_GENERAL},
@@ -99,12 +103,16 @@ void Renderer::Impl::createSwapchain() {
   std::cout << "Swapchain: " << swapchainImages.size() << " images, "
             << swapchain.extent.width << "x" << swapchain.extent.height
             << "\n";
+  std::cout << "Render " << render.width << "x" << render.height << ", display "
+            << display.width << "x" << display.height << ", jitter phases "
+            << jitterPhaseCount(render, display, aaSettings.rayReconstruction)
+            << ", mip bias " << textureMipBias(render, display) << "\n";
 }
 
 void Renderer::Impl::createDepthPyramid() {
   pyramidValid = false;
-  depthPyramidExtent = {std::bit_floor(swapchain.extent.width),
-                        std::bit_floor(swapchain.extent.height)};
+  depthPyramidExtent = {std::bit_floor(renderExtent.width),
+                        std::bit_floor(renderExtent.height)};
   const auto levels = static_cast<uint32_t>(std::bit_width(
       std::max(depthPyramidExtent.width, depthPyramidExtent.height)));
   if (levels > kMaxPyramidLevels) {

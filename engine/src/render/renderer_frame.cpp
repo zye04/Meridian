@@ -306,8 +306,8 @@ void Renderer::Impl::buildDepthPyramid(VkCommandBuffer cmd) {
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline);
-  int32_t sourceWidth = static_cast<int32_t>(swapchain.extent.width);
-  int32_t sourceHeight = static_cast<int32_t>(swapchain.extent.height);
+  int32_t sourceWidth = static_cast<int32_t>(renderExtent.width);
+  int32_t sourceHeight = static_cast<int32_t>(renderExtent.height);
   for (uint32_t level = 0; level < depthPyramidLevels.size(); ++level) {
     PyramidConstants constants;
     constants.sourceSize[0] = sourceWidth;
@@ -453,6 +453,18 @@ void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
 
+void Renderer::setAntiAliasing(const AaSettings &settings) {
+  if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
+    throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
+  }
+  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+  impl_->aaSettings = {.renderScale = settings.renderScale};
+  impl_->destroySwapchain();
+  impl_->createSwapchain();
+}
+
+AaSettings Renderer::antiAliasing() const { return impl_->aaSettings; }
+
 void Renderer::requestCapture(const std::filesystem::path &path) {
   impl_->capturePath = path;
 }
@@ -541,14 +553,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // Reset only once we know we'll submit, or the next wait never returns.
   check(vkResetFences(dev, 1, &frame.renderFence), "vkResetFences");
 
+  // The scene renders at renderExtent, the resolve and later passes at the
+  // display size.
   const VkExtent2D extent = impl_->swapchain.extent;
+  const VkExtent2D renderExtent = impl_->renderExtent;
+  const Extent render{renderExtent.width, renderExtent.height};
+  const Extent display{extent.width, extent.height};
   const float aspect =
       static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
-  // Sub-pixel jitter in pixels, cycling through Halton(2,3). The temporal
-  // resolve turns it into anti-aliasing (and DLSS will need it too).
+  // Sub-pixel jitter in render pixels, cycling through Halton(2,3). The
+  // temporal resolve turns it into anti-aliasing (and DLSS will need it too).
   const uint32_t phase =
-      static_cast<uint32_t>(impl_->frameNumber % kJitterPhases) + 1;
+      static_cast<uint32_t>(impl_->frameNumber %
+                            jitterPhaseCount(render, display,
+                                             impl_->aaSettings.rayReconstruction)) +
+      1;
   const float jitterX = halton(phase, 2) - 0.5f;
   const float jitterY = halton(phase, 3) - 0.5f;
 
@@ -557,8 +577,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   const Mat4 view = camera.viewRotation();
   const Mat4 projection = camera.projection(aspect);
   Mat4 jitteredProjection = projection;
-  jitteredProjection.m[2][0] += 2.0f * jitterX / static_cast<float>(extent.width);
-  jitteredProjection.m[2][1] += 2.0f * jitterY / static_cast<float>(extent.height);
+  jitteredProjection.m[2][0] += 2.0f * jitterX / static_cast<float>(renderExtent.width);
+  jitteredProjection.m[2][1] += 2.0f * jitterY / static_cast<float>(renderExtent.height);
 
   SceneData scene;
   scene.viewProjection = jitteredProjection * view;
@@ -581,8 +601,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.cameraPosition = camera.position;
   scene.sunAngularRadius = lighting.sunAngularRadius;
   scene.skyIrradiance = impl_->skyIrradianceBuffer.address;
-  scene.inverseResolution[0] = 1.0f / static_cast<float>(extent.width);
-  scene.inverseResolution[1] = 1.0f / static_cast<float>(extent.height);
+  scene.inverseResolution[0] = 1.0f / static_cast<float>(renderExtent.width);
+  scene.inverseResolution[1] = 1.0f / static_cast<float>(renderExtent.height);
+  scene.mipBias = textureMipBias(render, display);
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
   if (impl_->terrain.enabled) {
@@ -658,10 +679,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   };
 
   VkViewport viewport{};
-  viewport.width = static_cast<float>(extent.width);
-  viewport.height = static_cast<float>(extent.height);
+  viewport.width = static_cast<float>(renderExtent.width);
+  viewport.height = static_cast<float>(renderExtent.height);
   viewport.maxDepth = 1.0f;
-  VkRect2D scissor = {{0, 0}, extent};
+  VkRect2D scissor = {{0, 0}, renderExtent};
 
   if (impl_->instancesDirty) {
     impl_->uploadInstances(cmd, frame);
@@ -783,7 +804,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   VkRenderingInfo sceneRendering{};
   sceneRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-  sceneRendering.renderArea = {{0, 0}, extent};
+  sceneRendering.renderArea = {{0, 0}, renderExtent};
   sceneRendering.layerCount = 1;
   VkRenderingAttachmentInfo motionAttachment{};
   motionAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1051,8 +1072,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     impl_->tonemapPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           impl_->postLayout, 0, 1, &postSet, 0, nullptr);
-  vkCmdSetViewport(cmd, 0, 1, &viewport);
-  vkCmdSetScissor(cmd, 0, 1, &scissor);
+  const VkViewport displayViewport{0.0f, 0.0f, static_cast<float>(extent.width),
+                                   static_cast<float>(extent.height), 0.0f, 1.0f};
+  const VkRect2D displayScissor{{0, 0}, extent};
+  vkCmdSetViewport(cmd, 0, 1, &displayViewport);
+  vkCmdSetScissor(cmd, 0, 1, &displayScissor);
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
   endPass("tonemap");

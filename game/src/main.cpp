@@ -317,6 +317,8 @@ struct Options {
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
+  // Render size over display size, in (0, 1].
+  std::optional<float> renderScale;
   // Fullscreen by default: consistent size for GPU timings, and the way the
   // game is played.
   bool fullscreen = true;
@@ -367,6 +369,12 @@ Options parseOptions(int argc, char **argv) {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
       options.lodError = number(i);
+    } else if (arg == "--render-scale") {
+      const float scale = number(i);
+      if (!(scale > 0.0f && scale <= 1.0f)) {
+        throw std::runtime_error("--render-scale takes a value in (0, 1]");
+      }
+      options.renderScale = scale;
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--placement" && i + 1 < argc &&
@@ -382,7 +390,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
-                               "--lod-error px, "
+                               "--lod-error px, --render-scale s, "
                                "--windowed, "
                                "--capture file.png|file.pfm, --frames n)");
     }
@@ -412,6 +420,9 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setLodErrorPixels(options.lodError);
+  if (options.renderScale) {
+    renderer.setAntiAliasing({.renderScale = *options.renderScale});
+  }
 
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
   const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";

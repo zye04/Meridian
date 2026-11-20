@@ -80,6 +80,10 @@ Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
+`--render-scale S` (0 < S <= 1, default 1) renders the scene at the
+display size times S and lets TAA upscale (startup prints `Render WxH,
+display WxH, jitter phases N, mip bias B`).
+
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
@@ -162,7 +166,9 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            PlacedInstance), grade.h (Grade, CPU
                            reference of the grade + AgX LUT bake that
                            grade_lut.comp mirrors; Renderer::setGrade),
-                           window.h, math/{vec3,mat4}.h
+                           upscaler.h (AaSettings, render/display rules:
+                           scaledExtent, jitterPhaseCount,
+                           textureMipBias), window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders
@@ -257,9 +263,15 @@ LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
-AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. 2 frames in
-flight; the HDR/depth/LUT/history images are shared between them, and
-barriers account for that.
+AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. Everything up
+to the TAA resolve runs at the render size (`renderExtent`: depth, HDR,
+motion, depth pyramid, Halton(2,3) jitter in render pixels over
+`jitterPhaseCount` phases, material mip bias `textureMipBias`, both in
+upscaler.h); the resolve and everything after it at the display size
+(swapchain). Both sets of images are created in `createSwapchain` and
+destroyed in `destroySwapchain`; `setAntiAliasing` recreates them. 2
+frames in flight; the HDR/depth/LUT/history images are shared between
+them, and barriers account for that.
 
 ## Conventions
 

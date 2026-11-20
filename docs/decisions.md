@@ -70,8 +70,9 @@ sources. Check here before re-researching a topic.
 
 ## Anti-aliasing and upscaling
 
-- **TAA** now, **DLSS later** in the same slot. Halton(2,3) jitter over 8
-  frames, motion vectors as previous - current in UV, 9-tap Catmull-Rom
+- **TAA** now, **DLSS later** in the same slot. Halton(2,3) jitter (phase
+  count from the render/display ratio, see motion clarity), motion
+  vectors as previous - current in UV, 9-tap Catmull-Rom
   history sampling (MJP), variance clipping in YCoCg toward the box center
   (Salvi; Playdead), and luminance-weighted blend (Karis).
   - http://behindthepixels.io/assets/files/TemporalAA.pdf
@@ -1241,6 +1242,27 @@ separately linked module (`MERIDIAN_DLSS`).**
   greens.
 - Sources: https://dev.epicgames.com/documentation/en-us/unreal-engine/color-grading-and-the-filmic-tonemapper-in-unreal-engine
   and https://gdcvault.com/play/1024253/High-Dynamic-Range-Color-Grading
+
+**The scene renders at a render size, the resolve and later passes at
+the display size** (DLSS programming guide).
+- Render-sized: depth, HDR, motion and the depth pyramid; the scene
+  viewport, jitter and `inverseResolution` (aerial perspective, cull, LOD
+  pixels) use it. Display-sized: TAA history, histogram, exposure,
+  tonemap, captures. `--render-scale S` sets render = display x S
+  (rounded); TAA reads the current colour bilinearly at display pixel
+  centers and its neighbourhood and motion at the render texel under
+  them (quality below scale 1 is not gated: DLSS is the upscaler).
+- Jitter phases = max(8, ceil(8 (display/render)^2)), at least 32 for
+  Ray Reconstruction: about 8 samples per display pixel per cycle.
+- Texture mip bias = log2(render/display), minus 1 when upscaling (0 at
+  DLAA), on material samples (`texture` bias; `textureGrad` gradients
+  scaled by 2^bias).
+- Scale 1 is unchanged: Release 1080p ground still mean diff 0.0000/255,
+  forward 5 m/s 0.0106/255 vs the previous build, accepted as noise
+  (shader codegen: a same-size path fetching the identical texels gives
+  the same diff; the forward/still Laplacian ratio stays 0.4974).
+- Source: https://github.com/NVIDIA/DLSS (DLSS_Programming_Guide_Release.pdf,
+  sections on resolution, jitter and mip bias)
 
 **The reference's motion/still ratio is about 0.9** (0.8-1.0, low
 confidence), estimated from the YouTube video. Gates: forward 5 m/s

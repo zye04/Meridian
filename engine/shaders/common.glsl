@@ -337,7 +337,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     mat4 currentViewProjection;
     mat4 previousViewProjection;
     vec3 sunDirection;
-    float pad0;
+    // Added to material texture LODs (textureMipBias: sharper when the
+    // render size is below the display size).
+    float mipBias;
     vec3 sunIlluminance;
     uint frameIndex;
     vec3 cameraPosition;

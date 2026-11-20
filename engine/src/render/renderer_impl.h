@@ -7,6 +7,7 @@
 #include "vulkan_util.h"
 
 #include <meridian/renderer.h>
+#include <meridian/upscaler.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -43,14 +44,20 @@ struct Renderer::Impl {
   std::vector<VkSemaphore> renderFinished;
   bool swapchainOutOfDate = false;
 
-  // Sized like the swapchain and recreated with it.
+  // The scene renders at renderExtent (the display, swapchain.extent, scaled
+  // by aaSettings.renderScale); the temporal resolve and everything after it
+  // run at the display size. All of these images are recreated with the
+  // swapchain.
+  AaSettings aaSettings;
+  VkExtent2D renderExtent{};
+  // Render-sized.
   Image depth;
   Image hdr;
   Image motion;
-  // Temporal anti-aliasing history, ping-ponged: each frame reads one and
-  // writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
+  // Display-sized temporal anti-aliasing history, ping-ponged: each frame
+  // reads one and writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
   std::array<Image, 2> history;
-  // Min-reduced depth for occlusion culling: the screen rounded down to
+  // Min-reduced depth for occlusion culling: the render size rounded down to
   // powers of two, one view per level. Always in VK_IMAGE_LAYOUT_GENERAL.
   Image depthPyramid;
   std::vector<VkImageView> depthPyramidLevels;
@@ -270,8 +277,10 @@ struct Renderer::Impl {
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect,
                     uint32_t mipLevels = 1);
-  Image createScreenImage(VkFormat format, VkImageUsageFlags usage,
+  Image createRenderImage(VkFormat format, VkImageUsageFlags usage,
                           VkImageAspectFlags aspect);
+  Image createDisplayImage(VkFormat format, VkImageUsageFlags usage,
+                           VkImageAspectFlags aspect);
   void destroyImage(Image &image);
 
   Buffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,

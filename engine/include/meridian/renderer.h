@@ -6,6 +6,7 @@
 #include <meridian/mesh.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
+#include <meridian/upscaler.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -219,6 +220,12 @@ public:
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.
   void setGrade(const Grade &grade);
+
+  // Recreates the render-sized images and resets the temporal history. Only
+  // renderScale (0 < scale <= 1, the render size over the display size) is
+  // honoured so far; antiAliasing() returns the settings in effect.
+  void setAntiAliasing(const AaSettings &settings);
+  AaSettings antiAliasing() const;
 
   // Saves the next drawn frame (after tonemapping) as a PNG. For automated
   // visual checks; stalls that frame until the GPU is done.
