@@ -291,13 +291,13 @@ output (backlog row).
 - per-hue saturation and hue rotation in OKLCh, in 3 bands: greens,
   blues, browns.
 
-**Bake.** Grade + DRT go into one 33^3 RGBA16F 3D LUT, indexed by a
+**Bake.** Grade + DRT go into one 65^3 RGBA16F 3D LUT, indexed by a
 log2 shaper over -12.47..+8 EV (log2 of the value, as AgX's own shaper),
 after AgX's inset matrix. The range reaches past AgX's +4.03 EV clamp so
 a negative exposure offset in the grade recovers highlights; AgX's clamp
 is applied inside the bake. Indexing after the inset keeps saturated
-highlights from clipping early. CPU tests check both. If the identity
-gate (mean <= 0.3/255) fails at 33^3, the LUT becomes 65^3.
+highlights from clipping early. CPU tests check both. 33^3 fails the
+identity gate (mean 0.47/255 > 0.3/255); 65^3 passes (0.11/255).
 - A compute pass rebuilds it only when the grade or the display changes.
 - `tonemap.frag` does one trilinear fetch, then the existing dither.
 - A CPU reference of the grade math is unit-tested against the shader

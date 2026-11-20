@@ -1210,9 +1210,21 @@ separately linked module (`MERIDIAN_DLSS`).**
 
 **The grade is scene-referred and parametric.**
 - White balance, CDL and per-hue OKLCh grading are baked with the DRT
-  into a 33^3 LUT (65^3 if the identity gate fails), indexed after
-  AgX's inset by a log2 shaper over -12.47..+8 EV, so one grade serves
-  SDR and HDR and a negative exposure offset recovers highlights.
+  into a 65^3 LUT, indexed after AgX's inset by a log2 shaper over
+  -12.47..+8 EV, so one grade serves SDR and HDR and a negative exposure
+  offset recovers highlights.
+- 33^3 misses the identity gate: the CPU reference (`grade.h`, 10000
+  random colours, 2^-12..2^4) measures a mean of 0.47/255 against the
+  analytic AgX (max 9.1); 65^3 gives 0.11/255 (max 3.9), and 0.06/255 for
+  highlights up to 2^6.
+- White balance is CAT02 from the CIE daylight locus (Planckian below
+  4000 K, blended over 4000..5000 K so the slider has no jump), with tint
+  as Duv along the Planckian isotherm, to D65 as the daylight locus gives
+  it at 6504 K (so the default is exactly identity).
+- Sources: CIE 15:2004 (daylight locus x(T), y(x)); Krystek 1985, "An
+  algorithm to calculate correlated colour temperature" (Planckian uv);
+  CIE 159:2004 CIECAM02 (CAT02); Ottosson 2020,
+  https://bottosson.github.io/posts/oklab/ (OKLab).
 - The grade defaults to identity.
 - Reference starting set, for tuning after the lighting work: CDL power
   1.10, saturation 1.10, greens 10 degrees toward yellow x1.15, blues

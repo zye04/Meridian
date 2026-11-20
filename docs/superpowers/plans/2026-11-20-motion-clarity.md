@@ -1,12 +1,12 @@
 # Motion Clarity Implementation Plan
 
-**Status:** not started.
+**Status:** in progress: tasks done 0, 2.1.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** No smear in motion (forward 5 m/s Laplacian motion/still >= 0.85 on every path) with no more shimmer or shadow noise than the gates allow, plus a scene-referred grade baked into a LUT.
 
-**Architecture:** The renderer splits render from display resolution and hands colour, depth, motion, exposure and guides to an `Upscaler` with two backends: TAA (core) and DLSS SR/DLAA/RR (separately linked `meridian_dlss`, NGX never in the core). The fallback gets TAA v2 plus a FidelityFX shadow denoiser port. Grade + AgX are baked into a 33^3 LUT that `tonemap.frag` fetches once.
+**Architecture:** The renderer splits render from display resolution and hands colour, depth, motion, exposure and guides to an `Upscaler` with two backends: TAA (core) and DLSS SR/DLAA/RR (separately linked `meridian_dlss`, NGX never in the core). The fallback gets TAA v2 plus a FidelityFX shadow denoiser port. Grade + AgX are baked into a 65^3 LUT that `tonemap.frag` fetches once.
 
 **Tech Stack:** C++20, Vulkan 1.3 (dynamic rendering), GLSL, doctest, NVIDIA DLSS SDK 310.x (NGX, Linux x86_64), FidelityFX shadow denoiser (MIT, ported to GLSL), ImageMagick 7 + Python 3/numpy for gates.
 

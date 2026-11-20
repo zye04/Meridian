@@ -159,7 +159,9 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            terrain.h (Heightfield, height pyramid),
                            placement.h (rules, dither pattern,
                            evaluatePoint: CPU reference of GPU placement,
-                           PlacedInstance), window.h, math/{vec3,mat4}.h
+                           PlacedInstance), grade.h (Grade, CPU
+                           reference of the grade + AgX LUT bake),
+                           window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders
@@ -181,7 +183,8 @@ engine/src/render/         renderer internals:
                            draw()
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
-                           terrain.cpp, placement.cpp, window.cpp
+                           terrain.cpp, placement.cpp, grade.cpp,
+                           window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain.glsl (heightfield sampling + mirror,
                            quadtree, morph, detail noise),

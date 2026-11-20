@@ -98,6 +98,7 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 add_library(meridian STATIC
     src/cluster.cpp
     src/clusterlod.cpp
+    src/grade.cpp
     src/model.cpp
     src/placement.cpp
     src/render/renderer_frame.cpp
