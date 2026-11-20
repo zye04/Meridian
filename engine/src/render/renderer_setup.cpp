@@ -662,29 +662,18 @@ void Renderer::Impl::computeDfgLut() {
 }
 
 void Renderer::Impl::createScene() {
-  constexpr VkBufferUsageFlags kGeometryUsage =
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-  vertexPool = createBuffer(VkDeviceSize{kVertexPoolCapacity} * sizeof(Vertex),
-                            kGeometryUsage, 0);
-  indexPool = createBuffer(VkDeviceSize{kIndexPoolCapacity} * sizeof(uint32_t),
-                           kGeometryUsage | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 0);
+  vertexPool = createBuffer(kMinPoolBytes, kVertexPoolUsage, 0);
+  indexPool = createBuffer(kMinPoolBytes, kIndexPoolUsage, 0);
+  clusterPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  clusterVertexPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  clusterTrianglePool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  clusterNodePool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  clusterLevelPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
 
   constexpr VkBufferUsageFlags kTableUsage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   meshTable = createBuffer(kMaxMeshes * sizeof(MeshInfo), kTableUsage, 0);
-  clusterPool = createBuffer(VkDeviceSize{kMaxClusters} * sizeof(ClusterInfo),
-                             kTableUsage, 0);
-  clusterNodePool = createBuffer(VkDeviceSize{kMaxClusterNodes} * sizeof(ClusterNodeInfo),
-                                 kTableUsage, 0);
-  clusterLevelPool = createBuffer(VkDeviceSize{kMaxClusterLevels} * sizeof(ClusterLevelGpu),
-                                  kTableUsage, 0);
-  clusterVertexPool = createBuffer(
-      VkDeviceSize{kClusterVertexCapacity} * sizeof(uint32_t), kTableUsage, 0);
-  clusterTrianglePool = createBuffer(
-      VkDeviceSize{kClusterTriangleCapacity} * sizeof(uint32_t), kTableUsage, 0);
   instanceTable =
       createBuffer(kMaxInstances * sizeof(InstanceData), kTableUsage, 0);
 
@@ -949,6 +938,9 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   VkPhysicalDeviceMeshShaderPropertiesEXT meshProperties{};
   meshProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
   accelerationProperties.pNext = &meshProperties;
+  VkPhysicalDeviceVulkan13Properties properties13{};
+  properties13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+  meshProperties.pNext = &properties13;
   VkPhysicalDeviceProperties2 properties{};
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &accelerationProperties;
@@ -960,6 +952,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   }
   impl_->scratchAlignment =
       accelerationProperties.minAccelerationStructureScratchOffsetAlignment;
+  impl_->maxBufferSize = properties13.maxBufferSize;
 
   impl_->graphicsQueue =
       impl_->device.get_queue(vkb::QueueType::graphics).value();

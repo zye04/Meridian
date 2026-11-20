@@ -30,6 +30,7 @@ struct Renderer::Impl {
   vkb::DispatchTable dispatch;
   VmaAllocator allocator = nullptr;
   VkDeviceSize scratchAlignment = 0;
+  VkDeviceSize maxBufferSize = 0;
 
   VkQueue graphicsQueue = VK_NULL_HANDLE;
   uint32_t graphicsQueueFamily = 0;
@@ -266,6 +267,9 @@ struct Renderer::Impl {
                       VmaAllocationCreateFlags flags,
                       VkDeviceSize alignment = 0);
   void destroyBuffer(Buffer &buffer);
+  // A buffer at least 1.5x larger than `pool` that holds `bytes`, or none
+  // if `pool` already does.
+  Buffer grownPool(const Buffer &pool, VkDeviceSize bytes, VkBufferUsageFlags usage);
   Buffer uploadStorage(const void *data, VkDeviceSize bytes);
   void writeTexture(uint32_t index, VkImageView view, VkSampler sampler);
   void uploadTerrainHeights(const Heightfield &field);

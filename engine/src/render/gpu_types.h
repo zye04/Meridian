@@ -43,17 +43,19 @@ constexpr uint32_t kDfgLutSize = 128;
 // Depth pyramid levels: enough for a 32768-pixel-wide screen.
 constexpr uint32_t kMaxPyramidLevels = 16;
 // Shared geometry pools (bump-allocated; real streaming will need an
-// allocator with frees), sized for the scatter with the five imported
-// Megaplants trees (12.9M vertices, 51M indices, 30M + 34M cluster vertex
-// references and triangles): 16M vertices = 768 MB, 64M indices = 256 MB;
-// cluster hierarchies: 1M clusters = 80 MB, 48M vertex references and 48M
-// triangles = 192 MB each.
-constexpr uint32_t kVertexPoolCapacity = 16u << 20;
-constexpr uint32_t kIndexPoolCapacity = 64u << 20;
+// allocator with frees) grow by at least 1.5x when uploadMesh needs more,
+// from kMinPoolBytes. What bounds them besides maxBufferSize: work
+// items pack a first cluster index into 26 bits (cull.glsl), vertex offsets
+// are int32, other offsets uint32; kMaxMeshes sizes the fixed mesh table.
+constexpr VkDeviceSize kMinPoolBytes = 1u << 20;
+constexpr VkBufferUsageFlags kPoolUsage =
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+constexpr VkBufferUsageFlags kVertexPoolUsage =
+    kPoolUsage | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+constexpr VkBufferUsageFlags kIndexPoolUsage = kVertexPoolUsage | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+constexpr uint32_t kMaxClusterIndex = 1u << 26;
 constexpr uint32_t kMaxMeshes = 65536;
-constexpr uint32_t kMaxClusters = 1u << 20;
-constexpr uint32_t kClusterVertexCapacity = 48u << 20;
-constexpr uint32_t kClusterTriangleCapacity = 48u << 20;
 // Cluster draw lists: opaque, opaque double-sided, masked, masked
 // double-sided. Blended meshes (kDrawBucketBlended) are drawn from the CPU,
 // sorted back to front.
@@ -68,11 +70,8 @@ constexpr uint32_t kMaxWorkItems = 1u << 21;
 constexpr uint32_t kMaxChunks = 1u << 17;
 constexpr uint32_t kMaxDrawnClusters = 1u << 21;
 constexpr uint32_t kMaxRetestClusters = 1u << 20;
-// Cluster group BVHs of every mesh (ClusterNodeInfo, ClusterLevelGpu) and
-// the traversal: kBvhDepths dispatches per phase at most, over three node
-// queues of (instance, node) entries (cluster_traverse.comp).
-constexpr uint32_t kMaxClusterNodes = 1u << 18;
-constexpr uint32_t kMaxClusterLevels = 1u << 16;
+// The cluster BVH traversal: kBvhDepths dispatches per phase at most, over
+// three node queues of (instance, node) entries (cluster_traverse.comp).
 constexpr uint32_t kBvhDepths = 12;
 constexpr uint32_t kMaxTraversalNodes = 1u << 21;
 constexpr uint32_t kDrawBucketBlended = 4;
@@ -88,6 +87,7 @@ struct Buffer {
   VmaAllocation allocation = nullptr;
   VkDeviceAddress address = 0;
   void *mapped = nullptr;
+  VkDeviceSize size = 0;
 };
 
 struct Image {

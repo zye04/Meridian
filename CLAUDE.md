@@ -273,12 +273,14 @@ account for that.
   cull.glsl; terrain node and cell boxes: `displayedBoxInFrustum` in
   common.glsl); LOD distances stay flat.
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
-  allocated); `MeshInfo` and `InstanceData` tables are on the GPU. One
-  24-bit instance id space (`kMaxInstanceId`) serves culling, draw lists,
-  visibility and the TLAS custom index: ids below `kPlacedBase` index
-  `InstanceData`, the rest index the placed table (`PlacedInstance`, 24
-  B, order (cell, layer, pattern point); its index is not a persistent
-  id, (layer id, cell, point) is), each a prototype (`PrototypeInfo`:
+  allocated; they and the cluster pools grow by >= 1.5x when an upload
+  needs more, `grownPool`); `MeshInfo` and `InstanceData` tables are on
+  the GPU. One 24-bit instance id space (`kMaxInstanceId`) serves
+  culling, draw lists, visibility and the TLAS custom index: ids below
+  `kPlacedBase` index `InstanceData`, the rest index the placed table
+  (`PlacedInstance`, 24 B, order (cell, layer, pattern point); its
+  index is not a persistent id, (layer id, cell, point) is), each a
+  prototype (`PrototypeInfo`:
   its meshes, bounds, BLAS); shaders read instances only through
   `loadInstance` (common.glsl), and a ray hit's mesh through
   `instanceMesh` (the hit's geometry index picks a prototype's mesh).

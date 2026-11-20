@@ -25,6 +25,7 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                      &buffer.allocation, &info),
         "vmaCreateBufferWithAlignment");
   buffer.mapped = info.pMappedData;
+  buffer.size = size;
 
   if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
     VkBufferDeviceAddressInfo addressInfo{};
@@ -38,6 +39,15 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 void Renderer::Impl::destroyBuffer(Buffer &buffer) {
   vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
   buffer = {};
+}
+
+Buffer Renderer::Impl::grownPool(const Buffer &pool, VkDeviceSize bytes,
+                                 VkBufferUsageFlags usage) {
+  if (bytes <= pool.size) {
+    return {};
+  }
+  return createBuffer(std::min(std::max(bytes, pool.size + pool.size / 2), maxBufferSize),
+                      usage, 0);
 }
 
 AccelerationStructure
@@ -424,16 +434,33 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const auto nodeCount = static_cast<uint32_t>(nodeInfos.size());
   const auto levelCount = static_cast<uint32_t>(levelInfos.size());
 
-  if (impl_->vertexCount + vertexCount > kVertexPoolCapacity ||
-      impl_->indexCount + indexCount > kIndexPoolCapacity ||
-      impl_->clusterCount + clusterCount > kMaxClusters ||
-      impl_->clusterVertexCount + clusterVertexCount > kClusterVertexCapacity ||
-      impl_->clusterTriangleCount + clusterTriangleCount > kClusterTriangleCapacity ||
-      impl_->clusterNodeCount + nodeCount > kMaxClusterNodes ||
-      impl_->clusterLevelCount + levelCount > kMaxClusterLevels ||
-      traversalDepths > kBvhDepths ||
-      impl_->meshes.size() == kMaxMeshes) {
-    throw std::runtime_error("geometry pools are full");
+  const auto total = [](uint32_t used, uint32_t added) { return uint64_t{used} + added; };
+  if (total(impl_->vertexCount, vertexCount) > INT32_MAX ||
+      total(impl_->indexCount, indexCount) > UINT32_MAX ||
+      total(impl_->clusterVertexCount, clusterVertexCount) > UINT32_MAX ||
+      total(impl_->clusterTriangleCount, clusterTriangleCount) > UINT32_MAX ||
+      total(impl_->clusterNodeCount, nodeCount) > UINT32_MAX ||
+      total(impl_->clusterLevelCount, levelCount) > UINT32_MAX) {
+    throw std::runtime_error("geometry pool offsets exceed 32 bits");
+  }
+  if (total(impl_->clusterCount, clusterCount) > kMaxClusterIndex) {
+    throw std::runtime_error("more clusters than work items can index (kMaxClusterIndex)");
+  }
+  if (traversalDepths > kBvhDepths) {
+    throw std::runtime_error("cluster BVH deeper than the traversal's kBvhDepths");
+  }
+  if (impl_->meshes.size() == kMaxMeshes) {
+    throw std::runtime_error("mesh table is full (kMaxMeshes)");
+  }
+  if (std::max({total(impl_->vertexCount, vertexCount) * sizeof(Vertex),
+                total(impl_->indexCount, indexCount) * sizeof(uint32_t),
+                total(impl_->clusterCount, clusterCount) * sizeof(ClusterInfo),
+                total(impl_->clusterVertexCount, clusterVertexCount) * sizeof(uint32_t),
+                total(impl_->clusterTriangleCount, clusterTriangleCount) * sizeof(uint32_t),
+                total(impl_->clusterNodeCount, nodeCount) * sizeof(ClusterNodeInfo),
+                total(impl_->clusterLevelCount, levelCount) * sizeof(ClusterLevelGpu)}) >
+      impl_->maxBufferSize) {
+    throw std::runtime_error("a geometry pool would exceed the device's maxBufferSize");
   }
 
   GpuMesh mesh;
@@ -544,30 +571,63 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
+  // Grown pools are allocated before recording and swapped in only after
+  // the submit, so a failure leaves every pool as it was.
+  struct PoolUpload {
+    Buffer &pool;
+    VkDeviceSize offset;
+    VkDeviceSize stagingOffset;
+    VkDeviceSize bytes;
+    VkBufferUsageFlags usage;
+    Buffer grown{};
+  };
+  PoolUpload uploads[] = {
+      {impl_->vertexPool, vertexPoolOffset, stagingOffsets[0], vertexBytes, kVertexPoolUsage},
+      {impl_->indexPool, indexPoolOffset, stagingOffsets[1], indexBytes, kIndexPoolUsage},
+      {impl_->clusterPool, firstCluster * sizeof(ClusterInfo), stagingOffsets[2], clusterBytes,
+       kPoolUsage},
+      {impl_->clusterVertexPool, firstClusterVertex * sizeof(uint32_t), stagingOffsets[3],
+       clusterVertexBytes, kPoolUsage},
+      {impl_->clusterTrianglePool, firstClusterTriangle * sizeof(uint32_t), stagingOffsets[4],
+       clusterTriangleBytes, kPoolUsage},
+      {impl_->clusterNodePool, firstNode * sizeof(ClusterNodeInfo), stagingOffsets[5], nodeBytes,
+       kPoolUsage},
+      {impl_->clusterLevelPool, firstLevel * sizeof(ClusterLevelGpu), stagingOffsets[6],
+       levelBytes, kPoolUsage},
+  };
+  bool grows = false;
+  for (PoolUpload &upload : uploads) {
+    upload.grown = impl_->grownPool(upload.pool, upload.offset + upload.bytes, upload.usage);
+    grows |= upload.grown.buffer != VK_NULL_HANDLE;
+  }
+
   impl_->submitNow([&](VkCommandBuffer cmd) {
-    VkBufferCopy vertexCopy{0, vertexPoolOffset, vertexBytes};
-    vkCmdCopyBuffer(cmd, staging.buffer, impl_->vertexPool.buffer, 1, &vertexCopy);
-    VkBufferCopy indexCopy{vertexBytes, indexPoolOffset, indexBytes};
-    vkCmdCopyBuffer(cmd, staging.buffer, impl_->indexPool.buffer, 1, &indexCopy);
-    if (clusterCount > 0) {
-      const VkBufferCopy clusterCopy{stagingOffsets[2],
-                                     firstCluster * sizeof(ClusterInfo), clusterBytes};
-      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterPool.buffer, 1, &clusterCopy);
-      const VkBufferCopy vertexRefCopy{
-          stagingOffsets[3], firstClusterVertex * sizeof(uint32_t), clusterVertexBytes};
-      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterVertexPool.buffer, 1,
-                      &vertexRefCopy);
-      const VkBufferCopy triangleCopy{stagingOffsets[4],
-                                      firstClusterTriangle * sizeof(uint32_t),
-                                      clusterTriangleBytes};
-      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterTrianglePool.buffer, 1,
-                      &triangleCopy);
-      const VkBufferCopy nodeCopy{stagingOffsets[5], firstNode * sizeof(ClusterNodeInfo),
-                                  nodeBytes};
-      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterNodePool.buffer, 1, &nodeCopy);
-      const VkBufferCopy levelCopy{stagingOffsets[6], firstLevel * sizeof(ClusterLevelGpu),
-                                   levelBytes};
-      vkCmdCopyBuffer(cmd, staging.buffer, impl_->clusterLevelPool.buffer, 1, &levelCopy);
+    if (grows) {
+      // Earlier uploads wrote the old pools by copies too.
+      VkMemoryBarrier2 written{};
+      written.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+      written.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+      written.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+      written.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+      written.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+      VkDependencyInfo dependency{};
+      dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+      dependency.memoryBarrierCount = 1;
+      dependency.pMemoryBarriers = &written;
+      vkCmdPipelineBarrier2(cmd, &dependency);
+    }
+    for (const PoolUpload &upload : uploads) {
+      if (upload.grown.buffer != VK_NULL_HANDLE && upload.offset > 0) {
+        const VkBufferCopy copy{0, 0, upload.offset};
+        vkCmdCopyBuffer(cmd, upload.pool.buffer, upload.grown.buffer, 1, &copy);
+      }
+      if (upload.bytes > 0) {
+        const VkBufferCopy copy{upload.stagingOffset, upload.offset, upload.bytes};
+        vkCmdCopyBuffer(cmd, staging.buffer,
+                        upload.grown.buffer != VK_NULL_HANDLE ? upload.grown.buffer
+                                                              : upload.pool.buffer,
+                        1, &copy);
+      }
     }
     vkCmdUpdateBuffer(cmd, impl_->meshTable.buffer, meshIndex * sizeof(MeshInfo),
                       sizeof(info), &info);
@@ -594,6 +654,16 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   });
 
   impl_->destroyBuffer(staging);
+  if (grows) {
+    // Frames still in flight may read the old pools.
+    check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+    for (PoolUpload &upload : uploads) {
+      if (upload.grown.buffer != VK_NULL_HANDLE) {
+        impl_->destroyBuffer(upload.pool);
+        upload.pool = upload.grown;
+      }
+    }
+  }
 
   impl_->meshes.push_back(mesh);
   return {meshIndex};

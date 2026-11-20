@@ -762,9 +762,10 @@ foliage that survives simplification).
 | rowan sapling | 3.46M | 1.00M (wood 0.06M) | 1.6 (0.00%, all pieces kept) | 2.8 | 31 | 2.5 / 14 |
 
   Cook time includes ~20 s of bark encoding per tree; usd2gltf takes 12-14 s
-  for beech and oak, 1-2 s for the others. Geometry pools grow to fit the
-  scatter with all five (12.9M vertices, 51M indices, 30M + 34M cluster
-  vertex references and triangles): 16M vertices, 64M indices, 48M + 48M.
+  for beech and oak, 1-2 s for the others. The scatter with all five
+  needs 12.9M vertices, 51M indices, 30M + 34M cluster vertex references
+  and triangles (the pools grow to fit; see "Geometry pools grow with the
+  content").
 - **Tangents only where read.** `loadGltf` runs MikkTSpace only for
   materials with a normal map, the only place `mesh.frag` reads tangents;
   the trees' ~10M leaf triangles skip it, and Debug `--scatter 100` startup
@@ -1112,8 +1113,8 @@ slice 5's compression and streaming stay deferred.
   items 2^21 per phase (peak 813K, overview; was 2^19), cluster draw
   lists 2^21 per list (peak 570K, overview; was 2^20, raised for 1440p,
   where the 1-pixel cut should draw ~1.8x the clusters, the pixel-count
-  ratio; not measured, the monitor was off), node pool 2^18 (23.6K for
-  the placement's prototypes), levels 2^16.
+  ratio; not measured, the monitor was off); the node and level pools
+  grow with the uploads (23.6K nodes for the placement's prototypes).
   ~150 MB more VRAM; 4.72 GB in use at the forest views (nvidia-smi),
   11.7 GB free. 0 drops in every list at every view.
 - **Measured** (Release, 1920x1080, median of 5; trees and rocks all as
@@ -1135,3 +1136,32 @@ slice 5's compression and streaming stay deferred.
   - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/lod_generation.md
   - Karis, "Nanite: A Deep Dive", SIGGRAPH 2021 (persistent-thread
     hierarchy traversal, two-pass occlusion)
+
+## Geometry pools grow with the content (M2a, 2026-11-20)
+
+- **Grow on upload, by at least 1.5x, with a GPU copy.** The shared
+  bump-allocated pools (vertices, indices, clusters, cluster vertex
+  references and triangles, BVH nodes, DAG levels) start at 1 MiB each.
+  When `uploadMesh` needs more, `grownPool` allocates a buffer of
+  max(needed, 1.5x) bytes before recording; the used range is copied into
+  it in the same submit as the mesh's data. Only after that submit, and
+  a device idle (frames in flight may still read the old pool), does it
+  replace and free the old one, so a failed allocation leaves every pool
+  as it was. Nothing caches a pool's address: SceneData is
+  written every frame, the index buffer is bound every frame, and a BLAS
+  keeps no reference to its build inputs. Chosen over sizing from totals
+  the game would compute before uploading, which needs a new API and a
+  pass over every model before any upload; growth keeps `uploadMesh`
+  self-contained, and with few growths (log1.5 of the final size) the
+  copies cost little at load.
+- **1.5x, not doubling**: doubling left the vertex pool at 2 GiB for
+  1050 MiB of vertices (`--scatter 100` with placement, Debug): 6696 MiB
+  of device memory against 5697 MiB at 1.5x. Slack stays below a third of
+  each pool.
+- **Limits that remain** are structural and checked in `uploadMesh`, each
+  with its own error: work items pack a first cluster index into 26 bits
+  (`kMaxClusterIndex`, cull.glsl); vertex offsets are int32 and other
+  offsets uint32; the mesh table is a fixed `kMaxMeshes`; the traversal
+  dispatches at most `kBvhDepths` levels; and no pool may exceed the
+  device's `maxBufferSize` (Vulkan 1.3; buffer device addresses are not
+  bound by `maxStorageBufferRange`).
