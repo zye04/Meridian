@@ -4,8 +4,18 @@ C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
 world, grand scale. Hardware ray tracing is required. The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
-Technique choices and their sources are in `docs/decisions.md`; read it
-before re-researching anything.
+
+Docs, read on demand:
+
+- `docs/decisions.md`: technique choices and sources, newest last. Read
+  the relevant entry before re-researching anything (`grep -n '^## '`
+  lists them).
+- `docs/backlog.md`: known issues and deferred work.
+- `docs/superpowers/resume.md`: current state, open branches, next steps.
+- `docs/superpowers/{specs,plans}/`: designs and implementation plans
+  (Status line at the top); milestones in
+  `specs/2026-11-19-showcase-roadmap.md`.
+- `docs/assets.md`: Megascans and Fab asset import.
 
 ## Working agreement
 
@@ -187,7 +197,7 @@ tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
 tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
                            in a git-ignored venv made by setup.sh)
 tests/                     doctest unit tests
-docs/decisions.md          technique decisions with sources
+docs/                      see "Docs" at the top
 ```
 
 ## Frame (renderer_frame.cpp, in order)
