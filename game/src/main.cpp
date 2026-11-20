@@ -333,12 +333,18 @@ void placeScenery(meridian::Renderer &renderer, bool trees) {
   const auto goldenrod = plant("goldenrods_xg1lbfxia", {0, 1, 3});
   const auto clover = plant("clovers_rbdjz");
   const auto fern = plant("common_fern_rhdso");
-  std::vector<std::pair<uint32_t, float>> clumps;
-  for (const char *id : {"rough_meadow_grass_skfjj", "wild_grass_vlkhcbxia", "wild_grass_sjliz",
-                         "grass_clumps_qmbr2"}) {
-    const auto variants = plant(id);
-    clumps.insert(clumps.end(), variants.begin(), variants.end());
-  }
+  // Grass: a short, dense mat (the low Megascans clumps) and taller tufts
+  // with seed heads standing out of it.
+  const auto gather = [&](std::initializer_list<const char *> ids) {
+    std::vector<std::pair<uint32_t, float>> all;
+    for (const char *id : ids) {
+      const auto variants = plant(id);
+      all.insert(all.end(), variants.begin(), variants.end());
+    }
+    return all;
+  };
+  const auto grassMat = gather({"wild_grass_vlkhcbxia", "grass_clumps_qmbr2"});
+  const auto grassTufts = gather({"rough_meadow_grass_skfjj", "wild_grass_sjliz"});
 
   std::vector<PlacementLayer> layers;
   if (!forest.empty()) {
@@ -372,14 +378,15 @@ void placeScenery(meridian::Renderer &renderer, bool trees) {
     float streamFullDensity = 0.0f;
   };
   // Streamed (last field > 0, see PlacementLayer::streamFullDensity): the
-  // meadow's grass everywhere it grows, yellow hawkbit in wide drifts and
-  // clover patches, dense near the camera; poppies and goldenrod stay
-  // static, sparse accents.
+  // grass mat everywhere grass grows, so no ground shows, seed-head tufts
+  // and hawkbit in clumped patches, sparse clover; poppies and goldenrod
+  // stay static, sparse accents.
   for (const Patch &patch : {Patch{4, poppy, 4.0f, 25.0f, 1.0f / 37.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
-                             Patch{5, hawkbit, 0.7f, 28.0f, 1.0f / 70.0f, 0.42f, 0.4f, 0.8f, 1.3f, 70.0f, 20.0f},
+                             Patch{5, hawkbit, 0.3f, 28.0f, 1.0f / 15.0f, 0.50f, 1.0f, 2.0f, 2.8f, 120.0f, 30.0f},
                              Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
-                             Patch{7, clover, 0.8f, 25.0f, 1.0f / 23.0f, 0.66f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f},
-                             Patch{8, clumps, 0.45f, 35.0f, 0.0f, 0.0f, 0.3f, 0.5f, 0.9f, 60.0f, 15.0f}}) {
+                             Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f},
+                             Patch{8, grassMat, 0.2f, 35.0f, 0.0f, 0.0f, 0.2f, 1.0f, 1.5f, 120.0f, 30.0f},
+                             Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f}}) {
     if (!patch.variants.empty()) {
       layers.push_back({patch.id, patch.variants, patch.footprint,
                         {0.0f, patch.slopeMax, -1e9f, 1e9f, 0.4f, patch.patchFrequency,
@@ -778,8 +785,10 @@ int main(int argc, char **argv) {
     std::vector<Variant> variants;
   };
   const Role roles[] = {
+      // Matched to the streamed grass mat's mean as rendered, so the mat
+      // thins into a terrain of the same brightness (decisions.md).
       {TerrainRole::Grass,
-       {0.085f, 0.12f, 0.024f},
+       {0.027f, 0.034f, 0.006f},
        {{"uncut_grass_oilpt20", 2.0f, 0.0177f},
         {"wild_grass_pjwgw0", 1.0f, 0.0219f},
         {"lawn_grass_sbykrmp0", 0.41f, 0.0107f}}},

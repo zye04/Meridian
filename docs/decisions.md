@@ -2721,13 +2721,28 @@ should be in the TLAS is open (plan task 4). Plan:
   cell) took 90 s in Release. The candidate count is now capped at 512.
   Later points of dense patterns are slightly less even, and the static
   hashes changed.
-- **First setup** (Release 2560x1440, open view `1119 1356 -431 -1.55
-  -0.02`): grass clumps at 0.45 m footprint (full density to 15 m, gone
-  at 60 m), hawkbit drifts at 0.7 m (20/70 m), clover at 0.8 m (12/40
-  m). Window 5x5, ring 874,650 slots, ~221k live. The stream pass costs
-  0.00 ms when no cell changes; scene early 2.28 ms, total 7.70 ms
-  (DLSS RR 4.68 of it). The density is still well under
-  the target; a tuning pass follows.
+- **Meadow setup** (Release 2560x1440, open view `1119 1356 -431 -1.55
+  -0.02`), matched by eye to `assets/reference/target-meadow.png` (no
+  ground showing in the clearings):
+  - a short mat (the low clumps, 0.2 m footprint, full density to 30 m,
+    gone at 120 m)
+  - tall seed-head tufts in 15 m-scale patches (0.5 m)
+  - hawkbit in clumped drifts (0.3 m, scaled 2-2.8x so the heads stand
+    above the mat)
+  - sparse clover
+
+  Window 5x5, ring 4.21M slots, ~1.1M live, ~41k drawn instances, 3.3M
+  triangles. Scene early 5.2-5.5 ms against 2.0 ms without the meadow,
+  so the meadow costs ~3.3 ms. The stream pass is 0.00 ms when no cell
+  changes.
+- **Far field matched:** the terrain's grass role target colour is set
+  so the bare terrain renders as bright as the mat. The measure is
+  exposure-normalized mean radiance (.pfm, divided by a sky region's
+  ratio), with and without placement, over the same pixels. Mat/terrain
+  went from 0.50/0.46 (R/G, mid band) to 0.97/0.94, and from 0.42/0.38
+  (near) to 0.87/0.90. Blue stays ~0.7 (haze). The terrain grass target
+  went from linear (0.085, 0.12, 0.024) to (0.027, 0.034, 0.006): the mat
+  is darker than its albedo because of self-occlusion.
 
 ## Clouds and weather measured (M4 clouds, 2026-11-20)
 

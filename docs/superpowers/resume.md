@@ -67,19 +67,20 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   "Cloud shadow fallback refit", "Clouds and weather measured"). Worktrees
   `../meridian-clouds*` can be removed; ledger and artifacts in
   `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`.
-- **M3 meadow** (core MERGED 2026-11-20 ~17:00, branch `meadow-stream`,
-  worktree `../meridian-meadow-stream`). Streamed placement (plan
-  `docs/superpowers/plans/2026-11-20-streamed-placement.md`, decisions.md
-  "Streamed placement"): grass clumps, hawkbit and clover streamed around
-  the camera, poppies/goldenrod/ferns static. The procedural blade grass
-  was dropped (user: "horrendous"); branches `meadow` (step 1 only, not
-  merged) and `meadow-accents` (superseded) are obsolete. Next, in
-  order: density pass (user: VERY dense, no ground showing at eye height,
-  full density far out, thick yellow flowers; side-by-side capture vs
-  `flower-meadow-cumulus.png` and `meadow-cliff-forested-hills.png`
-  before merging; tuning start in the worktree's
-  `.superpowers/density-tune.patch`), then plan task 4 (TLAS for streamed
-  instances: measure, recommend).
+- **M3 meadow** (dense meadow MERGED 2026-11-20 ~17:45, branch
+  `meadow-stream`, worktree `../meridian-meadow-stream`). Streamed
+  placement (plan `docs/superpowers/plans/2026-11-20-streamed-placement.md`,
+  decisions.md "Streamed placement", "Plant micro occlusion"): grass mat,
+  seed-head tufts, hawkbit and clover streamed around the camera,
+  matched far-field terrain colour. The procedural blade grass was dropped
+  (user: "horrendous"); branches `meadow` and `meadow-accents` are
+  obsolete. Next (second merge, two parallel implementers): seamless
+  transition: (X) prefetch margin, a wider thinning band, a terrain-normal
+  blend for fading tufts, then velocity and shimmer gates at 30 and
+  150 m/s, with an Opus review; (Y) a grass-blade detail layer in the
+  terrain material past the mat, plus luminance matching at 3 distances
+  and 2 sun angles; then a per-layer albedo tint (fresher green), and
+  plan task 4 (TLAS for streamed instances).
 - **Queue after those** (in order, each when the user says go):
   1. Terrain detail: near-camera displacement from the material height
      maps (tessellated near nodes) + erosion-style procedural detail;
