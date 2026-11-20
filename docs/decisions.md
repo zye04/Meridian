@@ -1600,7 +1600,7 @@ floor under trees, rock only on cliffs.
 
 - **Surfaces by what they show, not their names** (contact sheet:
   `.superpowers/ground-assets/contact-sheet.png` in the lane's worktree;
-  roles in docs/assets.md). 15 of the 17 Megascans surfaces downloaded;
+  roles in docs/assets.md). 15 of the 17 Megascans surfaces downloaded (14 after the rock anti-tiling entry below);
   dropped: `wild_grass_sfknaeoa` (very dark olive, a third of the other
   grasses' luminance, big dark blotches that repeat) and
   `rough_sandstone_rock_xi4uccxjw` (flat saturated orange, low relief,
@@ -1650,3 +1650,26 @@ floor under trees, rock only on cliffs.
   layer (BC7 after transcoding: 4K with mips 21 MiB, 2K 5.3 MiB). Release
   startup with `--placement off` 2.2 -> 10.9 s, the 30 4K UASTC textures'
   transcode (backlog).
+
+## Rock anti-tiling at distance (2026-11-20)
+
+- **Second sample at 4x the tile size** in the triplanar rock's base
+  color, mixed in up to 70% as a pixel covers 1-6% of a tile, and the
+  rock's normal-map detail fades over the same range (the hex-tiled layers
+  fade at 2-20%): its tile-sized bumps were what drew the grid. The rock's 2-3 m tiles otherwise
+  repeat as a grid on cliffs seen from 100 m and more. 4x keeps a whole
+  number of repeats per wrap period (256 tiles), so the wrapped offsets
+  stay seamless. Hex-tiling the three triplanar projections was the
+  alternative: 3x the taps, and its row period (256.3 tiles) doesn't match
+  the triplanar wrap on the y axis.
+- **`layered_rock_cliff_thficeas` dropped** from the rock role: its evenly
+  spaced strata repeat as a brick grid that the 4x sample can't hide
+  (they repeat at both scales). Rock keeps `rock_cliff_tg1mcgbl` and
+  `layered_rock_vl0fdhdo`. 14 surfaces in all.
+- **Cost** (Release 1440p, `--placement off`, 3 runs): open view 1.33 ->
+  1.43 ms, high overview 3.22 -> 3.56 (distant cliffs take the second
+  sample), full-ground start view unchanged (1.53). Device memory 4472 ->
+  4216 MiB with one rock layer fewer.
+- Triplanar on steep slopes (the Whiteout blend) was already in place
+  since the first terrain material; with rock from 48 degrees only,
+  every planar layer is under ~50 degrees, stretched at most 1.5x.

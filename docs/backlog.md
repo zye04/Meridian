@@ -67,8 +67,8 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
+| Rock still shows a faint ~10 m pattern on cliffs seen from 100 m+ | Repetition, much weaker than the old grid | G1 rock anti-tiling | Hex-tiled triplanar if it shows in play |
 | Terrain textures add ~8.7 s to Release startup | 30 4K UASTC transcodes at load | G1 terrain material | Transcode in parallel or cache BC7 |
-| Grid pattern and two-tone patches on rock at distance; rock not hex-tiled | Visible repetition | User screenshots; known gap before the backlog | M3 terrain material |
 | Detail displacement (+-0.3 m) casts no shadows | Missing micro-shadows near the camera | M1 Task 5 | Later |
 | Residual contour shadow bands at grazing sun | Neighbor-cell relief under smooth normals | Shadow investigation | Accepted; revisit with shadow denoiser |
 | Sunset (3 deg sun) shadow march costs ~1.15 ms | Unbudgeted at low sun | M1 Task 5 | M5 |

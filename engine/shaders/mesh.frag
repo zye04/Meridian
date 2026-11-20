@@ -455,12 +455,22 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
         vec2 uv = uvs[axis] * flip[axis] * scale;
         vec2 dx = dxs[axis] * flip[axis] * scale;
         vec2 dy = dys[axis] * flip[axis] * scale;
-        texel.baseColor += sampleGrad(layer.baseColor, uv, dx, dy).rgb * blend[axis];
+        vec3 color = sampleGrad(layer.baseColor, uv, dx, dy).rgb;
+        // Far away a cliff's tiles repeat as a grid: the base color mixes in
+        // the same texture at 4x the tile size (a whole number of repeats per
+        // wrap period), and the tile-sized bumps of the normal map fade
+        // sooner than on the hex-tiled layers.
+        float far = smoothstep(0.01, 0.06, max(length(dx), length(dy)));
+        if (far > 0.0) {
+            vec3 macro = sampleGrad(layer.baseColor, uv * 0.25 + 0.5, dx * 0.25, dy * 0.25).rgb;
+            color = mix(color, macro, 0.7 * far);
+        }
+        texel.baseColor += color * blend[axis];
         texel.occlusionRoughness += sampleGrad(layer.arm, uv, dx, dy).rg * blend[axis];
         texel.height += sampleGrad(layer.height, uv, dx, dy).r * blend[axis];
         vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
         n.x *= flip[axis].x;
-        n.xy *= normalFade(dx, dy);
+        n.xy *= 1.0 - far;
         tangentNormals[axis] = n;
     }
     vec3 nx = tangentNormals[0];

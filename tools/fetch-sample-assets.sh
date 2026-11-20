@@ -218,7 +218,7 @@ else
   for id in uncut_grass_oilpt20 wild_grass_pjwgw0 lawn_grass_sbykrmp0 clover_vlzlbjon \
       forest_floor_sfjmafua forest_floor_xdfddec forest_path_ugsnfawlw soil_dirt_pjusf0 \
       soil_dirt_peioh0 soil_mud_olsetpp0 gravel_on_soil_rmrk3sp0 gravel_on_soil_rmsigwp0 \
-      rock_cliff_tg1mcgbl layered_rock_cliff_thficeas layered_rock_vl0fdhdo; do
+      rock_cliff_tg1mcgbl layered_rock_vl0fdhdo; do
     zip="$megaplants/${id}_4k_ue_high.zip"
     dest="$root/assets/terrain/$id"
     [[ -f "$zip" && ! -f "$dest/albedo.txt" ]] || continue

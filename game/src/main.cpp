@@ -570,9 +570,7 @@ int main(int argc, char **argv) {
       {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f}}},
       {TerrainRole::Rock,
        {0.13f, 0.108f, 0.085f},
-       {{"rock_cliff_tg1mcgbl", 2.0f},
-        {"layered_rock_cliff_thficeas", 2.0f},
-        {"layered_rock_vl0fdhdo", 3.0f}}},
+       {{"rock_cliff_tg1mcgbl", 2.0f}, {"layered_rock_vl0fdhdo", 3.0f}}},
   };
   meridian::TerrainMaterial material;
   material.forest = {kMaskFrequency, kMaskThreshold, kMaskEdge, kPlacementSeed};

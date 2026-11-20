@@ -35,10 +35,12 @@ tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd
     soil, pale pebbles), both 1 m; mud: `soil_mud_olsetpp0` (0.88 m)
   - gravel: `gravel_on_soil_rmsigwp0` (fine grey gravel, channels);
     scree: `gravel_on_soil_rmrk3sp0` (angular stones); both 0.39 m
-  - rock: `rock_cliff_tg1mcgbl` (2 m), `layered_rock_cliff_thficeas`
-    (2 m), `layered_rock_vl0fdhdo` (3 m, no height map: luminance)
+  - rock: `rock_cliff_tg1mcgbl` (2 m), `layered_rock_vl0fdhdo` (3 m, no
+    height map: luminance)
   - left out: `wild_grass_sfknaeoa` (very dark, blotches that repeat),
-    `rough_sandstone_rock_xi4uccxjw` (orange, off-palette, 2x1 m)
+    `rough_sandstone_rock_xi4uccxjw` (orange, off-palette, 2x1 m),
+    `layered_rock_cliff_thficeas` (its evenly spaced strata repeat as a
+    brick grid on cliffs seen from 100 m)
 
   The zip's `Textures/` go to `_extract/<id>_4k_ue_high/`; B and N stay
   4K, ORM and H are downscaled to 2K in `_terrain/<id>/`, all four are
