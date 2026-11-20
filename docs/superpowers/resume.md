@@ -1,47 +1,62 @@
-# Where work stopped (2026-11-20 ~19:00, orchestrator handoff)
+# Where work stopped (2026-11-20 ~23:55, orchestrator handoff)
 
 Read this first when resuming. Durable state is in git; the SDD ledgers
-under `.superpowers/` are local and git-ignored. A new orchestrator
-session takes over from here.
+and each lane's `next.md` live under git-ignored `.superpowers/` in the
+lane's worktree beside the repo (not on the remote). A new orchestrator
+session takes over from here. Every lane below was stopped cleanly by the
+user's request: branches pushed, `next.md` written, no runs left.
 
-## TOP PRIORITY for the next session: sunset GPU cost + cloud shimmer
+## Direction set by the user on 2026-11-20
 
-The user's first ask when they're back. Reported from interactive play on
-main a4e7623 (Release, 1440p fullscreen, DLSS RR DLAA, no `--trees`), on a
-grassy ridge looking into a low sun (sun set from the G panel):
+- **Raster first, in the Chlorophyll Engine style.** Ray Reconstruction is
+  no longer the default (DLSS Super Resolution DLAA is; `--rr on` is the
+  A/B). Raster sun shadows are to replace the TLAS shadow ray. Ray
+  tracing, RR and the 2.5D cloud path stay in the engine behind flags; none
+  is deleted.
+- **Clouds: keep the volumetric look, make it sharp and shimmer-free.** The
+  user likes today's volumetric look and wants a crisper silhouette
+  ("almost a pseudo outline"), also on the inner lobes (a strength in the G
+  panel's Effects section, 0 = off), and no shimmer. The 2.5D slab was
+  tried and paused (look rejected; it was 2.5-4x calmer, which is the
+  stability bar).
+- **Trees: Quixel Megaplants exported from Unreal Engine with textures.**
+  SpeedTree and procedural generators are rejected. The user is installing
+  UE 5.x on Linux (Linux build, unzipped to `~/Apps/UnrealEngine`).
+- **Phases.** Phase 1: every engine capability works reasonably (stable
+  clouds, raster shadows, GI, far field, trees, performance). Phase 2:
+  build the environment (terrain, materials, placement) in an authoring
+  tool; Houdini is the lead candidate (the Chlorophyll author does "all
+  terrain and scattering work in Houdini, rule based"; Linux-native,
+  scriptable headless via hython). Grass, terrain shape, terrain textures
+  and texture placement look bad to the user; those are phase 2 unless
+  they turn out to be engine bugs.
+- **Chlorophyll Engine architecture** (stated by its author): CLODs
+  (virtual geometry) with voxels for far representations, no impostors;
+  hybrid screen-space + voxel GI, no ray tracing; proxies without instance
+  data for very far away; 2.5D art-directed clouds; weather systems built
+  in from the ground up.
 
-- **15 FPS, GPU 64.21 ms, of which `scene early` 56.89 ms.** At midday
-  the open view's scene early is ~6.0 ms. Everything else was normal: aa
-  (RR) 5.13, clouds 1.27, weather 0.32, far field 0, stream 0.
-  Lead hypothesis (unproven): per-fragment sun shadowing on the dense
-  alpha-masked meadow grass; at grazing sun angles the `terrainOccludes`
-  height-pyramid march (terrain.glsl, called from mesh.frag) gets very
-  long, and grass overdraw pays it many times per pixel. Other suspects:
-  masked overdraw, the TLAS shadow ray, plant LOD.
-- **Clouds and fine detail shimmer heavily**, clouds blocky at the
-  edges, **blue dashed outlines along some cloud undersides**. RR is on.
-  Part of it is likely the 15 fps (fewer frames for RR to accumulate);
-  re-judge after the perf fix, then check the clouds' path through RR
-  (guides, motion vectors, transparency mask, white noise), the cloud
-  upsample/composite, and A/B `--aa taa` / `--rr off`.
-- A fix lane started and was paused before any run: nothing measured or
-  fixed. Worktree `../meridian-sunset-fix` (branch `sunset-fix`, pushed,
-  identical to a4e7623; `assets/` linked to main's; Release build done in
-  `build-release/`, no Debug build; capture helper
-  `.superpowers/sf/cap.sh`). Its `.superpowers/next.md` has the suspects,
-  repro commands, bisect steps (march off, ray off, sun elevation sweep,
-  effects toggles, a heat map of march steps) and fix ideas. From code
-  reading: `terrainOccludes` can take up to 256 steps per ray, paid by
-  every grass fragment on lit and backlit faces; the TLAS ray is a weaker
-  suspect (streamed grass isn't in the TLAS). Cloud code to look at:
-  `clouds_composite.comp`, `clouds_resolve.comp`.
-- Repro start: `--camera 1119 1356 -431 1.57 -0.02 --sun 0.9 0.05 -0.4`
-  and the sunset view `1119 1500 -431 3.14 -0.15 --sun 0.9 0.05 -0.4`;
-  sweep sun elevation 0.05 -> 0.5 and read `GPU passes:`.
-- Target: scene early at low sun on the order of midday (<= ~7 ms at that
-  view) with grass still receiving terrain/tree shadows; clouds stable.
-  Dispatch it as a fix (root cause first, Opus diagnosis, Sonnet
-  implementation), merge each fix as soon as it is verified.
+## The user's complaints, in their order (2026-11-20 evening)
+
+1. Volumetric cloud shimmer still there. Lane `clouds-sharp` (below).
+2. 180 fps looking at the sky, ~70 fps in walk mode near grass. Not
+   streaming (`stream` is 0.00 ms); it is the cost of drawing the grass.
+   No lane yet: a meadow performance lane (measure overdraw, the shadow
+   cascades' grass share, the distance thinning; then fix) is the
+   recommended next dispatch. Note: the alpha-mip fix in 19ac9d1 means
+   the grass/flower plants cooked before it lose their leaves beyond ~5 m
+   until they are re-cooked; check that first.
+3-6. Grass look, terrain shape, terrain textures, texture placement:
+   phase 2.
+
+## Recommended order when resuming (ask the user first)
+
+1. `clouds-sharp` (the user's top complaint).
+2. Meadow performance lane (new).
+3. Raster shadows: tune, then flip the default.
+4. GI: Task 5 merge, grass cost, forest fix, then the screen pass.
+5. Far field: the mid tier rasterized (user approved), then far-c.
+6. Trees: as soon as the user sends the Unreal inventory output.
 
 ## How work runs: one orchestrator
 
@@ -53,25 +68,26 @@ relays reports and user decisions. Each sub-orchestrator runs SDD
 risky reviews; never Fable) in its own worktree beside the repo (never
 under `/tmp`), and merges to main by rebase + fast-forward after review.
 
-The user's rules (2026-11-20):
+The user's rules:
 
-- Time: no hard caps (the user dropped the 2 h box), but work fast and
-  right: one implementer per chunk (or the sub-orchestrator implements
-  small things itself), one Opus review of risky core code + one final
-  review, iterate in Release (`--placement off` where possible), Debug +
-  validation once before each merge, merge small working pieces early,
-  batch captures, and every milestone message carries an ETA. Finishing
-  passes ~20-30 min. Give lanes absolute local-time deadlines matched to
-  the work; the user reacts badly to padded ETAs.
-- Parallelism: run queued work in parallel when files don't collide.
-  Watch the 5-hour usage window (the user reports %); near the limit,
-  pause lanes with a WIP commit + push + a `next.md`, resume after reset.
+- Time: work fast and right. The user sets hard deadlines (2026-11-20:
+  "00:00 MAX") and may ask for more agents: lanes then cut scope to a
+  first visible version behind a flag, run several Sonnet implementers on
+  non-colliding files at once, and say within 15 minutes what can land.
+  Every milestone message carries an absolute local-time ETA; no padding.
+- Parallelism: run queued work in parallel when files don't collide. The
+  GPU flock is the real bottleneck with 4+ lanes. Watch the 5-hour usage
+  window (the user reports %); near the limit, pause lanes with a WIP
+  commit + push + a `next.md`.
 - Don't launch lanes the user didn't ask for; when the user asks for help
   choosing, answer directly. When the user reports a visual problem,
-  dispatch a fix, not a lane that proves it.
+  dispatch a fix, not a lane that proves it, and verify it in the user's
+  conditions (clouds drifting at `--time-scale 1`, mouse-like turns,
+  interactive settings), not only static deterministic captures.
+- Prove a look claim with a side-by-side capture before relaying it.
 - Look target: the Chlorophyll Engine frames in
-  `assets/reference/chlorophyll/` plus `assets/reference/target-meadow.png`
-  (primary for meadow density and tree colour), not fidelity to the Napf.
+  `assets/reference/chlorophyll/` plus `assets/reference/target-meadow.png`,
+  except the clouds (keep today's volumetric look).
 - Ask the user before deciding look questions; give a recommendation.
 
 Every lane brief carries: no AI attribution in commits; latest SDK
@@ -79,144 +95,139 @@ versions (verify at fetch time); tidiness (no debug leftovers, new CLI
 flags in CLAUDE.md, plan Status lines, docs state current truth only);
 commit messages and temp files inside the lane's worktree (never the
 shared session scratchpad); every game run through `flock
-/tmp/meridian-gpu.lock`; never `pkill`/`killall` (stop only your own
-PIDs); look at assets before trusting their names; captures at
+/tmp/meridian-gpu.lock`; never `pkill`/`killall` or any name-pattern kill:
+record the PID of every background process at launch and stop only those
+(a lane's `pkill -f 'sleep 900'` on 2026-11-20 may have hit another
+lane's timer); look at assets before trusting their names; captures at
 2560x1440 and GPU ms compared only with identical `Render WxH` lines;
 DLSS SDK reuse via `-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=
 /home/zye/Projects/dev/meridian-motion-dlss/build/_deps/dlss_sdk-src`;
-every worktree's `assets/` is a symlink to main's (a partial asset set
-changes the placement hash and every timing; check the hash in CLAUDE.md
-before measuring); ccache + mold are automatic; GPU contention on the
-flock is the main bottleneck, so batch runs.
+every worktree's `assets/` is a symlink to
+`/home/zye/Projects/dev/meridian/assets` (the far-field worktrees pointed
+at `meridian-forests/assets` until 2026-11-20; check the link and the
+placement hash in CLAUDE.md before measuring); new `.glsl` includes need
+a cmake re-configure before shaders rebuild; ccache + mold are automatic.
 
 Reports: "status" = running and waiting work only; "overview" = done.
 
-## Landed on main 2026-11-20 (see decisions.md for each)
+## Landed on main 2026-11-20 evening (see decisions.md for each)
 
-Megascans ground material (14 surfaces, 4K colour/normal, height blends,
-colour matching), rock anti-tiling, terrain POM + self-shadow, micro
-shadows (terrain AO relative to layer mean), screen-space contact
-shadows, sun glare (bloom), DLSS DLAA + Ray Reconstruction preset F as
-default (absolute motion-sharpness gates, one fullscreen swapchain),
-exposure + starting grade, leaf transmission, Poly Haven AO, trees hidden
-by default (`--trees`), grass/flower plants cooked (coverage-preserving
-alpha mips), ImGui overlay: G grading panel (grade file
-`~/.config/meridian/grade.json`, Effects toggles), F3 performance
-overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
+- Low-sun cost: terrain sun march once per small masked cluster
+  (fc11e2a): scene early at sun 0.6 deg 61.7 -> 9.9 ms. The remaining
+  ~10 ms near 0 deg is a backlog row (terrain shadow-height map).
+- Clouds: per-frame texel jitter (5e5dd72), filter overshoot clamp, which
+  fixed the blue fringes (64d21a6), sun disk occluded at the march
+  early-out (b901b5d), stripe and horizon-band diagnoses as backlog rows
+  (598ae29).
+- DLSS SR DLAA is the default; RR is an A/B (27d03cb).
+- Far field: compact bricks (1efb4cb) and a far sun shadow map (d599dcd).
+  With `--trees`: forest overview 26.2 -> 18.1 ms, high overview
+  36.9 -> 15.3; far field 394 MiB resident.
+- GI first version, `--gi probes`, default off (79dddf2; 8900c3a,
+  a8ace1a).
+- Raster sun shadows, opt-in `--shadows raster` (4676c84).
+- Textured tree cook, usd2gltf textures, the Unreal export script (draft)
+  (19ac9d1, 5ec4f32, 1fc8cf5). 19ac9d1 also fixes the shared alpha-mip
+  code (cutout leaves vanished beyond ~5 m).
 
-## Lanes: running, paused, queued
+## Lanes (all stopped; resume each from its next.md)
 
-- **G2 ground transitions + cliffs** (DONE, merged 8a514ad and 05767d4;
-  decisions.md "Natural ground transitions", "Non-repeating cliffs").
-  M3 step 1 can now rebase onto G2's role weights. Worktrees
-  `../meridian-ground2*` can be removed.
-- **C2 clouds** (DONE, merged 2026-11-20; plan Status line, decisions.md
-  "Cloud shadow fallback refit", "Clouds and weather measured"; the
-  SceneData offset fix 5790d88 came after, and the clouds were re-checked
-  against it). User accepted for now: clouds ~2 ms (spec ~1 ms) and the
-  sky's fast-turn sharpness under RR (0.878 vs 0.978); both revisit in
-  the RR / frame-pacing pass. Worktrees removed; numbers in decisions.md.
-- **M3 meadow** (PAUSED 2026-11-20 ~18:40; most of it on main).
-  Streamed placement (plan `docs/superpowers/plans/2026-11-20-streamed-placement.md`,
-  decisions.md "Streamed placement", "Plant micro occlusion") is merged
-  with the dense meadow, Prototype::tint (fresh green, cream hawkbit),
-  wide thinning and the terrain-normal blend (40a230d), and the dither
-  pattern cache (851d0ad). Paused and NOT merged: branch `meadow-y`
-  (pushed; worktree `../meridian-meadow-y`, WIP 1fc4abf), the far-field
-  match: terrain blade detail, distance gain, canopy sun shadow and
-  `tools/placement-match.py`, all unverified. Resume from
-  `../meridian-meadow-stream/.superpowers/sdd/stream/next.md`: re-measure
-  the table, tune to 3-5% (low sun is the hard case), Debug validation,
-  merge, motion gates at 30 and 150 m/s, then plan task 4 (TLAS for
-  streamed instances). Obsolete branches: `meadow`, `meadow-accents`,
-  `meadow-x`, `meadow-tint`, `meadow-cache`.
-- **Queue after those** (in order, each when the user says go):
-  1. Terrain detail: near-camera displacement from the material height
-     maps (tessellated near nodes) + erosion-style procedural detail;
-     cliffs via placed rock/cliff meshes. Maybe a more dramatic terrain
-     (user's call; the Napf is gentle).
-  2. Trees: the user finds the Megaplants models themselves bad, not just
-     untextured. Plan: SpeedTree Modeler 10.2.1 (installed at
-     `~/Apps/SpeedTree_Modeler_v10.2.1`, trial; Indie $19/month if it
-     passes). The user works in it with their own agent (beech first:
-     mature/edge/lone/young variants, then oak, maple, edge shrubs; USD
-     export with PNG maps to `~/Downloads/speedtree-export/<species>/`).
-     When the user reports "beech test export ready", dispatch a lane to
-     run it through usd2gltf + meridian-cook and capture it against
-     `target-meadow.png`. Fallback idea if SpeedTree disappoints: a
-     procedural tree generator scripted in Blender (space colonization +
-     scanned Fab leaf/bark textures).
-  3. Frame pacing (backlog row).
-  4. RR motion sharpness pass (last, user order): inputs (motion vectors
-     incl. clouds, masks, hit distance, mip bias), tighten gates.
+- **clouds-sharp** (`../meridian-cloudsharp`, branch `clouds-sharp`
+  1fa9689, nothing merged). Baseline flicker under SR, mean / p99 / p99.9
+  per 255: ground 0.137 / 1.45 / 3.38, in-layer 0.134 / 1.04 / 2.32
+  (target p99 <= 0.6). 1fa9689 = a hashed per-texel start + golden-ratio
+  step jitter, not measured. Suspected causes (unproven): ground: a 10%
+  history blend with a large per-frame swing at the edges and a loose 2
+  sigma clip; in-layer: reprojection by each frame's noisy cloud depth.
+  Then the outer + inner pseudo outline with a G-panel strength. ~3-4 h.
+  Flicker tool: `tools/cloud-flicker.py` on the branch (`--shift`
+  unvalidated).
+- **raster** (`../meridian-raster`, branch = main, all merged). 5 cached,
+  texel-snapped 2048^2 cascades through the cluster cull, 3x3 PCF.
+  Raster vs rt: forest with `--trees` ~7 ms faster, meadow 0.15-1.5 ms
+  slower, crown shimmer equal, the beech forward sharpness 0.198 (gate
+  0.20) vs rt 0.214. Left (~3-4 h): per-cascade re-render cost, 4-tap
+  PCF + bias, rerun the gates, flip the default; streamed grass casts no
+  cascade shadows; outer cascades draw trees at full detail (use the far
+  field); the caster height is hard-coded for the Napf. Removing
+  TLAS/BLAS waits until raster is the default (still used by `--shadows
+  rt`, `farfield_bake.comp`, `--far-shadows tlas`).
+- **gi** (`../meridian-gi`, branch `gi` c906abd WIP, not merged): Task 5
+  (ground radiance cache, albedo feedback, multi-bounce, history 0.95);
+  Release clean, Debug/review/decisions entry not done. Open: +1.7 ms
+  scene early on grass with GI on (fix: sample the probes once per masked
+  cluster); `--trees` forest interior goes blue and the probes cost ~3 ms
+  (fix: canopy occlusion from the far-field column map); the effect is
+  subtle. Then the hybrid screen pass, motion gates, look review. ~6 h in
+  total.
+- **far field** (plan `docs/superpowers/plans/2026-11-19-forests.md`,
+  Status line current). `far-m` (`../meridian-farM`, 71b3ee9): the USER
+  APPROVED option 1, rasterize the voxels the Nanite Foliage way (bricks
+  as small cubes into the G-buffer, dithered coverage, exact depth and
+  motion, per-brick occlusion culling), ~1 day; resume steps in its
+  next.md. `far-c` (`../meridian-farC`, e753156, rebased): slower than
+  main; next, test its culling with the old 6 px switch, keep only what
+  pays (~2 h). Then Task 12; Task 13 (forest-edge variants) waits for the
+  Unreal trees.
+- **tree-import** (`../meridian-treeimport`, merged; branch = main
+  1fc8cf5). Waiting on the user: Unreal steps in `docs/assets.md`
+  ("Textured Megaplants trees from Unreal"): enable the Procedural
+  Vegetation Editor plugin and "Nanite Foliage (Experimental)", add the
+  beech from the Fab window, generate a variant, then run in the Output
+  Log (Python): `py /home/zye/Projects/dev/meridian/tools/unreal/export_trees.py
+  --folder /Game/<pack folder> --species beech --inventory-only`, then
+  without `--inventory-only`; the user sends back `inventory.json`,
+  `manifest.json`, `export_log.txt` from `~/Downloads/unreal-export/beech/`.
+  Then 1-2 h (single mesh) or +1-2 h (branch assembly converter). The
+  Megaplants USD zips on Fab carry no textures; the hornbeam page serves
+  the oak zip.
+- **clouds-25d** (PAUSED, not merged; `../meridian-clouds25d` 7839579
+  with the `--clouds 2.5d|volumetric|off` switch 0a74d05, slab shader,
+  spec, plan; `../meridian-clouds25d-mip` 29be63f, max-mip traversal,
+  Release only). Resume only if the user asks.
+- **sunset-fix** (DONE, all merged). Worktree `../meridian-sunset-fix`
+  can be removed.
+- **M3 meadow far-ground match** (PAUSED since 2026-11-20 ~18:40, branch
+  `meadow-y`, `../meridian-meadow-y` WIP 1fc4abf); resume from
+  `../meridian-meadow-stream/.superpowers/sdd/stream/next.md`. Obsolete
+  branches: `meadow`, `meadow-accents`, `meadow-x`, `meadow-tint`,
+  `meadow-cache`.
+- **Motion clarity** (plan `docs/superpowers/plans/2026-11-20-motion-clarity.md`).
+  RR is no longer the default, so Tasks 3.2a-3.2b (shadow denoiser for the
+  fallback paths) depend on whether raster shadows replace RT: revisit
+  after the raster default flips. Ledger
+  `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/`.
+
+## Queue (each when the user says go)
+
+1. Meadow performance lane (see complaint 2).
+2. Phase 2 environment authoring (Houdini; check the license for game
+   export: Indie is the safe choice).
+3. Weather beyond clouds: rain + wet surfaces, fog, wind on vegetation,
+   snow (the weather map already carries precipitation).
+4. Terrain detail (near displacement from the material height maps).
+5. Frame pacing (backlog row).
+6. Platform: the user can't run anti-cheat games on Arch; the
+   recommendation was dual-boot Windows (games, Unreal, HDR testing)
+   while the engine stays on Linux until there is a concrete reason to
+   port it.
 
 ## Decisions waiting for the user
 
-1. (Resolved 2026-11-20: voxels, no impostors, three tiers; see the
-   far-field spec. Look target for trees:
-   `assets/reference/target-meadow.png`.)
-2. The default grade: the user tunes it in the G panel and saves; read
+1. Raster shadows as the default: recommended after the tuning passes
+   the shimmer/sharpness gates and the meadow cost is no worse than rt.
+2. GI: the three recommendations in the gi lane (grass cost per cluster,
+   canopy occlusion before look tuning, hybrid pass last and only if the
+   motion gates hold).
+3. The default grade: the user tunes it in the G panel and saves; read
    `~/.config/meridian/grade.json` before changing `kStartingGrade`.
 
-## In progress (WIP branches on origin)
+## Done on main earlier
 
-- **Motion clarity** (plan `docs/superpowers/plans/2026-11-20-motion-clarity.md`,
-  spec `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`; its
-  Status line has the next steps). On main: gate tools, grading (CPU
-  reference + GPU LUT bake), render/display split, transparency mask,
-  Upscaler interface, TAA v2 (forward 5 m/s 0.94, 0.17 ms at 1440p).
-  DLSS module (Task 1.3), guide buffers and the `whiteNoise` field (Task
-  1.4) and Ray Reconstruction (Task 1.5) are on main. Default since
-  2026-11-20: DLSS DLAA + RR preset F (4.71 ms at 1440p; fallbacks SR
-  DLAA preset M, then TAA v2); the Laplacian gates are absolute motion
-  sharpness (decisions.md, "DLSS DLAA with Ray Reconstruction is the
-  default"); fullscreen startup builds one swapchain. Next: 3.2a -> 3.2b
-  (shadow denoiser, fallback paths only), Task 4 sweep, Task 5 final
-  review.
-  Ledger:
-  `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/`.
-- **M2a far field, three voxel tiers** (spec
-  `docs/superpowers/specs/2026-11-20-far-field-design.md`, plan
-  `docs/superpowers/plans/2026-11-19-forests.md` Tasks 9-13, ledger in
-  `../meridian-forests/.superpowers/sdd/2026-11-19-forests/`). On main
-  (2026-11-20): compact bricks + sliced splat (1efb4cb; far field 394 MiB
-  resident, 1257 MiB load peak, gates pass) and the far sun shadow map
-  (d599dcd; far field pass 2-3 ms at the overviews, was 7.5-11). Open,
-  each with a `next.md` in its worktree's `.superpowers/`:
-  - `far-c` (`../meridian-farC`, rebased on d599dcd): far-cell two-phase
-    culling, column boxes, 1 px switch with hysteresis. Fails: far field
-    6.0 ms high overview / 10.0 sunset vs 2.7 / 2.9 on main (more far
-    cells from the nearer switch, larger boxes). Next: split the switch
-    distance from the culling/box change (old 6 px switch with C's
-    culling), keep only what pays.
-  - `far-m` (`../meridian-farM`, 71b3ee9, not rebased): mid tier,
-    per-instance box + DDA, 6.7-85 ms (gate 1.5). Waiting on the user:
-    rasterize the voxels (Epic's Nanite Foliage approach, recommended) vs
-    narrower band vs tuning; options in its next.md.
-  Then Task 12 (measurement); Task 13 (forest-edge rules) waits for the
-  SpeedTree models (the density/scale edge ramp exists; variants need the
-  new prototypes). Gates are measured with `--rr off`. Worktree assets/
-  must be main's (`ln -s .../meridian/assets`).
-## Done on main
-
-- M1 (15 km Napf terrain).
-- M2a Tasks 1-7: static TLAS, Megaplants import, placement rules, GPU
-  placement (2.9M instances), placed trees and rocks drawn (cell cull,
-  TLAS fill), cluster-group BVH and its GPU traversal (0 drops; ~11.5 ms
-  of raster at the forest edge at 1080p until the far field lands).
-  Geometry pools sized from the loaded content.
-- Quality pass: sky dithering, summer haze, terrain march fix, multi-
-  bounce AO + specular occlusion, per-layer terrain AO (shadowed ground
-  ~11% of sunlit). `--capture x.pfm` + `tools/region-luminance.py`.
-- Far-field spec (`docs/superpowers/specs/2026-11-20-far-field-design.md`).
-- Repo hygiene: CLAUDE.md trimmed, docs map at its top, known gaps in
-  `docs/backlog.md`, asset notes in `docs/assets.md`.
-
-## Next after that
-
-M2a far field (A, B, then fix C and the mid tier; then Tasks 12-13), M2b
-(forest lighting). Held ideas: NRD SIGMA shadow denoiser + plain DLSS
-DLAA instead of RR (~3 ms saved, likely sharper in motion; the user said
-hold); a meadow cost pass (the meadow adds ~4 ms to scene early at
-midday). Backlog highlights: HDR output (mandatory), violet distant haze,
-procedural rivers/paths, character animation.
+M1 (15 km Napf terrain); M2a Tasks 1-7 (static TLAS, Megaplants import,
+placement rules, GPU placement, placed trees and rocks, cluster-group BVH
+traversal); the quality pass; the Megascans ground material, POM, micro
+and contact shadows, bloom, DLSS, exposure + grade, the G and F3 overlays,
+streamed meadow placement, the dither pattern cache. Backlog highlights:
+HDR output (mandatory), violet distant haze, procedural rivers/paths,
+character animation.
