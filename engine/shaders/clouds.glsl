@@ -365,7 +365,9 @@ float cloudShadowMap(vec3 world, out float weight) {
 // already crossed, so only the regional mean over the rest of the path
 // applies. 1 above the layer.
 const vec2 kCloudShadowFallbackFit = vec2(0.72, 2.6); // a, p
-const float kCloudShadowCrossingLength = 5500.0;
+// Mean path through the layer between independent clouds (m), stratus to
+// cumulus: billowed cumulus cells are smaller and closer than stratus sheets.
+const vec2 kCloudShadowCrossingLength = vec2(4900.0, 1550.0);
 
 float cloudShadowFallback(vec3 world, bool marched) {
     WeatherSample here = weatherAt(pc.scene, vec3(world.x, 0.0, world.z));
@@ -378,8 +380,10 @@ float cloudShadowFallback(vec3 world, bool marched) {
     float sunHeight = max(sun.y, kCloudShadowSunFade.x);
     float middle = 0.5 * (bottom + layer.y);
     vec2 xz = world.xz + sun.xz * ((middle - world.y) / sunHeight);
-    float crossings = (layer.y - bottom) * length(sun.xz) / (sunHeight * kCloudShadowCrossingLength);
     WeatherSample local = weatherAt(pc.scene, vec3(xz.x, 0.0, xz.y));
+    float crossingLength = mix(kCloudShadowCrossingLength.x, kCloudShadowCrossingLength.y,
+                               clamp(local.type, 0.0, 1.0));
+    float crossings = (layer.y - bottom) * length(sun.xz) / (sunHeight * crossingLength);
     float meanCoverage = clamp(local.coverage * (1.0 + kCoverageEdge) - 0.5 * kCoverageEdge, 0.0, 1.0);
     float meanK = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(local.type, 0.0, 1.0), kCloudShadowFallbackFit.y);
     // pow is undefined for 0^0 (overcast at a high sun).

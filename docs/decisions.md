@@ -2357,11 +2357,12 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   independent clouds; the n - 1 beyond the first pass the regional mean
   `1 - k(local type) c'`, c' the local state's mean coverage under
   weatherFromNoise's soft threshold over an about uniform noise
-  (`c (1 + 0.15) - 0.075`). L = 5.5 km, fitted at 6.5, 10 and 20
-  degrees; n = 1 from 26 degrees up. Calibration: top-down captures at
+  (`c (1 + 0.15) - 0.075`). L falls with the local type, 4.9 km for
+  stratus to 1.55 km for cumulus (`kCloudShadowCrossingLength`), fitted
+  at 6.5, 10 and 20 degrees. Calibration: top-down captures at
   9 km (map weight 1 on every pixel), mean map T vs mean fallback T on
   the same pixels, 3 positions per sun elevation (residuals of the
-  current fit: "Cloud look development", fallback refit). On high oblique views
+  current fit: "Cloud shadow fallback refit"). On high oblique views
   (6500 m, pitch -0.25) swept from 0 to 20 degrees of sun, the mean
   applied transmittance 11.5-13.8 km and 15.4-17.5 km from the camera
   differs with the cloud pattern either way, except at 4-5.5 degrees,
@@ -2528,7 +2529,8 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   -0.053 (6.5); broken -0.008, +0.120, +0.077, +0.040 (the stale fit was
   -0.07..-0.16 fair, -0.06..+0.17 broken). L = 3.5 km made fair at 6.5
   deg and broken at 10 deg worse (-0.13, -0.08): the remaining error is
-  the step from one crossing to many at ~26 deg, not L.
+  the step from one crossing to many at ~26 deg, not L. Superseded by
+  "Cloud shadow fallback refit" below (L by type).
 - **Measured (Release, 2560x1440):** `clouds` ms, fair from 1500 m
   0.91 (median of 3; 0.83 at the rebase, before this round), cirrus view
   1.04, broken 1.16, overcast 0.60, sunset from above 0.99; `weather`
@@ -2637,3 +2639,30 @@ No visible change on the fair and broken views:
   overcast 0.80 + 0.50, sunset from above 1.37 + 0.42. Weather split on
   the fair view: map 0.14, shadow map + blur 0.21, sky capture +
   irradiance 0.16.
+
+## Cloud shadow fallback refit (M4 clouds, 2026-11-20)
+
+- **Why the map darkened at a low sun:** after the sharp-detail round
+  the shadow map's mean transmittance on the fair top-down view at 10
+  degrees was 0.65, against 0.89 when the fallback was last fitted.
+  Measured on one view (fair, 10 degrees, (1119, -431)), changing one
+  thing at a time: every row marched each frame 0.655 (same as half
+  rows), the old 1.8-4.5 km layer 0.658, PNG instead of `.pfm` readout
+  0.645, density gain 3 instead of 6 0.664, gain 3 and shape cut 0.6
+  instead of 0.3 0.923. The lower shape cut (kShapeCut, "Sharp cloud
+  detail") grows each cumulus taller and wider, so a slanted sun line
+  crosses far more cloud, while a high sun sees about the same cover
+  (40.5 degrees: 0.90). The darkening is real; the fallback's single
+  crossing length (5.5 km) was fitted to the narrower clouds.
+- **Refit:** the crossing length now depends on the local type,
+  `mix(4.9 km, 1.55 km, type)` (`kCloudShadowCrossingLength`): fair
+  cumulus (type 1) needs ~1.55 km and broken (type 0.6) ~2.9 km, from
+  the fallback's response to L = 5.5 and 2.5 km at each elevation; one
+  L can't fit both. k (`1 - 0.72 type^2.6`) is unchanged: the high-sun
+  residuals didn't move. Fallback minus map, Task 5 procedure (3
+  positions, Release 2560x1440): fair -0.008 (40.5 deg), -0.048 (20),
+  -0.024 (10), +0.004 (6.5); broken -0.045, -0.027, -0.036, +0.002 (the
+  stale fit: fair -0.013, +0.053, +0.223, +0.303; broken -0.037, +0.121,
+  +0.194, +0.143 on 2 positions). Single positions spread by up to 0.1
+  either way with the local cloud pattern (the third position's broken
+  map is 0.06 brighter even at 40.5 deg, where L doesn't apply).
