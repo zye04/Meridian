@@ -66,6 +66,52 @@ Vec3 windVelocityAt(const WindState &wind, float altitude) {
           (wind.direction.x * s + wind.direction.z * c) * speed};
 }
 
+SunBasis cloudShadowBasis(Vec3 sunDirection) {
+  // Frisvad (2012), in double, on the axes cycled (x, y, z) -> (z, x, y),
+  // which keeps the handedness and puts its one singular direction (its
+  // -z) at the nadir, where the sun never lights anything.
+  const Vec3 n = normalize(sunDirection);
+  const double nx = n.z;
+  const double ny = n.x;
+  const double nz = n.y;
+  if (nz < -0.9999999) {
+    return {{-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, n * -1.0f};
+  }
+  const double a = 1.0 / (1.0 + nz);
+  const double b = -nx * ny * a;
+  auto world = [](double x, double y, double z) {
+    return normalize(Vec3{static_cast<float>(y), static_cast<float>(z), static_cast<float>(x)});
+  };
+  return {world(1.0 - nx * nx * a, b, -nx), world(b, 1.0 - ny * ny * a, -ny), n * -1.0f};
+}
+
+BeerShadowTexel beerShadowTexel(std::span<const float> extinction, float start, float step) {
+  BeerShadowTexel texel;
+  float back = start;
+  bool found = false;
+  for (size_t i = 0; i < extinction.size(); ++i) {
+    if (extinction[i] <= 0.0f) {
+      continue;
+    }
+    const float near = start + static_cast<float>(i) * step;
+    if (!found) {
+      texel.front = near;
+      found = true;
+    }
+    back = near + step;
+    texel.maxOpticalDepth += extinction[i] * step;
+  }
+  if (found) {
+    texel.meanExtinction = texel.maxOpticalDepth / (back - texel.front);
+  }
+  return texel;
+}
+
+float beerShadowTransmittance(const BeerShadowTexel &texel, float depth) {
+  return std::exp(-std::min(texel.maxOpticalDepth,
+                            texel.meanExtinction * std::max(0.0f, depth - texel.front)));
+}
+
 Weather::Weather(uint32_t seed, const WeatherState &start)
     : seed_(seed), from_(start), target_(start) {
   current_ = stateAtTime(0.0);

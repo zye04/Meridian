@@ -21,9 +21,8 @@ layout(set = 2, binding = 0) uniform sampler2D sceneDepth;
 layout(set = 2, binding = 1, rgba16f) uniform writeonly image2D cloudColor;
 layout(set = 2, binding = 2, r32f) uniform writeonly image2D cloudDepth;
 
-// Extinction (1/m) at density 1, single-scattering albedo, and the albedo
-// factor at the thinnest edges (edge darkening, instead of the powder term).
-const float kExtinction = 0.06;
+// Single-scattering albedo, and the albedo factor at the thinnest edges
+// (edge darkening, instead of the powder term).
 const float kAlbedo = 0.98;
 const float kEdgeAlbedo = 0.5;
 const float kEdgeDensity = 0.15;
@@ -223,21 +222,30 @@ void main() {
                 }
 
                 // Sun: optical depth toward it through the layer (none to
-                // march without sun; stops once above the layer).
+                // march without sun; stops once above the layer), and from
+                // where the short march ends to the sun, the shadow map's
+                // (none beyond the map).
                 float opticalDepth = 0.0;
                 if (any(greaterThan(sunLight, vec3(0.0)))) {
                     float s = 0.0;
                     float ds = kLightStep;
+                    bool exited = false;
                     for (int j = 0; j < kLightSteps; ++j) {
                         vec3 q = cloudPoint(rel + sun * (s + 0.5 * ds), radius);
                         if (q.y > top) {
+                            exited = true;
                             break;
                         }
                         opticalDepth += cloudDensity(q, lod + float(j) * 0.5) * ds;
                         s += ds;
                         ds *= 2.0;
                     }
-                    opticalDepth *= kExtinction;
+                    opticalDepth *= kCloudExtinction;
+                    if (!exited && c.shadowSize > 0.0) {
+                        float weight;
+                        float beyond = cloudShadowMap(cloudPoint(rel + sun * s, radius), weight);
+                        opticalDepth -= weight * log(max(beyond, 1e-6));
+                    }
                 }
 
                 float scattered = 0.0;
@@ -253,7 +261,7 @@ void main() {
                 vec3 source = albedo * (sunLight * scattered +
                                         ambient * mix(kAmbientBottom, 1.0, heightFraction));
                 // Energy-conserving integration over the step (Hillaire 2016).
-                float sigma = density * kExtinction;
+                float sigma = density * kCloudExtinction;
                 float stepTransmittance = exp(-sigma * dt);
                 float opacity = transmittance * (1.0 - stepTransmittance);
                 luminance += source * opacity;

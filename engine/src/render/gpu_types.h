@@ -340,6 +340,10 @@ constexpr uint32_t kCurlNoiseSize = 128;
 // seconds (cells form and dissolve), periodic every kWeatherTimePeriod units.
 constexpr double kWeatherCellLifetime = 1800.0;
 constexpr uint32_t kWeatherTimePeriod = 64;
+// The cloud shadow map: 1024^2 texels over 30 km (30 m texels) across the
+// sun, centered on the camera, texel-snapped in the sun's frame.
+constexpr uint32_t kCloudShadowResolution = 1024;
+constexpr double kCloudShadowSize = 30720.0;
 
 // Must match Clouds in common.glsl (see clouds.glsl).
 struct GpuClouds {
@@ -366,9 +370,21 @@ struct GpuClouds {
   // How far the cloud air moved since last frame (xz, m), for reprojection
   // and motion vectors.
   float windDisplacement[2] = {};
+  // The cloud shadow map's frame (cloudShadowBasis), its size across the sun
+  // (m; 0 = no cloud shadows), and the camera's offset from the map's center
+  // in (right, up) (m).
+  float shadowRight[3] = {};
+  float shadowSize = 0.0f;
+  float shadowUp[3] = {};
+  uint32_t shadowResolution = kCloudShadowResolution;
+  float shadowForward[3] = {};
+  uint32_t shadowMap = 0;
+  float shadowCamera[2] = {};
+  float pad1[2] = {};
 };
-static_assert(sizeof(GpuClouds) == 96);
+static_assert(sizeof(GpuClouds) == 160);
 static_assert(offsetof(GpuClouds, windDisplacement) == 88);
+static_assert(offsetof(GpuClouds, shadowRight) == 96);
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
@@ -435,7 +451,7 @@ struct SceneData {
   GpuWeather weather;
   GpuClouds clouds;
 };
-static_assert(sizeof(SceneData) == 2000);
+static_assert(sizeof(SceneData) == 2064);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
