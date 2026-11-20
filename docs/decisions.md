@@ -2607,3 +2607,15 @@ sun); sheets in the clouds worktree's
 - A grey smudge in the sunset-from-above sky under DLSS RR only (absent
   with TAA, and before this change with RR) is RR reconstructing the
   cloud-free sky (backlog).
+
+## Cloud altitudes (M4 clouds, 2026-11-20)
+
+The layer was 1.8-4.5 km above sea level, only ~450 m
+over the Napf ridges (~1.35-1.4 km). Fair-weather cumulus bases sit at
+the lifting condensation level, ~125 m above ground per degree C of
+surface dew-point spread; a Swiss summer afternoon's 10-15 degrees
+puts them 1.2-2 km above ground. Now cumulus (type 1) 2.8 km base, top
+growing with coverage up to 4.8 km (fair: ~1.2 km thick); stratus
+(type 0) 1.7-2.8 km, above the terrain's high points; broken
+(type ~0.6) lands at ~2.4 km base. Types blend linearly as before
+(`cloudLayer`). Cirrus stays at 9 km.
