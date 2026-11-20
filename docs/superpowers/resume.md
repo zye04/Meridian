@@ -49,6 +49,16 @@ so rebasing it after each merge keeps conflicts small.
 
 ## In progress (WIP branches on origin, not reviewed)
 
+- `wip/m2a-task8` (M2a Task 8, voxel far-field prototype; worktree
+  `../meridian-forests`, SDD ledger in its `.superpowers/sdd/2026-11-19-forests/`):
+  four WIP commits (phases A bake+splat, B far raster, C far shadows, review
+  fixes), task-reviewed, build and tests pass. Known so far: VRAM over
+  both gates (resident 659 MiB / 500, load peak 3.68 GB / 2.5); far field
+  pass ~2.4 ms ridge, ~6.1 ms overview at 1440p (gate 1.0); voxel far
+  shadows cost 1.5-2.4x the TLAS path. Next: Phase D (Task 8 Step 6-7):
+  measure all gates at 1440p Release, write decisions.md/CLAUDE.md/backlog,
+  squash into one commit, then stop for the user's gate decision (tune C,
+  a lever, or option B). Not merged.
 - `clouds`: M4 clouds, see below.
 
 ## Where clouds stopped
