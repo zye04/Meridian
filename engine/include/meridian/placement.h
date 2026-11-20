@@ -47,6 +47,10 @@ struct PlacementLayer {
   Rotation rotation;
   float sinkDepth;
   float maxDrawDistance = 0.0f;
+  // Its instances are splatted into the far field (farfield.h), which draws
+  // distant cells instead of them. Far-field layers come first, and their
+  // prototypes are in no other layer.
+  bool farField = false;
 };
 
 // Points over one tile, ranked progressively: any prefix of the threshold

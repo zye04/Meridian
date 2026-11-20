@@ -263,6 +263,7 @@ void placeScenery(meridian::Renderer &renderer) {
                       {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
                        -kMaskEdge, 0.0f, 0.0f},
                       0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
+    layers[0].farField = layers[1].farField = true;
   }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).

@@ -92,6 +92,10 @@ add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
+add_shader(farfield_bake.comp farfield_bake.comp)
+add_shader(farfield_splat.comp farfield_occupancy.comp FARFIELD_OCCUPANCY)
+add_shader(farfield_splat.comp farfield_accumulate.comp FARFIELD_ACCUMULATE)
+add_shader(farfield_splat.comp farfield_pack.comp FARFIELD_PACK)
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
@@ -99,9 +103,11 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 add_library(meridian STATIC
     src/cluster.cpp
     src/clusterlod.cpp
+    src/farfield.cpp
     src/grade.cpp
     src/model.cpp
     src/placement.cpp
+    src/render/renderer_farfield.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_placement.cpp
     src/render/renderer_resources.cpp

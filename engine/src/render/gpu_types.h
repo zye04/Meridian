@@ -2,6 +2,7 @@
 // GLSL declarations in engine/shaders; change both together.
 #pragma once
 
+#include <meridian/farfield.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
 
@@ -525,6 +526,108 @@ struct TlasFillConstants {
 };
 static_assert(sizeof(TlasFillConstants) == 32);
 static_assert(sizeof(VkAccelerationStructureInstanceKHR) == 64);
+
+// Far field (renderer_farfield.cpp). Must match FarCell in farfield.glsl.
+// Per placement cell: the canopy's extent over all levels (bottom > top
+// when empty), how many of the cell's instances (the start of its run) are
+// in far-field layers, and the tallest of them (m above its origin).
+struct FarCell {
+  float bottom = 0.0f;
+  float top = 0.0f;
+  uint32_t treeCount = 0;
+  float treeHeight = 0.0f;
+};
+static_assert(sizeof(FarCell) == 16);
+
+// Must match FarField in farfield.glsl: per level the brick columns and
+// voxel pools, then FarCell per cell, the canopy top pyramid (levels
+// 1..pyramidLevels, max over 2^k x 2^k cells; level 0 is FarCell::top),
+// the albedo palette (vec4, linear) and the grid (FarFieldCpu's).
+struct GpuFarField {
+  VkDeviceAddress columns[kFarLevels] = {};
+  VkDeviceAddress voxels[kFarLevels] = {};
+  VkDeviceAddress cells = 0;
+  VkDeviceAddress pyramid = 0;
+  VkDeviceAddress palette = 0;
+  float originX = 0.0f;
+  float originZ = 0.0f;
+  float heightBase = 0.0f;
+  uint32_t cellsX = 0;
+  uint32_t cellsZ = 0;
+  uint32_t pyramidLevels = 0;
+  uint32_t paletteSize = 0;
+  uint32_t pad = 0;
+  uint32_t pyramidOffsets[16] = {};
+};
+static_assert(sizeof(GpuFarField) == 168);
+
+// Must match FarTemplateInfo in farfield.glsl; one per (prototype, level).
+struct FarTemplateInfo {
+  Vec3 centerMin;
+  uint32_t firstVoxel = 0;
+  Vec3 centerMax;
+  uint32_t voxelCount = 0;
+};
+static_assert(sizeof(FarTemplateInfo) == 32);
+
+// Must match the push constants in farfield_splat.comp.
+struct FarSplatConstants {
+  VkDeviceAddress placed = 0;
+  VkDeviceAddress templates = 0;
+  VkDeviceAddress templateVoxels = 0;
+  VkDeviceAddress columns = 0;
+  VkDeviceAddress accumulators = 0;
+  VkDeviceAddress voxels = 0;
+  VkDeviceAddress palette = 0;
+  VkDeviceAddress cellData = 0;
+  float originX = 0.0f;
+  float originZ = 0.0f;
+  float heightBase = 0.0f;
+  float fixedScale = 0.0f;
+  uint32_t cellsX = 0;
+  uint32_t cellsZ = 0;
+  uint32_t level = 0;
+  uint32_t count = 0;
+  uint32_t paletteSize = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarSplatConstants) == 104);
+
+// The prototype bake: rays per axis and voxel face, and mesh slots per
+// prototype (its meshes; more share the last slot's hit counts).
+constexpr uint32_t kFarBakeRays = 8;
+constexpr uint32_t kFarBakeSlots = 8;
+static_assert(3 * kFarBakeRays * kFarBakeRays < 256, "slot hits are 8-bit");
+
+// Must match the push constants in farfield_bake.comp.
+struct FarBakeConstants {
+  VkDeviceAddress tlas = 0;
+  VkDeviceAddress vertices = 0;
+  VkDeviceAddress indices = 0;
+  VkDeviceAddress meshes = 0;
+  VkDeviceAddress materials = 0;
+  VkDeviceAddress prototypeMeshes = 0;
+  VkDeviceAddress bake = 0;
+  uint32_t firstMesh = 0;
+  uint32_t meshCount = 0;
+  float origin[3] = {};
+  uint32_t raysPerAxis = 0;
+  uint32_t size[3] = {};
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarBakeConstants) == 96);
+static_assert(offsetof(FarBakeConstants, origin) == 64);
+static_assert(offsetof(FarBakeConstants, size) == 80);
+
+// Must match BakeVoxel in farfield_bake.comp.
+struct FarBakeVoxel {
+  uint32_t passes;
+  uint32_t hits;
+  uint32_t slotHits[2];
+  float normal[4];
+  float slotColor[kFarBakeSlots][4];
+};
+static_assert(sizeof(FarBakeVoxel) == 160);
 
 // Must match the push constants in scan.comp.
 struct ScanConstants {

@@ -1,0 +1,143 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "material.glsl"
+
+// The far-field prototype bake (renderer_farfield.cpp), one thread per 1 m
+// template voxel: raysPerAxis^2 rays along each axis through the voxel,
+// against the prototype's full-detail BLAS (alpha test included, like the
+// shadow rays), count the rays that pass and, per hit, its mesh slot,
+// shading normal and base color.
+
+layout(local_size_x = 64) in;
+
+const uint kBakeSlots = 8u;
+
+// Must match FarBakeVoxel in gpu_types.h.
+struct BakeVoxel {
+    uint passes;
+    uint hits;
+    // Hits per slot (the prototype's mesh), 8 bits each.
+    uint slotHits[2];
+    vec4 normal; // sum over hits
+    vec4 slotColor[kBakeSlots]; // base color sums per slot
+};
+
+layout(buffer_reference, std430) writeonly buffer BakeVoxelBuffer {
+    BakeVoxel voxels[];
+};
+
+// Must match FarBakeConstants in gpu_types.h.
+layout(push_constant) uniform FarBakeConstants {
+    uvec2 tlas;
+    VertexBuffer vertices;
+    IndexBuffer indices;
+    MeshBuffer meshes;
+    MaterialBuffer materials;
+    PrototypeMeshBuffer prototypeMeshes;
+    BakeVoxelBuffer bake;
+    uint firstMesh;
+    uint meshCount;
+    // Voxel (0, 0, 0)'s min corner in the bake TLAS.
+    vec3 origin;
+    uint raysPerAxis;
+    uvec3 size;
+} pc;
+
+struct Hit {
+    MeshInfo mesh;
+    Vertex v0, v1, v2;
+    vec3 weights;
+};
+
+Hit loadHit(uint geometry, uint primitive, vec2 barycentrics) {
+    Hit hit;
+    hit.mesh = pc.meshes.meshes[pc.prototypeMeshes.meshes[pc.firstMesh + geometry]];
+    uint first = hit.mesh.firstIndex + primitive * 3u;
+    hit.v0 = pc.vertices.vertices[pc.indices.indices[first] + hit.mesh.vertexOffset];
+    hit.v1 = pc.vertices.vertices[pc.indices.indices[first + 1u] + hit.mesh.vertexOffset];
+    hit.v2 = pc.vertices.vertices[pc.indices.indices[first + 2u] + hit.mesh.vertexOffset];
+    hit.weights = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics);
+    return hit;
+}
+
+vec2 hitUv(Hit hit) {
+    return hit.weights.x * vec2(hit.v0.uvX, hit.v0.uvY) +
+           hit.weights.y * vec2(hit.v1.uvX, hit.v1.uvY) +
+           hit.weights.z * vec2(hit.v2.uvX, hit.v2.uvY);
+}
+
+vec4 baseColor(Hit hit) {
+    Material m = pc.materials.materials[hit.mesh.materialIndex];
+    vec4 color = m.baseColorFactor;
+    if (m.baseColorTexture != kNoTexture) {
+        color *= textureLod(textures[nonuniformEXT(m.baseColorTexture)], hitUv(hit), 0.0);
+    }
+    return color;
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    uint voxelCount = pc.size.x * pc.size.y * pc.size.z;
+    if (index >= voxelCount) {
+        return;
+    }
+    uvec3 cell = uvec3(index % pc.size.x, (index / pc.size.x) % pc.size.y,
+                       index / (pc.size.x * pc.size.y));
+    vec3 corner = pc.origin + vec3(cell);
+
+    BakeVoxel voxel;
+    voxel.passes = 0u;
+    voxel.hits = 0u;
+    voxel.slotHits = uint[2](0u, 0u);
+    voxel.normal = vec4(0.0);
+    for (uint slot = 0u; slot < kBakeSlots; ++slot) {
+        voxel.slotColor[slot] = vec4(0.0);
+    }
+    float step = 1.0 / float(pc.raysPerAxis);
+    for (uint axis = 0u; axis < 3u; ++axis) {
+        vec3 direction = vec3(axis == 0u, axis == 1u, axis == 2u);
+        vec3 u = direction.yzx, w = direction.zxy;
+        for (uint a = 0u; a < pc.raysPerAxis; ++a) {
+            for (uint b = 0u; b < pc.raysPerAxis; ++b) {
+                vec3 origin = corner + u * ((float(a) + 0.5) * step) +
+                              w * ((float(b) + 0.5) * step);
+                rayQueryEXT query;
+                rayQueryInitializeEXT(query, accelerationStructureEXT(pc.tlas),
+                                      gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, origin, 0.0,
+                                      direction, 1.0);
+                while (rayQueryProceedEXT(query)) {
+                    if (rayQueryGetIntersectionTypeEXT(query, false) ==
+                        gl_RayQueryCandidateIntersectionTriangleEXT) {
+                        Hit candidate = loadHit(
+                            rayQueryGetIntersectionGeometryIndexEXT(query, false),
+                            rayQueryGetIntersectionPrimitiveIndexEXT(query, false),
+                            rayQueryGetIntersectionBarycentricsEXT(query, false));
+                        Material m = pc.materials.materials[candidate.mesh.materialIndex];
+                        if (baseColor(candidate).a >= m.alphaCutoff) {
+                            rayQueryConfirmIntersectionEXT(query);
+                        }
+                    }
+                }
+                if (rayQueryGetIntersectionTypeEXT(query, true) ==
+                    gl_RayQueryCommittedIntersectionNoneEXT) {
+                    ++voxel.passes;
+                    continue;
+                }
+                uint geometry = rayQueryGetIntersectionGeometryIndexEXT(query, true);
+                Hit hit = loadHit(geometry, rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
+                                  rayQueryGetIntersectionBarycentricsEXT(query, true));
+                vec3 normal = hit.weights.x * hit.v0.normal + hit.weights.y * hit.v1.normal +
+                              hit.weights.z * hit.v2.normal;
+                uint slot = min(geometry, kBakeSlots - 1u);
+                ++voxel.hits;
+                voxel.slotHits[slot / 4u] += 1u << (8u * (slot % 4u));
+                voxel.normal.xyz += normalize(normal);
+                voxel.slotColor[slot].rgb += baseColor(hit).rgb;
+            }
+        }
+    }
+    pc.bake.voxels[index] = voxel;
+}

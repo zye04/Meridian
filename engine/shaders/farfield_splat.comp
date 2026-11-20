@@ -1,0 +1,221 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "farfield.glsl"
+
+// The far-field splat at load, one level at a time (renderer_farfield.cpp),
+// in three variants that mirror splatFarField in farfield.cpp operation for
+// operation (precise: no fused multiply-adds the CPU doesn't do):
+// FARFIELD_OCCUPANCY (one thread per placed instance, 2D dispatch): each column an
+//   instance's template can reach takes the min of the instances' low
+//   heights and the min of their inverted high heights, so one fill to
+//   0xFFFFFFFF initializes both. Level 0 also takes each cell's tallest
+//   tree (float bits, positive).
+// FARFIELD_ACCUMULATE (one workgroup per placed instance): every template
+//   voxel goes trilinearly into the 8 nearest voxels of the allocated
+//   bricks, as fixed-point sums (order-independent).
+// FARFIELD_PACK (one thread per voxel): the sums to a packed voxel.
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430) buffer UintBuffer {
+    uint values[];
+};
+
+// Must match FarSplatConstants in gpu_types.h.
+layout(push_constant) uniform FarSplatConstants {
+    PlacedInstanceBuffer placed;
+    FarTemplateBuffer templates; // prototype * kFarLevels + level
+    FarTemplateVoxelBuffer templateVoxels;
+    // Occupancy: (lo, ~hi) per column; accumulate: the BrickColumns.
+    BrickColumnBuffer columns;
+    UintBuffer accumulators; // kFarChannels per voxel
+    FarVoxelBuffer voxels;
+    FarPaletteBuffer palette;
+    // Per cell: the tallest tree's height (float bits); then the deposits
+    // that missed their column (must stay 0).
+    UintBuffer cellData;
+    float originX;
+    float originZ;
+    float heightBase;
+    float fixedScale;
+    uint cellsX;
+    uint cellsZ;
+    uint level;
+    // Placed instances (occupancy, accumulate) or voxels (pack).
+    uint count;
+    uint paletteSize;
+} pc;
+
+vec3 rotated(vec4 q, vec3 v) {
+    precise vec3 inner = cross(q.xyz, v) + q.w * v;
+    precise vec3 result = v + 2.0 * cross(q.xyz, inner);
+    return result;
+}
+
+int fixedPoint(float value) {
+    precise float rounded = floor(value + 0.5);
+    return int(rounded);
+}
+
+#ifdef FARFIELD_OCCUPANCY
+void main() {
+    uint index = gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u) + gl_GlobalInvocationID.x;
+    if (index >= pc.count) {
+        return;
+    }
+    PlacedInstance instance = pc.placed.placed[index];
+    FarTemplateInfo info = pc.templates.infos[instance.prototype * kFarLevels + pc.level];
+    if (info.voxelCount == 0u) {
+        return;
+    }
+    vec4 q = placedRotation(instance);
+    float s = placedScale(instance);
+    vec3 position = vec3(instance.positionX, instance.positionY, instance.positionZ);
+    float v = farVoxelSize(pc.level);
+    float inverseV = 1.0 / v;
+    const float kPad = 0.01;
+    precise vec3 lo = vec3(1e30), hi = vec3(-1e30);
+    for (uint corner = 0u; corner < 8u; ++corner) {
+        vec3 c = vec3((corner & 1u) != 0u ? info.centerMax.x : info.centerMin.x,
+                      (corner & 2u) != 0u ? info.centerMax.y : info.centerMin.y,
+                      (corner & 4u) != 0u ? info.centerMax.z : info.centerMin.z);
+        precise vec3 p = rotated(q, c * s) + position;
+        lo = min(lo, p);
+        hi = max(hi, p);
+    }
+    precise float x0 = floor((lo.x - kPad - pc.originX) * inverseV - 0.5);
+    precise float z0 = floor((lo.z - kPad - pc.originZ) * inverseV - 0.5);
+    precise float x1 = floor((hi.x + kPad - pc.originX) * inverseV - 0.5);
+    precise float z1 = floor((hi.z + kPad - pc.originZ) * inverseV - 0.5);
+    precise float bottom = floor((lo.y - 0.5 * v - pc.heightBase) * (1.0 / kFarHeightUnit));
+    precise float top = ceil((hi.y + 0.5 * v - pc.heightBase) * (1.0 / kFarHeightUnit));
+    uint low = uint(max(bottom, 0.0));
+    uint high = uint(max(top, 0.0));
+    // Voxel indices to columns (4 voxels wide), floored.
+    ivec2 first = ivec2(x0, z0) >> 2;
+    ivec2 last = (ivec2(x1, z1) + 1) >> 2;
+    ivec2 columns = ivec2(pc.cellsX, pc.cellsZ) * int(farColumnsPerCell(pc.level));
+    for (int z = max(first.y, 0); z <= min(last.y, columns.y - 1); ++z) {
+        for (int x = max(first.x, 0); x <= min(last.x, columns.x - 1); ++x) {
+            uint column = farColumnIndex(pc.cellsX, pc.level, uint(x), uint(z));
+            atomicMin(pc.columns.columns[column].x, low);
+            atomicMin(pc.columns.columns[column].y, ~high);
+        }
+    }
+    if (pc.level == 0u) {
+        ivec2 cell = ivec2(floor((position.xz - vec2(pc.originX, pc.originZ)) / kCellSize));
+        cell = clamp(cell, ivec2(0), ivec2(pc.cellsX, pc.cellsZ) - 1);
+        float height = s * (info.centerMax.y + 0.5 * v);
+        atomicMax(pc.cellData.values[uint(cell.y) * pc.cellsX + uint(cell.x)],
+                  floatBitsToUint(max(height, 0.0)));
+    }
+}
+#endif
+
+#ifdef FARFIELD_ACCUMULATE
+void main() {
+    uint index = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    if (index >= pc.count) {
+        return;
+    }
+    PlacedInstance instance = pc.placed.placed[index];
+    FarTemplateInfo info = pc.templates.infos[instance.prototype * kFarLevels + pc.level];
+    vec4 q = placedRotation(instance);
+    float s = placedScale(instance);
+    vec3 position = vec3(instance.positionX, instance.positionY, instance.positionZ);
+    float v = farVoxelSize(pc.level);
+    float inverseV = 1.0 / v;
+    ivec2 voxelsXZ = ivec2(pc.cellsX, pc.cellsZ) * int(farColumnsPerCell(pc.level) * kBrickEdge);
+    for (uint t = gl_LocalInvocationID.x; t < info.voxelCount; t += 64u) {
+        FarTemplateVoxel tv = pc.templateVoxels.voxels[info.firstVoxel + t];
+        precise vec3 p = rotated(q, tv.center * s) + position;
+        precise float value = tv.extinction * (s * s * s);
+        vec3 normal = rotated(q, tv.normal);
+        vec3 albedo = pc.palette.albedo[tv.albedo].rgb;
+        precise float fx = (p.x - pc.originX) * inverseV - 0.5;
+        precise float fz = (p.z - pc.originZ) * inverseV - 0.5;
+        precise float ix = floor(fx);
+        precise float iz = floor(fz);
+        precise float wx = fx - ix;
+        precise float wz = fz - iz;
+        for (int dz = 0; dz < 2; ++dz) {
+            for (int dx = 0; dx < 2; ++dx) {
+                precise float wh = (dx != 0 ? wx : 1.0 - wx) * (dz != 0 ? wz : 1.0 - wz);
+                int i = int(ix) + dx;
+                int j = int(iz) + dz;
+                if (wh <= 0.0 || i < 0 || j < 0 || i >= voxelsXZ.x || j >= voxelsXZ.y) {
+                    continue;
+                }
+                uvec2 column = pc.columns.columns[farColumnIndex(pc.cellsX, pc.level,
+                                                                 uint(i) / 4u, uint(j) / 4u)];
+                precise float base = pc.heightBase + float(columnBaseHeight(column)) *
+                                                         kFarHeightUnit;
+                precise float fy = (p.y - base) * inverseV - 0.5;
+                precise float ky = floor(fy);
+                precise float wy = fy - ky;
+                for (int dy = 0; dy < 2; ++dy) {
+                    precise float m = value * (wh * (dy != 0 ? wy : 1.0 - wy));
+                    int quantized = fixedPoint(m * pc.fixedScale);
+                    int k = int(ky) + dy;
+                    if (quantized <= 0) {
+                        continue;
+                    }
+                    if (k < 0 || k >= int(columnBrickCount(column) * kBrickEdge)) {
+                        atomicAdd(pc.cellData.values[pc.cellsX * pc.cellsZ], 1u);
+                        continue;
+                    }
+                    uint brick = column.x + uint(k) / 4u;
+                    uint a = (brick * kBrickVoxels + brickVoxelIndex(uint(i), uint(k), uint(j))) *
+                             kFarChannels;
+                    atomicAdd(pc.accumulators.values[a], uint(quantized));
+                    atomicAdd(pc.accumulators.values[a + 1u],
+                              uint(fixedPoint(m * normal.x * pc.fixedScale)));
+                    atomicAdd(pc.accumulators.values[a + 2u],
+                              uint(fixedPoint(m * normal.y * pc.fixedScale)));
+                    atomicAdd(pc.accumulators.values[a + 3u],
+                              uint(fixedPoint(m * normal.z * pc.fixedScale)));
+                    atomicAdd(pc.accumulators.values[a + 4u],
+                              uint(fixedPoint(m * albedo.r * pc.fixedScale)));
+                    atomicAdd(pc.accumulators.values[a + 5u],
+                              uint(fixedPoint(m * albedo.g * pc.fixedScale)));
+                    atomicAdd(pc.accumulators.values[a + 6u],
+                              uint(fixedPoint(m * albedo.b * pc.fixedScale)));
+                }
+            }
+        }
+    }
+}
+#endif
+
+#ifdef FARFIELD_PACK
+void main() {
+    uint index = gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u) + gl_GlobalInvocationID.x;
+    if (index >= pc.count) {
+        return;
+    }
+    uint a = index * kFarChannels;
+    uint extinction = pc.accumulators.values[a];
+    if (extinction == 0u) {
+        pc.voxels.voxels[index] = 0u;
+        return;
+    }
+    float e = float(extinction);
+    vec3 normal = vec3(int(pc.accumulators.values[a + 1u]), int(pc.accumulators.values[a + 2u]),
+                       int(pc.accumulators.values[a + 3u]));
+    normal = length(normal) > 0.0 ? normalize(normal) : vec3(0.0, 1.0, 0.0);
+    vec3 albedo = vec3(pc.accumulators.values[a + 4u], pc.accumulators.values[a + 5u],
+                       pc.accumulators.values[a + 6u]) / e;
+    uint best = 0u;
+    float bestDistance = 1e30;
+    for (uint entry = 0u; entry < pc.paletteSize; ++entry) {
+        vec3 d = pc.palette.albedo[entry].rgb - albedo;
+        if (dot(d, d) < bestDistance) {
+            bestDistance = dot(d, d);
+            best = entry;
+        }
+    }
+    pc.voxels.voxels[index] = packVoxel(e / pc.fixedScale, normal, best);
+}
+#endif

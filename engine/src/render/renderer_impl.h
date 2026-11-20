@@ -196,6 +196,16 @@ struct Renderer::Impl {
   std::vector<AccelerationStructure> prototypeBlas;
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
+  // Far field (renderer_farfield.cpp): per level the brick columns and
+  // voxel pools, FarCell per cell, the canopy top pyramid, the albedo
+  // palette and the GpuFarField pointing at them; empty unless placement
+  // has far-field layers.
+  std::array<Buffer, kFarLevels> farColumns;
+  std::array<Buffer, kFarLevels> farVoxels;
+  Buffer farCells;
+  Buffer farPyramid;
+  Buffer farPalette;
+  Buffer farFieldInfo;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -317,6 +327,12 @@ struct Renderer::Impl {
   void buildPlacedTlas(std::span<const Prototype> prototypes,
                        std::span<const PlacementLayer> layers,
                        const std::vector<std::array<float, 4>> &bounds);
+  // The far field of the current placement: prototype bake, then the
+  // splat over the placed table (offsets: setPlacement's per (cell, layer)).
+  void buildFarField(std::span<const Prototype> prototypes,
+                     std::span<const PlacementLayer> layers,
+                     const std::vector<uint32_t> &offsets);
+  void destroyFarField();
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
   void resetDrawCounters(VkCommandBuffer cmd);
   CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;
@@ -331,6 +347,15 @@ struct Renderer::Impl {
 
   template <typename Record> void submitNow(Record &&record);
 };
+
+// FNV-1a over bytes, for the Debug hashes of load-time GPU tables.
+inline uint64_t fnv1a(uint64_t hash, const void *data, size_t bytes) {
+  const auto *p = static_cast<const uint8_t *>(data);
+  for (size_t i = 0; i < bytes; ++i) {
+    hash = (hash ^ p[i]) * 0x100000001b3ull;
+  }
+  return hash;
+}
 
 // Records commands with `record`, submits them and waits until the GPU is
 // done. Only for loading, never per frame.

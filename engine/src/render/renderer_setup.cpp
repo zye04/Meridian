@@ -1050,6 +1050,7 @@ Renderer::~Renderer() {
   for (AccelerationStructure &blas : impl_->prototypeBlas) {
     impl_->destroyAccelerationStructure(blas);
   }
+  impl_->destroyFarField();
   for (Buffer *buffer :
        {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
         &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,

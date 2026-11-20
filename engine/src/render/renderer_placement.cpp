@@ -8,6 +8,7 @@
 
 #include <meridian/placement.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -37,14 +38,6 @@ std::array<float, 4> prototypeSphere(const Prototype &prototype,
     radius = std::max(radius, length(mesh.boundsCenter - center) + mesh.boundsRadius);
   }
   return {center.x, center.y, center.z, radius};
-}
-
-uint64_t fnv1a(uint64_t hash, const void *data, size_t bytes) {
-  const auto *p = static_cast<const uint8_t *>(data);
-  for (size_t i = 0; i < bytes; ++i) {
-    hash = (hash ^ p[i]) * 0x100000001b3ull;
-  }
-  return hash;
 }
 
 // Debug: whole (cell, layer) runs of the GPU table against evaluatePoint
@@ -180,6 +173,20 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     gpu.sinkDepth = layer.sinkDepth;
     gpu.fullRotation = layer.rotation == Rotation::Full ? 1 : 0;
     gpuLayers.push_back(gpu);
+  }
+  // Far-field layers first (FarCell::treeCount counts the start of each
+  // cell's run), and their prototypes in no other layer.
+  std::vector<uint8_t> farUse(prototypes.size(), 0);
+  for (uint32_t l = 0; l < layerCount; ++l) {
+    if (layers[l].farField && l > 0 && !layers[l - 1].farField) {
+      throw std::runtime_error("far-field placement layers must come first");
+    }
+    for (const auto &[prototype, weight] : layers[l].prototypes) {
+      farUse[prototype] |= layers[l].farField ? 1 : 2;
+    }
+  }
+  if (std::find(farUse.begin(), farUse.end(), 3) != farUse.end()) {
+    throw std::runtime_error("a far-field prototype is also in another placement layer");
   }
   std::vector<std::array<float, 4>> bounds;
   for (const Prototype &prototype : prototypes) {
@@ -374,6 +381,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     r.destroyBuffer(readback);
   }
 
+  r.buildFarField(prototypes, layers, offsets);
 }
 
 // Each prototype's BLAS and PrototypeInfo, the cells' reach and draw
