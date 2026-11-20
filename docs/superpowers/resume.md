@@ -67,21 +67,19 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   "Cloud shadow fallback refit", "Clouds and weather measured"). Worktrees
   `../meridian-clouds*` can be removed; ledger and artifacts in
   `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`.
-- **M3 meadow** (PAUSED at 15:01). Branches `meadow` (worktree
-  `../meridian-meadow`: step 1 7c248e0 terrain_roles.glsl + wind clock,
-  also cherry-picked as 68ab406 in `../meridian-meadow-merge`, unpushed;
-  grass WIP eef148d: mesh-shader blades wired, draws nothing yet) and
-  `meadow-accents` (`../meridian-meadow-accents`, 1912f50: flower/clump
-  placement layers 4-10; clover renders black, flowers too sparse,
-  ~1.59M instances vs 1.5M budget). Resume order and details:
-  `../meridian-meadow/.superpowers/sdd/meadow/next.md`, `grass-next.md`,
-  and the accents `next.md`. Put the grass debugging on Opus. This is the
-  biggest visible gap: the ground reads as a flat lawn.
-  Overlap with G2: M3 step 1 moves the terrain role weights into
-  `terrain_roles.glsl`, and G2 rewrites those weights (warped multi-scale
-  noise). Resume M3 now on the grass shaders and accent tuning (no shared
-  files); rebase step 1 onto G2's weights after G2 merges, and only then
-  merge M3.
+- **M3 meadow** (core MERGED 2026-11-20 ~17:00, branch `meadow-stream`,
+  worktree `../meridian-meadow-stream`). Streamed placement (plan
+  `docs/superpowers/plans/2026-11-20-streamed-placement.md`, decisions.md
+  "Streamed placement"): grass clumps, hawkbit and clover streamed around
+  the camera, poppies/goldenrod/ferns static. The procedural blade grass
+  was dropped (user: "horrendous"); branches `meadow` (step 1 only, not
+  merged) and `meadow-accents` (superseded) are obsolete. Next, in
+  order: density pass (user: VERY dense, no ground showing at eye height,
+  full density far out, thick yellow flowers; side-by-side capture vs
+  `flower-meadow-cumulus.png` and `meadow-cliff-forested-hills.png`
+  before merging; tuning start in the worktree's
+  `.superpowers/density-tune.patch`), then plan task 4 (TLAS for streamed
+  instances: measure, recommend).
 - **Queue after those** (in order, each when the user says go):
   1. Terrain detail: near-camera displacement from the material height
      maps (tessellated near nodes) + erosion-style procedural detail;

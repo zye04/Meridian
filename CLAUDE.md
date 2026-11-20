@@ -169,7 +169,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -233,16 +233,20 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 so without the Megaplants trees the same seed places different content
 and these views differ.
 The game places rocks over the whole Napf at load (`placeScenery` in
-main.cpp; 21281 instances), plus forests and lone trees with `--trees`
+main.cpp; 21281 instances), poppies, goldenrod and ferns (~500k
+together), streamed meadow layers around the camera (grass clumps,
+hawkbit, clover: ring ~875k slots, ~220k live), plus forests and lone trees with `--trees`
 (~2.65M instances), which loads the rocks (and with `--trees` the
 Megaplants trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
 textures, ~8.7 s of it); use it for captures that
 don't need placement. Debug runs print `placement check:` (GPU table vs
-the CPU reference, must be 0 mismatches) and `placement hash 0x...`
-(0x7e391ac57b8792dd for seed 1 without trees, 0x8322bae25df9e142 with
-`--trees`, every asset present). Loading
+the CPU reference, must be 0 mismatches), `stream check:` (every
+regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
+`placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
+trees, every asset present). Capture runs print `streamed: L layers,
+window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin).
 
@@ -333,13 +337,16 @@ engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            weather.cpp, window.cpp
 engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain.glsl (heightfield sampling + mirror,
-                           quadtree, morph, detail noise),
+                           quadtree, morph), terrain_detail.glsl (near
+                           detail noise, also lifts streamed instances),
                            terrain_select.comp, terrain.mesh, terrain.frag
                            (mesh.frag with TERRAIN), terrain_normals.comp.
                            placement.glsl: integer keep/reject twin of
                            placement.cpp; placement.comp
                            (PLACEMENT_COUNT / PLACEMENT_WRITE variants)
                            and scan.comp (exclusive scan) run at load;
+                           PLACEMENT_STREAM regenerates streamed slots
+                           per frame;
                            tlas_fill.comp writes the placed TLAS records.
                            contact_shadows.comp: screen-space sun
                            shadows after the late scene pass.
@@ -384,7 +391,10 @@ DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the
 camera is within the next finer level's range, else emit to the terrain
-draw list) -> cull cells (cell_cull.comp phase 0: placement cells visible
+draw list) -> stream (only with a streamed layer: placement_stream.comp
+regenerates the ring slots whose cell left the window around the camera,
+one workgroup per (slot, streamed layer)) -> cull cells (cell_cull.comp
+phase 0: placement cells and streamed slot records visible
 last frame, frustum (displayed box) and the layers' draw distance; emits
 chunks of up to 64 consecutive instance ids; the hand-placed instances
 are chunks too) -> early cull (cull.comp, one workgroup per chunk, phase
@@ -533,8 +543,17 @@ barriers account for that.
   its meshes, bounds, BLAS); shaders read instances only through
   `loadInstance` (common.glsl), and a ray hit's mesh through
   `instanceMesh` (the hit's geometry index picks a prototype's mesh).
-  The visibility buffer holds one uint per instance id, then one per
-  cell. `SceneData` carries the placed table, the `Cell` table
+  Streamed layers (`PlacementLayer::streamFullDensity > 0`) live in a
+  ring after the static table: per (window slot, streamed layer) a fixed
+  run of pattern-size slots plus a `Cell` record after the grid's; the
+  window is W x W 64 m cells around the camera (`streamWindowCells`),
+  regenerated by the same integer rules when a cell enters it. For
+  streamed ids `loadInstance` thins by distance (dither threshold vs
+  `streamKeepFraction`), shrinks before culling (`streamFade`) and lifts
+  them onto the near detail noise; they are not in the TLAS (no
+  ray-traced shadows cast, contact shadows only).
+  The visibility buffer holds one uint per instance id (static, then
+  ring), then one per grid cell, then one per streamed record. `SceneData` carries the placed table, the `Cell` table
   (64 m cells, row-major from the north-west of `cellGrid`) and the grid. Opaque/masked
   meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
   and cluster-triangle pools; draw list entries are (instance, cluster));
