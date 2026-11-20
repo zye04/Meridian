@@ -2,14 +2,18 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "atmosphere.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
 
-// Integrates the sky-view LUT over the upper hemisphere (cosine-weighted) to
-// get the sky's irradiance on an upward-facing surface, used for ambient
-// light. 256 directions, one per thread.
+// Integrates the sky over the upper hemisphere (cosine-weighted) to get its
+// irradiance on an upward-facing surface: the sky-view LUT with the sky
+// capture's clouds over it (ambient light for the scene), and the LUT alone
+// (the clear sky lighting the clouds). 256 directions, one per thread.
 
 layout(local_size_x = 256) in;
 
 shared vec3 partial[256];
+shared vec3 partialClear[256];
 
 void main() {
     uint index = gl_LocalInvocationIndex;
@@ -37,15 +41,20 @@ void main() {
     vec2 uv = skyViewLutUv(intersectsGround, dot(direction, up), lightOnPlane.x, viewHeight);
 
     // Cosine-weighted samples: irradiance = pi * mean(luminance).
-    partial[index] = textureLod(skyViewLut, uv, 0.0).rgb;
+    vec3 sky = textureLod(skyViewLut, uv, 0.0).rgb;
+    vec4 clouds = skyCaptureAt(direction);
+    partial[index] = sky * clouds.a + clouds.rgb;
+    partialClear[index] = sky;
     barrier();
     for (uint stride = 128u; stride > 0u; stride >>= 1u) {
         if (index < stride) {
             partial[index] += partial[index + stride];
+            partialClear[index] += partialClear[index + stride];
         }
         barrier();
     }
     if (index == 0u) {
         pc.scene.skyIrradiance.irradiance = kPi * partial[0] / 256.0;
+        pc.scene.skyIrradiance.clearIrradiance = kPi * partialClear[0] / 256.0;
     }
 }

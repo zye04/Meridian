@@ -488,9 +488,11 @@ void Renderer::Impl::createAtmosphere() {
                            VK_IMAGE_ASPECT_COLOR_BIT);
   aerialPerspectiveLut = createImage(kLutFormat, {32, 32, 32}, kLutUsage,
                                      VK_IMAGE_ASPECT_COLOR_BIT);
+  // Zeroed: the sky capture reads last frame's clear irradiance.
   skyIrradianceBuffer = createBuffer(
-      16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      sizeof(SkyIrradiance), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+              VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
       0);
 
   const Image *luts[] = {&transmittanceLut, &multiScatteringLut, &skyViewLut,
@@ -503,6 +505,9 @@ void Renderer::Impl::createAtmosphere() {
                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
     }
+    vkCmdFillBuffer(cmd, skyIrradianceBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
   });
 
   VkDescriptorImageInfo images[8]{};
@@ -563,7 +568,7 @@ void Renderer::Impl::createGrade() {
 void Renderer::Impl::createExposureBuffers() {
   constexpr VkBufferUsageFlags kUsage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   histogramBuffer =
       createBuffer(kHistogramBins * sizeof(uint32_t), kUsage, 0);
   exposureBuffer = createBuffer(sizeof(ExposureState), kUsage, 0);

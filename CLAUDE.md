@@ -91,9 +91,15 @@ Weather: `--weather clear|fair|broken|overcast` (default `fair`),
 `--time-scale X` (game seconds per real second), `--weather-front
 SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
-with the wind). Capture runs print the weather at the camera (coverage,
+with the wind). Capture runs print the exposure (EV100) and the sky
+irradiance with clouds and clear (x sun), and the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
-`--clouds off` skips the cloud march, composite and cloud shadows (A/B).
+`--clouds off` skips the cloud march, composite, cloud shadows and sky
+capture (A/B). Ambient light (diffuse irradiance, the specular sky
+fallback) includes the clouds through the sky capture, taken at the
+camera. Front time-lapse: `--weather fair --weather-front 600
+--time-scale 600 --capture-sequence 20 --frames 1200` from the ground or
+above-layer view (the overcast deck reaches the camera after ~800 frames).
 Surfaces (mesh.frag, terrain too) multiply the sun by `cloudShadow` at
 their flat world position: the shadow map within ~13.8 km of the camera
 (horizontally and across the sun), blended over 1.5 km into the
@@ -115,7 +121,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, weather, atmosphere, scene early, pyramid, cull late, scene late, clouds, taa, exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, pyramid, cull late, scene late, clouds, taa, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -232,9 +238,10 @@ engine/src/render/         renderer internals:
                            draw()
   renderer_clouds.cpp      cloud noise volumes (at load), weather map
                            window and pass, cloud shadow map placement
-                           and pass, dumpWeatherMap, cloud march
-                           targets and histories (quarter/half res) and
-                           the cloud pass (march, resolve, composite)
+                           and pass, sky capture pass, dumpWeatherMap,
+                           printAmbient, cloud march targets and
+                           histories (quarter/half res) and the cloud
+                           pass (march, resolve, composite)
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -257,7 +264,10 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            weather.glsl (weatherAt: history lookup),
                            clouds.glsl (tileable noise, weatherMapAt +
                            analytic fallback, layer profiles,
-                           cloudDensity, cloudShadow), cloud_noise.comp,
+                           cloudDensity, cloudShadow, skyCaptureAt),
+                           clouds_march.glsl (layer span + lit march,
+                           shared by clouds_march.comp and
+                           sky_capture.comp), cloud_noise.comp,
                            weather_map.comp, cloud_shadow.comp,
                            cloud_shadow_blur.comp, clouds_march.comp,
                            clouds_resolve.comp, clouds_composite.comp,
@@ -298,15 +308,20 @@ clusters) -> cull clusters (cluster_cull.comp, dispatched indirectly:
 Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
-single/double-sided) -> weather (weather_map.comp: 512^2 over 60 km
-around the camera, texel-snapped; then the cloud shadow map,
-cloud_shadow.comp: a Beer shadow map, 1024^2 over 30 km across the sun,
-orthographic along it, texel-snapped in its frame, 32 steps per texel
-across the layer, only for lines that reach a receiver within ~15 km of
-the camera, and cloud_shadow_blur.comp, a bilateral 5x5 of its
-extinction and optical depth) -> atmosphere LUTs
+single/double-sided) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
-sky-view, aerial perspective, sky irradiance every frame) -> early scene
+sky-view, aerial perspective every frame) -> weather (weather_map.comp:
+512^2 over 60 km around the camera, texel-snapped; then the cloud shadow
+map, cloud_shadow.comp: a Beer shadow map, 1024^2 over 30 km across the
+sun, orthographic along it, texel-snapped in its frame, 32 steps per
+texel across the layer, only for lines that reach a receiver within ~15
+km of the camera, and cloud_shadow_blur.comp, a bilateral 5x5 of its
+extinction and optical depth; then sky_capture.comp: a coarse cloud march
+from the camera into a 64^2 octahedral map (cloud luminance + haze,
+transmittance; one texel of every 2x2 block per frame, all when the
+history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
+clouds over it integrated into the scene's ambient irradiance, and the
+LUT alone into the clear-sky irradiance that lights the clouds) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + D32 depth
 (sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then

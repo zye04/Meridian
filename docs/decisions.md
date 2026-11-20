@@ -160,8 +160,8 @@ sources. Check here before re-researching a topic.
 
 - **Filament's BRDF**: GGX, height-correlated Smith, Schlick, Lambert, with
   multiple-scattering energy compensation from a DFG LUT (Filament
-  `DFV_Multiscatter`). Specular ambient comes from the sky-view LUT until RT
-  reflections exist.
+  `DFV_Multiscatter`). Specular ambient comes from the sky-view LUT with
+  the sky capture's clouds over it until RT reflections exist.
 - **Material AO on ambient light (2026-11-20)**, on every surface (glTF
   materials and terrain layers):
   - **Diffuse:** AO goes through the multi-bounce fit of Jimenez et al.
@@ -1442,7 +1442,7 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   layer); dual-lobe Henyey-Greenstein (0.8 and -0.5, 30% backward);
   Wrenninge octaves, 3, extinction x0.25, contribution x0.7, eccentricity
   x0.5 (a <= b keeps it energy-conserving; b = 0.5 left sunlit tops
-  grey); ambient = sky irradiance / 2 pi (isotropic in-scattering from
+  grey); ambient = clear-sky irradiance / 2 pi (isotropic in-scattering from
   a uniform upper hemisphere) times a 0.35-to-1 bottom-to-top gradient;
   Frostbite's energy-conserving integration per step. Mean depth
   weights each step by its opacity contribution; 0 = no cloud.
@@ -1689,3 +1689,55 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   not marched). Over the ~1 ms budget; levers, not applied: amortize the
   map (a quarter of the texels per frame), fewer steps (16), or a
   cheaper analytic weather lookup.
+
+## Sky capture and ambient (M4 clouds, 2026-11-20)
+
+- **Capture (spec: "Sky + cloud capture and ambient"):**
+  `sky_capture.comp` marches the clouds from the camera into an RGBA16F
+  octahedral map of the whole sphere, 64^2 (~2.8 degree texels; full
+  sphere so downward reflections and a camera above the layer see the
+  clouds below), in pass `weather` after the cloud shadow map. It stores
+  only the clouds: in-scattered luminance with the haze in front (rgb,
+  sun illuminance 1) and transmittance (a). Readers composite `sky x a +
+  rgb` with the full-resolution sky-view LUT (`skyCaptureAt`,
+  clouds.glsl), so a clear sky reads exactly the LUT (MAE 0 against the
+  sky-view LUT alone) and keeps its horizon resolution. Coarse march: the
+  view march's code (clouds_march.glsl), steps from 250 m growing 3% of
+  the distance, at most 32, one fixed jitter per texel (no flicker, no
+  history). Time-sliced like UE's real-time sky light capture: one texel
+  of every 2x2 block per frame (all when the history resets: first
+  frame, swapchain rebuild), so it lags at most 4 frames. Chosen over 6
+  x 32^2: one 2D image in the bindless table, no cube faces or seams,
+  bilinear-continuous over the upper hemisphere.
+- **Approximations:** the haze in front of capture clouds is `sky (1 -
+  T_haze)` from the sky-view and transmittance LUTs (the aerial
+  perspective LUT covers only the screen), which assumes uniform
+  in-scattering along the sky's whole path and so over-counts haze in
+  front of near clouds toward the horizon; `transmittanceBetween` is
+  grey (the channel average).
+- **Ambient:** `sky_irradiance.comp` integrates the sky-view LUT with
+  the capture over it (256 cosine-weighted directions) into
+  `skyIrradiance.irradiance` (scene ambient, mesh.frag and terrain), and
+  the LUT alone into `clearIrradiance`, which lights the clouds (the
+  layer's top sees the clear sky; lighting clouds with the cloud-dimmed
+  irradiance under them would feed back and darken overcast twice). The
+  specular sky fallback in mesh.frag reads the capture in the reflected
+  direction (costs under 0.02 ms). No SH-L1: directional ambient would
+  change the clear image, and nothing reads it yet.
+- Overcast needs no special case: from the ground the capture is dim
+  cloud, ambient irradiance is ~1/3 of the clear sky's (0.025 vs 0.076
+  x sun, green), the sun is in the shadow map's shadow, and auto
+  exposure lands at EV100 12.2 (clear 15.2; sunny-16 tables put heavy
+  overcast at EV 12-13). Fair and broken cumulus raise the irradiance
+  (fair 0.106, broken 0.126 vs 0.076: bright cloud sides replace blue
+  sky, the known broken-cloud enhancement of diffuse light). The capture
+  is taken at the camera: above the layer the scene under an overcast
+  deck gets the clear sky's ambient (backlog).
+- Cost (2560x1440, GPU fast clock state; ~1.8x in the slow one):
+  capture + irradiance 0.07-0.16 ms (fair ground 0.14, overcast ground
+  0.07 since opaque rays stop early, overcast above 0.16). Clouds +
+  weather are over the ~1 ms budget (fair ground 0.43 + 0.80); capture
+  levers: 1/8 or 1/16 of the texels per frame, 16 steps.
+  - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016; clouds and sky captured into a low-resolution cubemap, updated over frames, for the scene's ambient): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
+  - UE Sky Light, Real Time Capture (sky atmosphere and volumetric clouds captured and time-sliced over frames into the sky light): https://dev.epicgames.com/documentation/en-us/unreal-engine/sky-lights-in-unreal-engine
+  - Cigolle et al., A Survey of Efficient Representations for Independent Unit Vectors (JCGT 2014, octahedral mapping): https://jcgt.org/published/0003/02/01/

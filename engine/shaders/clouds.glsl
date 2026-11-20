@@ -330,4 +330,35 @@ float cloudShadow(vec3 world) {
     return weight >= 1.0 ? shadow : mix(cloudShadowFallback(world), shadow, weight);
 }
 
+// Octahedral map of the unit sphere (y up): the upper hemisphere fills the
+// inner diamond, the lower one folds over the corners.
+vec2 octahedralUv(vec3 direction) {
+    vec3 n = direction / (abs(direction.x) + abs(direction.y) + abs(direction.z));
+    vec2 p = n.xz;
+    if (n.y < 0.0) {
+        p = (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+vec3 octahedralDirection(vec2 uv) {
+    vec2 p = uv * 2.0 - 1.0;
+    vec3 n = vec3(p.x, 1.0 - abs(p.x) - abs(p.y), p.y);
+    if (n.y < 0.0) {
+        n.xz = (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(n);
+}
+
+// The clouds toward a direction from the camera, from the sky capture
+// (sky_capture.comp): rgb the in-scattered luminance with the haze in
+// front (sun illuminance 1), a the transmittance; the sky behind them is
+// the sky-view LUT's (sky x a + rgb). Clear with clouds off.
+vec4 skyCaptureAt(vec3 direction) {
+    if (pc.scene.clouds.shadowSize <= 0.0) {
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    return textureLod(textures[pc.scene.clouds.skyCapture], octahedralUv(direction), 0.0);
+}
+
 #endif

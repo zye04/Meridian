@@ -771,10 +771,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->cullClusters(cmd, frame, 0);
   endPass("cull clusters");
 
-  // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
+  // --- Atmosphere: LUTs for the sky, sun color and haze.
 
-  // The LUTs and the weather map are shared by both frames in flight; wait
-  // for the previous frame's reads before overwriting them.
+  // The LUTs, the weather map, the cloud shadow map and the sky capture are
+  // shared by both frames in flight; wait for the previous frame's reads
+  // before overwriting them.
   VkMemoryBarrier2 atmosphereBarrier{};
   atmosphereBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
   atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
@@ -786,11 +787,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   atmosphereDependency.memoryBarrierCount = 1;
   atmosphereDependency.pMemoryBarriers = &atmosphereBarrier;
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
-  impl_->drawWeatherMap(cmd, frame);
-  if (impl_->cloudsEnabled) {
-    impl_->drawCloudShadow(cmd, frame);
-  }
-  endPass("weather");
 
   // From here on, each pass reads what the one before it wrote.
   atmosphereBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -828,11 +824,25 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     impl_->aerialPerspectiveLutPipeline);
   vkCmdDispatch(cmd, 32 / 8, 32 / 8, 32);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+  endPass("atmosphere");
+
+  // --- Weather: the weather map, cloud shadow map and sky capture, then the
+  // sky irradiance with the capture's clouds (the capture reads the LUTs).
+  impl_->drawWeatherMap(cmd, frame);
+  if (impl_->cloudsEnabled) {
+    impl_->drawCloudShadow(cmd, frame);
+    impl_->drawSkyCapture(cmd, frame);
+  }
+  const VkDescriptorSet irradianceSets[] = {impl_->atmosphereSet, impl_->materialSet};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->sceneLayout, 0, 2,
+                          irradianceSets, 0, nullptr);
+  vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
+                     sizeof(scenePush), &scenePush);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                     impl_->skyIrradiancePipeline);
   vkCmdDispatch(cmd, 1, 1, 1);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
-  endPass("atmosphere");
+  endPass("weather");
 
   // --- Scene pass: shade into the HDR target.
 

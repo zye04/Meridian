@@ -1,0 +1,228 @@
+// The cloud march shared by the view march (clouds_march.comp) and the sky
+// capture (sky_capture.comp): the layer's span along a ray from the camera
+// and the lit march through it. Rays are straight in the displayed (curved)
+// frame: the layer is a spherical shell around the planet center below the
+// camera, matching the curvature warp. Include after common.glsl,
+// atmosphere.glsl, weather.glsl and clouds.glsl.
+#ifndef CLOUDS_MARCH_GLSL
+#define CLOUDS_MARCH_GLSL
+
+// Single-scattering albedo, and the albedo factor at the thinnest edges
+// (edge darkening, instead of the powder term).
+const float kAlbedo = 0.98;
+const float kEdgeAlbedo = 0.5;
+const float kEdgeDensity = 0.15;
+// Dual-lobe Henyey-Greenstein: forward, backward, backward weight.
+const vec3 kPhase = vec3(0.8, -0.5, 0.3);
+// Wrenninge multiple-scattering octaves: per octave, extinction x a,
+// contribution x b, eccentricity x c.
+const int kOctaves = 3;
+const vec3 kOctaveScale = vec3(0.25, 0.7, 0.5);
+// Ambient (sky irradiance) at the layer's bottom relative to its top.
+const float kAmbientBottom = 0.35;
+const float kMaxDistance = 300000.0;
+const float kOpaque = 0.01;
+// Sun march: steps doubling from kLightStep (5 steps cover 1.2 km).
+const int kLightSteps = 5;
+const float kLightStep = 40.0;
+
+// Roots (near, far) of a ray from the camera (altitude h, direction with
+// vertical component dy) against the sphere at altitude a, in m. Written to
+// avoid the cancellation of |o|^2 - r^2 at planet scale (stable quadratic).
+vec2 shellIntersect(float radius, float h, float dy, float a) {
+    float b = (radius + h) * dy;
+    float c = (h - a) * (2.0 * radius + h + a);
+    float disc = b * b - c;
+    if (disc < 0.0) {
+        return vec2(-1.0);
+    }
+    float q = -b - (b >= 0.0 ? 1.0 : -1.0) * sqrt(disc);
+    if (q == 0.0) {
+        return vec2(0.0);
+    }
+    float t0 = q;
+    float t1 = c / q;
+    return vec2(min(t0, t1), max(t0, t1));
+}
+
+// World xz (flat, for the weather and noise) and altitude on the sphere of a
+// point at `rel` from the camera.
+vec3 cloudPoint(vec3 rel, float radius) {
+    vec3 p = pc.scene.cameraPosition;
+    float altitude = length(vec3(rel.x, radius + p.y + rel.y, rel.z)) - radius;
+    return vec3(p.x + rel.x, altitude, p.z + rel.z);
+}
+
+float dualLobePhase(float cosTheta, float eccentricity) {
+    return mix(henyeyGreensteinPhase(kPhase.x * eccentricity, -cosTheta),
+               henyeyGreensteinPhase(kPhase.y * eccentricity, -cosTheta), kPhase.z);
+}
+
+// Transmittance between atmosphere-space points a and b on one ray
+// (Bruneton 2017: a ratio of transmittances to the atmosphere's edge, taken
+// upward so neither ray hits the ground).
+float transmittanceBetween(vec3 a, vec3 b, vec3 direction) {
+    float lb = length(b);
+    vec3 ta;
+    vec3 tb;
+    if (dot(direction, b / lb) >= 0.0) {
+        float la = length(a);
+        ta = transmittanceToSun(la, dot(direction, a / la));
+        tb = transmittanceToSun(lb, dot(direction, b / lb));
+        return clamp(dot(ta, vec3(1.0 / 3.0)) / max(dot(tb, vec3(1.0 / 3.0)), 1e-6), 0.0, 1.0);
+    }
+    float la = length(a);
+    ta = transmittanceToSun(la, dot(-direction, a / la));
+    tb = transmittanceToSun(lb, dot(-direction, b / lb));
+    return clamp(dot(tb, vec3(1.0 / 3.0)) / max(dot(ta, vec3(1.0 / 3.0)), 1e-6), 0.0, 1.0);
+}
+
+// The camera in atmosphere space (km, planet center at the origin, camera
+// above it), as the haze lookups use it.
+vec3 cloudCameraKm() {
+    return vec3(0.0, pc.scene.atmosphere.bottomRadius +
+                         max(pc.scene.cameraPosition.y * 0.001, kPlanetRadiusOffset), 0.0);
+}
+
+// Where the ray from the camera runs through the layer's envelope over all
+// cloud types (cloudDensity is zero outside each sample's own layer), in m,
+// ending at the ground; y <= x: it misses the layer.
+vec2 cloudLayerSpan(vec3 direction) {
+    Clouds c = pc.scene.clouds;
+    float bottom = min(c.stratusBottom, c.cumulusBottom);
+    float top = max(c.stratusTop, c.cumulusTop);
+    float radius = pc.scene.atmosphere.bottomRadius * 1000.0;
+    float h = pc.scene.cameraPosition.y;
+    vec2 inner = shellIntersect(radius, h, direction.y, bottom);
+    vec2 outer = shellIntersect(radius, h, direction.y, top);
+    float tStart = 0.0;
+    float tEnd = -1.0;
+    if (h < bottom) {
+        tStart = inner.y;
+        tEnd = outer.y;
+    } else if (h <= top) {
+        tEnd = inner.x > 0.0 ? inner.x : outer.y;
+    } else if (outer.y > 0.0) {
+        tStart = max(outer.x, 0.0);
+        tEnd = inner.x > 0.0 ? inner.x : outer.y;
+    }
+    vec2 ground = shellIntersect(radius, h, direction.y, 0.0);
+    if (ground.x > 0.0) {
+        tEnd = min(tEnd, ground.x);
+    }
+    return vec2(tStart, tEnd);
+}
+
+struct CloudMarch {
+    // In-scattered luminance (sun illuminance 1), no haze.
+    vec3 luminance;
+    float transmittance;
+    // Transmittance-weighted mean cloud distance (m); 0 = no cloud.
+    float distance;
+};
+
+// Marches [tStart, tEnd] along the ray. Steps grow with distance
+// (stepGrowth x t, at least minStep), widened only where the steps left
+// couldn't reach the segment's end; at most maxSteps, stops when opaque.
+// Each sample sits at the same jittered fraction of its own step.
+// ambient: the sky irradiance lighting the layer's top.
+CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, float minStep,
+                       float stepGrowth, int maxSteps, vec3 ambient) {
+    CloudMarch result = CloudMarch(vec3(0.0), 1.0, 0.0);
+    Clouds c = pc.scene.clouds;
+    float top = max(c.stratusTop, c.cumulusTop);
+    float radius = pc.scene.atmosphere.bottomRadius * 1000.0;
+    float h = pc.scene.cameraPosition.y;
+    vec3 sun = pc.scene.sunDirection;
+    float cosTheta = dot(sun, direction);
+    float phases[kOctaves];
+    float eccentricity = 1.0;
+    for (int k = 0; k < kOctaves; ++k) {
+        phases[k] = dualLobePhase(cosTheta, eccentricity);
+        eccentricity *= kOctaveScale.z;
+    }
+    ambient /= 2.0 * kPi;
+    float bottomKm = pc.scene.atmosphere.bottomRadius;
+
+    float depthSum = 0.0;
+    float weightSum = 0.0;
+    float t = tStart;
+    for (int i = 0; i < maxSteps && t < tEnd; ++i) {
+        float dt = min(max(max(minStep, t * stepGrowth), (tEnd - t) / float(maxSteps - i)),
+                       tEnd - t);
+        float sampleT = t + jitter * dt;
+        vec3 rel = direction * sampleT;
+        vec3 world = cloudPoint(rel, radius);
+        float lod = max(0.0, log2(dt / 100.0));
+        float heightFraction;
+        float density = cloudDensity(world, lod, heightFraction);
+        if (density > 0.0) {
+            // Sun color from the atmosphere at the sample, zero in the
+            // planet's shadow.
+            vec3 up = normalize(vec3(rel.x, radius + h + rel.y, rel.z));
+            float sampleRadius = bottomKm + max(world.y * 0.001, kPlanetRadiusOffset);
+            vec3 sunLight = transmittanceToSun(sampleRadius, dot(sun, up));
+            if (raySphereIntersectNearest(up * sampleRadius, sun, bottomKm) >= 0.0) {
+                sunLight = vec3(0.0);
+            }
+
+            // Sun: optical depth toward it through the layer (none to
+            // march without sun; stops once above the layer), and from
+            // where the short march ends to the sun, the shadow map's
+            // (none beyond the map).
+            float opticalDepth = 0.0;
+            if (any(greaterThan(sunLight, vec3(0.0)))) {
+                float s = 0.0;
+                float ds = kLightStep;
+                bool exited = false;
+                for (int j = 0; j < kLightSteps; ++j) {
+                    vec3 q = cloudPoint(rel + sun * (s + 0.5 * ds), radius);
+                    if (q.y > top) {
+                        exited = true;
+                        break;
+                    }
+                    opticalDepth += cloudDensity(q, lod + float(j) * 0.5) * ds;
+                    s += ds;
+                    ds *= 2.0;
+                }
+                opticalDepth *= kCloudExtinction;
+                if (!exited && c.shadowSize > 0.0) {
+                    float weight;
+                    float beyond = cloudShadowMap(cloudPoint(rel + sun * s, radius), weight);
+                    opticalDepth -= weight * log(max(beyond, 1e-6));
+                }
+            }
+
+            float scattered = 0.0;
+            float a = 1.0;
+            float b = 1.0;
+            for (int k = 0; k < kOctaves; ++k) {
+                scattered += b * exp(-opticalDepth * a) * phases[k];
+                a *= kOctaveScale.x;
+                b *= kOctaveScale.y;
+            }
+
+            float albedo = kAlbedo * mix(kEdgeAlbedo, 1.0, smoothstep(0.0, kEdgeDensity, density));
+            vec3 source = albedo * (sunLight * scattered +
+                                    ambient * mix(kAmbientBottom, 1.0, heightFraction));
+            // Energy-conserving integration over the step (Hillaire 2016).
+            float sigma = density * kCloudExtinction;
+            float stepTransmittance = exp(-sigma * dt);
+            float opacity = result.transmittance * (1.0 - stepTransmittance);
+            result.luminance += source * opacity;
+            depthSum += sampleT * opacity;
+            weightSum += opacity;
+            result.transmittance *= stepTransmittance;
+            if (result.transmittance < kOpaque) {
+                break;
+            }
+        }
+        t += dt;
+    }
+    if (weightSum > 0.0) {
+        result.distance = depthSum / weightSum;
+    }
+    return result;
+}
+
+#endif
