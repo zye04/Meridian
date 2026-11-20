@@ -1484,6 +1484,12 @@ same texture info (texture transform included) as occlusion when the
 image file name holds `_arm`. 14 of 16 models gain AO; the two
 rock_moss sets ship a plain roughness map and have none.
 
+**Sun shadows test the TLAS before the terrain march.** Both must pass,
+so the order changes no pixel (image diff 0), but inside canopies the
+ray query stops within meters while the height-pyramid march walks
+toward the sun first. Release 1440p, with leaf transmission (below):
+forest edge 33.2 -> 21.8 ms, start view 5.70 -> 5.21 ms.
+
 ## Forest species mix favours the mature beech (2026-11-20)
 
 Trees read as skinny, sparse "baby trees". The cook is not the cause:

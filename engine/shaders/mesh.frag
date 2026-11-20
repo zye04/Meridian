@@ -150,9 +150,8 @@ float sunVisibility(vec3 position, vec3 normal) {
     marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
     vec3 direction = sampleSunDirection(gl_FragCoord.xy);
-    if (terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
-        return 0.0;
-    }
+    // The TLAS query first: inside canopies it hits within a few meters,
+    // where the terrain march would walk the whole pyramid first.
     rayQueryEXT query;
     rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
                           gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
@@ -164,10 +163,11 @@ float sunVisibility(vec3 position, vec3 normal) {
             rayQueryConfirmIntersectionEXT(query);
         }
     }
-    return rayQueryGetIntersectionTypeEXT(query, true) ==
-                   gl_RayQueryCommittedIntersectionNoneEXT
-               ? 1.0
-               : 0.0;
+    if (rayQueryGetIntersectionTypeEXT(query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT) {
+        return 0.0;
+    }
+    return terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength) ? 0.0 : 1.0;
 }
 
 // ---------------------------------------------------------------- Surface
