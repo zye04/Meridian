@@ -1708,12 +1708,13 @@ restores the previous behaviour exactly (2645325 instances, hash
   sideways 5 ground 0.10 (0.118), forward 5 beech 0.20 (0.226), pitch 0.02
   ground 0.09 (0.108). The ratio is printed as an informational column;
   shimmer and SSIM gates are unchanged.
-- Measured at 2560x1440 (Release, `--placement off`): RR laplacian 0.130 /
-  0.145 / 0.214 / 0.129 (ratio 0.84 / 0.94 / 0.86 / 0.84), crown/shadow
-  1.41 / 0.35, SSIM 0.984, all pass. TAA v2: 0.114 / 0.118 / 0.226 /
-  0.108 (ratio 0.94 / 0.97 / 1.02 / 0.89), crown/shadow 2.41 / 1.76 (crown
-  fails), SSIM 0.980 (fails 0.98 by 0.0004). RR is 5% below TAA on the
-  beech forward frame and above it on the ground views.
+- Measured at 2560x1440 (Release, `--placement off`, `--trees` for the
+  beech views, identical `Render 2560x1440` lines): RR laplacian 0.128 /
+  0.144 / 0.214 / 0.128 (ratio 0.84 / 0.94 / 0.86 / 0.84), crown/shadow
+  1.41 / 0.29, SSIM 0.983, all pass. TAA v2: 0.112 / 0.117 / 0.226 /
+  0.107 (ratio 0.94 / 0.97 / 1.02 / 0.89), crown/shadow 2.41 / 1.76 (crown
+  fails), SSIM 0.979 (fails). RR is 5% below TAA on the beech forward
+  frame and above it on the ground views.
 - Startup: the window's size is the monitor mode when fullscreen
   (`Window::framebufferSize`; Wayland reports the tiled size until the
   first presented frame), and `Renderer` takes the `AaSettings` in its

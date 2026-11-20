@@ -31,10 +31,10 @@ run ground_still "$ground"
 run ground_fwd "$ground" --camera-velocity $(vel $gyaw fwd)
 run ground_side "$ground" --camera-velocity $(vel $gyaw side)
 run ground_pitch "$ground" --camera-angular-velocity 0 0.02
-run beech_still "$beech" --scatter 100
-run beech_fwd "$beech" --scatter 100 --camera-velocity $(vel $byaw fwd)
-run beech_f120 "$beech" --scatter 100 --frames 120
-run beech_f121 "$beech" --scatter 100 --frames 121
+run beech_still "$beech" --trees --scatter 100
+run beech_fwd "$beech" --trees --scatter 100 --camera-velocity $(vel $byaw fwd)
+run beech_f120 "$beech" --trees --scatter 100 --frames 120
+run beech_f121 "$beech" --trees --scatter 100 --frames 121
 
 if [ -n "${GPU_RUNS:-}" ] && [ "$GPU_RUNS" -gt 1 ]; then
   for i in $(seq 2 "$GPU_RUNS"); do run ground_still_$i "$ground"; done
@@ -46,7 +46,7 @@ cmp_le() { python3 -c "import sys;print('pass' if float(sys.argv[1])<=float(sys.
 val() { awk '{print $2}'; }
 
 # Sharpness in motion is the motion frame's own Laplacian std, thresholds
-# anchored to TAA v2 at 1440p (0.114, 0.118, 0.226, 0.108; minimum = 90% of
+# anchored to TAA v2 at 1440p (0.114, 0.118, 0.226, 0.108 at first measurement; minimum = 90% of
 # each, rounded down, docs/decisions.md); the motion/still
 # ratio is informational (a sharper still, as under Ray Reconstruction,
 # lowers it without making the motion frame worse).
