@@ -2738,7 +2738,7 @@ should be in the TLAS is open (plan task 4). Plan:
   the layer (`1119 6500 -431 -1.55 -0.25`) 0.48 + 1.29 / 11.41; inside
   the layer (`1119 3200 -431 -1.55 0`, half-resolution march) 0.48 +
   1.89 / 10.82. Over the spec's ~1 ms (2 ms inside) on every view but
-  overcast; the user accepted ~2 ms for the sharp detail. Levers left:
+  overcast; the sharp-detail round targeted ~2 ms fair. Levers left:
   the 16-tap composite as a 9-tap bilinear one, an adaptive shadow-map
   step count, fewer sun steps far from the camera.
 - **Motion gates** (`tools/motion-gates.sh`, same session, main 899fcba
