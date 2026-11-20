@@ -472,9 +472,10 @@ int main(int argc, char **argv) {
   // Scripted runs (motion and exposure) use a fixed step so they repeat
   // exactly.
   constexpr float kScriptedStep = 1.0f / 60.0f;
+  const meridian::Vec3 scriptedEnd = camera.position;
   if (options.cameraVelocity) {
-    camera.position = camera.position - *options.cameraVelocity *
-                                            (kScriptedStep * options.frames);
+    camera.position = meridian::scriptedPosition(
+        scriptedEnd, *options.cameraVelocity, kScriptedStep, options.frames);
   }
 
   using Clock = std::chrono::steady_clock;
@@ -511,7 +512,9 @@ int main(int argc, char **argv) {
     }
     ++totalFrames;
     if (options.cameraVelocity) {
-      camera.position = camera.position + *options.cameraVelocity * kScriptedStep;
+      camera.position = meridian::scriptedPosition(
+          scriptedEnd, *options.cameraVelocity, kScriptedStep,
+          options.frames - totalFrames);
     }
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);

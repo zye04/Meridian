@@ -38,4 +38,12 @@ struct Camera {
   }
 };
 
+// Scripted capture path: `framesLeft` steps of velocity * dt before `end`.
+// Computed from `end` rather than accumulated, so float rounding cannot
+// leave the final frame off the requested camera.
+inline Vec3 scriptedPosition(Vec3 end, Vec3 velocity, float dt,
+                             int framesLeft) {
+  return end - velocity * (dt * static_cast<float>(framesLeft));
+}
+
 } // namespace meridian
