@@ -59,11 +59,10 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
 
 ## Lanes: running, paused, queued
 
-- **G2 ground transitions + cliffs** (RUNNING, owned by the old
-  orchestrator session until it merges; deadline 16:30). Branches
-  `ground2` (worktree `../meridian-ground2`) and `ground2-cliffs`
-  (`../meridian-ground2-cliffs`); next steps in each
-  `.superpowers/sdd/ground2/next.md`. Don't touch them until G2 reports.
+- **G2 ground transitions + cliffs** (DONE, merged 8a514ad and 05767d4;
+  decisions.md "Natural ground transitions", "Non-repeating cliffs").
+  M3 step 1 can now rebase onto G2's role weights. Worktrees
+  `../meridian-ground2*` can be removed.
 - **C2 clouds** (PAUSED at 15:25, branch `clouds` at 197d458, worktree
   `../meridian-clouds`; user chose: merge to main after Task 8, no look
   gate). Done: cumulus detail across the body, stepped underside fixed,
