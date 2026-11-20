@@ -17,15 +17,27 @@ const int kWeatherFallbackOctaves = 1;
 const float kWeatherMapBlendTexels = 64.0;
 // Width of the coverage threshold's soft edge in weather noise units.
 const float kCoverageEdge = 0.15;
+// Cell size of the weather noise's large-cell regions over weatherCell.
+const float kLargeCellScale = 2.0;
+// Mean of the weather Worley octaves (weatherNoise's 0.46 / mean regional).
+const float kWorleyMean = 0.46;
 // Detail erosion: how far curl noise displaces the detail lookup (m) and how
 // much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
 const vec2 kDetailErosion = vec2(0.5, 0.6);
+// Cauliflower billows: the detail volume again at kBillowScale x its
+// period (lobes of about 100-500 m), carving the base shape across the
+// whole body, not only at its rim, so cumulus read as heaped lobes that
+// shade each other. Cumulus only (scaled by type); kBillowFadeLod: the
+// march lods over which they fade out.
+const float kBillowScale = 4.0;
+const float kBillowErosion = 0.8;
+const vec2 kBillowFadeLod = vec2(1.0, 3.0);
 // The shape cut (stratus, cumulus): thinning x shape below it is clear air.
 // It carves the gaps and rounds the cumulus tops (the profile thins
 // upward); low for stratus so overcast stays a nearly continuous sheet.
 // Coverage multiplies the result (thresholded once, in the map).
-const vec2 kShapeCut = vec2(0.1, 0.6);
+const vec2 kShapeCut = vec2(0.1, 0.3);
 // The base shape's range, stretched to [0, 1]: the dilated Perlin-Worley
 // spans only about 0.78-0.92 (measured: 6% below 0.8, median 0.84, 4%
 // above 0.9), too little contrast to carve gaps on its own.
@@ -39,8 +51,9 @@ const float kStratusShapeFloor = 0.4;
 // wider than tall, so cumulus spread into flat-based loaves.
 const float kShapeSquash = 2.0;
 // Scales the eroded shape before it saturates at 1: cores reach the full
-// extinction and edges sharpen.
-const float kDensityGain = 3.0;
+// extinction and edges sharpen (6: crisp billow surfaces; the sky's
+// fast-turn sharpness ratio drops, decisions.md).
+const float kDensityGain = 6.0;
 // Extinction (1/m) at density 1.
 const float kCloudExtinction = 0.06;
 
@@ -139,7 +152,19 @@ float weatherNoise(vec2 xz, int octaves) {
     int cells = int(c.noisePeriod / c.weatherCell);
     ivec3 period = ivec3(cells, cells, int(c.timePeriod));
     vec3 p = vec3((xz - c.windOffset) / c.weatherCell, c.time);
-    float cellNoise = worleyOctaves(p, period, octaves);
+    // Cell sizes vary by region: where a coarse mask is high the cells are
+    // kLargeCellScale x larger, so the field isn't one cumulus size to the
+    // horizon.
+    float large = smoothstep(0.5, 0.7, gradientNoise(p * 0.125, period / 8));
+    float cellNoise = large < 1.0 ? worleyOctaves(p, period, octaves) : 0.0;
+    if (large > 0.0) {
+        float largeNoise = worleyOctaves(vec3(p.xy / kLargeCellScale, p.z),
+                                         ivec3(period.xy / int(kLargeCellScale), period.z), octaves);
+        // Rescaled about the mean so the blend keeps the deviation of one
+        // field: the coverage threshold below stays calibrated.
+        cellNoise = kWorleyMean + (mix(cellNoise, largeNoise, large) - kWorleyMean) /
+                                      length(vec2(1.0 - large, large));
+    }
     float regional = gradientOctaves(p * 0.25, period / 4, octaves);
     float weightSum = 2.0 - exp2(1.0 - float(octaves));
     float weightSquares = (1.0 - exp2(-2.0 * float(octaves))) / 0.75;
@@ -193,11 +218,13 @@ vec2 cloudLayer(float type, float coverage) {
 // The vertical profile by normalized height in the layer: x the base ramp,
 // applied after the shape cut so every cloud starts at the same height
 // (flat bases); y the thinning toward the top, applied before the cut so
-// clouds narrow upward (rounded tops). Stratus a slab with soft edges,
-// cumulus a sharp base and a long taper.
+// clouds narrow upward (rounded tops). Stratus a slab, cumulus a flat
+// base and a long taper. The base ramp spans a fifth of the
+// layer: steeper, the density gain turns it into a hard plane whose
+// eroded rim shows as stacked steps along the underside.
 vec2 cloudProfile(float type, float h) {
     float t = clamp(type, 0.0, 1.0);
-    return vec2(smoothstep(0.0, mix(0.15, 0.07, t), h),
+    return vec2(smoothstep(0.0, mix(0.15, 0.2, t), h),
                 1.0 - smoothstep(mix(0.7, 0.3, t), 1.0, h));
 }
 
@@ -205,9 +232,10 @@ vec2 cloudProfile(float type, float h) {
 // and altitude world.y (m above sea level, on the curved layer); lod is the
 // noise mip level (0 near the camera, coarser for longer steps). Weather
 // coverage (thresholded once, in the map) x the vertical profile times the
-// base Perlin-Worley shape cut at kShapeCut, eroded by curl-distorted
-// detail Worley noise (Schneider 2015). heightFraction: the normalized
-// height in the local layer (lighting's ambient gradient).
+// base Perlin-Worley shape (billow-eroded for cumulus) cut at kShapeCut,
+// eroded by curl-distorted detail Worley noise (Schneider 2015).
+// heightFraction: the normalized height in the local layer (lighting's
+// ambient gradient).
 float cloudDensity(vec3 world, float lod, out float heightFraction) {
     heightFraction = 0.0;
     vec4 weather = weatherMapAt(world);
@@ -229,6 +257,16 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
     shape = clamp(remap(shape, kShapeRange.x, kShapeRange.y, 0.0, 1.0), 0.0, 1.0);
     float type = clamp(weather.g, 0.0, 1.0);
+    // Billows fade out with distance: the coarse mips average to a uniform
+    // erosion that would only thin far clouds.
+    float billowErosion = kBillowErosion * type * (1.0 - smoothstep(kBillowFadeLod.x, kBillowFadeLod.y, lod));
+    if (billowErosion > 0.0) {
+        // lod - 2: texels 4x the detail's, so the footprint spans two mips fewer.
+        vec3 billowNoise = textureLod(textures3D[c.detailNoise],
+                                      shapePoint / (c.detailNoisePeriod * kBillowScale), max(0.0, lod - 2.0)).rgb;
+        float billows = 1.0 - dot(billowNoise, vec3(0.5, 0.3, 0.2));
+        shape = clamp(remap(shape, billows * billowErosion, 1.0, 0.0, 1.0), 0.0, 1.0);
+    }
     shape = mix(shape, 1.0, kStratusShapeFloor * (1.0 - type));
     float cut = mix(kShapeCut.x, kShapeCut.y, type);
     vec2 profile = cloudProfile(weather.g, h);
@@ -240,10 +278,10 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     vec3 q = p + vec3(curl.x, 0.0, curl.y) * (kCurlDistortion * (1.0 - h));
     float detail = dot(textureLod(textures3D[c.detailNoise], q / c.detailNoisePeriod, lod).rgb,
                        vec3(0.625, 0.25, 0.125));
-    // Cumulus: wispy at the base, billowy toward the top; stratus wispy and
-    // eroded more throughout.
-    float billow = type * clamp(h * 4.0, 0.0, 1.0);
-    float erosion = mix(detail, 1.0 - detail, billow) * mix(kDetailErosion.x, kDetailErosion.y, type);
+    // Cumulus billowy (inverted Worley) throughout: wispy bases cut by the
+    // detail's cell ridges read as stacked steps along the underside.
+    // Stratus wispy and eroded more.
+    float erosion = mix(detail, 1.0 - detail, type) * mix(kDetailErosion.x, kDetailErosion.y, type);
     return clamp(remap(cloud, erosion, 1.0, 0.0, 1.0) * kDensityGain, 0.0, 1.0);
 }
 

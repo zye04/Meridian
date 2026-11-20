@@ -100,8 +100,7 @@ fair-weather cumulus like `assets/reference/target-meadow.png`.
    advected simulation texture (blurs, carries state, not deterministic);
    authored weather zones (not procedural).
 3. **Ambient and sky.** Chosen: a small sky + cloud capture, time-sliced,
-   integrated to the scene's sky irradiance (replacing today's single
-   value from the atmosphere alone); haze in front of
+   integrated to the scene's sky irradiance (not the atmosphere alone); haze in front of
    clouds composited the Frostbite way. Rejected: dimming ambient by a
    coverage scalar (wrong color and direction).
 4. **Cloud shadow map.** Chosen: a Beer shadow map (front depth, mean
@@ -210,15 +209,20 @@ New public header `engine/include/meridian/weather.h`:
   layer; a new view above the layer (~6500 m) is added. Planet-curved, so it meets M1's curvature warp at the
   horizon.
 - **Density:** weather coverage x vertical profile(type, height) x base
-  3D Worley-Perlin noise (128³), eroded by detail Worley noise (32³)
-  distorted by curl noise; both volumes generated on the GPU at load.
+  3D Worley-Perlin noise (128³), billow-eroded across the body for
+  cumulus (the detail volume again at 4x its scale, fading out by LOD),
+  cut at 0.3 for cumulus (0.1 stratus), then eroded by detail Worley
+  noise (32³) distorted by curl noise, and scaled by a density gain of 6
+  before saturating; the base ramp spans 0.2 of the layer. Both volumes
+  are generated on the GPU at load.
 - **Lighting:** sun transmittance through the layer (short light march)
   and the Beer shadow map beyond it, sun color and illuminance from the
   atmosphere's transmittance at the sample, dual-lobe phase
   (Jendersie-d'Eon approximate Mie as an option), multiple scattering
   with Wrenninge octaves (2-3), edge darkening by lowered albedo at
   thin edges (Hillaire) rather than the powder hack, ambient from the
-  sky irradiance with a bottom-to-top gradient.
+  sky irradiance with a bottom-to-top gradient and an in-cloud ambient
+  occlusion tap (one density sample 100 m above, optical depth x 0.5).
 - **March:** quarter resolution (640x360 at 1440p) below the layer and
   above it; half resolution when the camera is inside or within a
   margin of it. Blue-noise jittered start per frame; step counts grow
@@ -266,7 +270,7 @@ New public header `engine/include/meridian/weather.h`:
 - A small capture (octahedral, ~64², or 6 x 32²) from the camera's
   position: sky-view LUT plus a coarse cloud march, updated over a few
   frames (time-sliced), integrated into the sky irradiance the scene
-  uses today (`skyIrradiance`, now also its directional terms as SH-L1
+  uses (`skyIrradiance`, now also its directional terms as SH-L1
   if cheap, else the existing single value) and into the specular sky
   fallback. Overcast: the capture is mostly dim cloud, so ambient goes
   flat and dim with no special case; the sun is dimmed by the shadow

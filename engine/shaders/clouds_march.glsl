@@ -24,6 +24,10 @@ const vec2 kDiffuse = vec2(0.8, 0.75 * (1.0 - 0.6));
 // at the bottom, the ground bounce at the top; under full coverage the
 // bases see other clouds, not the sky (x clear, y overcast).
 const vec2 kAmbientBottom = vec2(0.35, 0.05);
+// Ambient occlusion: one density tap kAmbientProbe (m) above the sample,
+// its optical depth over the probe scaled by kAmbientOcclusion.
+const float kAmbientProbe = 100.0;
+const float kAmbientOcclusion = 0.5;
 const float kMaxDistance = 300000.0;
 const float kOpaque = 0.01;
 // Sun march: steps doubling from kLightStep (6 steps cover 1.26 km).
@@ -203,6 +207,11 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                 }
             }
 
+            // The cloud above shades crevices between billows and the
+            // undersides, which the height gradient alone leaves smooth.
+            float above = cloudDensity(cloudPoint(rel + up * kAmbientProbe, radius), lod);
+            float ambientVisibility = exp(-above * kCloudExtinction * kAmbientProbe * kAmbientOcclusion);
+
             float scattered = 0.0;
             float a = 1.0;
             float b = 1.0;
@@ -214,7 +223,7 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
             scattered += kDiffuse.x / (4.0 * kPi * (1.0 + kDiffuse.y * opticalDepth));
 
             vec3 source = kAlbedo * (sunLight * scattered +
-                                    ambient * mix(ambientBottom, 1.0, heightFraction) +
+                                    ambient * mix(ambientBottom, 1.0, heightFraction) * ambientVisibility +
                                     ground * mix(1.0, kAmbientBottom.x, heightFraction));
             // Energy-conserving integration over the step (Hillaire 2016).
             float sigma = density * kCloudExtinction;
