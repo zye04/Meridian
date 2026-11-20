@@ -45,12 +45,23 @@ Window::Window(int width, int height, const char *title, bool fullscreen) {
   if (const GLFWvidmode *mode = monitor ? glfwGetVideoMode(monitor) : nullptr) {
     width = mode->width;
     height = mode->height;
+    fullscreenWidth_ = width;
+    fullscreenHeight_ = height;
   }
   handle_ = glfwCreateWindow(width, height, title, monitor, nullptr);
   if (!handle_) {
     glfwTerminate();
     throw std::runtime_error("glfwCreateWindow failed");
   }
+}
+
+void Window::framebufferSize(int &width, int &height) const {
+  if (fullscreenWidth_ > 0) {
+    width = fullscreenWidth_;
+    height = fullscreenHeight_;
+    return;
+  }
+  glfwGetFramebufferSize(handle_, &width, &height);
 }
 
 Window::~Window() {

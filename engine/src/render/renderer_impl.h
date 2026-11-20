@@ -9,6 +9,7 @@
 #include <meridian/renderer.h>
 #include <meridian/upscaler.h>
 #include <meridian/upscaler_vk.h>
+#include <meridian/window.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -25,6 +26,7 @@ namespace meridian {
 
 struct Renderer::Impl {
   GLFWwindow *window = nullptr;
+  const Window *windowSize = nullptr;
   vkb::Instance instance;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   vkb::Device device;

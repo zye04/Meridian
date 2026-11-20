@@ -164,6 +164,8 @@ before and after compaction, cell margin).
   fullscreen on the primary monitor by default, so captures share one size
   (the 1440p monitor; Hyprland's 1920x1080 FALLBACK output when it's off).
   `--windowed` gives a tiled window, whose size varies between runs.
+  Fullscreen sizes the window to the monitor mode from the start
+  (`Window::framebufferSize`), so startup prints one `Swapchain:` line.
 - Interactive runs pick up the user's mouse; use capture runs for checks.
 - Captures step time by a fixed 1/60 s (motion and exposure adaptation), so
   two captures of the same view with the same build match almost exactly

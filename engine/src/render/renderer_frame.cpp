@@ -498,7 +498,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   int width = 0;
   int height = 0;
-  glfwGetFramebufferSize(impl_->window, &width, &height);
+  impl_->windowSize->framebufferSize(width, height);
   if (width == 0 || height == 0) {
     return;
   }

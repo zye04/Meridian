@@ -1714,6 +1714,9 @@ restores the previous behaviour exactly (2645325 instances, hash
   0.108 (ratio 0.94 / 0.97 / 1.02 / 0.89), crown/shadow 2.41 / 1.76 (crown
   fails), SSIM 0.980 (fails 0.98 by 0.0004). RR is 5% below TAA on the
   beech forward frame and above it on the ground views.
-- Startup: `Renderer` takes the `AaSettings` in its constructor (the
-  DLSS support fallbacks run there), so the swapchain, render targets and
-  upscaler are built once at startup, not again for `setAntiAliasing`.
+- Startup: the window's size is the monitor mode when fullscreen
+  (`Window::framebufferSize`; Wayland reports the tiled size until the
+  first presented frame), and `Renderer` takes the `AaSettings` in its
+  constructor, so the swapchain, render targets and upscaler are built
+  once: one `Swapchain: ... 2560x1440` line. `--windowed` keeps the
+  framebuffer size.

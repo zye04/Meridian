@@ -12,7 +12,7 @@ namespace meridian {
 void Renderer::Impl::createSwapchain() {
   int width = 0;
   int height = 0;
-  glfwGetFramebufferSize(window, &width, &height);
+  windowSize->framebufferSize(width, height);
 
   auto built =
       vkb::SwapchainBuilder{device}
@@ -945,6 +945,7 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
                    const AaSettings &aa)
     : impl_(std::make_unique<Impl>()) {
   impl_->window = window.handle();
+  impl_->windowSize = &window;
   impl_->upscalerProvider = provider;
 
   vkb::InstanceBuilder instanceBuilder;
