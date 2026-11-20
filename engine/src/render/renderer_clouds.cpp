@@ -201,6 +201,7 @@ void Renderer::Impl::createClouds() {
   cloudMarchPipeline = createComputePipeline(dev, "clouds_march.comp", cloudMarchLayout);
   cloudResolvePipeline = createComputePipeline(dev, "clouds_resolve.comp", cloudMarchLayout);
   cloudCompositePipeline = createComputePipeline(dev, "clouds_composite.comp", cloudMarchLayout);
+  cloudSlabPipeline = createComputePipeline(dev, "clouds_slab.comp", cloudMarchLayout);
   skyCapturePipeline = createComputePipeline(dev, "sky_capture.comp", cloudMarchLayout);
   createCloudTargets();
 
@@ -226,6 +227,7 @@ void Renderer::Impl::createClouds() {
 void Renderer::Impl::destroyClouds() {
   VkDevice dev = device.device;
   vkDestroyPipeline(dev, skyCapturePipeline, nullptr);
+  vkDestroyPipeline(dev, cloudSlabPipeline, nullptr);
   vkDestroyPipeline(dev, cloudCompositePipeline, nullptr);
   vkDestroyPipeline(dev, cloudResolvePipeline, nullptr);
   vkDestroyPipeline(dev, cloudMarchPipeline, nullptr);
@@ -277,7 +279,7 @@ void Renderer::Impl::drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame)
 // snapped to whole texels in the sun's frame, so shadows don't swim as the
 // camera moves (in double, like the weather map). Off with the clouds.
 void Renderer::Impl::placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection) {
-  if (!cloudsEnabled) {
+  if (cloudRenderer == CloudRenderer::Off) {
     clouds.shadowSize = 0.0f;
     return;
   }
@@ -472,6 +474,41 @@ void Renderer::Impl::drawClouds(VkCommandBuffer cmd, const FrameData &frame,
     memoryBarrier(cmd, kCompute, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, kCompute, kStorage);
   }
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudCompositePipeline);
+  vkCmdDispatch(cmd, (renderExtent.width + 7) / 8, (renderExtent.height + 7) / 8, 1);
+}
+
+// The 2.5D slab renderer: one compute pass at the render size, composited
+// over HDR, motion and the mask like drawClouds' composite (same layouts
+// in and out).
+void Renderer::Impl::drawCloudsSlab(VkCommandBuffer cmd, const FrameData &frame) {
+  constexpr VkPipelineStageFlags2 kCompute = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  constexpr VkAccessFlags2 kStorage =
+      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  transitionImage(cmd, {depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, kCompute,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  for (VkImage target : {hdr.image, motion.image, transparencyMask.image}) {
+    transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, kCompute, kStorage});
+  }
+  memoryBarrier(cmd, kCompute, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, kCompute,
+                kStorage | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+  const VkDescriptorSet sets[] = {atmosphereSet, materialSet, cloudMarchSets[frameNumber % 2]};
+  CloudConstants push;
+  push.sceneBuffer = frame.sceneBuffer.address;
+  push.historyValid = 0;
+  push.inLayer = 0;
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMarchLayout, 0, 3, sets, 0,
+                          nullptr);
+  vkCmdPushConstants(cmd, cloudMarchLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudSlabPipeline);
   vkCmdDispatch(cmd, (renderExtent.width + 7) / 8, (renderExtent.height + 7) / 8, 1);
 }
 

@@ -430,7 +430,7 @@ struct Clouds {
     uint shadowMap;
     vec2 shadowCamera;
     float groundCoverage;
-    float pad1;
+    uint renderer;
 };
 
 #include "terrain_detail.glsl"

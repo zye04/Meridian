@@ -393,7 +393,8 @@ struct GpuClouds {
   float shadowCamera[2] = {};
   // Coverage at the camera: the ground bounce's sunlit fraction.
   float groundCoverage = 0.0f;
-  float pad1 = 0.0f;
+  // 0 off, 1 volumetric, 2 slab (CloudRenderer).
+  uint32_t renderer = 0;
 };
 static_assert(sizeof(GpuClouds) == 160);
 static_assert(offsetof(GpuClouds, windDisplacement) == 88);

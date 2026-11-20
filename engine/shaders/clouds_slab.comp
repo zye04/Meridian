@@ -1,0 +1,26 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "clouds_temporal.glsl"
+#include "atmosphere.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "clouds_march.glsl"
+
+// The 2.5D slab clouds: one pass at the render size, composited over HDR,
+// motion and the transparency mask. Skeleton: writes nothing yet.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0) uniform sampler2D sceneDepth;
+layout(set = 2, binding = 7, rgba16f) uniform image2D hdr;
+layout(set = 2, binding = 8, rg16f) uniform writeonly image2D motion;
+layout(set = 2, binding = 10, r8) uniform image2D transparencyMask;
+
+void main() {
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, imageSize(hdr)))) {
+        return;
+    }
+}

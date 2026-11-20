@@ -111,6 +111,10 @@ struct ForestMask {
 // soil on ridges and the slopes below rock; forest path at forest edges and
 // forest floor inside (the forest mask); gravel in channels; scree at the
 // foot of rock; rock on cliffs. Flat ground above the snow line is snow.
+// Which cloud renderer draws: the volumetric march, the 2.5D heightfield
+// slab, or none.
+enum class CloudRenderer { Off, Volumetric, Slab };
+
 enum class TerrainRole { Grass, Clover, Mud, Soil, ForestPath, ForestFloor, Gravel, Scree, Rock, Count };
 constexpr int kMaxTerrainLayers = 16;
 
@@ -253,7 +257,7 @@ public:
   void setWeather(const Weather &weather);
 
   // On by default; off skips the cloud march and composite (for A/B).
-  void setCloudsEnabled(bool enabled);
+  void setCloudRenderer(CloudRenderer renderer);
 
   // deltaSeconds: time since the previous frame, which paces exposure
   // adaptation. Pass a fixed step for repeatable output.

@@ -573,7 +573,7 @@ void Renderer::setWeather(const Weather &weather) {
   }
 }
 
-void Renderer::setCloudsEnabled(bool enabled) { impl_->cloudsEnabled = enabled; }
+void Renderer::setCloudRenderer(CloudRenderer renderer) { impl_->cloudRenderer = renderer; }
 
 void Renderer::requestCapture(const std::filesystem::path &path) {
   impl_->capturePath = path;
@@ -808,6 +808,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.weather.history = frame.weatherHistory.address;
   impl_->placeWeatherMap(camera.position);
   impl_->placeCloudShadow(camera.position, lighting.sunDirection);
+  impl_->clouds.renderer = static_cast<uint32_t>(impl_->cloudRenderer);
   scene.clouds = impl_->clouds;
   std::memcpy(frame.weatherHistory.mapped, impl_->weatherHistory.data(),
               impl_->weather.historyCount * sizeof(WeatherHistorySample));
@@ -940,7 +941,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // --- Weather: the weather map, cloud shadow map and sky capture, then the
   // sky irradiance with the capture's clouds (the capture reads the LUTs).
   impl_->drawWeatherMap(cmd, frame);
-  if (impl_->cloudsEnabled) {
+  if (impl_->cloudRenderer != CloudRenderer::Off) {
     impl_->drawCloudShadow(cmd, frame);
     impl_->drawSkyCapture(cmd, frame);
   }
@@ -1158,8 +1159,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdEndRendering(cmd);
   endPass("scene late");
 
-  if (impl_->cloudsEnabled) {
-    impl_->drawClouds(cmd, frame, camera.position);
+  if (impl_->cloudRenderer != CloudRenderer::Off) {
+    if (impl_->cloudRenderer == CloudRenderer::Slab) {
+      impl_->drawCloudsSlab(cmd, frame);
+    } else {
+      impl_->drawClouds(cmd, frame, camera.position);
+    }
     endPass("clouds");
   }
 
@@ -1169,7 +1174,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // The cloud composite (compute) leaves HDR, motion and the transparency
   // mask in GENERAL and depth in SHADER_READ_ONLY.
-  const bool clouds = impl_->cloudsEnabled;
+  const bool clouds = impl_->cloudRenderer != CloudRenderer::Off;
   for (size_t i = 0; i < colorTargets.size(); ++i) {
     if (colorTargets[i] == impl_->hdr.image) {
       continue;

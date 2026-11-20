@@ -140,7 +140,8 @@ seconds; the change enters at the front line 60 km upwind and travels
 with the wind). Capture runs print the exposure (EV100) and the sky
 irradiance with clouds and clear (x sun), and the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
-`--clouds off` skips the cloud march, composite, cloud shadows and sky
+`--clouds 2.5d|volumetric|off` picks the cloud renderer (2.5d: the
+heightfield slab clouds, work in progress; default volumetric); `off` skips the cloud march, composite, cloud shadows and sky
 capture (A/B). Ambient light (diffuse irradiance, the specular sky
 fallback) includes the clouds through the sky capture, taken at the
 camera. Front time-lapse: `--weather fair --weather-front 600

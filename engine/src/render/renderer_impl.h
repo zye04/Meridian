@@ -402,8 +402,9 @@ struct Renderer::Impl {
   VkPipeline cloudMarchPipeline = VK_NULL_HANDLE;
   VkPipeline cloudResolvePipeline = VK_NULL_HANDLE;
   VkPipeline cloudCompositePipeline = VK_NULL_HANDLE;
+  VkPipeline cloudSlabPipeline = VK_NULL_HANDLE;
   VkPipeline skyCapturePipeline = VK_NULL_HANDLE;
-  bool cloudsEnabled = true;
+  CloudRenderer cloudRenderer = CloudRenderer::Volumetric;
   // The resolution last frame's history was resolved at (none yet: 2).
   uint32_t cloudHistoryResolution = 2;
   // Bottom and top (m) of the cloud layer at the camera, from setWeather.
@@ -440,6 +441,7 @@ struct Renderer::Impl {
   void destroyCloudTargets();
   bool cameraInCloudLayer(Vec3 cameraPosition) const;
   void drawClouds(VkCommandBuffer cmd, const FrameData &frame, Vec3 cameraPosition);
+  void drawCloudsSlab(VkCommandBuffer cmd, const FrameData &frame);
 
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect,

@@ -98,6 +98,34 @@ vec3 cloudCameraKm() {
                          max(pc.scene.cameraPosition.y * 0.001, kPlanetRadiusOffset), 0.0);
 }
 
+// Haze between the camera and distance d (m) along the ray: in-scattered
+// luminance (sun illuminance 1) and transmittance. Within the aerial
+// perspective LUT's range from it (as mesh.frag); beyond, the LUT's last
+// value extended with the transmittance LUT and the sky-view luminance.
+vec4 haze(vec2 uv, vec3 direction, float d) {
+    float distanceKm = d * 0.001;
+    float rangeKm = kAerialPerspectiveSlices * kAerialPerspectiveKmPerSlice;
+    float slice = min(distanceKm, rangeKm) / kAerialPerspectiveKmPerSlice;
+    float weight = 1.0;
+    if (slice < 0.5) {
+        weight = clamp(slice * 2.0, 0.0, 1.0);
+        slice = 0.5;
+    }
+    vec4 ap = textureLod(aerialPerspectiveLut,
+                         vec3(uv, sqrt(slice / kAerialPerspectiveSlices)), 0.0);
+    vec3 luminance = ap.rgb * weight;
+    float transmittance = mix(1.0, ap.a, weight);
+    if (distanceKm > rangeKm) {
+        vec3 camera = cloudCameraKm();
+        float beyond = transmittanceBetween(camera + direction * rangeKm,
+                                            camera + direction * distanceKm, direction);
+        vec3 sky = skyLuminance(camera, direction);
+        luminance = min(luminance + transmittance * sky * (1.0 - beyond), max(sky, luminance));
+        transmittance *= beyond;
+    }
+    return vec4(luminance, transmittance);
+}
+
 // Where the ray from the camera runs through the layer's envelope over all
 // cloud types (cloudDensity is zero outside each sample's own layer), in m,
 // ending at the ground; y <= x: it misses the layer.

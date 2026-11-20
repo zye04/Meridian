@@ -102,7 +102,7 @@ foreach(source
     cluster_traverse.comp mesh.mesh terrain_select.comp
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp
-    clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
+    clouds_march.comp clouds_resolve.comp clouds_composite.comp clouds_slab.comp cloud_shadow.comp
     cloud_shadow_blur.comp sky_capture.comp voxel.mesh)
   add_shader(${source} ${source})
 endforeach()
