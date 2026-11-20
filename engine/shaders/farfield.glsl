@@ -17,6 +17,14 @@ float farVoxelSize(uint level) {
     return 4.0 * float(1u << level);
 }
 
+// How far a level's voxels reach past FarCell.bottom/top: the extent bounds
+// the deposits' heights plus half a voxel, and the trilinear splat writes
+// voxels centered up to one voxel from a deposit, each spanning half a
+// voxel around its center.
+float farCanopyPad(uint level) {
+    return farVoxelSize(level);
+}
+
 uint farColumnsPerCell(uint level) {
     return 4u >> level;
 }
@@ -280,7 +288,7 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
                 heightBase;
     float tEnd = maxDistance;
     if (direction.y > 0.0) {
-        tEnd = min(tEnd, (top + farVoxelSize(kFarLevels - 1u) - origin.y) / direction.y);
+        tEnd = min(tEnd, (top + farCanopyPad(kFarLevels - 1u) - origin.y) / direction.y);
     }
     vec2 inverseXZ = 1.0 / vec2(abs(direction.x) > 1e-12 ? direction.x : 1e-12,
                               abs(direction.z) > 1e-12 ? direction.z : 1e-12);
@@ -318,9 +326,7 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
         float tExit = min(min(axisExit.x, axisExit.y), tEnd);
         float y0 = origin.y + direction.y * t;
         float y1 = origin.y + direction.y * tExit;
-        // Voxels hold deposits up to a voxel past the canopy extent (whose
-        // bound is the deposits' height plus half a voxel).
-        float pad = farVoxelSize(tExit < kFarRayLevelEnd0 ? 0u
+        float pad = farCanopyPad(tExit < kFarRayLevelEnd0 ? 0u
                                  : tExit < kFarRayLevelEnd1 ? 1u
                                                             : 2u);
         bool below = blockTop + pad <= min(y0, y1);

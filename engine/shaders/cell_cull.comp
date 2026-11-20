@@ -48,7 +48,10 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
     if (height * pixelsPerMeter >= kFarSwitchPixels) {
         return 0u;
     }
-    if (cull.phase == 0u && displayedBoxInFrustum(scene, boxLo, boxHi)) {
+    // The drawn box (voxel.mesh) reaches up to the coarsest level's pad past
+    // the canopy extent.
+    vec3 pad = vec3(0.0, farCanopyPad(kFarLevels - 1u), 0.0);
+    if (cull.phase == 0u && displayedBoxInFrustum(scene, boxLo - pad, boxHi + pad)) {
         // The coarsest level whose voxel projects to at most kFarLevelPixels.
         float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
         uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
@@ -74,7 +77,13 @@ void main() {
     Cell cell = scene.cells.cells[index];
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
     uint skipped = scene.farFieldEnabled != 0u ? farSwitch(scene, index, gridIndex) : 0u;
+    // Cell bits follow the instance ids' in the visibility buffer.
+    uint visibilityIndex = kPlacedBase + scene.placedCount + index;
     if (cell.instanceCount <= skipped) {
+        // Drawn as voxels only: none of its instances were visible.
+        if (cull.phase == 1u) {
+            cull.visibility.visible[visibilityIndex] = 0u;
+        }
         return;
     }
     vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize - scene.cellMargin;
@@ -85,8 +94,6 @@ void main() {
                    (scene.cellDrawDistance == 0.0 ||
                     length(max(max(boxLo, -boxHi), vec3(0.0))) <= scene.cellDrawDistance);
 
-    // Cell bits follow the instance ids' in the visibility buffer.
-    uint visibilityIndex = kPlacedBase + scene.placedCount + index;
     bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
     if (cull.phase == 0u) {
         if (cull.occlusion != 0u && wasVisible && visible) {

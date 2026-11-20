@@ -29,10 +29,11 @@ void main() {
     uint entry = scene.farCellList.entries[gl_WorkGroupID.x];
     uint index = entry & 0x3FFFFFFFu;
     FarCell far = scene.farField.field.cells.cells[index];
+    float pad = farCanopyPad(entry >> 30u);
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
     vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
-    vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
-    vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
+    vec3 boxLo = vec3(lo.x, far.bottom - pad, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(lo.x + kCellSize, far.top + pad, lo.y + kCellSize) - scene.cameraPosition;
     float drop = curvatureDrop(scene, (boxLo + boxHi) * 0.5);
 
     SetMeshOutputsEXT(8, 12);

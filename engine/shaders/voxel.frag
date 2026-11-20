@@ -45,8 +45,9 @@ void main() {
     vec3 direction = normalize(inDisplayed);
     vec3 fieldOrigin = vec3(field.originX, field.heightBase, field.originZ);
     vec3 origin = scene.cameraPosition - fieldOrigin + vec3(0.0, inDrop, 0.0);
-    vec3 boxLo = vec3(vec2(cell) * kCellSize, far.bottom - field.heightBase).xzy;
-    vec3 boxHi = boxLo + vec3(kCellSize, far.top - far.bottom, kCellSize);
+    float pad = farCanopyPad(level);
+    vec3 boxLo = vec3(vec2(cell) * kCellSize, far.bottom - pad - field.heightBase).xzy;
+    vec3 boxHi = boxLo + vec3(kCellSize, far.top - far.bottom + 2.0 * pad, kCellSize);
     vec3 inverseDirection = 1.0 / mix(vec3(1e-12), direction, greaterThan(abs(direction), vec3(1e-12)));
     vec3 t0 = (boxLo - origin) * inverseDirection;
     vec3 t1 = (boxHi - origin) * inverseDirection;
