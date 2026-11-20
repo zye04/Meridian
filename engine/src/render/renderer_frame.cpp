@@ -1132,14 +1132,14 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // radiance where a short march toward the sun hits it. After the clouds:
   // within the 60 m fade, a cloud stands in front only inside the layer.
 
-  // The cloud composite (compute) leaves HDR and motion in GENERAL and depth in
-  // SHADER_READ_ONLY.
+  // The cloud composite (compute) leaves HDR, motion and the transparency
+  // mask in GENERAL and depth in SHADER_READ_ONLY.
   const bool clouds = impl_->cloudsEnabled;
   for (size_t i = 0; i < colorTargets.size(); ++i) {
     if (colorTargets[i] == impl_->hdr.image) {
       continue;
     }
-    const bool written = clouds && i < 2;
+    const bool written = clouds && i < 3;
     transitionImage(cmd, {colorTargets[i], VK_IMAGE_ASPECT_COLOR_BIT,
                           written ? VK_IMAGE_LAYOUT_GENERAL
                                   : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

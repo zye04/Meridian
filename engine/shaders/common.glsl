@@ -586,8 +586,8 @@ bool displayedBoxInFrustum(SceneBuffer scene, vec3 lo, vec3 hi) {
     return true;
 }
 
-// Interleaved gradient noise (Jimenez 2014), shifted every frame so the
-// temporal resolve averages successive samples.
+// Per-pixel, per-frame noise: interleaved gradient (low discrepancy), or
+// pcg3d white noise, which Ray Reconstruction wants (scene.whiteNoise).
 float interleavedGradientNoise(vec2 pixel, uint frame) {
     pixel += 5.588238 * float(frame % 64u);
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
