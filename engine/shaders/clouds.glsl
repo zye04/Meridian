@@ -20,7 +20,7 @@ const float kCoverageEdge = 0.15;
 // Detail erosion: how far curl noise displaces the detail lookup (m) and how
 // much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
-const vec2 kDetailErosion = vec2(0.5, 0.5);
+const vec2 kDetailErosion = vec2(0.5, 0.6);
 // The shape cut (stratus, cumulus): thinning x shape below it is clear air.
 // It carves the gaps and rounds the cumulus tops (the profile thins
 // upward); low for stratus so overcast stays a nearly continuous sheet.

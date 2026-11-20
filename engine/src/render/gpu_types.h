@@ -312,14 +312,14 @@ constexpr float kCloudWindAltitude = 3000.0f;
 constexpr uint32_t kCloudNoisePeriod = 1u << 18;
 constexpr uint32_t kWeatherCell = 4096;
 constexpr uint32_t kBaseNoisePeriod = 8192;
-constexpr uint32_t kDetailNoisePeriod = 512;
+constexpr uint32_t kDetailNoisePeriod = 256;
 constexpr uint32_t kCurlNoisePeriod = 4096;
 static_assert(kCloudNoisePeriod % kWeatherCell == 0 && kCloudNoisePeriod % kBaseNoisePeriod == 0 &&
               kCloudNoisePeriod % kDetailNoisePeriod == 0 &&
               kCloudNoisePeriod % kCurlNoisePeriod == 0);
 // Volume sizes in texels (cloud_noise.comp).
 constexpr uint32_t kBaseNoiseSize = 128;
-constexpr uint32_t kDetailNoiseSize = 32;
+constexpr uint32_t kDetailNoiseSize = 64;
 constexpr uint32_t kCurlNoiseSize = 128;
 // The weather noise's time coordinate: one lattice unit per this many game
 // seconds (cells form and dissolve), periodic every kWeatherTimePeriod units.
