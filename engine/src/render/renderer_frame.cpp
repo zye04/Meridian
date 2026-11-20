@@ -3,6 +3,7 @@
 #include <basisu_enc.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -16,6 +17,43 @@ namespace {
 // the origin.
 float wrapAround(float x, double period) {
   return static_cast<float>(x - period * std::round(x / period));
+}
+
+float halfToFloat(uint16_t h) {
+  const uint32_t sign = uint32_t{h & 0x8000u} << 16;
+  const uint32_t exponent = (h >> 10) & 0x1f;
+  const uint32_t mantissa = h & 0x3ff;
+  if (exponent == 0) {
+    const float subnormal = std::ldexp(static_cast<float>(mantissa), -24);
+    return sign ? -subnormal : subnormal;
+  }
+  const uint32_t bits =
+      exponent == 31 ? sign | 0x7f800000u | (mantissa << 13)
+                     : sign | ((exponent + 112) << 23) | (mantissa << 13);
+  return std::bit_cast<float>(bits);
+}
+
+// Portable Float Map: RGB float, rows bottom to top; a negative scale means
+// little-endian, which the host is.
+bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
+             const uint16_t *rgba) {
+  std::FILE *file = std::fopen(path.c_str(), "wb");
+  if (!file) {
+    return false;
+  }
+  std::fprintf(file, "PF\n%u %u\n-1.0\n", extent.width, extent.height);
+  std::vector<float> row(size_t{extent.width} * 3);
+  for (uint32_t y = extent.height; y-- > 0;) {
+    for (uint32_t x = 0; x < extent.width; ++x) {
+      for (uint32_t c = 0; c < 3; ++c) {
+        row[x * 3 + c] =
+            halfToFloat(rgba[(size_t{y} * extent.width + x) * 4 + c]);
+      }
+    }
+    std::fwrite(row.data(), sizeof(float), row.size(), file);
+  }
+  const bool written = !std::ferror(file);
+  return std::fclose(file) == 0 && written;
 }
 
 } // namespace
@@ -870,14 +908,30 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->passTimeCount = passCount;
 
   // Optional capture: copy the finished frame into a CPU-readable buffer.
+  // A .pfm capture takes the linear HDR image the tonemap pass read instead.
   Buffer captureBuffer;
   const bool capturing = impl_->capturePath.has_value();
+  const bool hdrCapture =
+      capturing && impl_->capturePath->extension() == ".pfm";
   if (capturing) {
     captureBuffer = impl_->createBuffer(
-        VkDeviceSize{extent.width} * extent.height * 4,
+        VkDeviceSize{extent.width} * extent.height * (hdrCapture ? 8 : 4),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  }
+  if (hdrCapture) {
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {extent.width, extent.height, 1};
+    VkImage resolved = impl_->history[1 - impl_->frameNumber % 2].image;
+    vkCmdCopyImageToBuffer(cmd, resolved, VK_IMAGE_LAYOUT_GENERAL,
+                           captureBuffer.buffer, 1, &region);
+  }
+  if (capturing && !hdrCapture) {
     transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -938,13 +992,21 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     check(vmaInvalidateAllocation(impl_->allocator, captureBuffer.allocation, 0,
                                   VK_WHOLE_SIZE),
           "vmaInvalidateAllocation");
-    // The swapchain is BGRA8 sRGB, already display-encoded; PNG wants RGBA.
-    basisu::image png(extent.width, extent.height);
-    const auto *bgra = static_cast<const uint8_t *>(captureBuffer.mapped);
-    for (uint32_t i = 0; i < extent.width * extent.height; ++i) {
-      png.get_ptr()[i].set(bgra[i * 4 + 2], bgra[i * 4 + 1], bgra[i * 4], 255);
+    bool saved = false;
+    if (hdrCapture) {
+      saved = savePfm(*impl_->capturePath, extent,
+                      static_cast<const uint16_t *>(captureBuffer.mapped));
+    } else {
+      // The swapchain is BGRA8 sRGB, already display-encoded; PNG wants RGBA.
+      basisu::image png(extent.width, extent.height);
+      const auto *bgra = static_cast<const uint8_t *>(captureBuffer.mapped);
+      for (uint32_t i = 0; i < extent.width * extent.height; ++i) {
+        png.get_ptr()[i].set(bgra[i * 4 + 2], bgra[i * 4 + 1], bgra[i * 4],
+                             255);
+      }
+      saved = basisu::save_png(impl_->capturePath->string(), png);
     }
-    if (!basisu::save_png(impl_->capturePath->string(), png)) {
+    if (!saved) {
       std::fprintf(stderr, "Capture failed: %s\n", impl_->capturePath->c_str());
     }
     impl_->destroyBuffer(captureBuffer);

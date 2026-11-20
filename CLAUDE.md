@@ -37,6 +37,7 @@ flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc
 tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd2gltf.py in.usd out.gltf   # USD tree -> unflattened glTF
 ./build/tools/cook/meridian-cook --tree in.gltf outDir --triangles N [--bark-texture dir]   # flatten to <= N tris
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
+python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
 ```
 
 Every run of the game binary (interactive, capture, perf; Debug or
@@ -53,6 +54,9 @@ validation error):
 ```bash
 ./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--lod-error PX] --capture out.png [--frames N]
 ```
+
+A `.pfm` capture path writes the linear HDR image the tonemap reads
+(post-TAA, pre-exposed) instead, for luminance ratios.
 
 Motion sharpness: add `--camera-velocity X Y Z` (m/s, fixed 1/60 s steps,
 ending at `--camera`) and compare with the still capture of the same view:

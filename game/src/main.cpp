@@ -378,7 +378,7 @@ Options parseOptions(int argc, char **argv) {
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, "
                                "--windowed, "
-                               "--capture file.png, --frames n)");
+                               "--capture file.png|file.pfm, --frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.

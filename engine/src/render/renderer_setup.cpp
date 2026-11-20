@@ -53,7 +53,8 @@ void Renderer::Impl::createSwapchain() {
                        VK_IMAGE_ASPECT_COLOR_BIT);
   for (Image &image : history) {
     image = createScreenImage(kHdrFormat,
-                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                         VK_IMAGE_ASPECT_COLOR_BIT);
   }
   submitNow([&](VkCommandBuffer cmd) {
