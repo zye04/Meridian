@@ -477,9 +477,17 @@ struct SceneData {
   GpuWind wind;
   GpuWind previousWind;
   GpuWeather weather;
-  GpuClouds clouds;
+  // std430 aligns Clouds (vec3 members) to 16 bytes.
+  alignas(16) GpuClouds clouds;
 };
-static_assert(sizeof(SceneData) == 2184);
+// The struct members at their std430 offsets in common.glsl (spirv-dis).
+static_assert(offsetof(SceneData, atmosphere) == 432);
+static_assert(offsetof(SceneData, terrain) == 544);
+static_assert(offsetof(SceneData, wind) == 1896);
+static_assert(offsetof(SceneData, previousWind) == 1944);
+static_assert(offsetof(SceneData, weather) == 1992);
+static_assert(offsetof(SceneData, clouds) == 2032);
+static_assert(sizeof(SceneData) == 2192);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

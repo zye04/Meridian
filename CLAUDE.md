@@ -632,7 +632,9 @@ barriers account for that.
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
   `ScanConstants` in scan.comp, `BloomConstants` in bloom.comp, `TlasFillConstants` in tlas_fill.comp,
   `GpuGrade`/`GradeConstants` in grade_lut.comp; `PlacedInstance` in placement.h); change
-  both together (static_asserts check the sizes). `placement.glsl` mirrors
+  both together (static_asserts check the sizes, and the std430 offsets of
+  `SceneData`'s struct members: a struct with vec3 or 64-bit members aligns
+  to 16 or 8 in GLSL, so give the C++ member `alignas` to match). `placement.glsl` mirrors
   `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's
   integer core operation for operation: placement keep/reject must be
   bit-exact on CPU and GPU (no floats on that path).
