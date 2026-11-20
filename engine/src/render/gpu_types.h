@@ -448,12 +448,24 @@ struct SceneData {
   // PrototypeInfo per prototype and the mesh lists they index.
   VkDeviceAddress prototypes = 0;
   VkDeviceAddress prototypeMeshes = 0;
+  // The static placed instances; the streamed ring's ids follow them.
   uint32_t placedCount = 0;
   // Cells: the largest layer draw distance (0: some layer has none) and how
   // far instances' bounds reach past their cell horizontally.
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
   uint32_t pad3 = 0;
+  // Streamed placement: the ring's instances, the streamed cell records
+  // (after the grid's cells in `cells`), and per streamed layer
+  // (fullDensity, maxDistance), per ring instance threshold | layer << 16,
+  // per record its cell coordinates.
+  uint32_t ringCount = 0;
+  uint32_t streamRecordCount = 0;
+  uint32_t pad4 = 0;
+  uint32_t pad5 = 0;
+  VkDeviceAddress streamLayers = 0;
+  VkDeviceAddress streamThresholds = 0;
+  VkDeviceAddress streamCoords = 0;
   // Every mesh's cluster group BVH nodes and DAG levels.
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
@@ -467,7 +479,7 @@ struct SceneData {
   GpuWeather weather;
   GpuClouds clouds;
 };
-static_assert(sizeof(SceneData) == 2144);
+static_assert(sizeof(SceneData) == 2184);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -668,6 +680,38 @@ struct PlacementConstants {
   float spacing = 0.0f;
 };
 static_assert(sizeof(PlacementConstants) == 120);
+
+// One slot's new cell for placement.comp's PLACEMENT_STREAM variant.
+struct StreamUpdate {
+  uint32_t ringStart; // the slot's first ring index
+  uint32_t record;    // the slot's first streamed record
+  int32_t cellX = 0;
+  int32_t cellZ = 0;
+};
+static_assert(sizeof(StreamUpdate) == 16);
+
+// Must match the push constants in placement.comp (PLACEMENT_STREAM).
+struct StreamConstants {
+  VkDeviceAddress heights = 0;
+  VkDeviceAddress layers = 0;
+  VkDeviceAddress points = 0;
+  VkDeviceAddress prototypes = 0;
+  VkDeviceAddress bounds = 0;
+  VkDeviceAddress updates = 0;
+  VkDeviceAddress thresholds = 0;
+  VkDeviceAddress coords = 0;
+  VkDeviceAddress instances = 0;
+  VkDeviceAddress cells = 0;
+  PlacementField field;
+  uint32_t seed = 0;
+  uint32_t staticCount = 0; // the first ring id's index in the placed table
+  uint32_t gridCells = 0;   // the first streamed record's index in the cells
+  float minHeight = 0.0f;
+  float heightScale = 0.0f;
+  float spacing = 0.0f;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(StreamConstants) == 128);
 
 // Must match the push constants in tlas_fill.comp.
 struct TlasFillConstants {
@@ -905,6 +949,9 @@ struct FrameData {
   Buffer drawCountReadback;
   // GpuWeather::history: kWeatherHistoryCapacity WeatherHistorySamples.
   Buffer weatherHistory;
+  // The streamed slots to update this frame (StreamUpdate), CPU-written;
+  // per frame so the CPU never overwrites a list an earlier frame still reads.
+  Buffer streamUpdates;
 };
 
 // The NVIDIA driver leaks a few KB during device creation and on the first

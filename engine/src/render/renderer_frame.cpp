@@ -204,7 +204,7 @@ void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint
                           nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
                      &constants);
-  const uint32_t threads = placementGrid.columns * placementGrid.rows +
+  const uint32_t threads = placementGrid.columns * placementGrid.rows + stream.recordCount +
                            (static_cast<uint32_t>(instances.size()) + 63) / 64;
   vkCmdDispatch(cmd, std::max(1u, (threads + 63) / 64), 1, 1);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -781,6 +781,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.prototypes = impl_->prototypeTable.address;
   scene.prototypeMeshes = impl_->prototypeMeshTable.address;
   scene.placedCount = impl_->placedCount;
+  scene.ringCount = impl_->stream.ringCount;
+  scene.streamRecordCount = impl_->stream.recordCount;
+  scene.streamLayers = impl_->stream.layerTable.address;
+  scene.streamThresholds = impl_->stream.thresholds.address;
+  scene.streamCoords = impl_->stream.coords.address;
   scene.cellDrawDistance = impl_->cellDrawDistance;
   scene.cellMargin = impl_->cellMargin;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
@@ -801,6 +806,16 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
+
+  // Streamed slots whose cell changed. Debug places them on their own and
+  // checks them before the frame; Release records them into the frame.
+  const uint32_t streamUpdates = impl_->planStreamUpdates(camera.position, frame);
+  if (kEnableValidation && streamUpdates > 0) {
+    impl_->submitNow([&](VkCommandBuffer upload) {
+      impl_->recordStreamUpdate(upload, frame, streamUpdates);
+    });
+    impl_->checkStreamUpdate(frame, streamUpdates);
+  }
 
   VkCommandBuffer cmd = frame.commandBuffer;
   check(vkResetCommandBuffer(cmd, 0), "vkResetCommandBuffer");
@@ -840,6 +855,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->resetDrawCounters(cmd);
   impl_->selectTerrain(cmd, frame);
   endPass("terrain select");
+  if (impl_->stream.active()) {
+    if (!kEnableValidation) {
+      impl_->recordStreamUpdate(cmd, frame, streamUpdates);
+    }
+    endPass("stream");
+  }
   impl_->cullCells(cmd, frame, 0);
   endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);

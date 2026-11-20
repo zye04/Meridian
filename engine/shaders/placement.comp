@@ -8,13 +8,17 @@
 // of the grid, layers in order inside it. Two variants:
 //   PLACEMENT_COUNT: kept points per (cell, layer) into counts;
 //   PLACEMENT_WRITE: after scan.comp turned the counts into offsets, the
-//     instances in (cell, layer, pattern point) order and the cell table.
+//     instances in (cell, layer, pattern point) order and the cell table;
+//   PLACEMENT_STREAM: per frame, one workgroup per (streamed slot being
+//     updated, streamed layer): the kept points of that slot's new cell into
+//     the run's fixed range of the ring, their dither thresholds, and the
+//     run's cell record with its coordinates.
 // Keep/reject mirrors evaluatePoint (placement.cpp) in integer math; the
 // order comes from the offsets, never from atomics, so the table is
 // deterministic.
 
-#if defined(PLACEMENT_COUNT) == defined(PLACEMENT_WRITE)
-#error define one of PLACEMENT_COUNT and PLACEMENT_WRITE
+#if defined(PLACEMENT_COUNT) + defined(PLACEMENT_WRITE) + defined(PLACEMENT_STREAM) != 1
+#error define one of PLACEMENT_COUNT, PLACEMENT_WRITE and PLACEMENT_STREAM
 #endif
 
 layout(local_size_x = 64) in;
@@ -50,6 +54,50 @@ layout(buffer_reference, std430) readonly buffer PrototypePicks {
 layout(buffer_reference, std430) readonly buffer PrototypeBounds {
     vec4 bounds[];
 };
+
+#ifdef PLACEMENT_STREAM
+// Must match StreamUpdate in gpu_types.h: one slot's new cell. ringStart:
+// the slot's first ring index; record: the slot's first streamed record
+// (one per streamed layer, consecutive).
+struct StreamUpdate {
+    uint ringStart;
+    uint record;
+    uint cellX;
+    uint cellZ;
+};
+layout(buffer_reference, std430) readonly buffer StreamUpdates {
+    StreamUpdate updates[];
+};
+layout(buffer_reference, std430) buffer StreamThresholds {
+    uint thresholds[];
+};
+layout(buffer_reference, std430) buffer StreamCoords {
+    ivec2 coords[];
+};
+
+// Must match StreamConstants in gpu_types.h.
+layout(push_constant) uniform PlacementConstants {
+    HeightWords heights;
+    PlacementLayers layers;
+    PatternPoints points;
+    PrototypePicks prototypes;
+    PrototypeBounds bounds;
+    StreamUpdates updates;
+    StreamThresholds thresholds;
+    StreamCoords coords;
+    PlacedInstanceBuffer instances;
+    CellBuffer cells;
+    PlacementField field;
+    uint seed;
+    // The first ring id's index in the placed table, and the streamed
+    // records' first index in the cell table.
+    uint staticCount;
+    uint gridCells;
+    float minHeight;
+    float heightScale;
+    float spacing;
+} pc;
+#else
 layout(buffer_reference, std430) buffer PlacementCounts {
     uint counts[];
 };
@@ -75,6 +123,7 @@ layout(push_constant) uniform PlacementConstants {
     float heightScale;
     float spacing;
 } pc;
+#endif
 
 int heightSample(uint i, uint j) {
     uint k = j * pc.field.width + i;
@@ -172,8 +221,101 @@ PlacedInstance placeInstance(PlacementLayer layer, uint cellHash, uint point, iv
     instance.prototype = pc.prototypes.picks[pick].y;
     return instance;
 }
+
+// The kept points of one cell and layer in pattern order, from placed table
+// index `first`; returns how many. Workgroup-uniform. tag: the streamed
+// layer index of a ring run's thresholds.
+uint placeRun(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, uint first,
+              uint tag, inout float minY, inout float maxY) {
+    uint thread = gl_LocalInvocationID.x;
+    uint next = first;
+    for (uint base = 0u; base < layer.pointCount; base += 64u) {
+        uint point = base + thread;
+        ivec2 p;
+        uint mask;
+        bool keep = point < layer.pointCount &&
+                    evaluate(layer, layerSeed, cell, cellHash, point, p, mask);
+        keptFlags[thread] = keep ? 1u : 0u;
+        barrier();
+        uint before = 0u;
+        uint total = 0u;
+        for (uint t = 0u; t < 64u; ++t) {
+            before += t < thread ? keptFlags[t] : 0u;
+            total += keptFlags[t];
+        }
+        if (keep) {
+            PlacedInstance instance = placeInstance(layer, cellHash, point, p, mask);
+            pc.instances.placed[next + before] = instance;
+#ifdef PLACEMENT_STREAM
+            pc.thresholds.thresholds[next + before - pc.staticCount] =
+                pc.points.points[layer.firstPoint + point].y | (tag << 16u);
+#endif
+            vec4 sphere = pc.bounds.bounds[instance.prototype];
+            float scale = placedScale(instance);
+            float centerY = instance.positionY +
+                            scale * rotateByQuaternion(placedRotation(instance), sphere.xyz).y;
+            minY = min(minY, centerY - scale * sphere.w);
+            maxY = max(maxY, centerY + scale * sphere.w);
+#ifdef PLACEMENT_STREAM
+            // A fading instance shrinks toward its pivot, which can lie
+            // outside its sphere.
+            minY = min(minY, instance.positionY);
+            maxY = max(maxY, instance.positionY);
+#endif
+        }
+        next += total;
+        barrier();
+    }
+    return next - first;
+}
+
+// The workgroup's height range, valid in thread 0.
+void reduceHeights(inout float minY, inout float maxY) {
+    uint thread = gl_LocalInvocationID.x;
+    lowest[thread] = minY;
+    highest[thread] = maxY;
+    barrier();
+    if (thread == 0u) {
+        for (uint t = 1u; t < 64u; ++t) {
+            minY = min(minY, lowest[t]);
+            maxY = max(maxY, highest[t]);
+        }
+    }
+}
 #endif
 
+#ifdef PLACEMENT_STREAM
+void main() {
+    StreamUpdate update = pc.updates.updates[gl_WorkGroupID.x];
+    uint k = gl_WorkGroupID.y;
+    ivec2 cell = ivec2(int(update.cellX), int(update.cellZ));
+    PlacementLayer layer = pc.layers.layers[k];
+    uint runOffset = 0u;
+    for (uint j = 0u; j < k; ++j) {
+        runOffset += pc.layers.layers[j].pointCount;
+    }
+    uint first = pc.staticCount + update.ringStart + runOffset;
+    float minY = 3.4e38;
+    float maxY = -3.4e38;
+    uint kept = 0u;
+    // Cells outside placement's range are empty, as in evaluatePoint.
+    if (placementCellInRange(cell)) {
+        uint layerSeed = placementLayerSeed(layer.id, pc.seed);
+        kept = placeRun(layer, layerSeed, cell, placementCellHash(cell, layerSeed), first, k,
+                        minY, maxY);
+    }
+    reduceHeights(minY, maxY);
+    if (gl_LocalInvocationID.x == 0u) {
+        Cell result;
+        result.firstInstance = first;
+        result.instanceCount = kept;
+        result.minY = kept > 0u ? minY : 0.0;
+        result.maxY = kept > 0u ? maxY : 0.0;
+        pc.cells.cells[pc.gridCells + update.record + k] = result;
+        pc.coords.coords[update.record + k] = cell;
+    }
+}
+#else
 void main() {
     uint thread = gl_LocalInvocationID.x;
     ivec2 cell = ivec2(pc.gridFirstX, pc.gridFirstZ) + ivec2(gl_WorkGroupID.xy);
@@ -204,45 +346,13 @@ void main() {
         }
         barrier();
 #else
-        uint next = pc.counts.counts[cellIndex * pc.layerCount + l];
-        for (uint base = 0u; base < layer.pointCount; base += 64u) {
-            uint point = base + thread;
-            ivec2 p;
-            uint mask;
-            bool keep = point < layer.pointCount &&
-                        evaluate(layer, layerSeed, cell, cellHash, point, p, mask);
-            keptFlags[thread] = keep ? 1u : 0u;
-            barrier();
-            uint before = 0u;
-            uint total = 0u;
-            for (uint t = 0u; t < 64u; ++t) {
-                before += t < thread ? keptFlags[t] : 0u;
-                total += keptFlags[t];
-            }
-            if (keep) {
-                PlacedInstance instance = placeInstance(layer, cellHash, point, p, mask);
-                pc.instances.placed[next + before] = instance;
-                vec4 sphere = pc.bounds.bounds[instance.prototype];
-                float scale = placedScale(instance);
-                float centerY = instance.positionY +
-                                scale * rotateByQuaternion(placedRotation(instance), sphere.xyz).y;
-                minY = min(minY, centerY - scale * sphere.w);
-                maxY = max(maxY, centerY + scale * sphere.w);
-            }
-            next += total;
-            barrier();
-        }
+        placeRun(layer, layerSeed, cell, cellHash, pc.counts.counts[cellIndex * pc.layerCount + l],
+                 0u, minY, maxY);
 #endif
     }
 #ifndef PLACEMENT_COUNT
-    lowest[thread] = minY;
-    highest[thread] = maxY;
-    barrier();
+    reduceHeights(minY, maxY);
     if (thread == 0u) {
-        for (uint t = 1u; t < 64u; ++t) {
-            minY = min(minY, lowest[t]);
-            maxY = max(maxY, highest[t]);
-        }
         Cell result;
         result.firstInstance = pc.counts.counts[cellIndex * pc.layerCount];
         result.instanceCount =
@@ -253,3 +363,4 @@ void main() {
     }
 #endif
 }
+#endif

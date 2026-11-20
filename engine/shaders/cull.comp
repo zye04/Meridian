@@ -55,6 +55,13 @@ void main() {
     uint id = chunk.x + gl_LocalInvocationID.x;
     SceneBuffer scene = cull.scene;
     LoadedInstance instance = loadInstance(scene, id);
+    if (instance.placed && instance.scale <= 0.0) {
+        // Thinned out (streamed): not visible, and not kept visible.
+        if (cull.phase == 1u) {
+            cull.visibility.visible[id] = 0u;
+        }
+        return;
+    }
     vec3 center;
     float radius;
     float maxDistance = 0.0;

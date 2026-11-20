@@ -275,3 +275,58 @@ TEST_CASE("the placement grid covers the crop with whole cells") {
   CHECK(grid.columns == 236);
   CHECK(grid.rows == 236);
 }
+
+TEST_CASE("streamKeepFraction thins by distance squared and fades out") {
+  CHECK(streamKeepFraction(0.0f, 40.0f, 200.0f) == 1.0f);
+  CHECK(streamKeepFraction(40.0f, 40.0f, 200.0f) == 1.0f);
+  CHECK(streamKeepFraction(80.0f, 40.0f, 200.0f) == doctest::Approx(0.25f));
+  CHECK(streamKeepFraction(200.0f, 40.0f, 200.0f) == 0.0f);
+  CHECK(streamKeepFraction(500.0f, 40.0f, 200.0f) == 0.0f);
+  const float inFade = streamKeepFraction(180.0f, 40.0f, 200.0f);
+  CHECK(inFade == doctest::Approx((40.0f / 180.0f) * (40.0f / 180.0f) * 0.5f));
+}
+
+TEST_CASE("streamFade is zero at the threshold and monotonic") {
+  CHECK(streamFade(0.3f, 0.3f) == 0.0f);
+  CHECK(streamFade(0.2f, 0.5f) == 0.0f);
+  CHECK(streamFade(1.0f, 0.0f) == 1.0f);
+  float last = 0.0f;
+  for (int i = 0; i <= 100; ++i) {
+    const float f = streamFade(0.5f + 0.001f * i, 0.5f);
+    CHECK(f >= last);
+    last = f;
+  }
+}
+
+TEST_CASE("streamWindowCells") {
+  CHECK(streamWindowCells(0.0f) == 1);
+  CHECK(streamWindowCells(1.0f) == 3);
+  CHECK(streamWindowCells(64.0f) == 3);
+  CHECK(streamWindowCells(65.0f) == 5);
+  CHECK(streamWindowCells(200.0f) == 9);
+}
+
+TEST_CASE("streamSlot is a floor mod") {
+  CHECK(streamSlot(0, 0, 5) == std::pair<uint32_t, uint32_t>{0, 0});
+  CHECK(streamSlot(7, 4, 5) == std::pair<uint32_t, uint32_t>{2, 4});
+  CHECK(streamSlot(-1, -5, 5) == std::pair<uint32_t, uint32_t>{4, 0});
+  CHECK(streamSlot(-6, -7, 5) == std::pair<uint32_t, uint32_t>{4, 3});
+}
+
+TEST_CASE("streamSlotCell inverts streamSlot over the window") {
+  for (uint32_t window : {1u, 3u, 9u, 11u}) {
+    const int32_t half = static_cast<int32_t>(window / 2);
+    for (int32_t cx : {0, 3, -1, -17, 100}) {
+      for (int32_t cz : {0, -4, 29, -128}) {
+        for (int32_t x = cx - half; x <= cx + half; ++x) {
+          for (int32_t z = cz - half; z <= cz + half; ++z) {
+            const auto [sx, sz] = streamSlot(x, z, window);
+            const auto cell = streamSlotCell(sx, sz, cx, cz, window);
+            CHECK(cell.first == x);
+            CHECK(cell.second == z);
+          }
+        }
+      }
+    }
+  }
+}

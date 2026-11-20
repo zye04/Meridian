@@ -10,7 +10,10 @@
 // frame's depth pyramid and records cell visibility. A cell's box is its
 // square grown by the instances' horizontal reach (cellMargin) and their
 // height range. Survivors emit their instances as chunks of up to 64 ids;
-// threads past the cells emit the hand-placed instances the same way.
+// the streamed (slot, layer) records follow the grid's cells, their box from
+// their cell coordinates and their heights widened by the terrain detail
+// the instances are lifted by; threads past them emit the hand-placed
+// instances the same way.
 
 layout(local_size_x = 64) in;
 
@@ -28,7 +31,8 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
 void main() {
     SceneBuffer scene = cull.scene;
     uint index = gl_GlobalInvocationID.x;
-    uint cellCount = scene.cellGridSize.x * scene.cellGridSize.y;
+    uint gridCells = scene.cellGridSize.x * scene.cellGridSize.y;
+    uint cellCount = gridCells + scene.streamRecordCount;
     if (index >= cellCount) {
         uint first = (index - cellCount) * 64u;
         // Phase 0 is skipped without occlusion culling (see cull.comp).
@@ -41,17 +45,26 @@ void main() {
     if (cell.instanceCount == 0u) {
         return;
     }
-    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize - scene.cellMargin;
+    ivec2 coordinates;
+    float lift = 0.0;
+    if (index < gridCells) {
+        coordinates = ivec2(uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x)) +
+                      scene.cellGrid;
+    } else {
+        coordinates = scene.streamCoords.coords[index - gridCells];
+        lift = kTerrainDetailAmplitude;
+    }
+    vec2 lo = vec2(coordinates) * kCellSize - scene.cellMargin;
     vec2 hi = lo + kCellSize + 2.0 * scene.cellMargin;
-    vec3 boxLo = vec3(lo.x, cell.minY, lo.y) - scene.cameraPosition;
-    vec3 boxHi = vec3(hi.x, cell.maxY, hi.y) - scene.cameraPosition;
+    vec3 boxLo = vec3(lo.x, cell.minY - lift, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(hi.x, cell.maxY + lift, hi.y) - scene.cameraPosition;
     bool visible = displayedBoxInFrustum(scene, boxLo, boxHi) &&
                    (scene.cellDrawDistance == 0.0 ||
                     length(max(max(boxLo, -boxHi), vec3(0.0))) <= scene.cellDrawDistance);
 
-    // Cell bits follow the instance ids' in the visibility buffer.
-    uint visibilityIndex = kPlacedBase + scene.placedCount + index;
+    // Cell bits follow the instance ids' (static and ring) in the visibility
+    // buffer.
+    uint visibilityIndex = kPlacedBase + scene.placedCount + scene.ringCount + index;
     bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
     if (cull.phase == 0u) {
         if (cull.occlusion != 0u && wasVisible && visible) {

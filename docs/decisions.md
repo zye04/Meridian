@@ -2666,3 +2666,65 @@ No visible change on the fair and broken views:
   +0.194, +0.143 on 2 positions). Single positions spread by up to 0.1
   either way with the local cloud pattern (the third position's broken
   map is 0.06 brighter even at 40.5 deg, where L doesn't apply).
+
+## Streamed placement: ground cover around the camera (M3, 2026-11-20)
+
+The user rejected the procedural mesh-shader grass blades ("horrendous")
+and set the target to the Chlorophyll Engine meadow frame
+(`assets/reference/chlorophyll/flower-meadow-cumulus.png`): dense,
+knee-high scanned grass tufts with flowers. Static placement over the
+whole crop can't hold that: 4-6 clumps/m^2 over ~100 km^2 of grassland is
+400-600M instances, against the 24-bit id space (16.7M) and the 1.5M
+budget.
+
+Practice:
+- **Horizon Zero Dawn** (van Muijden, "GPU-Based Procedural Placement in
+  Horizon Zero Dawn", GDC 2017): placement in compute, on tiles around
+  the player, from density maps and a dither pattern (density = keep the
+  pattern points under the threshold), regenerated as the player moves.
+  Meridian's static placement already is this, applied to the whole crop
+  at once.
+- **Ghost of Tsushima** (Wohllaib, "Procedural Grass in Ghost of
+  Tsushima", GDC 2021): grass on a tile grid around the camera, generated
+  every frame, thinned with distance and shrinking blades before they are
+  removed so nothing pops.
+- **UE5 PCG runtime generation** (Epic docs, "Using PCG Generation
+  Modes"): partitioned grids generated within a generation radius
+  around generation sources, cleaned up past radius x a cleanup
+  multiplier, one radius per grid size.
+- **Chlorophyll Engine**: nothing public on its ground cover beyond the
+  video.
+
+Choice: any placement layer can be **streamed**
+(`PlacementLayer::streamFullDensity > 0`). It is placed by the same
+integer rules, dither patterns and hash as static layers. The difference
+is that it covers a W x W window of 64 m cells around the camera, written
+into a fixed ring of instance slots after the static ones. Only cells
+that enter the window are regenerated. Inside the window, the instances
+thin with distance: the dither threshold against a keep fraction (full
+density, then 1/d^2), shrinking before they go (Ghost of Tsushima).
+Being a prefix of a progressive pattern, a thinned set stays evenly
+spread. Static and streamed instances share one id space and one cull
+and draw path. Debug builds check every regenerated cell against
+`evaluatePoint`. Streamed instances are not in the TLAS. They receive
+sun shadows, but cast only screen-space contact shadows. Whether they
+should be in the TLAS is open (plan task 4). Plan:
+`docs/superpowers/plans/2026-11-20-streamed-placement.md`.
+
+- **Ground following:** near the camera the raster terrain adds up to
+  0.3 m of detail noise that placement (on the bilinear heightfield)
+  doesn't see. Short plants sank under it, and only their TLAS shadow
+  showed: the "black clover". Streamed instances are lifted by the same
+  displacement in `loadInstance` (`terrain_detail.glsl`).
+- **Pattern cost:** best-candidate dither patterns take 8 i candidates
+  for point i, which is quadratic. A 0.45 m footprint (~20k points per
+  cell) took 90 s in Release. The candidate count is now capped at 512.
+  Later points of dense patterns are slightly less even, and the static
+  hashes changed.
+- **First setup** (Release 2560x1440, open view `1119 1356 -431 -1.55
+  -0.02`): grass clumps at 0.45 m footprint (full density to 15 m, gone
+  at 60 m), hawkbit drifts at 0.7 m (20/70 m), clover at 0.8 m (12/40
+  m). Window 5x5, ring 874,650 slots, ~221k live. The stream pass costs
+  0.00 ms when no cell changes; scene early 2.28 ms, total 7.70 ms
+  (DLSS RR 4.68 of it). The density is still well under
+  the target; a tuning pass follows.

@@ -236,6 +236,9 @@ uint32_t placementHash(uint32_t a, uint32_t b, uint32_t c) {
 // threshold.
 DitherPattern makeDitherPattern(uint32_t seed, uint32_t count) {
   constexpr uint32_t kCandidatesPerPoint = 8;
+  // Best-candidate sampling is quadratic in the point count; past this the
+  // dense (streamed) layers' patterns would take minutes to build.
+  constexpr uint32_t kMaxCandidates = 512;
   DitherPattern pattern;
   pattern.points.reserve(count);
   pattern.thresholds.reserve(count);
@@ -277,7 +280,7 @@ DitherPattern makeDitherPattern(uint32_t seed, uint32_t count) {
   for (uint32_t i = 0; i < count; ++i) {
     uint32_t chosen = 0;
     int64_t chosenDistance = -1;
-    for (uint32_t k = 0; k <= kCandidatesPerPoint * i; ++k) {
+    for (uint32_t k = 0; k <= std::min(kCandidatesPerPoint * i, kMaxCandidates); ++k) {
       const uint32_t candidate = placementHash(seed, i, k);
       const int64_t d = nearest2(candidate);
       if (d > chosenDistance) {
@@ -508,6 +511,50 @@ DecodedInstance decodePlacedInstance(const PlacedInstance &instance) {
   out.scale = halfToFloat(instance.scaleHalf);
   out.prototype = instance.prototype;
   return out;
+}
+
+namespace {
+
+float smoothstep01(float a, float b, float x) {
+  const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+int32_t floorMod(int32_t a, int32_t m) { return ((a % m) + m) % m; }
+
+} // namespace
+
+float streamKeepFraction(float distance, float fullDensity, float maxDistance) {
+  if (distance >= maxDistance) {
+    return 0.0f;
+  }
+  const float ratio = distance <= fullDensity ? 1.0f : fullDensity / distance;
+  const float thin = distance <= fullDensity ? 1.0f : ratio * ratio;
+  return thin * (1.0f - smoothstep01(0.8f * maxDistance, maxDistance, distance));
+}
+
+float streamFade(float keepFraction, float threshold) {
+  return smoothstep01(0.0f, 0.15f, keepFraction - threshold);
+}
+
+uint32_t streamWindowCells(float radius) {
+  return 2u * static_cast<uint32_t>(std::ceil(radius / kCellSize)) + 1u;
+}
+
+std::pair<uint32_t, uint32_t> streamSlot(int32_t cellX, int32_t cellZ, uint32_t window) {
+  const auto w = static_cast<int32_t>(window);
+  return {static_cast<uint32_t>(floorMod(cellX, w)), static_cast<uint32_t>(floorMod(cellZ, w))};
+}
+
+std::pair<int32_t, int32_t> streamSlotCell(uint32_t slotX, uint32_t slotZ, int32_t cameraCellX,
+                                           int32_t cameraCellZ, uint32_t window) {
+  const auto w = static_cast<int32_t>(window);
+  const int32_t half = w / 2;
+  auto cell = [&](uint32_t slot, int32_t camera) {
+    const int32_t low = camera - half;
+    return low + floorMod(static_cast<int32_t>(slot) - low, w);
+  };
+  return {cell(slotX, cameraCellX), cell(slotZ, cameraCellZ)};
 }
 
 } // namespace meridian

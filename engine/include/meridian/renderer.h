@@ -229,6 +229,13 @@ public:
   void setPlacement(std::span<const Prototype> prototypes,
                     std::span<const PlacementLayer> layers, uint32_t seed);
   uint32_t placedInstanceCount() const;
+  // Streamed placement (PlacementLayer::streamFullDensity): its layers,
+  // window (cells per side), ring size (instances) and the instances live
+  // in all slots. Reads the slot records back; for captures, not per frame.
+  struct StreamStats {
+    uint32_t layers = 0, window = 0, ringInstances = 0, live = 0;
+  };
+  StreamStats streamStats() const;
 
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
   MeshId uploadMesh(const MeshData &mesh, MaterialId material);

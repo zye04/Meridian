@@ -422,6 +422,25 @@ struct Clouds {
     float pad1;
 };
 
+#include "terrain_detail.glsl"
+#include "placement.glsl"
+
+// Streamed placement (renderer_placement.cpp): per streamed layer its
+// (full density distance, draw distance), per ring instance its dither
+// threshold | streamed layer << 16, and per streamed cell record its cell
+// coordinates.
+layout(buffer_reference, std430) readonly buffer StreamLayerBuffer {
+    vec2 layers[];
+};
+
+layout(buffer_reference, std430) readonly buffer StreamThresholdBuffer {
+    uint thresholds[];
+};
+
+layout(buffer_reference, std430) readonly buffer StreamCoordBuffer {
+    ivec2 coords[];
+};
+
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // All view matrices here leave out the camera translation: they take
     // positions relative to the camera (world - cameraPosition, or
@@ -485,12 +504,24 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uvec2 cellGridSize;
     PrototypeBuffer prototypes;
     PrototypeMeshBuffer prototypeMeshes;
+    // Static placed instances (ids kPlacedBase + [0, placedCount)); the
+    // streamed ring follows them.
     uint placedCount;
     // Cells: the largest layer draw distance (0: some layer has none) and
     // how far instances' bounds reach past their cell horizontally.
     float cellDrawDistance;
     float cellMargin;
     uint pad3;
+    // The ring's instances and the streamed cell records (which follow the
+    // grid's cells in `cells`). Visibility: ids (static + ring), then the
+    // grid cells and the streamed records.
+    uint ringCount;
+    uint streamRecordCount;
+    uint pad4;
+    uint pad5;
+    StreamLayerBuffer streamLayers;
+    StreamThresholdBuffer streamThresholds;
+    StreamCoordBuffer streamCoords;
     ClusterNodeBuffer clusterNodes;
     ClusterLevelBuffer clusterLevels;
     // Effects (renderer.h): parallax depth multiplier (0 = off), parallax
@@ -527,14 +558,40 @@ struct LoadedInstance {
     bool placed;
 };
 
+// A streamed instance (a ring id) thins out with distance and shrinks to
+// nothing before it is dropped (streamFade), and sits on the displayed
+// terrain: the raster terrain adds detail noise near the camera, which
+// short plants would sink under. Every user of loadInstance sees the same
+// scale and position, so culling, drawing and motion vectors agree.
+void applyStreaming(SceneBuffer scene, uint ring, inout LoadedInstance loaded) {
+    uint tag = scene.streamThresholds.thresholds[ring];
+    vec2 layer = scene.streamLayers.layers[tag >> 16u];
+    vec3 position = loaded.transform[3].xyz;
+    float distanceToCamera = length(position - scene.cameraPosition);
+    float keep = streamKeepFraction(distanceToCamera, layer.x, layer.y);
+    float factor = streamFade(keep, float(tag & 0xFFFFu) / 65536.0);
+    loaded.transform[0].xyz *= factor;
+    loaded.transform[1].xyz *= factor;
+    loaded.transform[2].xyz *= factor;
+    loaded.scale *= factor;
+    float weight = factor > 0.0 ? terrainDetailWeight(scene.terrain, distanceToCamera) : 0.0;
+    if (weight > 0.0) {
+        loaded.transform[3].y += weight * terrainDetail(position.xz).x;
+    }
+}
+
 LoadedInstance loadInstance(SceneBuffer scene, uint id) {
     LoadedInstance loaded;
     if (id >= kPlacedBase) {
-        PlacedInstance placed = scene.placedInstances.placed[id - kPlacedBase];
+        uint index = id - kPlacedBase;
+        PlacedInstance placed = scene.placedInstances.placed[index];
         loaded.transform = placedTransform(placed);
         loaded.scale = placedScale(placed);
         loaded.meshOrPrototype = placed.prototype;
         loaded.placed = true;
+        if (index >= scene.placedCount) {
+            applyStreaming(scene, index - scene.placedCount, loaded);
+        }
         return loaded;
     }
     InstanceData instance = scene.instances.instances[id];

@@ -6,6 +6,7 @@
 #include "gpu_types.h"
 #include "vulkan_util.h"
 
+#include <meridian/placement.h>
 #include <meridian/renderer.h>
 #include <meridian/upscaler.h>
 #include <meridian/upscaler_vk.h>
@@ -209,7 +210,8 @@ struct Renderer::Impl {
   Buffer retestClusters;
   Buffer drawCounters;
   // Visible at the end of last frame's culling (1) or not: per instance id
-  // (kPlacedBase + placedCount of them), then per placement cell.
+  // (kPlacedBase + placedCount + the ring's of them), then per placement
+  // cell and streamed record.
   Buffer visibility;
 
   // Terrain (renderer_terrain.cpp): the heightfield, its normal map (both
@@ -234,7 +236,36 @@ struct Renderer::Impl {
   Buffer placedInstances;
   Buffer cells;
   PlacementGrid placementGrid{};
+  // The static placed instances (ids kPlacedBase + [0, placedCount), the
+  // ones in the TLAS); the streamed ring's ids follow.
   uint32_t placedCount = 0;
+  // Streamed placement (renderer_placement.cpp), while a layer is streamed:
+  // the placement inputs setPlacement uploaded (kept for the per-frame
+  // updates), the ring's thresholds, the records' coordinates and the cells
+  // the slots hold.
+  struct Stream {
+    Buffer heights, layers, points, picks, bounds;
+    Buffer layerTable, thresholds, coords;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    uint32_t layerCount = 0;
+    uint32_t window = 0;
+    // Ring instances per slot (the layers' pattern sizes, summed) and in all.
+    uint32_t runStride = 0;
+    uint32_t ringCount = 0;
+    // Streamed records after the grid's cells in `cells`, and the grid's.
+    uint32_t recordCount = 0;
+    uint32_t gridCells = 0;
+    uint32_t seed = 0;
+    // The cell each slot holds; INT32_MIN: none yet.
+    std::vector<std::array<int32_t, 2>> held;
+    // Debug check inputs: the streamed layers, their patterns, the
+    // prototype spheres.
+    std::vector<PlacementLayer> layerList;
+    std::vector<DitherPattern> patterns;
+    std::vector<std::array<float, 4>> spheres;
+    bool active() const { return layerCount > 0; }
+  } stream;
   // PrototypeInfo per prototype, the mesh lists they index, and their BLAS
   // (one per prototype, a geometry per mesh, compacted).
   Buffer prototypeTable;
@@ -436,6 +467,15 @@ struct Renderer::Impl {
                        std::span<const PlacementLayer> layers,
                        const std::vector<std::array<float, 4>> &bounds);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
+  // Streamed placement: writes the slots whose cell changed for `camera`
+  // into frame.streamUpdates (all of them after setPlacement) and returns
+  // how many; recordStreamUpdate then places them. Debug runs the update on
+  // its own before the frame and checks it against evaluatePoint.
+  uint32_t planStreamUpdates(const Vec3 &camera, FrameData &frame);
+  void recordStreamUpdate(VkCommandBuffer cmd, const FrameData &frame, uint32_t updates);
+  void checkStreamUpdate(const FrameData &frame, uint32_t updates);
+  void destroyStreamBuffers(Stream &stream);
+  void destroyStream();
   void resetDrawCounters(VkCommandBuffer cmd);
   CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;
   void cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);

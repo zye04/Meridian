@@ -487,7 +487,9 @@ void Renderer::Impl::createVisibility() {
   destroyBuffer(visibility);
   const uint32_t cellCount = placementGrid.columns * placementGrid.rows;
   visibility = createBuffer(
-      (VkDeviceSize{kPlacedBase} + placedCount + cellCount) * sizeof(uint32_t),
+      (VkDeviceSize{kPlacedBase} + placedCount + stream.ringCount + cellCount +
+       stream.recordCount) *
+          sizeof(uint32_t),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
@@ -1402,6 +1404,7 @@ Renderer::~Renderer() {
   vkDestroyCommandPool(dev, impl_->uploadPool, nullptr);
   impl_->destroyAccelerationStructure(impl_->tlas);
   impl_->destroyBuffer(impl_->tlasScratch);
+  impl_->destroyStream();
   for (FrameData &frame : impl_->frames) {
     impl_->destroyBuffer(frame.instanceBuffer);
     impl_->destroyBuffer(frame.instanceStaging);

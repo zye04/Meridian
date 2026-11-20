@@ -47,7 +47,22 @@ struct PlacementLayer {
   Rotation rotation;
   float sinkDepth;
   float maxDrawDistance = 0.0f;
+  // 0 = static (placed over the whole crop at load); > 0 = streamed (placed
+  // around the camera; full density within this distance, then thinned). A
+  // streamed layer needs maxDrawDistance > 0.
+  float streamFullDensity = 0.0f;
 };
+
+// Streamed placement: fraction of a layer's points kept at distance d.
+float streamKeepFraction(float distance, float fullDensity, float maxDistance);
+// Scale factor of a kept point (threshold = dither threshold / 65536).
+float streamFade(float keepFraction, float threshold);
+// Cells per side of the window around the camera.
+uint32_t streamWindowCells(float radius);
+// Ring slot of a cell, and the window cell a slot holds.
+std::pair<uint32_t, uint32_t> streamSlot(int32_t cellX, int32_t cellZ, uint32_t window);
+std::pair<int32_t, int32_t> streamSlotCell(uint32_t slotX, uint32_t slotZ, int32_t cameraCellX,
+                                           int32_t cameraCellZ, uint32_t window);
 
 // Points over one tile, ranked progressively: any prefix of the threshold
 // order is evenly spread, so raising the density adds points evenly.
