@@ -1,6 +1,11 @@
 # Motion Clarity Implementation Plan
 
-**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 3.1.
+**Status:** paused 2026-11-20 (usage limit): tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 3.1. Next steps:
+- Track 1: Task 1.3 is reviewed and approved on branch `motion-dlss` (29d1383, worktree `../meridian-motion-dlss`; WIP head has review fixes 1-2). To finish: drop the InPreExposure fix (ruled out: CPU-only input, and the 310.9.16 guide says exposure affects only presets J/K, default is M), then add backlog rows "DLSS InPreExposure needs CPU-side pre-exposure" and "Upscaler history reset on camera cuts (no hook)". Squash into one commit, set this Status, then merge protocol. Then 1.4 -> 1.5.
+- Track 1, user decision pending: DLAA default preset M passes every quality gate (fwd5 0.956, SSIM 0.993), but `aa` costs 2.36 ms at 1440p vs the 1.0 ms gate. Options: accept, Quality mode (fwd5 0.82, 1.25 ms), or TAA v2 as default (fwd5 0.94, 0.17 ms).
+- Track 2: done.
+- Track 3: 3.1 done; 3.2a waits for 1.4, then 3.2b.
+- After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
