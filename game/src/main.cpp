@@ -308,6 +308,8 @@ struct Options {
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::pair<float, float>> cameraAngularVelocity;
   std::optional<std::filesystem::path> capturePath;
+  // Diagnostic: one model (assets/-relative glTF) on the ground at (x, z).
+  std::optional<std::tuple<std::string, float, float>> asset;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
@@ -375,6 +377,10 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--render-scale takes a value in (0, 1]");
       }
       options.renderScale = scale;
+    } else if (arg == "--asset") {
+      std::string path = argv[++i];
+      const float x = number(i);
+      options.asset = std::tuple{path, x, number(i)};
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--placement" && i + 1 < argc &&
@@ -467,6 +473,14 @@ int main(int argc, char **argv) {
   }
   if (auto alpha = loadModel(renderer, "AlphaBlendModeTest/AlphaBlendModeTest.gltf")) {
     addModel(renderer, *alpha, meridian::translation(ground(7.0f, -3.0f)));
+  }
+  if (options.asset) {
+    const auto &[path, x, z] = *options.asset;
+    if (auto model = loadModel(renderer, path.c_str())) {
+      const float y = terrain.heightAt(x, z);
+      std::printf("asset %s at %.2f %.2f %.2f\n", path.c_str(), x, y, z);
+      addModel(renderer, *model, meridian::translation({x, y, z}));
+    }
   }
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter);
