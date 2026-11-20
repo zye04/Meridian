@@ -33,9 +33,6 @@ flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
-./tools/fetch-sample-assets.sh ~/Downloads       # + imports the Megascans Megaplants tree_*_usd.zip and the Fab sandstone cliff (*_ue_high.zip) found there
-tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd2gltf.py in.usd out.gltf   # USD tree -> unflattened glTF
-./build/tools/cook/meridian-cook --tree in.gltf outDir --triangles N [--bark-texture dir]   # flatten to <= N tris
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
 ```
@@ -352,16 +349,9 @@ account for that.
   terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
-- Megaplants trees: `assets/source/megascans/_extract/<zip>/` (untrusted
-  archive contents, one fresh directory each), `_usd/<tree>.gltf`
-  (usd2gltf output), `<tree>/<tree>.gltf` (cooked, 4M triangles, saplings
-  1M, Bark012 bark). Their USD has no normals on most meshes (the cook computes them),
-  leftHanded winding (usd2gltf flips it), and leaf materials named
-  `TwoSided_Material` (usd2gltf marks them double-sided; the cook treats
-  double-sided materials as leaves). The Fab sandstone cliff lands in
-  `massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf` there (10.6 m
-  tall, origin at its base). The rock placement layer and the terrain
-  material's rock blend share `kRockNormalY` (renderer.h).
+- Megascans trees, the Fab cliff and their import tools:
+  `docs/assets.md`. The rock placement layer and the terrain material's
+  rock blend share `kRockNormalY` (renderer.h).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building
