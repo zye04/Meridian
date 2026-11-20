@@ -9,6 +9,9 @@ before re-researching anything.
 
 ## Working agreement
 
+- Resuming paused work: read `docs/superpowers/resume.md` first (what is
+  done, open WIP branches, next steps).
+
 - The user steers; Claude implements, verifies, and commits/pushes to `main`.
 - Commits carry **no** AI attribution trailer. One feature per commit, with
   a message that explains what changed and why.
