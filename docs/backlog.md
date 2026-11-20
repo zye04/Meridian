@@ -97,6 +97,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | TLAS build scratch (228 MiB) stays allocated | The TLAS is rebuilt only when instances change, yet its scratch is kept for the whole run | M2a Task 5 review | M2b (memory accounting) |
 | Debug startup ~95 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
 | Ground material costs ~1.1-1.4 ms on steep slopes | Budget | M1 | M5 |
+| Terrain march still costs ~5 ms at a sun near 0 degrees (scene early ~10 ms + cull clusters ~1.9 ms vs ~4.4 + 0.2 at midday): grazing rays take the full 256 steps on terrain and opaque pixels and in the per-cluster march | Sunset/sunrise frame time | sunset-fix lane, 2026-11-20 (decisions.md "Terrain sun visibility per masked cluster") | A terrain shadow-height (horizon) map around the camera, updated as the sun moves, would make it one fetch per surface |
 | Renderer constructor leaks partial Vulkan state on throw | Robustness | Known gap before the backlog | Later |
 | Frame pacing: present timing (`VK_EXT_present_timing`, fallback `VK_KHR_present_wait`/`present_id`), a refresh-locked limiter that sleeps before input (Reflex-style, `VK_NV_low_latency2`), hitch removal (pipeline compiles, uploads, TLAS rebuilds off the frame) | Smooth delivery and good 0.1%/1%/5% lows, not just average FPS; flip-metering-like behaviour | User, 2026-11-20 | After the performance overlay; research current practice and NVIDIA/Wayland support first |
 

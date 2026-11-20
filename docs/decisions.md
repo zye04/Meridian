@@ -2829,3 +2829,47 @@ uses `MERIDIAN_ASSET_DIR`), empty = no cache. Alternative rejected: a
 cheaper algorithm, which would change every placed object's identity.
 Result: Placed 10.5 s -> 63 ms Release, 58.9 s -> 128 ms Debug; placement
 hash 0x341d51799d224d3c, placement and stream checks 0 mismatches.
+
+## Terrain sun visibility per masked cluster (2026-11-20)
+
+At a sun under ~1 degree the meadow made scene early 57 ms (open ridge view
+into the sun, `1119 1356 -431 1.57 -0.02 --sun 0.9 0.0 -0.4`, Release
+2560x1440 DLSS RR; midday ~6 ms). Bisect: the terrain march off took it to
+6.7 ms, the TLAS query off left it at 55 ms, and without placement the same
+view was 5.2 ms. So the cost was the heightfield march (Terrain shadows:
+heightfield march) run by every alpha-masked fragment: grazing rays skim the
+ridges and take the full 256 steps, and masked grass overdraw paid that many
+times per pixel. The cost jumps between sun elevation 0.6 and 1.1 degrees
+(scene early 62 -> 11 ms).
+
+- **Choice:** a small alpha-masked cluster (bounding radius <= 1 m: grass,
+  flowers, leaves at fine LOD) gets its terrain visibility from
+  cluster_cull.comp, one march per drawn cluster from its bounds center
+  (lifted to the bilinear height plus the shadow bias, like an object's
+  march origin) through a point of the sun's disk fixed per cluster (a
+  hash of instance and cluster): a per-frame point would flip whole tufts
+  between lit and shadowed, a flicker the upscaler can't average like
+  per-pixel noise, so the penumbra is a stable mix of lit and shadowed
+  clusters. Blade tips and bases share the center's value (at 0.6 degrees
+  0.25 m of height is 24 m of ray run). The result rides in the
+  draw list entry's top 8 bits (0 shadowed, 1 lit, 255 = march per
+  fragment); mesh.frag multiplies the TLAS query's visibility by it. The
+  TLAS query stays per fragment. A cluster is about the size of a terrain
+  shadow's penumbra (0.53 degrees times the occluder distance, 0.9 m at
+  100 m) or smaller. Opaque surfaces (early-Z, about one march per pixel),
+  the terrain and larger masked clusters keep the per-fragment march.
+- **Rejected:** the march in mesh.mesh per cluster (32 lanes through 32
+  disk points, averaged): scene early 17 ms, 7 ms of it the mesh shader
+  waiting on the march latency (1 lane cost the same); in the cull pass
+  the same work is 1.6 ms. A terrain shadow-height (horizon) map would
+  make every surface's terrain shadow one fetch at any sun angle; it is
+  bigger work for the remaining grazing cost (backlog).
+- **Measured** (Release, 2560x1440, DLSS RR, scene early / cull clusters,
+  ms): sun elevation 0 degrees 57.81 / 0.07 -> 9.92 / 1.86, 0.6 degrees
+  61.74 -> 9.86 / 1.65, 2.9 degrees 10.44 / 0.07 -> 7.56 / 0.26, 5.7
+  degrees 7.63 -> 5.43 / 0.24; full-ground view at 0 degrees 65.33 ->
+  12.39 / 1.68; midday open view 5.93 -> 4.23 / 0.22. Images match the
+  per-fragment march (mean difference 0.28-0.30/255 at 0, 0.6 and 2.9
+  degrees). Frame-to-frame shimmer at 0.6 degrees, static camera, frozen
+  time (mean |difference|/255 of two consecutive frames): near meadow
+  0.445 -> 0.442, mid meadow 0.633 -> 0.639.

@@ -94,11 +94,11 @@ void main() {
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     if (sh.NoL > 0.0) {
-        vec3 rayDirection = sampleSunDirection(gl_FragCoord.xy);
+        vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
         vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
-        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart),
+        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart, true),
                     1.0);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }

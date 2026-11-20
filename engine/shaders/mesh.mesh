@@ -22,6 +22,9 @@ layout(location = 7) flat out float outLodError[];
 layout(location = 8) out float outHeight[];
 layout(location = 9) flat out vec3 outTint[];
 layout(location = 10) flat out float outStreamFade[];
+// The terrain's sun visibility from the draw list entry (cluster_cull.comp),
+// -1 where mesh.frag marches the terrain per fragment.
+layout(location = 11) flat out float outTerrainSun[];
 
 void main() {
     // Entries past the list's capacity were dropped by the cull.
@@ -32,7 +35,9 @@ void main() {
     SceneBuffer scene = pc.scene;
     uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
                                           gl_WorkGroupID.x];
-    LoadedInstance instance = loadInstance(scene, entry.x);
+    LoadedInstance instance = loadInstance(scene, entry.x & 0xFFFFFFu);
+    uint terrainSunCode = entry.x >> 24;
+    float terrainSun = terrainSunCode == kTerrainSunPerFragment ? -1.0 : float(terrainSunCode);
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
     MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
@@ -60,6 +65,7 @@ void main() {
         outLodError[i] = lodError;
         outTint[i] = tint;
         outStreamFade[i] = instance.fade;
+        outTerrainSun[i] = terrainSun;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
         // Static geometry for now: only the camera moves between frames.

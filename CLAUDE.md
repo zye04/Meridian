@@ -438,7 +438,9 @@ clusters) -> cull clusters (cluster_cull.comp, dispatched indirectly:
 Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
-single/double-sided) -> atmosphere LUTs
+single/double-sided; a masked cluster of radius <= 1 m also marches the
+terrain toward the sun once and packs the result into its entry's top 8
+bits, which mesh.frag uses instead of its per-fragment march) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective every frame) -> weather (weather_map.comp:
 512^2 over 60 km around the camera, texel-snapped; then the cloud shadow
@@ -590,7 +592,8 @@ barriers account for that.
   ring), then one per grid cell, then one per streamed record. `SceneData` carries the placed table, the `Cell` table
   (64 m cells, row-major from the north-west of `cellGrid`) and the grid. Opaque/masked
   meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
-  and cluster-triangle pools; draw list entries are (instance, cluster));
+  and cluster-triangle pools; draw list entries are (instance | terrain sun code << 24, cluster):
+  code 0 shadowed, 1 lit, 255 = mesh.frag marches the terrain per fragment);
   blended meshes and the BLAS use the original indices. Push constants
   carry the scene buffer address (plus the draw list index for
   mesh.mesh); everything else is reached through it (buffer device
@@ -604,7 +607,8 @@ barriers account for that.
   (`resolved`), grade LUT sampled and as storage (one set); TaaUpscaler
   set 0 = HDR, motion, history read/write, output (two ping-pong sets,
   shared by taa.comp and sharpen.comp); contact shadows layout set 0 = depth, sun light, HDR (storage); pyramid layout set 0 = source + destination level (one
-  set per level); cull layout set 0 = depth pyramid (min sampler); cloud
+  set per level); cull layout set 0 = depth pyramid (min sampler), set 1 = bindless (the
+  height image for cluster_cull.comp's terrain march); cloud
   layout set 0 = the cloud noise, weather map and cloud shadow map (raw,
   blurred) storage images, set 1 = bindless. The bindless table also
   holds the cloud noise volumes as 3D views, read through `textures3D[]`

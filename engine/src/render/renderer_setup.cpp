@@ -1044,8 +1044,11 @@ void Renderer::Impl::createPipelines() {
                                     sizeof(CullConstants)};
   VkPipelineLayoutCreateInfo cullLayoutInfo{};
   cullLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  cullLayoutInfo.setLayoutCount = 1;
-  cullLayoutInfo.pSetLayouts = &cullSetLayout;
+  // Set 1 (bindless) holds the height image cluster_cull.comp's terrain
+  // march reads.
+  const VkDescriptorSetLayout cullSetLayouts[] = {cullSetLayout, materialSetLayout};
+  cullLayoutInfo.setLayoutCount = 2;
+  cullLayoutInfo.pSetLayouts = cullSetLayouts;
   cullLayoutInfo.pushConstantRangeCount = 1;
   cullLayoutInfo.pPushConstantRanges = &cullPushRange;
   check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),

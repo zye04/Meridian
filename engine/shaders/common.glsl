@@ -148,12 +148,15 @@ layout(buffer_reference, std430) readonly buffer ClusterTriangleBuffer {
 };
 
 // Culled clusters, kDrawBuckets lists per culling phase of
-// kMaxDrawnClusters entries each: (instance, cluster).
+// kMaxDrawnClusters entries each.
 const uint kMaxDrawnClusters = 1u << 21;
 
+// Entries are (instance id | terrain sun code << 24, cluster index); the code
+// is 0 (shadowed) or 1 (lit) where cluster_cull.comp traced the terrain.
 layout(buffer_reference, std430) buffer DrawListBuffer {
     uvec2 entries[];
 };
+const uint kTerrainSunPerFragment = 255u;
 
 // One per hand-placed instance (id < kPlacedBase). Must match InstanceData
 // in C++.
@@ -700,3 +703,35 @@ layout(push_constant) uniform PushConstants {
     uint drawList;
 } pc;
 #endif
+
+// Sun shadow rays (lighting.glsl, cluster_cull.comp's per-cluster terrain
+// march).
+const float kShadowRayBias = 0.05;
+const float kShadowRayLength = 20000.0;
+
+// The direction through a point of the sun's disk, from two uniform numbers
+// in [0, 1) (radius, angle).
+vec3 sunDiskDirection(SceneBuffer scene, float noiseRadius, float noiseAngle) {
+    vec3 sun = scene.sunDirection;
+    vec3 tangent = normalize(cross(abs(sun.y) < 0.99 ? vec3(0, 1, 0)
+                                                      : vec3(1, 0, 0), sun));
+    vec3 bitangent = cross(sun, tangent);
+    float radius = tan(scene.sunAngularRadius) * sqrt(noiseRadius);
+    float angle = 6.28318531 * noiseAngle;
+    return normalize(sun + radius * (cos(angle) * tangent +
+                                     sin(angle) * bitangent));
+}
+
+// Picks a direction inside the sun's disk. One ray per pixel per frame;
+// accumulated over frames this gives penumbrae that widen with distance from
+// the occluder, like real sun shadows.
+vec3 sampleSunDirection(SceneBuffer scene, vec2 pixel) {
+    if (scene.whiteNoise != 0u) {
+        uvec3 h = pcg3d(uvec3(uvec2(pixel), scene.frameIndex));
+        return sunDiskDirection(scene, float(h.x >> 8u) * (1.0 / 16777216.0),
+                                float(h.y >> 8u) * (1.0 / 16777216.0));
+    }
+    return sunDiskDirection(scene, interleavedGradientNoise(pixel, scene.frameIndex),
+                            interleavedGradientNoise(pixel + vec2(17.0, 31.0),
+                                                     scene.frameIndex));
+}

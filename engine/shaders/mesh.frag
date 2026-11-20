@@ -29,6 +29,11 @@ layout(location = 9) flat in vec3 inTint;
 // terrain it turns into as this goes to 0.
 layout(location = 10) flat in float inStreamFade;
 #endif
+#ifdef ALPHA_MASK
+// The cluster's terrain sun visibility (cluster_cull.comp), or -1 where the
+// terrain is marched here per fragment.
+layout(location = 11) flat in float inTerrainSun;
+#endif
 
 layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
@@ -80,12 +85,22 @@ float sunVisibility(vec3 position, vec3 normal) {
                                                             normal));
 #else
     vec3 origin = position + normal * max(kShadowRayBias, inLodError);
+#ifdef ALPHA_MASK
+    if (inTerrainSun == 0.0) {
+        return 0.0;
+    }
+    if (inTerrainSun > 0.0) {
+        return traceSunVisibility(origin, origin, sampleSunDirection(pc.scene, gl_FragCoord.xy),
+                                  0.0, false);
+    }
+#endif
     // An object's base can sit below the bilinear heightfield (detail
     // displacement, coarse ridges), where the march would hit at once.
     vec3 marchOrigin = origin;
     marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
-    return traceSunVisibility(origin, marchOrigin, sampleSunDirection(gl_FragCoord.xy), 0.0);
+    return traceSunVisibility(origin, marchOrigin, sampleSunDirection(pc.scene, gl_FragCoord.xy),
+                              0.0, true);
 }
 
 // ---------------------------------------------------------------- Surface

@@ -9,38 +9,10 @@
 #include "weather.glsl"
 #include "clouds.glsl"
 
-const float kShadowRayBias = 0.05;
-const float kShadowRayLength = 20000.0;
 const float kGroundAlbedo = 0.1;
 const float kMinPerceptualRoughness = 0.045;
 
 // ---------------------------------------------------------------- Shadows
-
-// Picks a direction inside the sun's disk. One ray per pixel per frame;
-// accumulated over frames this gives penumbrae that widen with distance from
-// the occluder, like real sun shadows.
-vec3 sampleSunDirection(vec2 pixel) {
-    vec3 sun = pc.scene.sunDirection;
-    vec3 tangent = normalize(cross(abs(sun.y) < 0.99 ? vec3(0, 1, 0)
-                                                      : vec3(1, 0, 0), sun));
-    vec3 bitangent = cross(sun, tangent);
-
-    float noiseRadius;
-    float noiseAngle;
-    if (pc.scene.whiteNoise != 0u) {
-        uvec3 h = pcg3d(uvec3(uvec2(pixel), pc.scene.frameIndex));
-        noiseRadius = float(h.x >> 8u) * (1.0 / 16777216.0);
-        noiseAngle = float(h.y >> 8u) * (1.0 / 16777216.0);
-    } else {
-        noiseRadius = interleavedGradientNoise(pixel, pc.scene.frameIndex);
-        noiseAngle = interleavedGradientNoise(pixel + vec2(17.0, 31.0),
-                                              pc.scene.frameIndex);
-    }
-    float radius = tan(pc.scene.sunAngularRadius) * sqrt(noiseRadius);
-    float angle = 2.0 * kPi * noiseAngle;
-    return normalize(sun + radius * (cos(angle) * tangent +
-                                     sin(angle) * bitangent));
-}
 
 // Only opaque and alpha-masked instances cast shadows (see buildTlas); the
 // placed trees of far-field layers have their own bit. Must match
@@ -85,8 +57,10 @@ bool alphaTestCandidate(rayQueryEXT query) {
 // inside canopies it hits within a few meters, where the terrain march would
 // walk the whole pyramid first. A receiver beyond kFarShadowDistance traces
 // the TLAS without the far-field trees, then the far field's transmittance
-// from the same start.
-float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start) {
+// from the same start. Without marchTerrain the caller accounts for the
+// terrain itself (cluster_cull.comp's per-cluster visibility).
+float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start,
+                         bool marchTerrain) {
     bool far = pc.scene.voxelFarShadows != 0u &&
                distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
     rayQueryEXT query;
@@ -105,7 +79,7 @@ float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float st
         gl_RayQueryCommittedIntersectionNoneEXT) {
         return 0.0;
     }
-    if (terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
+    if (marchTerrain && terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
         return 0.0;
     }
     if (!far) {

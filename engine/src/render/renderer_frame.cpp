@@ -201,7 +201,8 @@ CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t pha
 void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase) {
   const CullConstants constants = cullConstants(frame, phase);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1, &cullSet, 0,
+  const VkDescriptorSet sets[] = {cullSet, materialSet};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 2, sets, 0,
                           nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
                      &constants);
@@ -226,8 +227,9 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                                    uint32_t phase) {
   CullConstants constants = cullConstants(frame, phase);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1,
-                          &cullSet, 0, nullptr);
+  const VkDescriptorSet sets[] = {cullSet, materialSet};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 2, sets, 0,
+                          nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
   vkCmdDispatchIndirect(cmd, drawCounters.buffer,
