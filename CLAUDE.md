@@ -417,7 +417,8 @@ barriers account for that.
 - Motion vectors: UV units, `previous - current` (the DLSS convention).
 - Transparency mask: scene attachment 2 (R8, render-sized, cleared to 0
   in the early pass); only the blended pipeline writes it (coverage,
-  blend op MAX), all others have write mask 0. Clouds will write it too.
+  blend op MAX), all others have write mask 0; the cloud composite raises
+  it to the cloud coverage (`max`, as a storage image).
 - Scene attachments: 0 HDR RGBA16F, 1 motion RG16F, 2 transparency mask
   R8, 3 diffuse albedo RGBA8 (`diffuseColor`), 4 specular albedo RGBA8
   (the DFG pre-integrated `mix(dfg.x, dfg.y, f0)`), 5 normal RGBA16F (world
@@ -427,8 +428,9 @@ barriers account for that.
   `wantsGuides()`; otherwise those views are null and the writes are
   discarded (device extension `VK_EXT_dynamic_rendering_unused_attachments`).
 - `SceneData.whiteNoise` (`Renderer::Impl::whiteNoise`, 0 today, nothing
-  sets it): at 1 the sun-disk sample uses a PCG3D hash of (pixel,
-  frameIndex) instead of interleaved gradient noise.
+  sets it): at 1 the sun-disk sample and the cloud march jitter use a
+  PCG3D hash of (pixel, frameIndex) (`pcg3d`, common.glsl) instead of
+  interleaved gradient noise.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the

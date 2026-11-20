@@ -1418,7 +1418,9 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
 - The depth buffer needs no transparent-pixel fix: it clears to 0 (reverse-Z
   far) and the sky pipeline has no depth test and so writes none, while
   blended surfaces write no depth.
-- Clouds should write this mask too; they don't yet (`docs/backlog.md`).
+- The cloud composite (compute, storage image) raises it to the cloud
+  coverage over the scene, `max(mask, 1 - transmittance)`: thin cloud over
+  terrain is a blend whose motion vector describes neither layer.
 - Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).
 
 **Ray Reconstruction guide buffers and white noise (Task 1.4).**
@@ -1448,7 +1450,8 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   functions and white noise (PCG: Jarzynski and Olano 2020, JCGT 9(3)).
   IGN is a deliberately structured spatial pattern, which TAA integrates
   but RR does not expect. AO is not stochastic, so only the sun sample
-  changes. `whiteNoise` is 0 today and nothing sets it; 0 leaves TAA
+  and the cloud march jitter (per quarter/half-res texel) change.
+  `whiteNoise` is 0 today and nothing sets it; 0 leaves TAA
   output unchanged.
 - Measured (Release, 2560x1440, TAA, `--scatter 100` beech, frames
   120/121, island_tree_01.old assets because the recooked island_tree_01

@@ -567,6 +567,25 @@ bool displayedBoxInFrustum(SceneBuffer scene, vec3 lo, vec3 hi) {
     return true;
 }
 
+// Per-pixel, per-frame noise: interleaved gradient (low discrepancy), or
+// pcg3d white noise, which Ray Reconstruction wants (scene.whiteNoise).
+float interleavedGradientNoise(vec2 pixel, uint frame) {
+    pixel += 5.588238 * float(frame % 64u);
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+uvec3 pcg3d(uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
 // Shaders with their own push constants (cull.comp) define
 // MERIDIAN_CUSTOM_PUSH_CONSTANTS before including this file.
 #ifndef MERIDIAN_CUSTOM_PUSH_CONSTANTS

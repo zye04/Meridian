@@ -52,23 +52,6 @@ vec3 worldPosition;
 
 // Interleaved gradient noise (Jimenez 2014), shifted every frame so the
 // temporal resolve averages successive samples.
-float interleavedGradientNoise(vec2 pixel, uint frame) {
-    pixel += 5.588238 * float(frame % 64u);
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
-}
-
-uvec3 pcg3d(uvec3 v) {
-    v = v * 1664525u + 1013904223u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    v ^= v >> 16u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    return v;
-}
-
 // Picks a direction inside the sun's disk. One ray per pixel per frame;
 // accumulated over frames this gives penumbrae that widen with distance from
 // the occluder, like real sun shadows.

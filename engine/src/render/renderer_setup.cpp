@@ -76,7 +76,8 @@ void Renderer::Impl::createSwapchain() {
                        VK_IMAGE_ASPECT_COLOR_BIT);
   transparencyMask = createRenderImage(kTransparencyMaskFormat,
                                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                           VK_IMAGE_USAGE_SAMPLED_BIT,
+                                           VK_IMAGE_USAGE_SAMPLED_BIT |
+                                           VK_IMAGE_USAGE_STORAGE_BIT,
                                        VK_IMAGE_ASPECT_COLOR_BIT);
   // DLSS clears the output when its history resets (TRANSFER_DST).
   output = createDisplayImage(kHdrFormat,
