@@ -1,8 +1,47 @@
-# Where work stopped (2026-11-20 ~15:40, orchestrator handoff)
+# Where work stopped (2026-11-20 ~19:00, orchestrator handoff)
 
 Read this first when resuming. Durable state is in git; the SDD ledgers
 under `.superpowers/` are local and git-ignored. A new orchestrator
-session takes over from here; the old one finishes lane G2 only.
+session takes over from here.
+
+## TOP PRIORITY for the next session: sunset GPU cost + cloud shimmer
+
+The user's first ask when they're back. Reported from interactive play on
+main a4e7623 (Release, 1440p fullscreen, DLSS RR DLAA, no `--trees`), on a
+grassy ridge looking into a low sun (sun set from the G panel):
+
+- **15 FPS, GPU 64.21 ms, of which `scene early` 56.89 ms.** At midday
+  the open view's scene early is ~6.0 ms. Everything else was normal: aa
+  (RR) 5.13, clouds 1.27, weather 0.32, far field 0, stream 0.
+  Lead hypothesis (unproven): per-fragment sun shadowing on the dense
+  alpha-masked meadow grass; at grazing sun angles the `terrainOccludes`
+  height-pyramid march (terrain.glsl, called from mesh.frag) gets very
+  long, and grass overdraw pays it many times per pixel. Other suspects:
+  masked overdraw, the TLAS shadow ray, plant LOD.
+- **Clouds and fine detail shimmer heavily**, clouds blocky at the
+  edges, **blue dashed outlines along some cloud undersides**. RR is on.
+  Part of it is likely the 15 fps (fewer frames for RR to accumulate);
+  re-judge after the perf fix, then check the clouds' path through RR
+  (guides, motion vectors, transparency mask, white noise), the cloud
+  upsample/composite, and A/B `--aa taa` / `--rr off`.
+- A fix lane started and was paused before any run: nothing measured or
+  fixed. Worktree `../meridian-sunset-fix` (branch `sunset-fix`, pushed,
+  identical to a4e7623; `assets/` linked to main's; Release build done in
+  `build-release/`, no Debug build; capture helper
+  `.superpowers/sf/cap.sh`). Its `.superpowers/next.md` has the suspects,
+  repro commands, bisect steps (march off, ray off, sun elevation sweep,
+  effects toggles, a heat map of march steps) and fix ideas. From code
+  reading: `terrainOccludes` can take up to 256 steps per ray, paid by
+  every grass fragment on lit and backlit faces; the TLAS ray is a weaker
+  suspect (streamed grass isn't in the TLAS). Cloud code to look at:
+  `clouds_composite.comp`, `clouds_resolve.comp`.
+- Repro start: `--camera 1119 1356 -431 1.57 -0.02 --sun 0.9 0.05 -0.4`
+  and the sunset view `1119 1500 -431 3.14 -0.15 --sun 0.9 0.05 -0.4`;
+  sweep sun elevation 0.05 -> 0.5 and read `GPU passes:`.
+- Target: scene early at low sun on the order of midday (<= ~7 ms at that
+  view) with grass still receiving terrain/tree shadows; clouds stable.
+  Dispatch it as a fix (root cause first, Opus diagnosis, Sonnet
+  implementation), merge each fix as soon as it is verified.
 
 ## How work runs: one orchestrator
 
@@ -16,19 +55,23 @@ under `/tmp`), and merges to main by rebase + fast-forward after review.
 
 The user's rules (2026-11-20):
 
-- Time: every lane gets an absolute local-time deadline, at most ~2 h,
-  sized in hours, never days. Everything in a brief is finished, merged
-  and pushed by the deadline, with no "backlog row instead of doing it";
-  WIP is an emergency fallback only, and a lane at risk messages the
-  orchestrator early.
+- Time: no hard caps (the user dropped the 2 h box), but work fast and
+  right: one implementer per chunk (or the sub-orchestrator implements
+  small things itself), one Opus review of risky core code + one final
+  review, iterate in Release (`--placement off` where possible), Debug +
+  validation once before each merge, merge small working pieces early,
+  batch captures, and every milestone message carries an ETA. Finishing
+  passes ~20-30 min. Give lanes absolute local-time deadlines matched to
+  the work; the user reacts badly to padded ETAs.
 - Parallelism: run queued work in parallel when files don't collide.
   Watch the 5-hour usage window (the user reports %); near the limit,
   pause lanes with a WIP commit + push + a `next.md`, resume after reset.
 - Don't launch lanes the user didn't ask for; when the user asks for help
   choosing, answer directly. When the user reports a visual problem,
   dispatch a fix, not a lane that proves it.
-- Look target: the four Chlorophyll Engine frames in
-  `assets/reference/chlorophyll/`, not fidelity to the Napf (a test bed).
+- Look target: the Chlorophyll Engine frames in
+  `assets/reference/chlorophyll/` plus `assets/reference/target-meadow.png`
+  (primary for meadow density and tree colour), not fidelity to the Napf.
 - Ask the user before deciding look questions; give a recommendation.
 
 Every lane brief carries: no AI attribution in commits; latest SDK
@@ -40,7 +83,11 @@ shared session scratchpad); every game run through `flock
 PIDs); look at assets before trusting their names; captures at
 2560x1440 and GPU ms compared only with identical `Render WxH` lines;
 DLSS SDK reuse via `-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=
-/home/zye/Projects/dev/meridian-motion-dlss/build/_deps/dlss_sdk-src`.
+/home/zye/Projects/dev/meridian-motion-dlss/build/_deps/dlss_sdk-src`;
+every worktree's `assets/` is a symlink to main's (a partial asset set
+changes the placement hash and every timing; check the hash in CLAUDE.md
+before measuring); ccache + mold are automatic; GPU contention on the
+flock is the main bottleneck, so batch runs.
 
 Reports: "status" = running and waiting work only; "overview" = done.
 
@@ -64,9 +111,11 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   M3 step 1 can now rebase onto G2's role weights. Worktrees
   `../meridian-ground2*` can be removed.
 - **C2 clouds** (DONE, merged 2026-11-20; plan Status line, decisions.md
-  "Cloud shadow fallback refit", "Clouds and weather measured"). Worktrees
-  `../meridian-clouds*` can be removed; ledger and artifacts in
-  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`.
+  "Cloud shadow fallback refit", "Clouds and weather measured"; the
+  SceneData offset fix 5790d88 came after, and the clouds were re-checked
+  against it). User accepted for now: clouds ~2 ms (spec ~1 ms) and the
+  sky's fast-turn sharpness under RR (0.878 vs 0.978); both revisit in
+  the RR / frame-pacing pass. Worktrees removed; numbers in decisions.md.
 - **M3 meadow** (PAUSED 2026-11-20 ~18:40; most of it on main).
   Streamed placement (plan `docs/superpowers/plans/2026-11-20-streamed-placement.md`,
   decisions.md "Streamed placement", "Plant micro occlusion") is merged
@@ -86,10 +135,17 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
      maps (tessellated near nodes) + erosion-style procedural detail;
      cliffs via placed rock/cliff meshes. Maybe a more dramatic terrain
      (user's call; the Napf is gentle).
-  2. Leaf and bark textures for the Megaplants trees (USD leaves have UVs
-     into per-species atlas regions; remap onto a downloaded leaf
-     texture; bark tiles along the branch). Waits on the user
-     downloading a leaf + bark. Crown darkening (cook-baked AO) with it.
+  2. Trees: the user finds the Megaplants models themselves bad, not just
+     untextured. Plan: SpeedTree Modeler 10.2.1 (installed at
+     `~/Apps/SpeedTree_Modeler_v10.2.1`, trial; Indie $19/month if it
+     passes). The user works in it with their own agent (beech first:
+     mature/edge/lone/young variants, then oak, maple, edge shrubs; USD
+     export with PNG maps to `~/Downloads/speedtree-export/<species>/`).
+     When the user reports "beech test export ready", dispatch a lane to
+     run it through usd2gltf + meridian-cook and capture it against
+     `target-meadow.png`. Fallback idea if SpeedTree disappoints: a
+     procedural tree generator scripted in Blender (space colonization +
+     scanned Fab leaf/bark textures).
   3. Frame pacing (backlog row).
   4. RR motion sharpness pass (last, user order): inputs (motion vectors
      incl. clouds, masks, hit distance, mip bias), tighten gates.
@@ -161,9 +217,9 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
 
 ## Next after that
 
-M2a Tasks 9 (far-field completion), 10-11 (mid-range impostors), 12
-(gate: forest views <= 16.7 ms with shadows). M2b (forest lighting), M3
-(meadow). Backlog highlights: HDR output (mandatory), violet distant
-haze, procedural rivers/paths, character animation. The user's look
-target is the Chlorophyll Engine video (frames in
-`assets/reference/chlorophyll/`).
+M2a far field (A, B, then fix C and the mid tier; then Tasks 12-13), M2b
+(forest lighting). Held ideas: NRD SIGMA shadow denoiser + plain DLSS
+DLAA instead of RR (~3 ms saved, likely sharper in motion; the user said
+hold); a meadow cost pass (the meadow adds ~4 ms to scene early at
+midday). Backlog highlights: HDR output (mandatory), violet distant haze,
+procedural rivers/paths, character animation.
