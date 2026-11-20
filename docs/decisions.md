@@ -1918,3 +1918,34 @@ Contact shadows and bloom off skip their dispatches so F3 shows the cost
 saved. Defaults reproduce the previous image exactly (TAA capture diff 0).
 The grade file stores them as `effect*` numbers; the panel's A/B box and
 Reset cover them; `--effects` is the CLI twin.
+
+## Natural ground transitions (2026-11-20)
+
+The user found the ground layer borders "griddy". Cause: every role weight
+(soil, clover patches and the ~5 m border noise) came from one octave of
+value noise on the square 40 m-cell lattice, cut by narrow smoothsteps and
+a sharp height blend, so patches had stair-stepped, axis-aligned outlines
+(`before/ground30.png` in the lane's artifacts). Slope and curvature were
+already per pixel (normal map), not the vertex grid.
+
+- **Noise:** `groundPatches` warps the domain once (two ~80 m octaves,
+  +-30 m) and reads both the patch noise (~40 m) and the edge noise (~5 m)
+  from `rotatedFbm`: two octaves, the second on the lattice turned 45
+  degrees (scaled by sqrt 2), which maps the wrap lattice onto itself so
+  the noise stays periodic, while the two grids' axes no longer line up.
+  6 value-noise lookups instead of 2; a first version (warped 3-octave fBm
+  per field, 18 lookups) cost twice as much for no visible gain.
+- **Landform:** soil patches lean onto convex ground and clover into
+  hollows (curvature added to the patch threshold), instead of random
+  blobs.
+- **Height blend depth per pair:** 0.3 for the soft ground roles (grass to
+  forest floor), 0.1 kept for gravel, scree and rock (sharp stone edges),
+  0.2 between variants of a role: wider, still height-driven borders.
+- **POM border:** the march reads the dominant layer only, so the relief
+  jumped where the dominant role or variant changed; its depth now fades
+  to 0 toward those switches (dominant weight 0.75 -> 0.5, any role above
+  0.25 -> 0.5, variant blend 0.25 -> 0.5), continuous on both sides.
+- **Cost** (Release 2560x1440, `--placement off`, scene early, median of 5,
+  interleaved A/B): start 1.88 -> 1.96 ms, open view 1.68 -> 1.75, high
+  overview 3.96 -> 4.09, ground from 30 m 2.87 -> 3.08 (wider blend bands
+  sample two layers on more pixels).
