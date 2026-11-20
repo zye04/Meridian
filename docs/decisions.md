@@ -2979,3 +2979,41 @@ shadow's per-pixel noise; the raster sun shadows that replace the ray
   ray-traced shadow shimmers more without RR, as expected until the raster
   shadows land. SSIM fwd5 ground 0.959 / 0.960 fails the 0.98 gate under
   both, so it predates this change (backlog).
+
+## Global illumination: terrain-following probes + screen-space bitmask (2026-11-20)
+
+User direction: GI as a screen-space + voxel hybrid without ray tracing,
+the architecture Chlorophyll Engine states. Spec
+`docs/superpowers/specs/2026-11-20-gi-design.md`, behind `--gi
+off|probes|hybrid` (default off until the look is accepted).
+
+- **Options weighed:** per-pixel world traces with screen probes and a
+  surface cache (Lumen's software path, AMD Brixelizer GI): the quality
+  bar, but a deferred renderer's design whose spatial-temporal noise is
+  what shimmers under foliage. Voxel cone tracing (VXGI, CryEngine SVOGI):
+  noise-free, but every mesh voxelized into a clipmap, thin-wall leaks,
+  cones per pixel. Radiance cascades: proven in screen space (2D/2.5D),
+  world-space 3D cascades are memory-heavy. Probe volumes traced in
+  software (DDGI's irradiance probes with Godot SDFGI/HDDAGI's
+  no-RT traces): world-space, so stable in motion, and a few filtered
+  fetches per fragment in a forward renderer.
+- **Choice:** a camera-centred clipmap of SH L1 probes (5 levels, 2-32 m)
+  whose vertical axis follows the terrain, traced against what Meridian
+  already holds as exact voxel-like structures: the heightfield's max
+  pyramid (`terrainOccludes`' march, now returning the hit distance) and
+  the far-field world bricks of the trees (`farFieldTransmittance`). Ground
+  hits read a 2D ground radiance cache (albedo from the rendered image,
+  relit by the sun with terrain, tree and cloud shadows plus the probes'
+  own irradiance, so bounces accumulate); misses read the sky-view LUT and
+  the sky capture (clouds stay in ambient). Near detail below the probe
+  spacing comes from a half-resolution visibility-bitmask pass (Therrien
+  et al. 2023), which replaces the occluded share of the probe light by
+  the bounce it sees on screen.
+- **Why not a mesh voxel clipmap:** grass, flowers and the terrain
+  material are colour on a 2.5D surface at the GI's scale; trees already
+  have voxels; rocks are the only gap and the screen pass covers them near
+  the camera (rock voxels are a follow-up).
+- Sources: Therrien, Levesque, Gilet 2023 (arXiv 2301.11376); Wright et
+  al., Lumen, SIGGRAPH 2022 Advances; Majercik et al. 2019 (DDGI, JCGT
+  8(2)); Godot SDFGI and HDDAGI (PR #86267, probe traces 2.43 -> 0.93 ms
+  on a GTX 1650); AMD FidelityFX Brixelizer GI; Tevs et al. 2008.
