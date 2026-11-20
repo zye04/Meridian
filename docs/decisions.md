@@ -1196,6 +1196,20 @@ separately linked module (`MERIDIAN_DLSS`).**
   making the SDK subject to an open-source licence and requires NVIDIA
   attribution.
 - Source: https://github.com/NVIDIA/DLSS
+- The interface (`upscaler_vk.h`) is one `Upscaler::evaluate` per frame
+  with an `UpscalerFrame`: render-sized colour, depth, motion and
+  transparency mask in SHADER_READ_ONLY (depth is now stored after the
+  late pass for it), jitter in render pixels, unjittered camera-relative
+  matrices, reset; it writes a display-sized RGBA16F `output` that the
+  histogram, tonemap and `.pfm` captures read. An optional
+  `UpscalerProvider` passed to the `Renderer` constructor adds its
+  instance extensions, the device extensions the GPU has, and backends.
+- TAA is the core's backend (`TaaUpscaler`). It keeps its own ping-pong
+  history and writes the resolve to both it and `output`, so an
+  output-only sharpen can't feed back into the history. No visual
+  change: Release 1080p ground still and forward 5 m/s mean diff
+  0.0000/255 vs the previous build; the `aa` pass median of 5 is 0.17 ms
+  vs `taa` 0.17 ms (interleaved runs; re-measure at 1440p).
 
 **Ray Reconstruction first, for the shadows and AO.**
 - It takes the noisy lit colour plus guides (diffuse and specular albedo,
@@ -1247,8 +1261,8 @@ separately linked module (`MERIDIAN_DLSS`).**
 the display size** (DLSS programming guide).
 - Render-sized: depth, HDR, motion and the depth pyramid; the scene
   viewport, jitter and `inverseResolution` (aerial perspective, cull, LOD
-  pixels) use it. Display-sized: TAA history, histogram, exposure,
-  tonemap, captures. `--render-scale S` sets render = display x S
+  pixels) use it. Display-sized: the upscaler's output and TAA history,
+  histogram, exposure, tonemap, captures. `--render-scale S` sets render = display x S
   (rounded); TAA reads the current colour bilinearly at display pixel
   centers and its neighbourhood and motion at the render texel under
   them (quality below scale 1 is not gated: DLSS is the upscaler).

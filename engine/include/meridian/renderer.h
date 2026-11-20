@@ -17,6 +17,7 @@
 namespace meridian {
 
 class Window;
+class UpscalerProvider;
 struct Prototype;
 struct PlacementLayer;
 
@@ -147,7 +148,9 @@ struct DrawItem {
 
 class Renderer {
 public:
-  explicit Renderer(Window &window);
+  // `provider` supplies optional upscaler backends (DLSS) and outlives the
+  // Renderer.
+  explicit Renderer(Window &window, UpscalerProvider *provider = nullptr);
   ~Renderer();
 
   Renderer(const Renderer &) = delete;
@@ -235,6 +238,8 @@ public:
   uint32_t validationErrorCount() const;
 
 private:
+  // The core's TAA backend creates its images through Impl.
+  friend class TaaUpscaler;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

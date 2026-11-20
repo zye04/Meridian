@@ -610,7 +610,6 @@ constexpr uint32_t kHistogramBins = 256;
 
 // Must match the push_constant block in post.glsl.
 struct PostConstants {
-  uint32_t historyValid = 0;
   float deltaSeconds = 0.0f;
   VkDeviceAddress histogram = 0;
   VkDeviceAddress exposure = 0;

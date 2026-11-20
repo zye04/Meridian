@@ -107,6 +107,7 @@ add_library(meridian STATIC
     src/render/renderer_resources.cpp
     src/render/renderer_setup.cpp
     src/render/renderer_terrain.cpp
+    src/render/taa_upscaler.cpp
     src/render/vulkan_util.cpp
     src/terrain.cpp
     src/texture.cpp

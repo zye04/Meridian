@@ -8,6 +8,7 @@
 
 #include <meridian/renderer.h>
 #include <meridian/upscaler.h>
+#include <meridian/upscaler_vk.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -15,6 +16,7 @@
 
 #include <array>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -26,6 +28,8 @@ struct Renderer::Impl {
   vkb::Instance instance;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   vkb::Device device;
+  // Supplies the optional backends (DLSS); null when none was linked in.
+  UpscalerProvider *upscalerProvider = nullptr;
   // Device functions from extensions (ray tracing), which the loader doesn't
   // export directly.
   vkb::DispatchTable dispatch;
@@ -45,9 +49,9 @@ struct Renderer::Impl {
   bool swapchainOutOfDate = false;
 
   // The scene renders at renderExtent (the display, swapchain.extent, scaled
-  // by aaSettings.renderScale); the temporal resolve and everything after it
-  // run at the display size. All of these images are recreated with the
-  // swapchain.
+  // by aaSettings.renderScale); the upscaler and everything after it run at
+  // the display size. All of these images, and the upscaler, are recreated
+  // with the swapchain.
   AaSettings aaSettings;
   VkExtent2D renderExtent{};
   // Render-sized.
@@ -55,9 +59,10 @@ struct Renderer::Impl {
   Image hdr;
   Image motion;
   Image transparencyMask;
-  // Display-sized temporal anti-aliasing history, ping-ponged: each frame
-  // reads one and writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
-  std::array<Image, 2> history;
+  // Display-sized: the upscaler's output, read by the exposure histogram,
+  // the tonemap and .pfm captures. Always in VK_IMAGE_LAYOUT_GENERAL.
+  Image output;
+  std::unique_ptr<Upscaler> upscaler;
   // Min-reduced depth for occlusion culling: the render size rounded down to
   // powers of two, one view per level. Always in VK_IMAGE_LAYOUT_GENERAL.
   Image depthPyramid;
@@ -204,10 +209,8 @@ struct Renderer::Impl {
   VkPipeline pyramidPipeline = VK_NULL_HANDLE;
   VkDescriptorSetLayout postSetLayout = VK_NULL_HANDLE;
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-  // postSets[i] reads history[i] and writes history[1 - i].
-  std::array<VkDescriptorSet, 2> postSets{};
+  VkDescriptorSet postSet = VK_NULL_HANDLE;
   VkPipelineLayout postLayout = VK_NULL_HANDLE;
-  VkPipeline taaPipeline = VK_NULL_HANDLE;
   VkPipeline histogramPipeline = VK_NULL_HANDLE;
   VkPipeline exposurePipeline = VK_NULL_HANDLE;
   VkPipeline skyPipeline = VK_NULL_HANDLE;
@@ -250,7 +253,7 @@ struct Renderer::Impl {
   VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
   // Grade + AgX as a kGradeLutSize^3 LUT in GENERAL layout, sampled by the
-  // tonemap (post binding 5), rebaked (binding 6) when the grade changes.
+  // tonemap (post binding 1), rebaked (binding 2) when the grade changes.
   // gradeLayout is the post set plus GradeConstants.
   Grade grade;
   bool gradeDirty = true;

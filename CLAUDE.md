@@ -65,7 +65,7 @@ validation error):
 ```
 
 A `.pfm` capture path writes the linear HDR image the tonemap reads
-(post-TAA, pre-exposed) instead, for luminance ratios.
+(the upscaler's output, pre-exposed) instead, for luminance ratios.
 
 Motion sharpness: add `--camera-velocity X Y Z` (m/s) and/or
 `--camera-angular-velocity YAW PITCH` (rad/s), fixed 1/60 s steps ending at
@@ -81,7 +81,7 @@ haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, gre
 clean = Bruneton's very clean defaults, for A/B).
 
 `--render-scale S` (0 < S <= 1, default 1) renders the scene at the
-display size times S and lets TAA upscale (startup prints `Render WxH,
+display size times S and lets the upscaler (TAA) upscale (startup prints `Render WxH,
 display WxH, jitter phases N, mip bias B`).
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
@@ -94,7 +94,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -168,7 +168,11 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            grade_lut.comp mirrors; Renderer::setGrade),
                            upscaler.h (AaSettings, render/display rules:
                            scaledExtent, jitterPhaseCount,
-                           textureMipBias), window.h, math/{vec3,mat4}.h
+                           textureMipBias), upscaler_vk.h (Upscaler,
+                           UpscalerFrame, UpscalerProvider: the Vulkan
+                           extension point for upscaler backends; the
+                           Renderer constructor takes an optional
+                           provider), window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders
@@ -188,6 +192,8 @@ engine/src/render/         renderer internals:
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
+  taa_upscaler.*           the core Upscaler backend: taa.comp, its
+                           pipeline and ping-pong history
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -257,21 +263,26 @@ the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
-to front, mesh.vert) -> TAA resolve
-(compute) -> luminance histogram + exposure adaptation (compute) -> grade
+to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
+`UpscalerFrame`: colour, depth, motion, transparency mask in
+SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
+display-sized RGBA16F `output`; the backend today is `TaaUpscaler`,
+taa.comp, which writes its resolve to both its own history and `output`)
+-> luminance histogram + exposure adaptation (compute) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
 AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. Everything up
-to the TAA resolve runs at the render size (`renderExtent`: depth, HDR,
+to the upscaler runs at the render size (`renderExtent`: depth, HDR,
 motion, depth pyramid, Halton(2,3) jitter in render pixels over
 `jitterPhaseCount` phases, material mip bias `textureMipBias`, both in
-upscaler.h); the resolve and everything after it at the display size
-(swapchain). Both sets of images are created in `createSwapchain` and
-destroyed in `destroySwapchain`; `setAntiAliasing` recreates them. 2
-frames in flight; the HDR/depth/LUT/history images are shared between
-them, and barriers account for that.
+upscaler.h); the upscaler's output and everything after it at the
+display size (swapchain). Both sets of images, and the upscaler, are
+created in `createSwapchain` and destroyed in `destroySwapchain`;
+`setAntiAliasing` recreates them. 2 frames in flight; the
+HDR/depth/LUT/history/output images are shared between them, and
+barriers account for that.
 
 ## Conventions
 
@@ -326,8 +337,9 @@ them, and barriers account for that.
   R16_UNORM height image, via texelFetch so it matches `heightAt`
   exactly; the shadow march also reads it with textureGather through
   `nearestSampler`, whose CLAMP_TO_EDGE its mirror-tile math relies on,
-  so don't switch that sampler to mirrored; and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = HDR/motion/history (two
-  ping-pong sets); pyramid layout set 0 = source + destination level (one
+  so don't switch that sampler to mirrored; and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = upscaler output
+  (`resolved`), grade LUT sampled and as storage (one set); TaaUpscaler
+  set 0 = HDR, motion, history read/write, output (two ping-pong sets); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0

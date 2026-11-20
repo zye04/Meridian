@@ -1,4 +1,5 @@
 #include "renderer_impl.h"
+#include "taa_upscaler.h"
 
 #include <meridian/window.h>
 
@@ -58,49 +59,31 @@ void Renderer::Impl::createSwapchain() {
                                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                            VK_IMAGE_USAGE_SAMPLED_BIT,
                                        VK_IMAGE_ASPECT_COLOR_BIT);
-  for (Image &image : history) {
-    image = createDisplayImage(kHdrFormat,
-                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                        VK_IMAGE_ASPECT_COLOR_BIT);
-  }
+  output = createDisplayImage(kHdrFormat,
+                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT);
   submitNow([&](VkCommandBuffer cmd) {
-    for (Image &image : history) {
-      transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                            VK_PIPELINE_STAGE_2_NONE, 0,
-                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
-    }
+    transitionImage(cmd, {output.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
   });
+  upscaler = std::make_unique<TaaUpscaler>(*this, display);
   historyValid = false;
 
-  // Point the post-processing sets at the new images. Safe because the
-  // device is idle whenever the swapchain is (re)created.
-  for (int i = 0; i < 2; ++i) {
-    const Image &previous = history[i];
-    const Image &next = history[1 - i];
-    VkDescriptorImageInfo images[] = {
-        // Linear: the resolve reads the scene colour at display pixel centers.
-        {linearSampler, hdr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        {nearestSampler, motion.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        {linearSampler, previous.view, VK_IMAGE_LAYOUT_GENERAL},
-        {VK_NULL_HANDLE, next.view, VK_IMAGE_LAYOUT_GENERAL},
-        {nearestSampler, next.view, VK_IMAGE_LAYOUT_GENERAL},
-    };
-    VkWriteDescriptorSet writes[5]{};
-    for (uint32_t b = 0; b < 5; ++b) {
-      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      writes[b].dstSet = postSets[i];
-      writes[b].dstBinding = b;
-      writes[b].descriptorCount = 1;
-      writes[b].descriptorType = b == 3
-                                     ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                                     : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-      writes[b].pImageInfo = &images[b];
-    }
-    vkUpdateDescriptorSets(device.device, 5, writes, 0, nullptr);
-  }
+  // Safe because the device is idle whenever the swapchain is (re)created.
+  const VkDescriptorImageInfo resolved{nearestSampler, output.view,
+                                       VK_IMAGE_LAYOUT_GENERAL};
+  VkWriteDescriptorSet resolvedWrite{};
+  resolvedWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  resolvedWrite.dstSet = postSet;
+  resolvedWrite.dstBinding = 0;
+  resolvedWrite.descriptorCount = 1;
+  resolvedWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  resolvedWrite.pImageInfo = &resolved;
+  vkUpdateDescriptorSets(device.device, 1, &resolvedWrite, 0, nullptr);
 
   swapchainOutOfDate = false;
 
@@ -178,9 +161,8 @@ void Renderer::Impl::createDepthPyramid() {
 }
 
 void Renderer::Impl::destroySwapchain() {
-  for (Image &image : history) {
-    destroyImage(image);
-  }
+  upscaler.reset();
+  destroyImage(output);
   destroyImage(transparencyMask);
   destroyImage(motion);
   destroyImage(hdr);
@@ -399,10 +381,10 @@ void Renderer::Impl::createDescriptors() {
   // Must match post.glsl.
   constexpr VkShaderStageFlags kPostStages =
       VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding bindings[7]{};
-  for (uint32_t b = 0; b < 7; ++b) {
+  VkDescriptorSetLayoutBinding bindings[3]{};
+  for (uint32_t b = 0; b < 3; ++b) {
     bindings[b].binding = b;
-    bindings[b].descriptorType = b == 3 || b == 6
+    bindings[b].descriptorType = b == 2
                                      ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                      : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[b].descriptorCount = 1;
@@ -411,7 +393,7 @@ void Renderer::Impl::createDescriptors() {
 
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = 7;
+  layoutInfo.bindingCount = 3;
   layoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &postSetLayout),
         "vkCreateDescriptorSetLayout");
@@ -438,27 +420,25 @@ void Renderer::Impl::createDescriptors() {
         "vkCreateDescriptorSetLayout");
 
   VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 14},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 5},
   };
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.maxSets = 3;
+  poolInfo.maxSets = 2;
   poolInfo.poolSizeCount = 2;
   poolInfo.pPoolSizes = poolSizes;
   check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &descriptorPool),
         "vkCreateDescriptorPool");
 
-  VkDescriptorSetLayout setLayouts[] = {postSetLayout, postSetLayout};
   VkDescriptorSetAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocInfo.descriptorPool = descriptorPool;
-  allocInfo.descriptorSetCount = 2;
-  allocInfo.pSetLayouts = setLayouts;
-  check(vkAllocateDescriptorSets(dev, &allocInfo, postSets.data()),
+  allocInfo.descriptorSetCount = 1;
+  allocInfo.pSetLayouts = &postSetLayout;
+  check(vkAllocateDescriptorSets(dev, &allocInfo, &postSet),
         "vkAllocateDescriptorSets");
 
-  allocInfo.descriptorSetCount = 1;
   allocInfo.pSetLayouts = &atmosphereSetLayout;
   check(vkAllocateDescriptorSets(dev, &allocInfo, &atmosphereSet),
         "vkAllocateDescriptorSets");
@@ -535,19 +515,19 @@ void Renderer::Impl::createGrade() {
                                 VK_IMAGE_LAYOUT_GENERAL};
   VkDescriptorImageInfo storage{VK_NULL_HANDLE, gradeLut.view,
                                 VK_IMAGE_LAYOUT_GENERAL};
-  VkWriteDescriptorSet writes[4]{};
-  for (uint32_t i = 0; i < 4; ++i) {
-    const bool isSampled = i < 2;
+  VkWriteDescriptorSet writes[2]{};
+  for (uint32_t i = 0; i < 2; ++i) {
+    const bool isSampled = i == 0;
     writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[i].dstSet = postSets[i % 2];
-    writes[i].dstBinding = isSampled ? 5 : 6;
+    writes[i].dstSet = postSet;
+    writes[i].dstBinding = isSampled ? 1 : 2;
     writes[i].descriptorCount = 1;
     writes[i].descriptorType = isSampled
                                    ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                                    : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     writes[i].pImageInfo = isSampled ? &sampled : &storage;
   }
-  vkUpdateDescriptorSets(device.device, 4, writes, 0, nullptr);
+  vkUpdateDescriptorSets(device.device, 2, writes, 0, nullptr);
 }
 
 void Renderer::Impl::createExposureBuffers() {
@@ -819,8 +799,6 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &postLayoutInfo, nullptr, &postLayout),
         "vkCreatePipelineLayout");
 
-  taaPipeline = createComputePipeline(dev, "taa.comp", postLayout);
-
   VkPushConstantRange gradePushRange{};
   gradePushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
   gradePushRange.size = sizeof(GradeConstants);
@@ -897,11 +875,16 @@ void Renderer::Impl::createPipelines() {
                                    .colorFormats = swapchainFormat});
 }
 
-Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
+Renderer::Renderer(Window &window, UpscalerProvider *provider)
+    : impl_(std::make_unique<Impl>()) {
   impl_->window = window.handle();
+  impl_->upscalerProvider = provider;
 
   vkb::InstanceBuilder instanceBuilder;
   instanceBuilder.set_app_name("Meridian").require_api_version(1, 3, 0);
+  if (provider) {
+    instanceBuilder.enable_extensions(provider->instanceExtensions());
+  }
   if (kEnableValidation) {
     instanceBuilder.request_validation_layers()
         .set_debug_callback(debugCallback)
@@ -983,6 +966,12 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   if (!physical) {
     throw std::runtime_error(physical.error().message());
   }
+  if (provider) {
+    for (const char *extension : provider->deviceExtensions(
+             impl_->instance.instance, physical.value().physical_device)) {
+      physical.value().enable_extension_if_present(extension);
+    }
+  }
 
   auto device = [&] {
     DriverLeakScope driverLeak;
@@ -993,6 +982,11 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   }
   impl_->device = device.value();
   impl_->dispatch = impl_->device.make_table();
+  if (provider) {
+    provider->init({impl_->instance.instance, physical.value().physical_device,
+                    impl_->device.device, impl_->instance.fp_vkGetInstanceProcAddr,
+                    impl_->device.fp_vkGetDeviceProcAddr});
+  }
 
   VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationProperties{};
   accelerationProperties.sType =
@@ -1084,7 +1078,6 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->clusterTraversePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->clusterCullPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
-  vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->gradeLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);

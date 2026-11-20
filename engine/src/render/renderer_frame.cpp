@@ -898,8 +898,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   }
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-  // Nothing reads depth after the late pass.
-  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   sceneRendering.pColorAttachments = lateAttachments;
   beginScene();
   drawCulled(1);
@@ -930,7 +928,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdEndRendering(cmd);
   endPass("scene late");
 
-  // --- Temporal resolve: scene color + history -> new history.
+  // --- Upscaler: render-sized scene -> display-sized output.
 
   for (VkImage target : {impl_->hdr.image, impl_->motion.image,
                           impl_->transparencyMask.image}) {
@@ -942,65 +940,89 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
   }
+  transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, kDepthStages,
+                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
 
-  // The history images stay in GENERAL. This frame reads what the previous
-  // frame wrote, and overwrites the image the previous frame's tonemap read.
-  VkMemoryBarrier2 historyBarrier{};
-  historyBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-  historyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-  historyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
-                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-  VkDependencyInfo historyDependency{};
-  historyDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-  historyDependency.memoryBarrierCount = 1;
-  historyDependency.pMemoryBarriers = &historyBarrier;
-  vkCmdPipelineBarrier2(cmd, &historyDependency);
+  // The output is shared by both frames in flight: the previous frame's
+  // upscaler must be done writing it, and its histogram, tonemap and capture
+  // reading it.
+  VkMemoryBarrier2 postBarrier{};
+  postBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  postBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                             VK_PIPELINE_STAGE_2_COPY_BIT;
+  postBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  postBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  postBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  VkDependencyInfo postDependency{};
+  postDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  postDependency.memoryBarrierCount = 1;
+  postDependency.pMemoryBarriers = &postBarrier;
+  vkCmdPipelineBarrier2(cmd, &postDependency);
 
-  VkDescriptorSet postSet = impl_->postSets[impl_->frameNumber % 2];
+  auto upscalerImage = [](const Image &image, VkFormat format, VkExtent2D size) {
+    return UpscalerImage{image.image, image.view, format, {size.width, size.height}};
+  };
+  UpscalerFrame upscale;
+  upscale.cmd = cmd;
+  upscale.color = upscalerImage(impl_->hdr, kHdrFormat, renderExtent);
+  upscale.depth = upscalerImage(impl_->depth, kDepthFormat, renderExtent);
+  upscale.motion = upscalerImage(impl_->motion, kMotionFormat, renderExtent);
+  upscale.transparencyMask =
+      upscalerImage(impl_->transparencyMask, kTransparencyMaskFormat, renderExtent);
+  upscale.output = upscalerImage(impl_->output, kHdrFormat, extent);
+  upscale.jitter[0] = jitterX;
+  upscale.jitter[1] = jitterY;
+  upscale.motionScale[0] = static_cast<float>(renderExtent.width);
+  upscale.motionScale[1] = static_cast<float>(renderExtent.height);
+  upscale.worldToView = view;
+  upscale.viewToClip = projection;
+  upscale.frameSeconds = deltaSeconds;
+  upscale.reset = !impl_->historyValid;
+  impl_->upscaler->evaluate(upscale);
+
+  // Every pass below reads what the previous one wrote, so one barrier
+  // shape (compute writes -> compute/fragment reads) serves all of them.
+  postBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  postBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  postBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  postBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                              VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  vkCmdPipelineBarrier2(cmd, &postDependency);
+  impl_->historyValid = true;
+  endPass("aa");
+
+  const VkDescriptorSet postSet = impl_->postSet;
   PostConstants postConstants;
-  postConstants.historyValid = impl_->historyValid ? 1 : 0;
   postConstants.deltaSeconds = deltaSeconds;
   postConstants.histogram = impl_->histogramBuffer.address;
   postConstants.exposure = impl_->exposureBuffer.address;
   postConstants.exposureCompensation = camera.exposureCompensation;
-
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->taaPipeline);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          impl_->postLayout, 0, 1, &postSet, 0, nullptr);
-  vkCmdPushConstants(cmd, impl_->postLayout,
-                     VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                     0, sizeof(postConstants), &postConstants);
-  vkCmdDispatch(cmd, (extent.width + 7) / 8, (extent.height + 7) / 8, 1);
-
-  // Every pass below reads what the previous one wrote, so one barrier
-  // shape (compute writes -> compute/fragment reads) serves all of them.
-  historyBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-  historyBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-  historyBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-  historyBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
-                                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-  vkCmdPipelineBarrier2(cmd, &historyDependency);
-  impl_->historyValid = true;
-  endPass("taa");
 
   // --- Auto-exposure: histogram of the resolved frame, then adaptation.
   // The new exposure is used by the next frame's scene pass.
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                     impl_->histogramPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          impl_->postLayout, 0, 1, &postSet, 0, nullptr);
+  vkCmdPushConstants(cmd, impl_->postLayout,
+                     VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                     0, sizeof(postConstants), &postConstants);
   // One thread per 2x2 pixels (see histogram.comp).
   vkCmdDispatch(cmd, (extent.width + 31) / 32, (extent.height + 31) / 32, 1);
-  vkCmdPipelineBarrier2(cmd, &historyDependency);
+  vkCmdPipelineBarrier2(cmd, &postDependency);
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                     impl_->exposurePipeline);
   vkCmdDispatch(cmd, 1, 1, 1);
-  vkCmdPipelineBarrier2(cmd, &historyDependency);
+  vkCmdPipelineBarrier2(cmd, &postDependency);
   endPass("exposure");
 
   // --- Tonemap pass: resolved HDR -> swapchain image, through the grade
@@ -1114,8 +1136,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     VkBufferImageCopy region{};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {extent.width, extent.height, 1};
-    VkImage resolved = impl_->history[1 - impl_->frameNumber % 2].image;
-    vkCmdCopyImageToBuffer(cmd, resolved, VK_IMAGE_LAYOUT_GENERAL,
+    vkCmdCopyImageToBuffer(cmd, impl_->output.image, VK_IMAGE_LAYOUT_GENERAL,
                            captureBuffer.buffer, 1, &region);
   }
   if (capturing && !hdrCapture) {
