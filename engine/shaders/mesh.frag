@@ -496,8 +496,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
 // Height-based blend weight of b over a (Mishkinis, "Advanced Terrain
 // Texture Splatting"): near the border the taller texel wins, so needles
 // fill the gaps between stones instead of cross-fading.
-float heightBlend(float heightA, float heightB, float t) {
-    const float kDepth = 0.1;
+float heightBlend(float heightA, float heightB, float t, float kDepth) {
     float top = max(heightA + 1.0 - t, heightB + t) - kDepth;
     float a = max(heightA + 1.0 - t - top, 0.0);
     float b = max(heightB + t - top, 0.0);
@@ -534,6 +533,22 @@ float groundNoise(vec2 p, float scale, uint seed) {
     return valueNoise(p * scale, int(round(float(kNoiseWrapCells) * scale)), seed);
 }
 
+float groundFbm(vec2 p, float scale, uint seed) {
+    return 0.57 * groundNoise(p, scale, seed) +
+           0.29 * groundNoise(p + vec2(0.37, 0.71), 2.0 * scale, seed + 1u) +
+           0.14 * groundNoise(p + vec2(0.74, 1.42), 4.0 * scale, seed + 2u);
+}
+
+// Domain-warped fBm, ~0..1 around 0.5: a single lattice of value noise,
+// thresholded, gives axis-aligned blocky borders. The warp comes from
+// periodic noise, so the result stays periodic.
+float warpedNoise(vec2 p, float scale, uint seed) {
+    vec2 warp = vec2(groundFbm(p, 0.5 * scale, seed + 40u),
+                     groundFbm(p, 0.5 * scale, seed + 41u)) - 0.5;
+    float n = groundFbm(p + warp * (1.5 / scale), scale, seed);
+    return clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
+}
+
 // The forest mask noise (placement.glsl, bit-exact with the trees') at this
 // pixel, 0..1; -1 without a forest or outside the heightfield's crop, where
 // nothing is placed.
@@ -567,8 +582,8 @@ float groundCurvature(Terrain terrain) {
 }
 
 // b over a by height (heightBlend); a is skipped while hasA is false.
-TerrainTexel overlay(TerrainTexel a, bool hasA, TerrainTexel b, float t) {
-    return hasA ? mixTexels(a, b, heightBlend(a.height, b.height, t)) : b;
+TerrainTexel overlay(TerrainTexel a, bool hasA, TerrainTexel b, float t, float depth) {
+    return hasA ? mixTexels(a, b, heightBlend(a.height, b.height, t, depth)) : b;
 }
 
 // The role's variant (an index into the layers) picked by ~200 m noise, and
@@ -600,7 +615,7 @@ TerrainTexel sampleRole(uint role, vec2 p, vec3 normal, vec3 dpdx, vec3 dpdy) {
         TerrainLayer layer = pc.scene.terrain.layers[index + 1u];
         TerrainTexel next = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
                                       : samplePlanar(layer, normal, dpdx, dpdy);
-        texel = overlay(texel, t < 1.0, next, t);
+        texel = overlay(texel, t < 1.0, next, t, 0.2);
     }
     return texel;
 }
@@ -687,8 +702,8 @@ Surface terrainSurface(vec3 normal) {
     Terrain terrain = pc.scene.terrain;
 
     vec2 p = (inRelativePosition.xz + terrain.noiseOffset) / kNoiseCell;
-    float edge = (groundNoise(p, 8.0, 23u) - 0.5) * 0.5;
-    float patches = groundNoise(p, 2.0, 21u);
+    float edge = (warpedNoise(p, 8.0, 23u) - 0.5) * 0.5;
+    float patches = warpedNoise(p, 1.0, 21u);
     float curvature = groundCurvature(terrain);
     float flatGround = smoothstep(0.93, 0.98, normal.y);
     float belowRock = 1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.08,
@@ -697,10 +712,10 @@ Surface terrainSurface(vec3 normal) {
 
     float w[9];
     w[0] = 1.0;
-    w[1] = flatGround * smoothstep(0.006, 0.015, curvature + edge * 0.01) * smoothstep(0.45, 0.6, patches);
+    w[1] = flatGround * smoothstep(0.006, 0.015, curvature + edge * 0.01) * smoothstep(0.42, 0.62, patches + curvature * 10.0);
     w[2] = flatGround * smoothstep(0.02, 0.04, curvature + edge * 0.02);
     w[3] = max(belowRock, smoothstep(0.03, 0.06, -curvature + edge * 0.02)) *
-           smoothstep(0.45, 0.6, patches + edge * 0.5);
+           smoothstep(0.42, 0.62, patches - curvature * 10.0 + edge * 0.5);
     float m = forestMask(terrain);
     float lo = float(terrain.forestMaskLo) / 65535.0;
     float d = float(terrain.forestMaskHi - terrain.forestMaskLo) / 65535.0;
@@ -742,6 +757,19 @@ Surface terrainSurface(vec3 normal) {
         float pixels = layer.heightScale * sqrt(max(1.0 - NoV * NoV, 0.0)) / NoV /
                        max(max(length(dpdx), length(dpdy)), 1e-6);
         float fade = smoothstep(0.5, 1.5, pixels) * (1.0 - clamp(w[8], 0.0, 1.0));
+        // The march sees one layer: fade the relief out toward where the
+        // dominant role or variant switches, so it doesn't jump there.
+        float coverage = 1.0;
+        if (dominant > 0) {
+            coverage = smoothstep(0.5, 0.75, w[dominant]);
+        } else {
+            float above = 0.0;
+            for (int r = 1; r < 9; ++r) {
+                above = max(above, w[r]);
+            }
+            coverage = 1.0 - smoothstep(0.25, 0.5, above);
+        }
+        fade *= coverage * (1.0 - smoothstep(0.25, 0.5, min(variantBlend, 1.0 - variantBlend)));
         if (fade > 0.0) {
             float shadow;
             int steps = clamp(int(ceil(0.5 * pixels * fade)), 2, 12);
@@ -756,7 +784,8 @@ Surface terrainSurface(vec3 normal) {
     for (int r = start; r < 9; ++r) {
         float t = clamp(w[r], 0.0, 1.0);
         if (t > 0.0) {
-            ground = overlay(ground, has, sampleRole(uint(r), p, normal, dpdx, dpdy), t);
+            ground = overlay(ground, has, sampleRole(uint(r), p, normal, dpdx, dpdy), t,
+                             r < 6 ? 0.3 : 0.1);
             has = true;
         }
     }
