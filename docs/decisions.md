@@ -2748,3 +2748,18 @@ should be in the TLAS is open (plan task 4). Plan:
   vs 0.9806. All pass; the ground views look down (little sky), so this
   checks that the clouds pass, the cloud shadow and the capture ambient
   cost no sharpness. 0 validation errors in every run.
+
+## Plant micro occlusion (2026-11-20)
+
+The Megascans plants have no AO texture, so streamed grass looked flat
+under the sky ambient. Choice: a procedural height occlusion, `0.25 +
+0.75 * smoothstep(0, 0.85, h)` with h the vertex height over the mesh
+bound's top (mesh.mesh, object space; plants have their origin at the
+ground), only for materials with diffuse transmission. It multiplies
+`s.occlusion` (ambient, back irradiance, specular follow) and the sun
+diffuse at 50% (self-shadowing inside a tuft). The micro shadow Effects
+toggle and strength scale it (`micro=0` turns it off). Terrain and other
+materials are unchanged. Contact shadows already act on grass (any depth):
+the A/B at the open view shows clear grass-on-grass shadows, so the march
+is unchanged (0.09 ms). The bust still shadows the grass through the TLAS
+and the terrain march.

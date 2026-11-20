@@ -19,6 +19,7 @@ layout(location = 6) flat out uint outMaterialIndex[];
 // The cluster's simplification error (m): the shadow rays are traced against
 // the full-detail surface, which this one may lie under by up to that much.
 layout(location = 7) flat out float outLodError[];
+layout(location = 8) out float outHeight[];
 
 void main() {
     // Entries past the list's capacity were dropped by the cull.
@@ -52,6 +53,8 @@ void main() {
         outUv[i] = vec2(vertex.uvX, vertex.uvY);
         outMaterialIndex[i] = mesh.materialIndex;
         outLodError[i] = lodError;
+        float top = mesh.boundsCenter.y + mesh.boundsRadius;
+        outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *

@@ -22,6 +22,8 @@ layout(location = 6) flat in uint inMaterialIndex;
 // How far (m) this LOD cluster may deviate from the full-detail surface the
 // shadow rays are traced against; 0 at full detail.
 layout(location = 7) flat in float inLodError;
+// Height within the mesh, 0 at its base to 1 at its top (1 where unknown).
+layout(location = 8) in float inHeight;
 #endif
 
 layout(location = 0) out vec4 outColor;
@@ -912,6 +914,19 @@ Surface terrainSurface(vec3 normal) {
 
 #endif // TERRAIN
 
+#ifndef TERRAIN
+// The Megascans plants ship no AO: darken toward the base of the tuft. Leaf
+// materials (diffuse transmission) only; the micro shadow Effects strength
+// scales it.
+float plantOcclusion(Material m) {
+    if (m.diffuseTransmission <= 0.0) {
+        return 1.0;
+    }
+    return mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, inHeight),
+               pc.scene.microShadowStrength);
+}
+#endif
+
 Surface materialSurface(Material m, vec3 normal) {
     Surface s;
     vec4 baseColor = m.baseColorFactor;
@@ -935,6 +950,9 @@ Surface materialSurface(Material m, vec3 normal) {
         s.occlusion = mix(1.0, sampleTexture(m.occlusionTexture, inUv).r,
                           m.occlusionStrength);
     }
+#ifndef TERRAIN
+    s.occlusion *= plantOcclusion(m);
+#endif
     s.microOcclusion = s.occlusion;
 
     s.sunShadow = 1.0;
@@ -1087,7 +1105,12 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 sunLight = sunAtSurface * (NoL * visibility * mix(1.0, microShadow(NoL, s.microOcclusion),
+#ifdef TERRAIN
+        float plantSun = 1.0;
+#else
+        float plantSun = mix(1.0, plantOcclusion(material), 0.5);
+#endif
+        vec3 sunLight = sunAtSurface * (plantSun * NoL * visibility * mix(1.0, microShadow(NoL, s.microOcclusion),
                                                          pc.scene.microShadowStrength) *
                                         s.sunShadow);
         diffuseLight = diffuseColor / kPi * sunLight;

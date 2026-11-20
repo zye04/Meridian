@@ -62,7 +62,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 `G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
-parallax self-shadow, micro shadows on/off + strength, contact shadows on/off
+parallax self-shadow, micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
 (off skips the dispatch) + length x0..3, bloom on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
@@ -380,6 +380,13 @@ tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
 tests/                     doctest unit tests
 docs/                      see "Docs" at the top
 ```
+
+Plant micro occlusion: leaf materials (`diffuseTransmission > 0`, the
+Megascans plants, which ship no AO) get an occlusion that darkens toward
+the tuft base (height 0..1 from the vertex's object-space y over the mesh
+bound's top, varying location 8; mesh.vert sends 1), scaled by the micro
+shadow strength: ambient and back irradiance via `s.occlusion`, sun
+diffuse at half weight.
 
 ## Frame (renderer_frame.cpp, in order)
 
