@@ -26,7 +26,7 @@ layout(set = 2, binding = 6, r32f) uniform writeonly image2D resolvedDepth;
 // so less history.
 const float kCurrentWeight = 0.1;
 const float kCurrentWeightInLayer = 0.25;
-const float kVarianceGamma = 1.0;
+const float kVarianceGamma = 2.0;
 
 // 9-tap Catmull-Rom (as taa.comp): bilinear would blur the history a little
 // every frame.

@@ -475,7 +475,8 @@ retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
-resolution, half inside the layer or within 250 m of it: luminance with
+resolution, half inside the layer or within 250 m of it, each texel's ray
+offset within the texel per frame (R2 sequence): luminance with
 haze + transmittance, mean cloud depth d, stored -1 - d where scene
 geometry cut the march; the cirrus sheet (`cirrusLayer`) behind it on
 sky pixels; clouds_resolve.comp accumulates it into a per-resolution history
@@ -552,8 +553,10 @@ barriers account for that.
   Reconstruction); otherwise those views are null and the writes are
   discarded (device extension `VK_EXT_dynamic_rendering_unused_attachments`).
 - `SceneData.whiteNoise` (1 under Ray Reconstruction, else 0): at 1 the
-  sun-disk sample and the cloud march jitter use a PCG3D hash of (pixel,
+  sun-disk sample (and contact shadows) use a PCG3D hash of (pixel,
   frameIndex) (`pcg3d`, common.glsl) instead of interleaved gradient noise.
+  The cloud march keeps interleaved gradient noise: its own resolve
+  integrates it, and RR sees only the resolved clouds.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the

@@ -2873,3 +2873,32 @@ times per pixel. The cost jumps between sun elevation 0.6 and 1.1 degrees
   degrees). Frame-to-frame shimmer at 0.6 degrees, static camera, frozen
   time (mean |difference|/255 of two consecutive frames): near meadow
   0.445 -> 0.442, mid meadow 0.633 -> 0.639.
+
+## Cloud march sub-texel jitter (2026-11-20)
+
+User report (low sun, RR): clouds shimmer, blocky edges, dashed lines. The
+quarter-res march cast the same ray through each texel's center every
+frame, so the resolve could only accumulate along the ray: edges kept the
+4-px stair-step and the cirrus streaks (finer than a texel toward the
+horizon) broke into dashes, under RR, TAA and DLSS SR alike.
+
+- **Choice:** each frame offsets every march texel's ray within the texel
+  by the R2 sequence (`fract(0.5 + n (0.7549, 0.5698))`, n = frame mod
+  64), and the resolve accumulates it into the texel unchanged (as TAA
+  does with the camera jitter): each texel converges to its area's mean,
+  so edges and streaks are antialiased at quarter resolution (no added
+  detail; full-resolution reconstruction stays rejected, backlog). The
+  along-ray jitter is interleaved gradient noise under RR too: RR's
+  white-noise rule is for samples it denoises, and it sees only the
+  resolved clouds. The variance clip widens from 1 to 2 sigma, which the
+  spatial jitter's extra per-frame spread otherwise turned into flicker.
+- **Measured** (Release, 2560x1440, RR unless noted; flicker = two
+  consecutive frames of a static camera at `--time-scale 0`, sky rows
+  0-45%, 4x4 box-blurred, p99 / p99.9 of |difference| /255; the mean is
+  exposure drift): low sun (`1119 1356 -431 1.57 -0.02 --sun 0.9 0.01
+  -0.4`) 2.13 / 5.75 -> 1.81 / 5.00; same view at midday 1.67 / 6.02 ->
+  1.33 / 4.97; jitter alone (white noise, 1 sigma) 2.63 / 7.86. TAA,
+  low sun: 1.10 / 4.01 -> 1.33 / 5.01. Sky Laplacian (rows 0-600) under
+  a 1 rad/s turn unchanged (midday 0.0192, low sun 0.0176 -> 0.0175);
+  still frame 0.0199 -> 0.0188 and drifting-cloud crop 0.0292 -> 0.0282
+  (the stair-steps' edges gone). `clouds` ms unchanged (1.3-1.4).
