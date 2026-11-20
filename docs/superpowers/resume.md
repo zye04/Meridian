@@ -78,9 +78,18 @@ assets themselves. Order:
    field), crown ambient visibility. The look values are a starting
    point for the user to adjust.
 2. Green ground: the Napf is pasture, but everything renders as bare
-   dirt; the terrain material, then M3 meadow grass.
+   dirt; the terrain material, then M3 meadow grass. **Terrain material
+   done** (G1 lane, 2026-11-20, 1a7ef7d..e9fa36a): 14 Megascans surfaces
+   by role (meadow, clover, mud, soil, forest path/floor on the forest
+   mask, gravel, scree, rock from 48 degrees), colour-matched, 4K colour
+   and normal; rock anti-tiling at distance. Open: forest floor shows
+   olive-tan under the sparse canopy (trees, not ground); +8.7 s Release
+   startup and ~+500 MiB for the 4K textures (backlog); a faint ~10 m
+   pattern on distant cliffs (backlog). Next: M3 meadow grass.
 3. Rocks: seated on slopes, no floating or tilted slabs.
-4. Steep-slope texture stretching (triplanar or similar).
+4. Steep-slope texture stretching (triplanar or similar): rock was
+   already triplanar; with rock from 48 degrees no planar layer stretches
+   over 1.5x (G1).
 5. Shadow and foliage shimmer in motion: Ray Reconstruction (motion
    clarity plan) or the fallback denoiser.
 6. Finish and merge clouds.
