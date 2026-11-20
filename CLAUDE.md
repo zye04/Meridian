@@ -136,22 +136,14 @@ before and after compaction, cell margin).
 ## Layout
 
 ```
-engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
-                           createMaterial, uploadTexture, setTerrain,
-                           setTerrainMaterial, setPlacement,
-                           addInstance, draw; Lighting, Atmosphere,
-                           MaterialData, TerrainMaterial), camera.h, mesh.h,
-                           model.h (loadGltf, applyUvTransform),
-                           texture.h (loadKtx2),
-                           cluster.h (buildClusterLod, LOD cut rule,
-                           per-level group BVH, selectClustersBvh),
-                           terrain.h (Heightfield, heightAt, load/save,
-                           generateHeightfield, buildHeightPyramid),
-                           placement.h (Prototype, PlacementLayer, dither
-                           pattern, fixed-point rules, evaluatePoint: the
-                           CPU reference of GPU placement, PlacementGrid,
-                           PlacedInstance encode/decode),
-                           window.h, math/{vec3,mat4}.h
+engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
+                           Atmosphere, materials), camera.h, mesh.h,
+                           model.h (glTF), texture.h (KTX2), cluster.h
+                           (cluster LOD DAG, LOD cut rule, group BVH),
+                           terrain.h (Heightfield, height pyramid),
+                           placement.h (rules, dither pattern,
+                           evaluatePoint: CPU reference of GPU placement,
+                           PlacedInstance), window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders
