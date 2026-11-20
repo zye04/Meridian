@@ -580,3 +580,42 @@ TEST_CASE("The shadow map rebuild never stalls and follows the sun") {
   CHECK(step.count == 0);
   CHECK_FALSE(step.state.building);
 }
+
+TEST_CASE("farSwitch changes once per crossing over a +-5% oscillation") {
+  bool far = false;
+  int changes = 0;
+  // Pixels fall from 1.3 to 0.7 with a 5% ripple, then rise back.
+  for (int i = 0; i < 400; ++i) {
+    const float u = i < 200 ? i / 199.0f : (399 - i) / 199.0f;
+    const float base = 1.3f - 0.6f * u;
+    const float pixels = base * (1.0f + 0.05f * std::sin(i * 2.0f));
+    const bool next = farSwitch(pixels, far, kFarSwitchPixels, kFarSwitchHysteresis);
+    changes += next != far;
+    far = next;
+  }
+  CHECK(changes == 2);
+  CHECK_FALSE(far);
+  // The band itself: 1.05 px stays in whichever state it was in.
+  CHECK(farSwitch(1.05f, true, kFarSwitchPixels, kFarSwitchHysteresis));
+  CHECK_FALSE(farSwitch(1.05f, false, kFarSwitchPixels, kFarSwitchHysteresis));
+}
+
+TEST_CASE("farLevel picks the coarsest level within a pixel and holds it") {
+  CHECK(farLevel(1.0f, kFarLevels, kFarSwitchHysteresis) == 0);
+  CHECK(farLevel(0.6f, kFarLevels, kFarSwitchHysteresis) == 0);
+  CHECK(farLevel(0.5f, kFarLevels, kFarSwitchHysteresis) == 1);
+  CHECK(farLevel(0.25f, kFarLevels, kFarSwitchHysteresis) == 2);
+  CHECK(farLevel(0.01f, kFarLevels, kFarSwitchHysteresis) == 2);
+  for (const float boundary : {0.5f, 0.25f}) {
+    uint32_t level = farLevel(boundary * 1.3f, kFarLevels, kFarSwitchHysteresis);
+    int changes = 0;
+    for (int i = 0; i < 400; ++i) {
+      const float u = i < 200 ? i / 199.0f : (399 - i) / 199.0f;
+      const float pixels = boundary * (1.3f - 0.6f * u) * (1.0f + 0.05f * std::sin(i * 2.0f));
+      const uint32_t next = farLevel(pixels, level, kFarSwitchHysteresis);
+      changes += next != level;
+      level = next;
+    }
+    CHECK(changes == 2);
+  }
+}

@@ -8,10 +8,11 @@
 #include "lighting.glsl"
 #include "farfield.glsl"
 
-// A far cell's voxels (voxel.mesh draws its canopy box): marches the view
-// ray through the cell's brick columns at the cell's level, voxels constant
-// inside, and stops where the accumulated opacity reaches 0.5. A ray that
-// leaves the cell below that is discarded. The threshold is deterministic,
+// A far cell's voxels (voxel.mesh draws a box per occupied brick column):
+// marches the view ray through the cell's brick columns at the cell's level
+// inside the rasterized column's box, voxels constant inside, and stops where
+// the accumulated opacity reaches 0.5. A ray that leaves the box below that
+// is discarded (the neighbouring column's box covers the rest). The threshold is deterministic,
 // so the image is stable frame to frame; edges antialias through TAA
 // jitter. The hit lies behind the box face, so the written depth is never
 // nearer than the rasterized one (depth_less keeps early depth testing).
@@ -19,6 +20,9 @@
 layout(location = 0) in vec3 inDisplayed;
 layout(location = 1) flat in uint inEntry;
 layout(location = 2) flat in float inDrop;
+// The column's box in field coordinates (voxel.mesh).
+layout(location = 3) flat in vec3 inBoxLo;
+layout(location = 4) flat in vec3 inBoxHi;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outMotion;
@@ -44,16 +48,14 @@ void main() {
     uint index = inEntry & 0x3FFFFFFFu;
     uint level = inEntry >> 30u;
     uvec2 cell = uvec2(index % field.cellsX, index / field.cellsX);
-    FarCell far = field.cells.cells[index];
 
     // The displayed ray from the camera, shifted up by the cell's drop: the
     // same ray in the flat world (field coordinates).
     vec3 direction = normalize(inDisplayed);
     vec3 fieldOrigin = vec3(field.originX, field.heightBase, field.originZ);
     vec3 origin = scene.cameraPosition - fieldOrigin + vec3(0.0, inDrop, 0.0);
-    float pad = farCanopyPad(level);
-    vec3 boxLo = vec3(vec2(cell) * kCellSize, far.bottom - pad - field.heightBase).xzy;
-    vec3 boxHi = boxLo + vec3(kCellSize, far.top - far.bottom + 2.0 * pad, kCellSize);
+    vec3 boxLo = inBoxLo;
+    vec3 boxHi = inBoxHi;
     vec3 inverseDirection = 1.0 / mix(vec3(1e-12), direction, greaterThan(abs(direction), vec3(1e-12)));
     vec3 t0 = (boxLo - origin) * inverseDirection;
     vec3 t1 = (boxHi - origin) * inverseDirection;

@@ -122,11 +122,34 @@ uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) 
     return farField.field.voxels[level].voxels[farField.field.voxels[level].voxels[header + 2u] + rank];
 }
 
-// The far switch (cell_cull.comp): a cell draws its voxels instead of its
-// trees once its tallest tree projects under kFarSwitchPixels, at the
-// coarsest level whose voxel projects to at most kFarLevelPixels.
-const float kFarSwitchPixels = 6.0;
+// The far switch (cell_cull.comp; the CPU replicas are farSwitch and
+// farLevel in farfield.h): a cell draws its voxels instead of its trees once
+// an L0 voxel projects to at most kFarSwitchPixels from the nearest point of
+// its canopy box, and back to trees above kFarSwitchHysteresis times that.
+// The level is the coarsest whose voxel projects to at most kFarLevelPixels,
+// held until the continuous level leaves its band by the same ratio.
+const float kFarSwitchPixels = 1.0;
+const float kFarSwitchHysteresis = 1.1;
 const float kFarLevelPixels = 1.0;
+
+bool farSwitch(float projectedPixels, bool currentlyFar, float threshold, float hysteresis) {
+    return projectedPixels <= (currentlyFar ? threshold * hysteresis : threshold);
+}
+
+// previousLevel: the cell's level last frame while it was far, else
+// kFarLevels.
+uint farLevel(float l0VoxelPixels, uint previousLevel, float hysteresis) {
+    float x = log2(kFarLevelPixels / l0VoxelPixels);
+    if (previousLevel < kFarLevels) {
+        float margin = log2(hysteresis);
+        float lo = previousLevel == 0u ? -1e30 : float(previousLevel) - margin;
+        float hi = previousLevel == kFarLevels - 1u ? 1e30 : float(previousLevel + 1u) + margin;
+        if (x >= lo && x < hi) {
+            return previousLevel;
+        }
+    }
+    return uint(clamp(floor(x), 0.0, float(kFarLevels - 1u)));
+}
 
 // One occupied template voxel. Must match FarTemplateVoxel in farfield.h.
 struct FarTemplateVoxel {

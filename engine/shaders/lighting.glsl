@@ -24,7 +24,7 @@ const uint kFarFieldCasterMask = 0x04u;
 // instead of the trees in the TLAS (when SceneData.voxelFarShadows is set):
 // the far switch's distance for a 25 m tree at 1440p. One representation
 // per ray, so no tree occludes twice.
-const float kFarShadowDistance = 4000.0;
+const float kFarShadowDistance = 4800.0;
 
 // Alpha-masked geometry is non-opaque in the acceleration structure, so the
 // ray query reports each candidate hit; we accept it only where the base

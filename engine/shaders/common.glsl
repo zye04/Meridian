@@ -562,7 +562,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     Weather weather;
     Clouds clouds;
     // The far field (farfield.glsl) and the far cells the cell cull appends
-    // for voxel.mesh: cell | level << 30, one entry per cell.
+    // for voxel.mesh: cell | level << 30; phase 0's entries first, then
+    // phase 1's from one cell count on.
     FarFieldBuffer farField;
     FarCellListBuffer farCellList;
     // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the

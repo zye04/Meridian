@@ -981,6 +981,22 @@ foliage that survives simplification).
   their occupied voxels, the L0 splat in spatial slices, a sun shadow map
   of the bricks instead of the per-pixel march, one raster box per
   occupied brick column, two-phase Hi-Z culling of far cells.
+- **Far raster (Task 9 chunk C):** the far switch is an L0 voxel (4 m)
+  projecting to <= 1 px from the nearest point of the cell's canopy box
+  (`kFarSwitchPixels`, ~4.8 km at 1440p), back to trees above 1.1x
+  (`farSwitch`, farfield.h and farfield.glsl); the level (coarsest voxel
+  <= 1 px) is held until its continuous value leaves the band by the same
+  1.1x (`farLevel`). Both states live in the cell's visibility word (bit 1
+  far, bit 2 voxels visible, bits 3-4 level), read by both phases of
+  cell_cull.comp so they agree. voxel.mesh draws one exact box per occupied
+  brick column and voxel.frag marches only inside its box. Phase 0 lists
+  far cells visible last frame (early pass, `far field`); phase 1 retests
+  all far cells against the new pyramid and lists the newly visible (late
+  pass, `far field late`; the blended pass is now `blended`). The pass sum
+  "scene early + far field + scene late" gains `far field late` and
+  `blended`. `kFarShadowDistance` (lighting.glsl, 4000 m) should follow the
+  switch distance: set it to the ~4.8 km value when the lighting port lands.
+  Gate numbers: pending the GPU run.
 - **Rays:** M2a keeps the static TLAS and chooses per ray, by the
   receiver's distance from the camera against `kFarShadowDistance` (the
   far switch distance). Near receivers trace every tree in the TLAS (the

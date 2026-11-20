@@ -516,7 +516,7 @@ struct Renderer::Impl {
   void recordFarShadow(VkCommandBuffer cmd);
   void checkFarShadow(const FarFieldCpu &cpu);
   // Far cells as their voxels (voxel.mesh/frag), in the early scene pass.
-  void drawFarField(VkCommandBuffer cmd);
+  void drawFarField(VkCommandBuffer cmd, uint32_t phase, const PushConstants &scenePush);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
   // Streamed placement: writes the slots whose cell changed for `camera`
   // into frame.streamUpdates (all of them after setPlacement) and returns

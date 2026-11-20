@@ -188,14 +188,23 @@ void Renderer::Impl::destroyFarField() {
 
 // After the early clusters, so the terrain and near geometry reject hidden
 // far cells by early depth testing.
-void Renderer::Impl::drawFarField(VkCommandBuffer cmd) {
+// One phase's far cells; voxel.mesh reads the phase from drawList. Restores
+// scenePush after.
+void Renderer::Impl::drawFarField(VkCommandBuffer cmd, uint32_t phase,
+                                  const PushConstants &scenePush) {
   if (farFieldInfo.buffer == VK_NULL_HANDLE) {
     return;
   }
+  PushConstants farPush = scenePush;
+  farPush.drawList = phase;
+  vkCmdPushConstants(cmd, sceneLayout, kScenePushStages, 0, sizeof(farPush), &farPush);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelPipeline);
   vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
-  dispatch.cmdDrawMeshTasksIndirectEXT(cmd, drawCounters.buffer, offsetof(DrawCounters, farTasks),
-                                       1, sizeof(DrawCounters::farTasks));
+  dispatch.cmdDrawMeshTasksIndirectEXT(cmd, drawCounters.buffer,
+                                       offsetof(DrawCounters, farTasks) +
+                                           phase * sizeof(DrawCounters::farTasks[0]),
+                                       1, sizeof(DrawCounters::farTasks[0]));
+  vkCmdPushConstants(cmd, sceneLayout, kScenePushStages, 0, sizeof(scenePush), &scenePush);
 }
 
 void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
@@ -830,7 +839,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   info.cellsZ = grid.cellsZ;
   info.paletteSize = paletteSize;
   farFieldInfo = uploadStorage(&info, sizeof(info));
-  farCellList = createBuffer(VkDeviceSize{cellCount} * sizeof(uint32_t),
+  farCellList = createBuffer(VkDeviceSize{cellCount} * 2 * sizeof(uint32_t),
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                              0);

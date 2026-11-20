@@ -15,10 +15,19 @@
 // their cell coordinates and their heights widened by the terrain detail
 // the instances are lifted by; threads past them emit the hand-placed
 // instances the same way.
-// Grid cells past the far switch skip their trees (the start of their run)
-// and, in phase 0, append themselves to the far cell list for voxel.mesh.
+// Grid cells past the far switch skip their trees (the start of their run) and
+// go through the same two phases for voxel.mesh: phase 0 lists the far
+// cells drawn last frame that are in the frustum (early pass), phase 1
+// tests every far cell against the new pyramid and lists those newly
+// visible (late pass). A cell's visibility word: bit 0 its instances were
+// visible, bit 1 far, bit 2 its voxels were visible, bits 3-4 its level.
 
 layout(local_size_x = 64) in;
+
+const uint kCellVisible = 1u;
+const uint kCellFar = 2u;
+const uint kCellFarVisible = 4u;
+const uint kCellLevelShift = 3u;
 
 void emitChunks(uint firstId, uint count, bool cellWasVisible) {
     uint chunkCount = (count + 63u) / 64u;
@@ -31,38 +40,36 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
     }
 }
 
-// The far switch: whether the cell's tallest tree projects under
-// kFarSwitchPixels from the nearest point of its canopy box. A cell with
-// bricks but no trees (crowns reaching in from a neighbor) uses the box's
-// height. Returns how many instances to skip: its trees if far, else 0.
-// Phase 0 appends a far cell in the frustum to the far list with its level.
-uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
-    FarField field = scene.farField.field;
-    FarCell far = field.cells.cells[index];
+// Whether the cell draws its voxels (farSwitch, with last frame's state from
+// its visibility word): the L0 voxel's projection from the nearest point of
+// its canopy box. A cell with bricks but no trees (crowns reaching in from
+// a neighbor) is far too. Out: the level, and the box the voxels can reach
+// (relative to the camera) for the frustum and occlusion tests.
+bool farCell(SceneBuffer scene, uint index, uvec2 gridIndex, uint word, out uint level,
+             out vec3 reachLo, out vec3 reachHi) {
+    level = 0u;
+    reachLo = reachHi = vec3(0.0);
+    FarCell far = scene.farField.field.cells.cells[index];
     if (far.top < far.bottom) {
-        return 0u;
+        return false;
     }
     vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
     vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
     vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
     float distance = max(length(max(max(boxLo, -boxHi), vec3(0.0))), scene.nearPlane);
     float pixelsPerMeter = abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
-    float height = far.treeCount > 0u ? far.treeHeight : far.top - far.bottom;
-    if (height * pixelsPerMeter >= kFarSwitchPixels) {
-        return 0u;
+    float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
+    bool wasFar = (word & kCellFar) != 0u;
+    if (!farSwitch(voxelPixels, wasFar, kFarSwitchPixels, kFarSwitchHysteresis)) {
+        return false;
     }
-    // The drawn box (voxel.mesh) reaches up to the coarsest level's pad past
-    // the canopy extent.
-    vec3 pad = vec3(0.0, farCanopyPad(kFarLevels - 1u), 0.0);
-    if (cull.phase == 0u && displayedBoxInFrustum(scene, boxLo - pad, boxHi + pad)) {
-        // The coarsest level whose voxel projects to at most kFarLevelPixels.
-        float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
-        uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
-                                float(kFarLevels - 1u)));
-        uint slot = atomicAdd(cull.counters.counters[kCounterFarTasks], 1u);
-        scene.farCellList.entries[slot] = index | level << 30u;
-    }
-    return far.treeCount;
+    level = farLevel(voxelPixels, wasFar ? (word >> kCellLevelShift) & 3u : kFarLevels,
+                     kFarSwitchHysteresis);
+    // The voxels reach up to the level's pad past the canopy extent.
+    vec3 pad = vec3(0.0, farCanopyPad(level), 0.0);
+    reachLo = boxLo - pad;
+    reachHi = boxHi + pad;
+    return true;
 }
 
 void main() {
@@ -80,16 +87,49 @@ void main() {
     }
     Cell cell = scene.cells.cells[index];
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    uint skipped = scene.farFieldEnabled != 0u && index < gridCells
-                       ? farSwitch(scene, index, gridIndex)
-                       : 0u;
     // Cell bits follow the instance ids' (static and ring) in the visibility
     // buffer.
     uint visibilityIndex = kPlacedBase + scene.placedCount + scene.ringCount + index;
+    uint word = cull.visibility.visible[visibilityIndex];
+
+    uint level;
+    vec3 reachLo, reachHi;
+    bool isFar = scene.farFieldEnabled != 0u && index < gridCells &&
+                 farCell(scene, index, gridIndex, word, level, reachLo, reachHi);
+    uint farBits = 0u;
+    uint skipped = 0u;
+    if (isFar) {
+        skipped = scene.farField.field.cells.cells[index].treeCount;
+        farBits = kCellFar | level << kCellLevelShift;
+        uint entry = index | level << 30u;
+        bool inFrustum = displayedBoxInFrustum(scene, reachLo, reachHi);
+        // What phase 0 drew, so phase 1 lists only the rest.
+        bool drawnEarly = cull.occlusion != 0u && (word & kCellFarVisible) != 0u && inFrustum;
+        if (cull.phase == 0u) {
+            if (drawnEarly) {
+                uint slot = atomicAdd(cull.counters.counters[kCounterFarTasks], 1u);
+                scene.farCellList.entries[slot] = entry;
+            }
+        } else {
+            bool farVisible = inFrustum;
+            if (farVisible && cull.occlusion != 0u) {
+                vec3 center = (reachLo + reachHi) * 0.5;
+                farVisible = !occluded(displayedSphere(center, length(reachHi - reachLo) * 0.5),
+                                       scene.view);
+            }
+            if (farVisible) {
+                farBits |= kCellFarVisible;
+                if (!drawnEarly) {
+                    uint slot = atomicAdd(cull.counters.counters[kCounterFarTasks + 3u], 1u);
+                    scene.farCellList.entries[gridCells + slot] = entry;
+                }
+            }
+        }
+    }
     if (cell.instanceCount <= skipped) {
         // Drawn as voxels only: none of its instances were visible.
         if (cull.phase == 1u) {
-            cull.visibility.visible[visibilityIndex] = 0u;
+            cull.visibility.visible[visibilityIndex] = farBits;
         }
         return;
     }
@@ -110,7 +150,7 @@ void main() {
                    (scene.cellDrawDistance == 0.0 ||
                     length(max(max(boxLo, -boxHi), vec3(0.0))) <= scene.cellDrawDistance);
 
-    bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
+    bool wasVisible = (word & kCellVisible) != 0u;
     if (cull.phase == 0u) {
         if (cull.occlusion != 0u && wasVisible && visible) {
             emitChunks(kPlacedBase + cell.firstInstance + skipped, cell.instanceCount - skipped,
@@ -122,7 +162,7 @@ void main() {
         vec3 center = (boxLo + boxHi) * 0.5;
         visible = !occluded(displayedSphere(center, length(boxHi - boxLo) * 0.5), scene.view);
     }
-    cull.visibility.visible[visibilityIndex] = visible ? 1u : 0u;
+    cull.visibility.visible[visibilityIndex] = farBits | (visible ? kCellVisible : 0u);
     if (!visible) {
         return;
     }

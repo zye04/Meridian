@@ -168,7 +168,9 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
     }
   }
   initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
-  initial.farTasks[1] = initial.farTasks[2] = 1;
+  for (auto &tasks : initial.farTasks) {
+    tasks[1] = tasks[2] = 1;
+  }
   vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -650,7 +652,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->droppedEntries = counters->overflow;
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
-    impl_->drawnFarCells = counters->farTasks[0];
+    impl_->drawnFarCells = counters->farTasks[0][0] + counters->farTasks[1][0];
     impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
               impl_->droppedByList.begin());
@@ -1111,7 +1113,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->drawTerrain(cmd);
   drawCulled(0);
   endPass("scene early");
-  impl_->drawFarField(cmd);
+  impl_->drawFarField(cmd, 0, scenePush);
   vkCmdEndRendering(cmd);
   endPass("far field");
 
@@ -1145,6 +1147,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   sceneRendering.pColorAttachments = lateAttachments;
   beginScene();
   drawCulled(1);
+  endPass("scene late");
+  impl_->drawFarField(cmd, 1, scenePush);
+  endPass("far field late");
 
   // Blended last, back to front, from the CPU: each surface must composite
   // over everything behind it, and there are few of them.
@@ -1170,7 +1175,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
 
   vkCmdEndRendering(cmd);
-  endPass("scene late");
+  endPass("blended");
 
   if (impl_->cloudsEnabled) {
     impl_->drawClouds(cmd, frame, camera.position);

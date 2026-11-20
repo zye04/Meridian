@@ -636,12 +636,11 @@ struct DrawCounters {
   // workgroup per 64 nodes) and node count.
   uint32_t traverseDispatch[2][kBvhDepths][3];
   uint32_t traverseCount[2][kBvhDepths];
-  // vkCmdDrawMeshTasksIndirectEXT arguments for the far cells, one voxel.mesh
-  // workgroup per cell (x counts the far cells drawn).
-  uint32_t farTasks[3];
-  uint32_t pad2;
+  // Per phase, vkCmdDrawMeshTasksIndirectEXT arguments for the far cells,
+  // one voxel.mesh workgroup per cell (x counts the far cells drawn).
+  uint32_t farTasks[2][3];
 };
-static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths) * 4);
+static_assert(sizeof(DrawCounters) == (58 + 8 * kBvhDepths) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);

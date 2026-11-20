@@ -168,10 +168,10 @@ geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
-voxels), `bvh nodes N` (cluster group BVH nodes the
+voxels, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, far field late, blended, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 

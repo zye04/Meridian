@@ -4,50 +4,110 @@
 #include "common.glsl"
 #include "farfield.glsl"
 
-// One workgroup per far cell (the list cell_cull.comp appends in phase 0):
-// the cell's canopy box, which voxel.frag marches. The voxels are flat
-// (curvature is a display warp); the box and everything in it drop by one
-// constant, the drop at the box's center, so the march only shifts the view
-// ray up by it. Across a 64 m cell the drop varies by under 0.2 m.
+// One workgroup per far cell (the list cell_cull.comp appends, phase from
+// pc.drawList): one box per occupied brick column of the cell at its level
+// (the cell's empty columns are never rasterized), which voxel.frag marches
+// within. Boxes are the bricks' exact extent. The voxels are flat
+// (curvature is a display warp); every box drops by one constant, the drop
+// at the cell's canopy box center, so the march only shifts the view ray up
+// by it. Across a 64 m cell the drop varies by under 0.2 m.
 
-layout(local_size_x = 8) in;
-layout(triangles, max_vertices = 8, max_primitives = 12) out;
+const uint kMaxColumns = 16u;
+
+layout(local_size_x = 128) in;
+layout(triangles, max_vertices = 128, max_primitives = 192) out;
 
 // Relative to the camera, as displayed.
 layout(location = 0) out vec3 outDisplayed[];
 // The far list entry: cell | level << 30.
 layout(location = 1) flat out uint outEntry[];
 layout(location = 2) flat out float outDrop[];
+// The column's box in field coordinates (y relative to heightBase).
+layout(location = 3) flat out vec3 outBoxLo[];
+layout(location = 4) flat out vec3 outBoxHi[];
 
 // Corner i is (x, y, z) = bits (0, 1, 2) of i. Two triangles per face,
 // counter-clockwise seen from outside (like the terrain's, seen from above).
 const uint kFaces[24] = uint[24](1, 3, 7, 5, 0, 4, 6, 2, 2, 6, 7, 3,
                                  0, 1, 5, 4, 4, 5, 7, 6, 0, 2, 3, 1);
 
+// Per column: brick count, base height (m above heightBase); then the
+// occupied columns compacted.
+shared uvec2 sColumn[kMaxColumns];
+shared uint sList[kMaxColumns];
+shared uint sCount;
+
 void main() {
     SceneBuffer scene = pc.scene;
-    uint entry = scene.farCellList.entries[gl_WorkGroupID.x];
+    FarFieldBuffer farField = scene.farField;
+    uint entry = scene.farCellList.entries[pc.drawList * scene.cellGridSize.x * scene.cellGridSize.y +
+                                           gl_WorkGroupID.x];
     uint index = entry & 0x3FFFFFFFu;
-    FarCell far = scene.farField.field.cells.cells[index];
-    float pad = farCanopyPad(entry >> 30u);
-    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
-    vec3 boxLo = vec3(lo.x, far.bottom - pad, lo.y) - scene.cameraPosition;
-    vec3 boxHi = vec3(lo.x + kCellSize, far.top + pad, lo.y + kCellSize) - scene.cameraPosition;
-    float drop = curvatureDrop(scene, (boxLo + boxHi) * 0.5);
-
-    SetMeshOutputsEXT(8, 12);
+    uint level = entry >> 30u;
+    uint n = farColumnsPerCell(level);
     uint i = gl_LocalInvocationIndex;
-    vec3 corner = mix(boxLo, boxHi, vec3(i & 1u, (i >> 1) & 1u, (i >> 2) & 1u));
-    corner.y -= drop;
-    gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * vec4(corner, 1.0);
-    outDisplayed[i] = corner;
-    outEntry[i] = entry;
-    outDrop[i] = drop;
-    if (i < 6u) {
-        uvec4 q = uvec4(kFaces[i * 4u], kFaces[i * 4u + 1u], kFaces[i * 4u + 2u],
-                        kFaces[i * 4u + 3u]);
-        gl_PrimitiveTriangleIndicesEXT[i * 2u] = q.xyz;
-        gl_PrimitiveTriangleIndicesEXT[i * 2u + 1u] = q.xzw;
+    if (i < n * n) {
+        uvec2 column = farField.field.columns[level].columns[index * n * n + i];
+        sColumn[i] = uvec2(columnBrickCount(column), columnBaseHeight(column));
+    }
+    barrier();
+    if (i == 0u) {
+        uint count = 0u;
+        for (uint c = 0u; c < n * n; ++c) {
+            if (sColumn[c].x > 0u) {
+                sList[count++] = c;
+            }
+        }
+        sCount = count;
+    }
+    barrier();
+    uint boxes = sCount;
+    SetMeshOutputsEXT(8u * boxes, 12u * boxes);
+    if (boxes == 0u) {
+        return;
+    }
+
+    FarCell far = farField.field.cells.cells[index];
+    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
+    vec2 cellLo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
+    float pad = farCanopyPad(level);
+    vec3 canopyLo = vec3(cellLo.x, far.bottom - pad, cellLo.y) - scene.cameraPosition;
+    vec3 canopyHi = vec3(cellLo.x + kCellSize, far.top + pad, cellLo.y + kCellSize) -
+                    scene.cameraPosition;
+    float drop = curvatureDrop(scene, (canopyLo + canopyHi) * 0.5);
+
+    if (i < boxes * 8u) {
+        uint box = i / 8u;
+        uint column = sList[box];
+        float size = kCellSize / float(n);
+        vec2 columnLo = vec2(column % n, column / n) * size;
+        float bottom = float(sColumn[column].y) * kFarHeightUnit;
+        float top = bottom + float(sColumn[column].x * kBrickEdge) * farVoxelSize(level);
+        // Bricks are quantized to 4 voxels (64 m at L2); the voxels in them
+        // stay within the canopy extent.
+        bottom = max(bottom, far.bottom - farField.field.heightBase - pad);
+        top = min(top, far.top - farField.field.heightBase + pad);
+        vec3 fieldLo = vec3(float(index % farField.field.cellsX) * kCellSize + columnLo.x, bottom,
+                            float(index / farField.field.cellsX) * kCellSize + columnLo.y);
+        vec3 fieldHi = fieldLo + vec3(size, top - bottom, size);
+        vec3 fieldOrigin = vec3(farField.field.originX, farField.field.heightBase,
+                                farField.field.originZ);
+        vec3 worldLo = fieldOrigin + fieldLo - scene.cameraPosition;
+        vec3 worldHi = fieldOrigin + fieldHi - scene.cameraPosition;
+        vec3 corner = mix(worldLo, worldHi, vec3(i & 1u, (i >> 1) & 1u, (i >> 2) & 1u));
+        corner.y -= drop;
+        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * vec4(corner, 1.0);
+        outDisplayed[i] = corner;
+        outEntry[i] = entry;
+        outDrop[i] = drop;
+        outBoxLo[i] = fieldLo;
+        outBoxHi[i] = fieldHi;
+    }
+    for (uint p = i; p < boxes * 12u; p += 128u) {
+        uint box = p / 12u;
+        uint f = (p % 12u) / 2u;
+        uvec4 q = uvec4(kFaces[f * 4u], kFaces[f * 4u + 1u], kFaces[f * 4u + 2u],
+                        kFaces[f * 4u + 3u]) + box * 8u;
+        gl_PrimitiveTriangleIndicesEXT[p] = (p & 1u) == 0u ? q.xyz : q.xzw;
     }
 }

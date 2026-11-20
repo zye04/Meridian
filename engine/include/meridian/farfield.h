@@ -10,7 +10,9 @@
 #include <meridian/math/vec3.h>
 #include <meridian/placement.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -36,6 +38,34 @@ constexpr float kFarHeightUnit = 0.25f;
 constexpr float kFarRayLevelEnd[kFarLevels - 1] = {256.0f, 1000.0f};
 // The prototype bake's template voxel (m).
 constexpr float kFarTemplateVoxel = 1.0f;
+
+// The far switch (cell_cull.comp mirrors these): a cell draws its voxels
+// instead of its trees once an L0 voxel projects to at most
+// kFarSwitchPixels from the nearest point of its canopy box (~4.8 km at
+// 1440p), and back to trees above kFarSwitchHysteresis times that. The
+// level is the coarsest whose voxel projects to at most kFarLevelPixels,
+// kept until the continuous level leaves its band by the same ratio.
+constexpr float kFarSwitchPixels = 1.0f;
+constexpr float kFarSwitchHysteresis = 1.1f;
+constexpr float kFarLevelPixels = 1.0f;
+constexpr bool farSwitch(float projectedPixels, bool currentlyFar, float threshold,
+                         float hysteresis) {
+  return projectedPixels <= (currentlyFar ? threshold * hysteresis : threshold);
+}
+// previousLevel: the cell's level last frame while it was far, else
+// kFarLevels.
+inline uint32_t farLevel(float l0VoxelPixels, uint32_t previousLevel, float hysteresis) {
+  const float x = std::log2(kFarLevelPixels / l0VoxelPixels);
+  if (previousLevel < kFarLevels) {
+    const float margin = std::log2(hysteresis);
+    const float lo = previousLevel == 0 ? -INFINITY : float(previousLevel) - margin;
+    const float hi = previousLevel == kFarLevels - 1 ? INFINITY : float(previousLevel + 1) + margin;
+    if (x >= lo && x < hi) {
+      return previousLevel;
+    }
+  }
+  return uint32_t(std::clamp(std::floor(x), 0.0f, float(kFarLevels - 1)));
+}
 
 // A voxel, 4 bytes: extinction code (0 empty; c in 1..255 is
 // 2^((c - 1) / 18 - 10) per m, 1/1024 to ~17, steps of 3.9%), octahedral
