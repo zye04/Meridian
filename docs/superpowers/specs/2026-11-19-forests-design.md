@@ -1,5 +1,7 @@
 # M2a Forests — design
 
+**Status:** in progress; the plan (`docs/superpowers/plans/2026-11-19-forests.md`) tracks which tasks are done.
+
 Milestone M2 of the showcase roadmap (`2026-11-19-showcase-roadmap.md`) is
 split in two, each visible on screen with its own GPU budget:
 

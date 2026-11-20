@@ -1,5 +1,7 @@
 # Far-field forests: per-cell voxel bricks (M2a)
 
+**Status:** decided; built by M2a Tasks 8-9 (not started).
+
 Decided with the user on 2026-11-20: option C of the far-field draft. Forest
 cells past a screen-size threshold are drawn as one aggregate each, a
 sparse hierarchy of voxel bricks, instead of per-instance impostors. The
