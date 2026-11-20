@@ -42,7 +42,8 @@ Vec3 apply(const Mat3 &m, Vec3 v) {
   return {row(0), row(1), row(2)};
 }
 
-// tonemap.frag's matrices, transposed from GLSL's column-major mat3.
+// grade.glsl's and grade_lut.comp's matrices, transposed from GLSL's
+// column-major mat3.
 constexpr Mat3 kRec709ToAgxInset{
     0.544814816, 0.373786466, 0.081398195, 0.140416759, 0.754137100,
     0.105444695, 0.088810540, 0.178871522, 0.732317593};
@@ -132,21 +133,19 @@ Vec3 componentwise(Vec3 v, auto f) { return {f(v.x), f(v.y), f(v.z)}; }
 
 Vec3 multiply(Vec3 a, Vec3 b) { return {a.x * b.x, a.y * b.y, a.z * b.z}; }
 
-constexpr float kBandHalfWidth = 45.0f;
-
 void applyBands(const Grade &grade, Vec3 &lab) {
   constexpr float kDegrees = 180.0f / std::numbers::pi_v<float>;
   float hue = std::atan2(lab.z, lab.y) * kDegrees;
   float rotation = 0.0f, chromaScale = 1.0f;
   for (auto [band, centre] :
-       {std::pair{&grade.greens, 140.0f}, std::pair{&grade.blues, 250.0f},
-        std::pair{&grade.browns, 60.0f}}) {
+       {std::pair{&grade.greens, kGreensHue}, std::pair{&grade.blues, kBluesHue},
+        std::pair{&grade.browns, kBrownsHue}}) {
     float distance = std::abs(std::remainder(hue - centre, 360.0f));
-    if (distance >= kBandHalfWidth)
+    if (distance >= kHueBandHalfWidth)
       continue;
     float weight =
         0.5f + 0.5f * std::cos(std::numbers::pi_v<float> * distance /
-                               kBandHalfWidth);
+                               kHueBandHalfWidth);
     rotation += weight * band->hueShiftDegrees;
     chromaScale *= 1.0f + weight * (band->saturation - 1.0f);
   }

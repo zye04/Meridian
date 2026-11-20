@@ -56,6 +56,53 @@ bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
   return std::fclose(file) == 0 && written;
 }
 
+GpuGrade toGpu(const Grade &grade) {
+  GpuGrade gpu;
+  const std::array<float, 9> wb =
+      whiteBalanceMatrix(grade.temperatureKelvin, grade.tint);
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      gpu.whiteBalance[row][column] = wb[row * 3 + column];
+    }
+  }
+  const Vec3 cdl[] = {grade.slope, grade.offset, grade.power};
+  float *targets[] = {gpu.slope, gpu.offset, gpu.power};
+  for (int i = 0; i < 3; ++i) {
+    targets[i][0] = cdl[i].x;
+    targets[i][1] = cdl[i].y;
+    targets[i][2] = cdl[i].z;
+  }
+  gpu.exposureScale = std::exp2(grade.exposureEv);
+  gpu.contrast = grade.contrast;
+  gpu.saturation = grade.saturation;
+  const std::pair<const HueBand *, float> bands[] = {
+      {&grade.greens, kGreensHue},
+      {&grade.blues, kBluesHue},
+      {&grade.browns, kBrownsHue}};
+  for (int i = 0; i < 3; ++i) {
+    gpu.bands[i][0] = bands[i].second;
+    gpu.bands[i][1] = kHueBandHalfWidth;
+    gpu.bands[i][2] = bands[i].first->hueShiftDegrees;
+    gpu.bands[i][3] = bands[i].first->saturation;
+  }
+  return gpu;
+}
+
+// Largest difference between the baked LUT (RGBA16F) and the CPU reference.
+float gradeLutDifference(const Grade &grade, const uint16_t *rgba) {
+  const std::vector<std::array<float, 4>> reference = bakeGradeLut(grade);
+  float worst = 0.0f;
+  for (size_t i = 0; i < reference.size(); ++i) {
+    for (size_t c = 0; c < 3; ++c) {
+      const float d = std::abs(halfToFloat(rgba[i * 4 + c]) - reference[i][c]);
+      if (std::isnan(d) || d > worst) { // NaN sticks, so it fails the check
+        worst = d;
+      }
+    }
+  }
+  return worst;
+}
+
 } // namespace
 
 // Writes the CPU instance list to the GPU instance table. The table is
@@ -396,6 +443,11 @@ uint32_t Renderer::drawnCellCount() const { return impl_->drawnCells; }
 uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
 void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
+
+void Renderer::setGrade(const Grade &grade) {
+  impl_->grade = grade;
+  impl_->gradeDirty = true;
+}
 
 void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
@@ -918,7 +970,59 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdPipelineBarrier2(cmd, &historyDependency);
   endPass("exposure");
 
-  // --- Tonemap pass: resolved HDR -> swapchain image.
+  // --- Tonemap pass: resolved HDR -> swapchain image, through the grade
+  // LUT, which is rebaked first when the grade changed.
+
+  Buffer gradeReadback;
+  if (impl_->gradeDirty) {
+    // The LUT and its parameters are shared by both frames in flight: the
+    // previous frame's tonemap and bake must be done with them.
+    memoryBarrier(cmd,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT |
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_TRANSFER_WRITE_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    const GpuGrade gpuGrade = toGpu(impl_->grade);
+    vkCmdUpdateBuffer(cmd, impl_->gradeBuffer.buffer, 0, sizeof(gpuGrade),
+                      &gpuGrade);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                  VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+
+    const GradeConstants gradeConstants{impl_->gradeBuffer.address};
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      impl_->gradeLutPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            impl_->gradeLayout, 0, 1, &postSet, 0, nullptr);
+    vkCmdPushConstants(cmd, impl_->gradeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(gradeConstants), &gradeConstants);
+    constexpr uint32_t kGroups = (kGradeLutSize + 3) / 4;
+    vkCmdDispatch(cmd, kGroups, kGroups, kGroups);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                      VK_PIPELINE_STAGE_2_COPY_BIT,
+                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                      VK_ACCESS_2_TRANSFER_READ_BIT);
+    impl_->gradeDirty = false;
+
+    if (kEnableValidation) {
+      gradeReadback = impl_->createBuffer(
+          VkDeviceSize{kGradeLutSize} * kGradeLutSize * kGradeLutSize * 8,
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+              VMA_ALLOCATION_CREATE_MAPPED_BIT);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {kGradeLutSize, kGradeLutSize, kGradeLutSize};
+      vkCmdCopyImageToBuffer(cmd, impl_->gradeLut.image, VK_IMAGE_LAYOUT_GENERAL,
+                             gradeReadback.buffer, 1, &region);
+    }
+  }
 
   VkImage swapchainImage = impl_->swapchainImages[imageIndex];
   transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1032,6 +1136,21 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   submit.pSignalSemaphoreInfos = &signalInfo;
   check(vkQueueSubmit2(impl_->graphicsQueue, 1, &submit, frame.renderFence),
         "vkQueueSubmit2");
+
+  if (gradeReadback.buffer != VK_NULL_HANDLE) {
+    check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
+          "vkWaitForFences");
+    check(vmaInvalidateAllocation(impl_->allocator, gradeReadback.allocation, 0,
+                                  VK_WHOLE_SIZE),
+          "vmaInvalidateAllocation");
+    const float difference = gradeLutDifference(
+        impl_->grade, static_cast<const uint16_t *>(gradeReadback.mapped));
+    impl_->destroyBuffer(gradeReadback);
+    std::printf("grade LUT check: max diff %g\n", difference);
+    if (!(difference <= 2e-3f)) {
+      throw std::runtime_error("GPU grade LUT differs from the CPU reference");
+    }
+  }
 
   if (capturing) {
     check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),

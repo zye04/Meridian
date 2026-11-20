@@ -619,6 +619,29 @@ struct PostConstants {
 };
 static_assert(sizeof(PostConstants) == 32);
 
+// Must match GradeBuffer in grade_lut.comp: Grade with the white balance as
+// a matrix and the exposure as a scale, both computed on the CPU.
+struct GpuGrade {
+  float whiteBalance[3][4] = {}; // rows; w unused
+  float slope[4] = {};
+  float offset[4] = {};
+  float power[4] = {};
+  float exposureScale = 1.0f;
+  float contrast = 1.0f;
+  float saturation = 1.0f;
+  float pad = 0.0f;
+  // Greens, blues, browns: centre and half-width (degrees), hue shift
+  // (degrees), saturation.
+  float bands[3][4] = {};
+};
+static_assert(sizeof(GpuGrade) == 160);
+
+// Must match the push_constant block in grade_lut.comp.
+struct GradeConstants {
+  VkDeviceAddress grade = 0;
+};
+static_assert(sizeof(GradeConstants) == 8);
+
 // Must match the push_constant block in the shaders.
 struct PushConstants {
   VkDeviceAddress sceneBuffer = 0;

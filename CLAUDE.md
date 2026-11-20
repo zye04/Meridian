@@ -160,7 +160,8 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            placement.h (rules, dither pattern,
                            evaluatePoint: CPU reference of GPU placement,
                            PlacedInstance), grade.h (Grade, CPU
-                           reference of the grade + AgX LUT bake),
+                           reference of the grade + AgX LUT bake that
+                           grade_lut.comp mirrors; Renderer::setGrade),
                            window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
@@ -251,10 +252,14 @@ retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> TAA resolve
-(compute) -> luminance histogram + exposure adaptation (compute) -> AgX
-tonemap + +-1 LSB dither into the sRGB swapchain. 2 frames in flight; the
-HDR/depth/LUT/history images are shared between them, and barriers
-account for that.
+(compute) -> luminance histogram + exposure adaptation (compute) -> grade
+LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
+and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
+check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
+tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
+AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. 2 frames in
+flight; the HDR/depth/LUT/history images are shared between them, and
+barriers account for that.
 
 ## Conventions
 
@@ -326,7 +331,8 @@ account for that.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
-  `ScanConstants` in scan.comp, `TlasFillConstants` in tlas_fill.comp; `PlacedInstance` in placement.h); change
+  `ScanConstants` in scan.comp, `TlasFillConstants` in tlas_fill.comp,
+  `GpuGrade`/`GradeConstants` in grade_lut.comp; `PlacedInstance` in placement.h); change
   both together (static_asserts check the sizes). `placement.glsl` mirrors
   `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's
   integer core operation for operation: placement keep/reject must be

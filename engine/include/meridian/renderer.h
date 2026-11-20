@@ -1,6 +1,7 @@
 #pragma once
 
 #include <meridian/camera.h>
+#include <meridian/grade.h>
 #include <meridian/math/mat4.h>
 #include <meridian/mesh.h>
 #include <meridian/terrain.h>
@@ -214,6 +215,10 @@ public:
   // On by default; off draws everything in the view frustum (for A/B
   // comparisons).
   void setOcclusionCulling(bool enabled);
+
+  // The colour grade, baked with the display transform into a 3D LUT on the
+  // next frame. Identity by default.
+  void setGrade(const Grade &grade);
 
   // Saves the next drawn frame (after tonemapping) as a PNG. For automated
   // visual checks; stalls that frame until the GPU is done.

@@ -9,6 +9,8 @@ layout(set = 0, binding = 2) uniform sampler2D historyPrevious;
 layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D historyNext;
 // The same image as historyNext, read by the passes after the resolve.
 layout(set = 0, binding = 4) uniform sampler2D resolved;
+// Grade + AgX, baked by grade_lut.comp (which writes it at binding 6).
+layout(set = 0, binding = 5) uniform sampler3D gradeLut;
 
 layout(buffer_reference, std430) buffer HistogramBuffer {
     uint bins[kHistogramBins];

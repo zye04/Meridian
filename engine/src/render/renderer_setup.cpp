@@ -386,10 +386,10 @@ void Renderer::Impl::createDescriptors() {
   // Must match post.glsl.
   constexpr VkShaderStageFlags kPostStages =
       VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-  VkDescriptorSetLayoutBinding bindings[5]{};
-  for (uint32_t b = 0; b < 5; ++b) {
+  VkDescriptorSetLayoutBinding bindings[7]{};
+  for (uint32_t b = 0; b < 7; ++b) {
     bindings[b].binding = b;
-    bindings[b].descriptorType = b == 3
+    bindings[b].descriptorType = b == 3 || b == 6
                                      ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                      : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[b].descriptorCount = 1;
@@ -398,7 +398,7 @@ void Renderer::Impl::createDescriptors() {
 
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = 5;
+  layoutInfo.bindingCount = 7;
   layoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &postSetLayout),
         "vkCreateDescriptorSetLayout");
@@ -425,8 +425,8 @@ void Renderer::Impl::createDescriptors() {
         "vkCreateDescriptorSetLayout");
 
   VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 12},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 6},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 14},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8},
   };
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -497,6 +497,44 @@ void Renderer::Impl::createAtmosphere() {
     writes[b].pImageInfo = &images[b];
   }
   vkUpdateDescriptorSets(device.device, 8, writes, 0, nullptr);
+}
+
+void Renderer::Impl::createGrade() {
+  gradeLut = createImage(VK_FORMAT_R16G16B16A16_SFLOAT,
+                         {kGradeLutSize, kGradeLutSize, kGradeLutSize},
+                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT);
+  gradeBuffer = createBuffer(sizeof(GpuGrade),
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                             0);
+  submitNow([&](VkCommandBuffer cmd) {
+    transitionImage(cmd, {gradeLut.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+  });
+
+  VkDescriptorImageInfo sampled{linearSampler, gradeLut.view,
+                                VK_IMAGE_LAYOUT_GENERAL};
+  VkDescriptorImageInfo storage{VK_NULL_HANDLE, gradeLut.view,
+                                VK_IMAGE_LAYOUT_GENERAL};
+  VkWriteDescriptorSet writes[4]{};
+  for (uint32_t i = 0; i < 4; ++i) {
+    const bool isSampled = i < 2;
+    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[i].dstSet = postSets[i % 2];
+    writes[i].dstBinding = isSampled ? 5 : 6;
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = isSampled
+                                   ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                   : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[i].pImageInfo = isSampled ? &sampled : &storage;
+  }
+  vkUpdateDescriptorSets(device.device, 4, writes, 0, nullptr);
 }
 
 void Renderer::Impl::createExposureBuffers() {
@@ -769,6 +807,15 @@ void Renderer::Impl::createPipelines() {
 
   taaPipeline = createComputePipeline(dev, "taa.comp", postLayout);
 
+  VkPushConstantRange gradePushRange{};
+  gradePushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  gradePushRange.size = sizeof(GradeConstants);
+  VkPipelineLayoutCreateInfo gradeLayoutInfo = postLayoutInfo;
+  gradeLayoutInfo.pPushConstantRanges = &gradePushRange;
+  check(vkCreatePipelineLayout(dev, &gradeLayoutInfo, nullptr, &gradeLayout),
+        "vkCreatePipelineLayout");
+  gradeLutPipeline = createComputePipeline(dev, "grade_lut.comp", gradeLayout);
+
   VkPushConstantRange cullPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                     sizeof(CullConstants)};
   VkPipelineLayoutCreateInfo cullLayoutInfo{};
@@ -976,6 +1023,7 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
   impl_->createPipelines();
   impl_->computeDfgLut();
   impl_->createExposureBuffers();
+  impl_->createGrade();
   impl_->createAtmosphere();
   impl_->createScene();
 
@@ -1005,6 +1053,7 @@ Renderer::~Renderer() {
   }
 
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->gradeLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyIrradiancePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->aerialPerspectiveLutPipeline, nullptr);
@@ -1022,6 +1071,7 @@ Renderer::~Renderer() {
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->gradeLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
@@ -1061,6 +1111,8 @@ Renderer::~Renderer() {
   impl_->destroyImage(impl_->skyViewLut);
   impl_->destroyImage(impl_->multiScatteringLut);
   impl_->destroyImage(impl_->transmittanceLut);
+  impl_->destroyImage(impl_->gradeLut);
+  impl_->destroyBuffer(impl_->gradeBuffer);
   impl_->destroyBuffer(impl_->exposureBuffer);
   impl_->destroyBuffer(impl_->histogramBuffer);
   impl_->destroySwapchain();

@@ -12,6 +12,10 @@ namespace meridian {
 // Scene-referred colour grade, applied in linear Rec.2020 before AgX. The
 // default is identity. This is the CPU reference of the GPU LUT bake.
 
+// Band centres and half-width in OKLCh hue degrees (raised-cosine windows).
+constexpr float kGreensHue = 140.0f, kBluesHue = 250.0f, kBrownsHue = 60.0f;
+constexpr float kHueBandHalfWidth = 45.0f;
+
 // OKLCh hue band: rotation (positive = increasing hue) and chroma scale.
 struct HueBand {
   float hueShiftDegrees = 0.0f;
@@ -37,8 +41,8 @@ std::array<float, 9> whiteBalanceMatrix(float kelvin, float tint);
 
 Vec3 gradeColor(const Grade &grade, Vec3 rec2020);
 
-// tonemap.frag's agx(): scene-linear Rec.709 in, display-linear Rec.709 out
-// (not clamped).
+// grade_lut.comp's agxDisplay(): scene-linear Rec.709 in, display-linear
+// Rec.709 out (not clamped).
 Vec3 agxDisplay(Vec3 rec709);
 
 // The LUT's log2 shaper, over a range past AgX's +4.03 EV clamp so a

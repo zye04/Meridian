@@ -1226,6 +1226,14 @@ separately linked module (`MERIDIAN_DLSS`).**
   CIE 159:2004 CIECAM02 (CAT02); Ottosson 2020,
   https://bottosson.github.io/posts/oklab/ (OKLab).
 - The grade defaults to identity.
+- The GPU bake (`grade_lut.comp`, `Renderer::setGrade`) mirrors the CPU
+  reference operation for operation and runs only when the grade changes;
+  the tonemap is one trilinear fetch. Its readback differs from
+  `bakeGradeLut` by at most 1.1e-3 (Debug check, limit 2e-3; also for a
+  non-identity grade). Measured against the analytic AgX at 1920x1080,
+  Release: mean 0.15/255 on the ground view and on the sunset view (sun
+  disk), max 1/255; tonemap pass median 0.04 ms (was 0.06 ms; gate 0.08 ms
+  at 1440p, 0.045 ms at 1080p; re-measure at 1440p).
 - Reference starting set, for tuning after the lighting work: CDL power
   1.10, saturation 1.10, greens 10 degrees toward yellow x1.15, blues
   10 degrees toward cyan.

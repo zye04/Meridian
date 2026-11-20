@@ -241,6 +241,16 @@ struct Renderer::Impl {
   Buffer exposureBuffer;
   VkPipeline tonemapPipeline = VK_NULL_HANDLE;
 
+  // Grade + AgX as a kGradeLutSize^3 LUT in GENERAL layout, sampled by the
+  // tonemap (post binding 5), rebaked (binding 6) when the grade changes.
+  // gradeLayout is the post set plus GradeConstants.
+  Grade grade;
+  bool gradeDirty = true;
+  Image gradeLut;
+  Buffer gradeBuffer;
+  VkPipelineLayout gradeLayout = VK_NULL_HANDLE;
+  VkPipeline gradeLutPipeline = VK_NULL_HANDLE;
+
   std::vector<GpuMesh> meshes;
 
   std::optional<std::filesystem::path> capturePath;
@@ -253,6 +263,7 @@ struct Renderer::Impl {
   void createExposureBuffers();
   void createScene();
   void createAtmosphere();
+  void createGrade();
   void createMaterialSystem();
   void computeDfgLut();
 
