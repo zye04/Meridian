@@ -14,6 +14,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Upscaler history reset on camera cuts: `historyValid` goes false only in `createSwapchain`, no hook for teleports or cutscenes | Predates DLSS; TAA and DLSS (and Ray Reconstruction, Task 1.5) all need it | Task 1.3 review | Before a teleport or cutscene feature |
 | Shadow denoiser | Soft RT sun shadows use 1 ray/pixel accumulated by TAA; leaf shadows shimmer in motion | User screenshots 2026-11-20 | Motion-clarity plan: DLSS Ray Reconstruction (Task 1.5), fallback MIT shadow denoiser (Tasks 3.2a-3.2b) |
 | Ambient visibility inside crowns: foliage gets sky and ground light with occlusion 1, so crowns lack the dark depth of the reference frames | Biggest remaining foliage gap after leaf transmission and the grade | Q1 diagnosis R2c, quality pass | Crown-depth AO baked at cook, or RT sky visibility (M2b) |
+| Ground bounce is grey (`kGroundAlbedo` 0.1 in mesh.frag); the shadow sides of rocks and the cliff read blue | Tinting it with today's terrain layers (mean albedo 0.20, 0.12, 0.06) turned the forest's leaf undersides olive-brown, away from the look target: the brown ground is placeholder | Q1 diagnosis R4, quality pass | With the ground lane's terrain: bounce from the terrain material's mean albedo (or RT GI) |
 | Leaf textures (venation, normal, translucency maps) | Megaplants USD ships flat leaf colors only | Task 2 import; user feedback | Content, with leaf translucency |
 | Shadows too dark (needle ground ~11% of sunlit in two measured views; real ~10-20%) | Shadows at the dark end of real | Shadow investigation 2026-11-20 | Haze profile and bounce light (rows below) |
 | Haze anchored at sea level | Ridges (1.35 km) sit above most of the aerosol: less sky light up high, thin haze from above | Shadow investigation; haze tuning | Engine: aerosol layer from the valley floor / layered profile with a sharp top |
@@ -37,13 +38,13 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | DLSS 5 | Newest DLSS (shipped 2026-09), RTX 50 only, no Linux evidence; dev GPU is an RTX 4080 | Motion-clarity spec | When the Linux SDK carries it and an RTX 50 target exists (a version bump behind the Upscaler interface) |
 | XeSS backend | Intel's upscaler; no Linux binaries | Motion-clarity spec non-goal | When Linux binaries exist and a non-NVIDIA target needs it |
 | FSR 4 backend | Better than TAA v2 on AMD RDNA 2-4 (FidelityFX SDK 2.4, MIT, Vulkan); Linux binaries unverified | Motion-clarity spec non-goal | When a non-NVIDIA target exists |
-| Grade look tuning | Grading system lands with an identity grade; the measured reference starting set (decisions.md) waits for real lighting | Motion-clarity spec | After sky occlusion, leaf translucency and forests in frame |
+| Grade look tuning | The game starts with a grade tuned toward the Chlorophyll Engine frames (decisions.md, "Visible quality pass"); the engine default stays identity | Motion-clarity spec; quality pass | Final look after sky occlusion, crown AO and the ground lane's terrain |
 
 ## Geometry and vegetation
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Leaves vanish at distance | Cluster simplification thins disjoint leaves | User screenshots; VG spec | M2a impostors (Tasks 10-11) and voxel far field (Tasks 8-9); coverage-preserving simplification = VG slice 3 |
+| Leaves vanish at distance | Cluster simplification thins disjoint leaves (sloppy collapse; the error measures leaf size, not lost coverage). A per-mesh leaf error multiplier is no stop-gap: 2x barely helps, 4x restores the summit view's canopies at 18M -> 118M triangles, 5.6 -> 17.8 ms, and overflows the cull lists at the forest views (quality pass, Release 1440p) | User screenshots; VG spec; Q1 diagnosis R1 | M2a impostors (Tasks 10-11) and voxel far field (Tasks 8-9); coverage-preserving simplification = VG slice 3 |
 | RT on clusters | Shadows trace full-detail BLAS while raster draws LOD clusters (rays start the cluster's simplification error above the surface to avoid acne) | VG spec | VG slice 2 |
 | Visibility buffer | Tiny-triangle shading efficiency | VG spec | VG slice 4, if measurements call for it |
 | Cluster compression and streaming | Memory at larger scale (slice 5's hierarchical traversal landed in M2a Task 7); the geometry pools free retired buffers after vkDeviceWaitIdle and keep up to 1/3 slack, so streaming needs frees deferred by frame fences (and a trim) | VG spec | VG slice 5 |

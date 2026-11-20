@@ -52,6 +52,15 @@ assets themselves. Order:
    bounce light, near-black shadows, exposure), and the LOD (far trees
    render as leafless sticks while their RT shadows are full canopies:
    raster LOD vs full-detail BLAS). Report the root causes with evidence.
+   **Done** (`quality-q1` report, then the quality pass on main
+   2026-11-20): exposure mean at 18% grey, a starting grade toward the
+   Chlorophyll frames (`assets/reference/chlorophyll`), leaf diffuse
+   transmission (trees re-cooked), Poly Haven AO bound (models
+   re-cooked), TLAS-first sun shadows (forest edge 33 -> 22 ms).
+   Deferred (backlog): warm ground bounce until the green ground, the
+   leaf LOD multiplier (too costly; far trees wait for impostors / far
+   field), crown ambient visibility. The look values are a starting
+   point for the user to adjust.
 2. Green ground: the Napf is pasture, but everything renders as bare
    dirt; the terrain material, then M3 meadow grass.
 3. Rocks: seated on slopes, no floating or tilted slabs.

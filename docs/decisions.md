@@ -1484,6 +1484,12 @@ std 50-70, chroma 0.37-0.49; start view std 28 -> 40, chroma 0.37 ->
 included). The remaining gap is depth inside crowns (no ambient
 visibility for foliage; backlog).
 
+**Deferred from this pass** (rows in backlog.md): the warm ground bounce
+(with today's brown placeholder terrain it turned foliage olive) and a
+per-mesh leaf LOD error multiplier as a stop-gap for bare far trees (it
+needs about 4x to restore canopies, which costs 6.5x the triangles at
+the summit view and overflows the cull lists in the forest).
+
 **Poly Haven AO.** Their glTFs bind the `_arm` pack (R occlusion, G
 roughness, B metallic) only as metallicRoughness; the cook now binds the
 same texture info (texture transform included) as occlusion when the
