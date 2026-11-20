@@ -10,8 +10,9 @@
 
 // Traces the GI probes (gi.glsl): one workgroup per probe, one ray per
 // thread over a spherical Fibonacci set rotated every frame. Rays march the
-// heightfield (and the far-field trees' voxels); a hit returns the lit
-// ground, a miss the sky with the sky capture's clouds. The radiance is
+// heightfield (and the far-field trees' voxels); a hit returns the ground
+// cache's radiance (lit directly where it holds none), a miss the sky with
+// the sky capture's clouds. The radiance is
 // projected on L1 SH and blended into the probe's history. A frame updates
 // every 8th probe, plus any probe whose slot holds another column (it
 // scrolled in) or that was never traced.
@@ -19,13 +20,7 @@
 layout(local_size_x = 64) in;
 
 const uint kRays = 64u;
-const float kHysteresis = 0.9;
-const float kMaxDistance = 4000.0;
-// Trees farther than this along a probe ray, or toward the sun from a hit,
-// are left out: the far-field march is the pass's main cost with --trees.
-const float kTreeDistance = 300.0;
-// Until the ground cache: a meadow's mean linear albedo, and the canopy's.
-const vec3 kGroundAlbedo = vec3(0.06, 0.09, 0.03);
+const float kHysteresis = 0.95;
 const vec3 kLeafAlbedo = vec3(0.05, 0.08, 0.03);
 
 shared vec3 partial[4][kRays];
@@ -35,13 +30,6 @@ shared float probeBase;
 shared bool fresh;
 shared float canopySun;
 shared vec3 sunAtProbe;
-
-vec3 terrainNormalAt(Terrain t, vec2 xz) {
-    const float e = 1.0;
-    float dx = terrainHeight(t, xz + vec2(e, 0.0)) - terrainHeight(t, xz - vec2(e, 0.0));
-    float dz = terrainHeight(t, xz + vec2(0.0, e)) - terrainHeight(t, xz - vec2(0.0, e));
-    return normalize(vec3(-dx, 2.0 * e, -dz));
-}
 
 // A rotation that changes every frame (deterministic), from a hashed axis
 // and angle.
@@ -91,7 +79,7 @@ void main() {
             canopySun = 1.0;
             if (pc.scene.farFieldEnabled != 0u && pc.scene.sunDirection.y > 0.0) {
                 canopySun = farFieldTransmittance(farField, probePosition,
-                                                  pc.scene.sunDirection, 0.0, kTreeDistance, false);
+                                                  pc.scene.sunDirection, 0.0, kGiTreeDistance, false);
             }
             vec3 atmosphere = atmospherePosition(probePosition);
             float height = length(atmosphere);
@@ -114,31 +102,28 @@ void main() {
     vec3 origin = probePosition;
     vec3 sun = pc.scene.sunDirection;
     vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
-    float hit = terrain.width > 0u ? terrainRayDistance(pc.scene, origin, direction, kMaxDistance)
+    float hit = terrain.width > 0u ? terrainRayDistance(pc.scene, origin, direction, kGiMaxDistance)
                                    : -1.0;
     vec3 radiance;
     if (hit >= 0.0) {
         vec3 p = origin + hit * direction;
-        vec3 n = terrainNormalAt(terrain, p.xz);
-        vec3 atmosphere = atmospherePosition(p);
-        float height = length(atmosphere);
-        vec3 sunAtSurface = transmittanceToSun(height, dot(atmosphere / height, sun)) * cloudShadow(p);
-        float NoL = max(dot(n, sun), 0.0);
-        float visibility = 0.0;
-        if (NoL > 0.0 && !terrainOccludes(pc.scene, p + n * 0.05, sun, kMaxDistance)) {
-            visibility = 1.0;
-            if (pc.scene.farFieldEnabled != 0u) {
-                visibility = farFieldTransmittance(farField, p, sun, 0.0, kTreeDistance, false);
-            }
+        vec4 cached = giGroundRadiance(p.xz);
+        radiance = cached.rgb * cached.a;
+        if (cached.a < 1.0) {
+            vec3 n = terrainNormalAt(terrain, p.xz);
+            vec3 atmosphere = atmospherePosition(p);
+            float height = length(atmosphere);
+            vec3 sunAtSurface = transmittanceToSun(height, dot(atmosphere / height, sun));
+            float lit = max(dot(n, sun), 0.0) * giGroundSunVisibility(p, n);
+            radiance += (1.0 - cached.a) * kGiGroundAlbedo / kPi * (sunAtSurface * lit + skyIrradiance);
         }
-        radiance = kGroundAlbedo / kPi * (sunAtSurface * (NoL * visibility) + skyIrradiance);
     } else {
         vec4 clouds = skyCaptureAt(direction);
         radiance = skyLuminance(atmospherePosition(origin), direction) * clouds.a + clouds.rgb;
     }
     if (pc.scene.farFieldEnabled != 0u) {
         float transmittance = farFieldTransmittance(farField, origin, direction, 0.0,
-                                                    hit >= 0.0 ? min(hit, kTreeDistance) : kTreeDistance,
+                                                    hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance,
                                                     false);
         vec3 leaf = kLeafAlbedo / kPi * (sunAtProbe * (0.5 * canopySun * max(sun.y, 0.0)) +
                                          0.5 * skyIrradiance);

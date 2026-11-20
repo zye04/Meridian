@@ -178,7 +178,7 @@ voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
 voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi ground + gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (with `--gi probes`), contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -284,8 +284,10 @@ lights the ambient term from global-illumination probes (spec
 clipmap (5 levels, 2-32 m columns, 48^2 columns x 8 slices above the
 terrain under each column), traced in compute against the heightfield
 pyramid (`terrainRayDistance`) and, with `--trees`, the far-field voxels;
-ground hits are a fixed meadow albedo lit by the sun (terrain, tree and
-cloud shadow), misses the sky-view LUT + sky capture. No ray tracing.
+ground hits read a ground radiance cache (4 levels of 256^2 texels at 1-8
+m, albedo from the rendered image, relit by the sun with terrain, tree and
+cloud shadow plus the probes' own irradiance), misses the sky-view LUT + sky
+capture. No ray tracing.
 `--shadows raster|rt` (default raster; rt is an A/B, decisions.md): the
 sun's visibility of objects
 (trees, rocks, plants, models) from the cascaded shadow maps (lighting.glsl
@@ -395,8 +397,9 @@ engine/src/render/         renderer internals:
                            printAmbient, cloud march targets and
                            histories (quarter/half res) and the cloud
                            pass (march, resolve, composite)
-  renderer_gi.cpp          GI probe buffer, clipmap windows per frame,
-                           the probe trace dispatch
+  renderer_gi.cpp          GI probe and ground cache buffers, clipmap
+                           windows per frame, the ground relight, probe
+                           trace and albedo feedback dispatches
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -445,8 +448,11 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cloud reprojection).
                            gi.glsl: probe buffer layout, clipmap
                            indexing, giSample/giIrradiance (the ambient
-                           hook in lighting.glsl); gi_probes.comp traces
-                           the probes.
+                           hook in lighting.glsl), the ground cache
+                           (giGroundRadiance, giGroundSunVisibility);
+                           gi_probes.comp traces the probes, gi_ground.comp
+                           relights the ground cache, gi_albedo.comp
+                           (scatter, resolve) feeds it the rendered albedo.
 game/src/main.cpp          scene setup, fly camera, CLI options
 game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
                            with sun, haze and bloom (Look), G toggle
@@ -560,13 +566,16 @@ from the camera into a 64^2 octahedral map (cloud luminance + haze,
 transmittance; one texel of every 2x2 block per frame, all when the
 history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
 clouds over it integrated into the scene's ambient irradiance, and the
-LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
-(only with `--gi probes`: gi_probes.comp, one 64-ray workgroup per probe
+LUT alone into the clear-sky irradiance that lights the clouds) -> gi ground
+(only with `--gi probes`: gi_ground.comp relights a quarter of the ground
+cache's texels per frame, plus new or stale ones) -> gi probes
+(gi_probes.comp, one 64-ray workgroup per probe
 that is stale, never traced or in this frame's 1/8 (hashed over columns and
-slices); L1 SH with hysteresis 0.9; read by the scene passes) -> early scene
+slices); L1 SH with hysteresis 0.95; ground hits read the cache; read by the
+scene passes) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
 Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
-world normal + roughness; null views unless the upscaler wants them) + RGBA16F sun light (the
+world normal + roughness; null views unless the upscaler wants them, the diffuse albedo also when GI is on) + RGBA16F sun light (the
 sun's exposed radiance, for contact shadows) + D32 depth
 (sky fullscreen, then the masked lists depth-only (mesh_masked_depth.frag:
 the alpha test alone), then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
@@ -678,9 +687,16 @@ barriers account for that.
   frameIndex) (`pcg3d`, common.glsl) instead of interleaved gradient noise.
   The cloud march keeps interleaved gradient noise: its own resolve
   integrates it, and RR sees only the resolved clouds.
-- GI probes (`SceneData.giMode`, `gi`: the probe buffer, a 96 B header of
-  per-level windows + 64 B probes, toroidal by world column, each stamped
-  with the column it was traced for): `addAmbientLight` takes the diffuse
+- GI probes (`SceneData.giMode`, `gi`: the probe buffer, a 160 B header of
+  per-level windows (probes and ground cache) + 64 B probes, toroidal by
+  world column, each stamped with the column it was traced for; the ground
+  cache is a second buffer, 48 B per texel + a 16 B albedo accumulator,
+  toroidal by world texel and stamped the same way). The diffuse albedo
+  guide (scene attachment 3) exists whenever GI is on, not only under Ray
+  Reconstruction (`Renderer::setGiMode` recreates the targets if it is
+  turned on after they were made); the other guides still only for the
+  upscaler. gi albedo runs after the clouds, before contact shadows, with
+  depth and the albedo in SHADER_READ_ONLY: `addAmbientLight` takes the diffuse
   and rough-specular irradiance from `giSample`/`giIrradiance` when giMode
   is 1, blending to the analytic sky + ground term outside the clipmap.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,

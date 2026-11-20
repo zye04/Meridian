@@ -1,0 +1,68 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "atmosphere.glsl"
+#include "terrain.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "farfield.glsl"
+#include "gi.glsl"
+
+// Relights the ground cache (gi.glsl): a quarter of the texels per frame,
+// all of them after a reset, plus any texel whose slot holds another world
+// texel (it scrolled in). A texel's outgoing radiance is its albedo / pi x
+// (the sun with terrain, tree and cloud shadows + the probes' irradiance
+// there), so a probe ray that hits the ground sees one more bounce.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// The texel's albedo; where it was never seen, the next coarser level's at
+// that point, else the meadow default.
+vec3 groundAlbedo(GiBuffer gi, uint level, vec2 xz) {
+    for (uint k = level; k < kGiGroundLevels; ++k) {
+        ivec2 texel = ivec2(floor(xz / gi.ground[k].spacing));
+        GiGroundTexel record = gi.groundBuffer.texels[giGroundIndex(k, texel)];
+        if (record.albedo.a > 0.0 && record.texel == texel) {
+            return record.albedo.rgb;
+        }
+    }
+    return kGiGroundAlbedo;
+}
+
+void main() {
+    GiBuffer gi = pc.scene.gi;
+    uint level = gl_GlobalInvocationID.z;
+    ivec2 slot = ivec2(gl_GlobalInvocationID.xy);
+    GiLevel window = gi.ground[level];
+    ivec2 texel = window.origin +
+                  ivec2(giWrapN(slot.x - window.origin.x, kGiGroundTexels),
+                        giWrapN(slot.y - window.origin.y, kGiGroundTexels));
+    uint index = giGroundIndex(level, texel);
+    GiGroundTexel record = gi.groundBuffer.texels[index];
+    bool fresh = gi.reset != 0u || record.radiance.a == 0.0 || record.texel != texel;
+    uint quarter = pcg3d(uvec3(uvec2(texel + 32768), level)).x & 3u;
+    if (!fresh && quarter != (gi.frame & 3u)) {
+        return;
+    }
+
+    Terrain terrain = pc.scene.terrain;
+    vec2 xz = (vec2(texel) + 0.5) * window.spacing;
+    vec3 p = vec3(xz.x, terrain.width > 0u ? terrainHeight(terrain, xz) : 0.0, xz.y);
+    vec3 n = terrain.width > 0u ? terrainNormalAt(terrain, xz) : vec3(0.0, 1.0, 0.0);
+    vec3 albedo = groundAlbedo(gi, level, xz);
+
+    vec3 sun = pc.scene.sunDirection;
+    vec3 atmosphere = atmospherePosition(p);
+    float height = length(atmosphere);
+    vec3 sunAtSurface = transmittanceToSun(height, dot(atmosphere / height, sun));
+    float visibility = giGroundSunVisibility(p, n);
+    vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
+    vec3 irradiance = giIrradiance(giSample(p, n), n, skyIrradiance);
+    vec3 radiance = albedo / kPi * (sunAtSurface * (max(dot(n, sun), 0.0) * visibility) + irradiance);
+
+    if (record.texel != texel) {
+        gi.groundBuffer.texels[index].albedo = vec4(0.0);
+        gi.groundBuffer.texels[index].texel = texel;
+    }
+    gi.groundBuffer.texels[index].radiance = vec4(radiance, 1.0);
+}

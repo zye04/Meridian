@@ -121,11 +121,14 @@ void Renderer::Impl::createSwapchain() {
   if (!dlss) {
     upscaler = std::make_unique<TaaUpscaler>(*this, display);
   }
-  if (upscaler->wantsGuides()) {
-    constexpr VkImageUsageFlags kGuideUsage =
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  constexpr VkImageUsageFlags kGuideUsage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  // The GI's albedo feedback reads the diffuse albedo too.
+  if (upscaler->wantsGuides() || giMode != GiMode::Off) {
     diffuseAlbedo = createRenderImage(kAlbedoFormat, kGuideUsage,
                                       VK_IMAGE_ASPECT_COLOR_BIT);
+  }
+  if (upscaler->wantsGuides()) {
     specularAlbedo = createRenderImage(kAlbedoFormat, kGuideUsage,
                                        VK_IMAGE_ASPECT_COLOR_BIT);
     normalRoughness = createRenderImage(kNormalRoughnessFormat, kGuideUsage,
@@ -171,6 +174,9 @@ void Renderer::Impl::createSwapchain() {
   vkUpdateDescriptorSets(device.device, 1, &resolvedWrite, 0, nullptr);
 
   createCloudTargets();
+  if (giBuffer.buffer != VK_NULL_HANDLE) {
+    writeGiAlbedoSet();
+  }
   swapchainOutOfDate = false;
 
   std::cout << "Swapchain: " << swapchainImages.size() << " images, "

@@ -1028,9 +1028,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   endPass("weather");
 
-  // --- GI probes (the sky capture and irradiance above are their sky).
+  // --- GI ground cache, then probes (the sky capture and irradiance above
+  // are their sky).
   if (impl_->giMode != GiMode::Off) {
-    impl_->drawGiProbes(cmd, camera.position, scene.frameIndex);
+    impl_->drawGiGround(cmd, camera.position, scene.frameIndex);
+    endPass("gi ground");
+    impl_->drawGiProbes(cmd);
     endPass("gi probes");
   }
 
@@ -1038,14 +1041,17 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // The HDR and depth images are shared by both frames in flight, so each
   // barrier also waits for the previous frame's use of the image.
-  const bool guides = impl_->diffuseAlbedo.image != VK_NULL_HANDLE;
+  // The diffuse albedo also exists for the GI; the rest only for the upscaler.
+  const bool guides = impl_->specularAlbedo.image != VK_NULL_HANDLE;
   std::vector<VkImage> colorTargets = {
       impl_->hdr.image, impl_->motion.image, impl_->transparencyMask.image,
       impl_->sunLight.image};
+  if (impl_->diffuseAlbedo.image != VK_NULL_HANDLE) {
+    colorTargets.push_back(impl_->diffuseAlbedo.image);
+  }
   if (guides) {
     colorTargets.insert(colorTargets.end(),
-                        {impl_->diffuseAlbedo.image, impl_->specularAlbedo.image,
-                         impl_->normalRoughness.image});
+                        {impl_->specularAlbedo.image, impl_->normalRoughness.image});
   }
   for (VkImage target : colorTargets) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1320,6 +1326,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  }
+  if (impl_->giMode != GiMode::Off) {
+    impl_->drawGiAlbedo(cmd, scenePush.sceneBuffer);
+    endPass("gi albedo");
   }
   if (impl_->effects.contactShadows) {
     ContactShadowConstants contactPush;

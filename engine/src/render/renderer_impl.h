@@ -161,7 +161,17 @@ struct Renderer::Impl {
   GiMode giMode = GiMode::Off;
   // The GI probe table (gi.glsl), created on the first frame with GI on.
   Buffer giBuffer;
+  // The ground cache records and the albedo accumulator (GiGroundBuffer).
+  Buffer giGroundBuffer;
   VkPipeline giProbesPipeline = VK_NULL_HANDLE;
+  VkPipeline giGroundPipeline = VK_NULL_HANDLE;
+  VkPipeline giAlbedoScatterPipeline = VK_NULL_HANDLE;
+  VkPipeline giAlbedoResolvePipeline = VK_NULL_HANDLE;
+  // Set 2 of giAlbedoLayout: scene depth and diffuse albedo, sampled.
+  VkDescriptorSetLayout giAlbedoSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool giAlbedoPool = VK_NULL_HANDLE;
+  VkDescriptorSet giAlbedoSet = VK_NULL_HANDLE;
+  VkPipelineLayout giAlbedoLayout = VK_NULL_HANDLE;
   bool giReset = true;
 
   VkCommandPool uploadPool = VK_NULL_HANDLE;
@@ -501,7 +511,10 @@ struct Renderer::Impl {
   void destroyClouds();
   void createGi();
   void destroyGi();
-  void drawGiProbes(VkCommandBuffer cmd, Vec3 cameraPosition, uint32_t frameIndex);
+  void writeGiAlbedoSet();
+  void drawGiGround(VkCommandBuffer cmd, Vec3 cameraPosition, uint32_t frameIndex);
+  void drawGiProbes(VkCommandBuffer cmd);
+  void drawGiAlbedo(VkCommandBuffer cmd, VkDeviceAddress sceneBuffer);
   void placeWeatherMap(Vec3 cameraPosition);
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
   void placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection);

@@ -16,7 +16,7 @@ inline constexpr uint32_t kGiGroundLevels = 4;
 inline constexpr int32_t kGiGroundTexels = 256;
 inline constexpr float kGiGroundTexel0 = 1.0f;
 inline constexpr uint32_t kGiRays = 64;
-inline constexpr float kGiHysteresis = 0.9f;
+inline constexpr float kGiHysteresis = 0.95f;
 
 float giSpacing(uint32_t level);
 float giSliceBase(uint32_t level);

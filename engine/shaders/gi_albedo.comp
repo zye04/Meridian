@@ -1,0 +1,92 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "atmosphere.glsl"
+#include "terrain.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "farfield.glsl"
+#include "gi.glsl"
+
+// The ground cache's albedo from the rendered image (gi.glsl). SCATTER: each
+// visible pixel on or near the terrain (within kMaxHeight above it: not
+// rocks, trunks or walls) adds its diffuse albedo to the accumulator of the
+// texel it lies in, at every level whose window holds it. RESOLVE: per
+// texel, blends the mean of what was added into the stored albedo and
+// raises its confidence.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+const float kMaxHeight = 1.5;
+const float kFixed = 1023.0;
+const float kRate = 0.1;
+
+#ifdef SCATTER
+layout(set = 2, binding = 0) uniform sampler2D depthImage;
+layout(set = 2, binding = 1) uniform sampler2D albedoImage;
+
+void main() {
+    // One pixel of every 2x2 block per frame: the atomics on the coarse
+    // texels are the pass's cost, and the blend is slow anyway.
+    uint frame = pc.scene.frameIndex;
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) * 2 + ivec2(frame & 1u, (frame >> 1u) & 1u);
+    ivec2 size = textureSize(depthImage, 0);
+    Terrain terrain = pc.scene.terrain;
+    if (any(greaterThanEqual(pixel, size)) || terrain.width == 0u) {
+        return;
+    }
+    float depth = texelFetch(depthImage, pixel, 0).r;
+    if (depth == 0.0) {
+        return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    vec4 clip = inverse(pc.scene.currentViewProjection) * vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec3 relative = clip.xyz / clip.w;
+    // The depth holds the displayed position; the world is flat.
+    relative.y += curvatureDrop(pc.scene, relative);
+    vec3 p = pc.scene.cameraPosition + relative;
+    if (p.y - terrainHeight(terrain, p.xz) > kMaxHeight) {
+        return;
+    }
+    uvec3 albedo = uvec3(texelFetch(albedoImage, pixel, 0).rgb * kFixed + 0.5);
+    GiBuffer gi = pc.scene.gi;
+    for (uint k = 0u; k < kGiGroundLevels; ++k) {
+        GiLevel level = gi.ground[k];
+        ivec2 texel = ivec2(floor(p.xz / level.spacing));
+        ivec2 local = texel - level.origin;
+        if (min(local.x, local.y) < 0 || max(local.x, local.y) >= kGiGroundTexels) {
+            continue;
+        }
+        uint index = giGroundIndex(k, texel);
+        atomicAdd(gi.groundBuffer.accum[index].x, albedo.x);
+        atomicAdd(gi.groundBuffer.accum[index].y, albedo.y);
+        atomicAdd(gi.groundBuffer.accum[index].z, albedo.z);
+        atomicAdd(gi.groundBuffer.accum[index].w, 1u);
+    }
+}
+#else
+void main() {
+    GiBuffer gi = pc.scene.gi;
+    uint level = gl_GlobalInvocationID.z;
+    ivec2 slot = ivec2(gl_GlobalInvocationID.xy);
+    uint index = (level * uint(kGiGroundTexels) + uint(slot.y)) * uint(kGiGroundTexels) + uint(slot.x);
+    uvec4 sum = gi.groundBuffer.accum[index];
+    if (sum.w == 0u) {
+        return;
+    }
+    GiLevel window = gi.ground[level];
+    ivec2 texel = window.origin +
+                  ivec2(giWrapN(slot.x - window.origin.x, kGiGroundTexels),
+                        giWrapN(slot.y - window.origin.y, kGiGroundTexels));
+    GiGroundTexel record = gi.groundBuffer.texels[index];
+    if (record.texel != texel) {
+        record.albedo = vec4(0.0);
+        gi.groundBuffer.texels[index].radiance = vec4(0.0);
+        gi.groundBuffer.texels[index].texel = texel;
+    }
+    vec3 mean = vec3(sum.xyz) / (kFixed * float(sum.w));
+    vec3 albedo = mix(record.albedo.rgb, mean, max(kRate, 1.0 - record.albedo.a));
+    gi.groundBuffer.texels[index].albedo = vec4(albedo, min(record.albedo.a + kRate, 1.0));
+    gi.groundBuffer.accum[index] = uvec4(0u);
+}
+#endif

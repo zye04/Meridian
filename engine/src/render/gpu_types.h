@@ -1204,20 +1204,27 @@ struct GradeConstants {
 static_assert(sizeof(GradeConstants) == 8);
 
 // Must match GiBuffer's header in gi.glsl: per probe level the window's
-// first column, spacing and slice base; the frame; 1 to retrace every
-// probe without history. The probes (64 B each) follow.
+// first column, spacing and slice base; per ground cache level the window's
+// first texel and the texel size; the frame; 1 to retrace every probe and
+// relight every ground texel without history; the ground buffer. The probes
+// (64 B each) follow.
 struct GpuGiLevel {
   int32_t originX = 0, originZ = 0;
   float spacing = 0.0f, sliceBase = 0.0f;
 };
 struct GpuGiHeader {
   GpuGiLevel levels[5];
+  GpuGiLevel ground[4];
   uint32_t frame = 0;
   uint32_t reset = 0;
-  uint32_t pad0 = 0, pad1 = 0;
+  VkDeviceAddress groundBuffer = 0;
 };
-static_assert(sizeof(GpuGiHeader) == 96);
+static_assert(sizeof(GpuGiHeader) == 160);
 constexpr VkDeviceSize kGiProbeBytes = 64;
+// GiGroundBuffer: one 48 B record then one 16 B accumulator per ground
+// texel, kGiGroundLevels x 256 x 256 of each.
+constexpr VkDeviceSize kGiGroundTexelBytes = 48;
+constexpr VkDeviceSize kGiGroundAccumBytes = 16;
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {
