@@ -86,6 +86,7 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
 // stays. Returns nothing (after saying which file) if any file is missing.
 std::optional<meridian::TerrainLayer> loadTerrainLayer(meridian::Renderer &renderer,
                                                        const char *id, float tileSize,
+                                                       float heightScale,
                                                        meridian::Vec3 target) {
   const auto directory = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / id;
   const char *names[] = {"base_color.ktx2", "normal.ktx2", "arm.ktx2", "height.ktx2",
@@ -109,6 +110,7 @@ std::optional<meridian::TerrainLayer> loadTerrainLayer(meridian::Renderer &rende
   layer.arm = load("arm", meridian::ColorSpace::Linear);
   layer.height = load("height", meridian::ColorSpace::Linear);
   layer.tileSize = tileSize;
+  layer.heightScale = heightScale;
   float mean[3] = {};
   if (FILE *file = std::fopen((directory / "albedo.txt").c_str(), "r")) {
     const int read = std::fscanf(file, "%f %f %f", &mean[0], &mean[1], &mean[2]);
@@ -545,32 +547,40 @@ int main(int argc, char **argv) {
   }
   renderer.setTerrain(terrain);
   // Megascans surfaces (docs/assets.md has what each one shows and why it
-  // got its role): per role, the variants with their real-world tile sizes,
-  // and the mean linear color they are matched to.
+  // got its role): per role, the variants with their real-world tile sizes
+  // and parallax depths (m: each surface's Megascans JSON displacementScale,
+  // cm, / 100), and the mean linear color they are matched to.
   using meridian::TerrainRole;
   struct Role {
     TerrainRole role;
     meridian::Vec3 target;
-    std::vector<std::pair<const char *, float>> variants;
+    struct Variant {
+      const char *id;
+      float tileSize;
+      float depth;
+    };
+    std::vector<Variant> variants;
   };
   const Role roles[] = {
       {TerrainRole::Grass,
        {0.085f, 0.12f, 0.024f},
-       {{"uncut_grass_oilpt20", 2.0f}, {"wild_grass_pjwgw0", 1.0f}, {"lawn_grass_sbykrmp0", 0.41f}}},
-      {TerrainRole::Clover, {0.06f, 0.111f, 0.028f}, {{"clover_vlzlbjon", 1.5f}}},
-      {TerrainRole::Mud, {0.07f, 0.046f, 0.021f}, {{"soil_mud_olsetpp0", 0.88f}}},
+       {{"uncut_grass_oilpt20", 2.0f, 0.0177f},
+        {"wild_grass_pjwgw0", 1.0f, 0.0219f},
+        {"lawn_grass_sbykrmp0", 0.41f, 0.0107f}}},
+      {TerrainRole::Clover, {0.06f, 0.111f, 0.028f}, {{"clover_vlzlbjon", 1.5f, 0.0267f}}},
+      {TerrainRole::Mud, {0.07f, 0.046f, 0.021f}, {{"soil_mud_olsetpp0", 0.88f, 0.0251f}}},
       {TerrainRole::Soil,
        {0.13f, 0.095f, 0.05f},
-       {{"soil_dirt_pjusf0", 1.0f}, {"soil_dirt_peioh0", 1.0f}}},
-      {TerrainRole::ForestPath, {0.08f, 0.06f, 0.035f}, {{"forest_path_ugsnfawlw", 2.0f}}},
+       {{"soil_dirt_pjusf0", 1.0f, 0.0391f}, {"soil_dirt_peioh0", 1.0f, 0.0572f}}},
+      {TerrainRole::ForestPath, {0.08f, 0.06f, 0.035f}, {{"forest_path_ugsnfawlw", 2.0f, 0.0355f}}},
       {TerrainRole::ForestFloor,
        {0.05f, 0.05f, 0.016f},
-       {{"forest_floor_sfjmafua", 2.0f}, {"forest_floor_xdfddec", 2.0f}}},
-      {TerrainRole::Gravel, {0.13f, 0.1f, 0.07f}, {{"gravel_on_soil_rmsigwp0", 0.39f}}},
-      {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f}}},
+       {{"forest_floor_sfjmafua", 2.0f, 0.0292f}, {"forest_floor_xdfddec", 2.0f, 0.0372f}}},
+      {TerrainRole::Gravel, {0.13f, 0.1f, 0.07f}, {{"gravel_on_soil_rmsigwp0", 0.39f, 0.0149f}}},
+      {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f, 0.0156f}}},
       {TerrainRole::Rock,
        {0.13f, 0.108f, 0.085f},
-       {{"rock_cliff_tg1mcgbl", 2.0f}, {"layered_rock_vl0fdhdo", 3.0f}}},
+       {{"rock_cliff_tg1mcgbl", 2.0f, 0.0891f}, {"layered_rock_vl0fdhdo", 3.0f, 0.1495f}}},
   };
   meridian::TerrainMaterial material;
   if (options.trees) {
@@ -578,8 +588,8 @@ int main(int argc, char **argv) {
   }
   bool layersLoaded = true;
   for (const Role &role : roles) {
-    for (const auto &[id, tileSize] : role.variants) {
-      auto layer = layersLoaded ? loadTerrainLayer(renderer, id, tileSize, role.target)
+    for (const auto &[id, tileSize, depth] : role.variants) {
+      auto layer = layersLoaded ? loadTerrainLayer(renderer, id, tileSize, depth, role.target)
                                 : std::nullopt;
       layersLoaded = layer.has_value();
       if (layer) {

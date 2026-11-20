@@ -183,6 +183,8 @@ struct Surface {
     float occlusion;
     vec3 emissive;
     vec3 normal;
+    // Parallax self-shadowing of the sun (1 = lit).
+    float sunShadow;
 };
 
 vec4 sampleTexture(uint index, vec2 uv) {
@@ -232,6 +234,7 @@ Surface proceduralTerrain(vec3 normal) {
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.alpha = 1.0;
     s.metallic = 0.0;
+    s.sunShadow = 1.0;
     s.perceptualRoughness = mix(0.9, 0.5, snow);
     s.occlusion = 1.0;
     s.emissive = vec3(0.0);
@@ -371,8 +374,13 @@ vec2 normalToDerivative(vec3 n) {
     return -n.xy / max(a.z, max(a.x, a.y) / 128.0);
 }
 
+// World offset of the parallax hit; every layer is sampled there (set by
+// terrainSurface before the layers are read).
+vec3 terrainParallax = vec3(0.0);
+
 vec3 layerPosition(TerrainLayer layer) {
-    return inRelativePosition + vec3(layer.offset[0], layer.offset[1], layer.offset[2]);
+    return inRelativePosition + vec3(layer.offset[0], layer.offset[1], layer.offset[2]) +
+           terrainParallax;
 }
 
 // Top-down projection, uv = (x, -z): tangent +X, bitangent -Z, normal +Y.
@@ -563,30 +571,108 @@ TerrainTexel overlay(TerrainTexel a, bool hasA, TerrainTexel b, float t) {
     return hasA ? mixTexels(a, b, heightBlend(a.height, b.height, t)) : b;
 }
 
-// One of a role's variants per region, picked by ~200 m noise; near a
-// border the next variant is height-blended in. Layers are read straight
-// from the scene buffer: indexing a local copy of Terrain with a dynamic
-// index spills the whole struct to scratch memory (2-3x the terrain's cost).
-TerrainTexel sampleRole(uint role, vec2 p, vec3 normal, vec3 dpdx, vec3 dpdy) {
+// The role's variant (an index into the layers) picked by ~200 m noise, and
+// the blend toward the next one.
+uint roleVariant(uint role, vec2 p, out float t) {
     uint first = pc.scene.terrain.roles[role] & 0xFFu;
     uint count = pc.scene.terrain.roles[role] >> 8u;
-    bool triplanar = role == 8u;
     float n = clamp((groundNoise(p, 0.2, 30u + role) - 0.2) / 0.6, 0.0, 0.9999) * float(count);
     uint i = uint(n);
-    float t = i + 1u < count ? smoothstep(0.8, 1.0, fract(n)) : 0.0;
+    t = i + 1u < count ? smoothstep(0.8, 1.0, fract(n)) : 0.0;
+    return first + i;
+}
+
+// Near a variant border the next one is height-blended in. Layers are read
+// straight from the scene buffer: indexing a local copy of Terrain with a
+// dynamic index spills the whole struct to scratch memory (2-3x the
+// terrain's cost).
+TerrainTexel sampleRole(uint role, vec2 p, vec3 normal, vec3 dpdx, vec3 dpdy) {
+    bool triplanar = role == 8u;
+    float t;
+    uint index = roleVariant(role, p, t);
     TerrainTexel texel;
     if (t < 1.0) {
-        TerrainLayer layer = pc.scene.terrain.layers[first + i];
+        TerrainLayer layer = pc.scene.terrain.layers[index];
         texel = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
                           : samplePlanar(layer, normal, dpdx, dpdy);
     }
     if (t > 0.0) {
-        TerrainLayer layer = pc.scene.terrain.layers[first + i + 1u];
+        TerrainLayer layer = pc.scene.terrain.layers[index + 1u];
         TerrainTexel next = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
                                       : samplePlanar(layer, normal, dpdx, dpdy);
         texel = overlay(texel, t < 1.0, next, t);
     }
     return texel;
+}
+
+// Parallax occlusion mapping (Tatarchuk 2006) on one hex-tiled layer's
+// height map, the tiles' placement fixed at the unshifted position.
+// Grazing views are capped at 5x the depth.
+const float kParallaxMinNoV = 0.2;
+
+// Depth below the top surface (m) at a world offset from the pixel.
+float parallaxDepth(TerrainLayer layer, HexTiles tiles, vec3 weights, vec3 offset,
+                    float depthMax) {
+    vec2 delta = vec2(offset.x, -offset.z) / layer.tileSize;
+    float height = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        if (weights[i] != 0.0) {
+            height += sampleGrad(layer.height, tiles.uv[i] + tiles.rotation[i] * delta,
+                                 tiles.dx[i], tiles.dy[i]).r * weights[i];
+        }
+    }
+    return (1.0 - height) * depthMax;
+}
+
+// The world offset where the view ray meets the layer's surface (depth at
+// most depthMax); sunShadow is the sun's visibility over that point.
+vec3 parallaxHit(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy, float depthMax,
+                 int steps, out float sunShadow) {
+    float scale = 1.0 / layer.tileSize;
+    vec3 position = layerPosition(layer);
+    HexTiles tiles = hexTiles(vec2(position.x, -position.z) * scale,
+                              vec2(dpdx.x, -dpdx.z) * scale, vec2(dpdy.x, -dpdy.z) * scale);
+    vec3 weights = pow(tiles.barycentric, vec3(kHexExponent));
+    weights /= weights.x + weights.y + weights.z;
+    weights *= step(0.02, weights);
+    weights /= weights.x + weights.y + weights.z;
+
+    vec3 V = normalize(-inRelativePosition);
+    float NoV = max(dot(normal, V), kParallaxMinNoV);
+    float previousDepth = 0.0;
+    float previousGap = parallaxDepth(layer, tiles, weights, vec3(0.0), depthMax);
+    float hitDepth = 0.0;
+    if (previousGap > 0.0) {
+        for (int k = 1; k <= steps; ++k) {
+            float rayDepth = depthMax * float(k) / float(steps);
+            float surface = parallaxDepth(layer, tiles, weights, -V * (rayDepth / NoV), depthMax);
+            float gap = surface - rayDepth;
+            if (gap <= 0.0) {
+                hitDepth = mix(previousDepth, rayDepth, previousGap / (previousGap - gap));
+                break;
+            }
+            previousDepth = rayDepth;
+            previousGap = gap;
+        }
+    }
+    vec3 hit = -V * (hitDepth / NoV);
+
+    sunShadow = 1.0;
+    vec3 L = pc.scene.sunDirection;
+    float NoL = dot(normal, L);
+    if (NoL > 0.0 && hitDepth > 0.0) {
+        float blocked = 0.0;
+        int shadowSteps = max(steps / 2, 3);
+        for (int k = 1; k <= shadowSteps; ++k) {
+            float rise = hitDepth * float(k) / float(shadowSteps);
+            float surface = parallaxDepth(layer, tiles, weights,
+                                          hit + L * (rise / max(NoL, kParallaxMinNoV)),
+                                          depthMax);
+            blocked = max(blocked, (hitDepth - rise) - surface);
+        }
+        sunShadow = 1.0 - smoothstep(0.0, 0.2 * depthMax, blocked);
+    }
+    return hit;
 }
 
 // Each role's weight from the ground's shape, the forest mask and noise,
@@ -634,6 +720,37 @@ Surface terrainSurface(vec3 normal) {
             break;
         }
     }
+    // POM on the dominant layer's height; every layer is then sampled at
+    // the shifted position, so the blends agree with it. Rock (triplanar)
+    // has none: three projections would triple the march.
+    float sunShadow = 1.0;
+    int dominant = 0;
+    for (int r = 8; r > 0; --r) {
+        if (w[r] >= 0.5) {
+            dominant = r;
+            break;
+        }
+    }
+    if (dominant != 8) {
+        float variantBlend;
+        uint index = roleVariant(uint(dominant), p, variantBlend) + (variantBlend >= 0.5 ? 1u : 0u);
+        TerrainLayer layer = pc.scene.terrain.layers[index];
+        // The largest shift in pixels (of the pixel's longer axis): parallax
+        // fades out below ~1 pixel (3 cm of depth at ~40 m, 1 cm at ~10 m)
+        // and needs a step per ~2 pixels (the secant refines between them).
+        float NoV = max(dot(normal, normalize(-inRelativePosition)), kParallaxMinNoV);
+        float pixels = layer.heightScale * sqrt(max(1.0 - NoV * NoV, 0.0)) / NoV /
+                       max(max(length(dpdx), length(dpdy)), 1e-6);
+        float fade = smoothstep(0.5, 1.5, pixels) * (1.0 - clamp(w[8], 0.0, 1.0));
+        if (fade > 0.0) {
+            float shadow;
+            int steps = clamp(int(ceil(0.5 * pixels * fade)), 2, 12);
+            terrainParallax = parallaxHit(layer, normal, dpdx, dpdy, layer.heightScale * fade,
+                                          steps, shadow);
+            sunShadow = mix(1.0, shadow, fade);
+        }
+    }
+
     TerrainTexel ground;
     bool has = false;
     for (int r = start; r < 9; ++r) {
@@ -659,6 +776,7 @@ Surface terrainSurface(vec3 normal) {
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
     s.normal = normalize(mix(s.normal, normal, snow));
+    s.sunShadow = mix(sunShadow, 1.0, snow);
     s.alpha = 1.0;
     s.metallic = 0.0;
     s.emissive = vec3(0.0);
@@ -691,6 +809,7 @@ Surface materialSurface(Material m, vec3 normal) {
                           m.occlusionStrength);
     }
 
+    s.sunShadow = 1.0;
     s.emissive = m.emissiveFactor;
     if (m.emissiveTexture != kNoTexture) {
         s.emissive *= sampleTexture(m.emissiveTexture, inUv).rgb;
@@ -839,7 +958,8 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 sunLight = sunAtSurface * (NoL * visibility * microShadow(NoL, s.occlusion));
+        vec3 sunLight =
+            sunAtSurface * (NoL * visibility * microShadow(NoL, s.occlusion) * s.sunShadow);
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;
     }

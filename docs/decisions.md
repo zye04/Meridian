@@ -1737,3 +1737,63 @@ restores the previous behaviour exactly (2645325 instances, hash
   sees no extra noise. Sources:
   https://google.github.io/filament/Filament.html ("Micro-shadowing"),
   https://www.activision.com/cdn/research/MaterialAdvancesInWWII.pdf
+
+## Terrain parallax occlusion mapping (2026-11-20)
+
+Up close the 4K ground scans read flat. Options compared for eye-height
+views of 1-6 cm deep ground relief:
+
+- **POM, linear search + secant refinement** (Tatarchuk 2006; "steep"
+  POM refined between the last two steps): chosen. Converges on shallow
+  relief in a handful of steps, no extra data.
+- **Relief mapping's binary search / interval mapping** (Policarpo 2005,
+  Risser 2005): more dependent taps for the same result at 1-6 cm; the
+  secant step is interval mapping's first iteration.
+- **(Relaxed) cone step mapping, quadtree displacement** (Policarpo and
+  Oliveira 2007, Drobot 2009): fewer steps on deep relief, but a cone or
+  max-mip map per layer in the cook; ground relief here is 1-3% of a tile,
+  where the linear march already needs few steps.
+- **Mesh-shader displacement of near CDLOD nodes** (Nanite-tessellation
+  style): true silhouettes and depth, but mm-scale triangles within ~10 m
+  (millions), the blended hex-tiled height evaluated per vertex, and the
+  shadow march/TLAS don't see it. Silhouettes of 1-6 cm relief only show
+  at grazing angles within a few meters. Worth it later for rock (10-15 cm),
+  not for this.
+- **Parallax self-shadowing** (Tatarchuk's horizon march toward the sun):
+  added, ~0.1 ms of the cost below.
+
+What it does (`parallaxHit`, `terrainSurface` in mesh.frag):
+
+- **One height for every layer:** POM marches the dominant layer's height
+  (top role at weight >= 0.5, its nearer variant), and every layer is then
+  sampled at the shifted world position, so height blends and parallax
+  agree. Marching the blended height would sample every active layer per
+  step. The hex tiles are placed once at the unshifted position for the
+  march, weighted without the colour term (no base colour fetches); the
+  shift is at most a few cm against 0.2-1 m hex cells.
+- **Shift in world space:** a point at depth d below the surface on the
+  view ray is `-V d / (N.V)` away (N the macro normal, N.V capped at 0.2:
+  at most 5x the depth sideways); the planar layers read its x, z.
+- **Real depths:** each surface's Megascans JSON `displacementScale` (cm)
+  is the height map's full range (`TerrainLayer::heightScale`, main.cpp's
+  role table): grass 1.1-2.2 cm, gravel 1.5, mud 2.5, forest floor 2.9-3.7,
+  soil 3.9-5.7, rock 8.9-15.
+- **Fade by pixels, not meters:** the largest shift in pixels (over the
+  pixel's longer axis) fades parallax out from 1.5 to 0.5 pixels and sets
+  the steps (one per ~2 pixels, 2-12; the shadow march half that, at least
+  3). With a 1440p 60-degree view that is ~40 m for 3 cm of depth, ~10 m
+  for 1 cm grass; most of the cost stays within a few meters.
+- **No POM on the triplanar rock** (and it fades with the rock weight):
+  three projections triple the march, and the macro normal is a poor
+  tangent frame on cliffs.
+- **No pixel depth offset:** depth, motion vectors and the RR guides stay
+  the raster surface's; the guides (normal, albedo) come from the shifted
+  samples, so they agree with the colour.
+- **Cost** (Release, 2560x1440 DLAA + RR, `--placement off`, scene early
+  pass, median of 5): start view 1.56 -> 1.79 ms, ground close-up at eye
+  height (pitch -0.5) 1.86 -> 2.20 ms; the sun march is ~0.1-0.15 ms of
+  that. A fixed 8-15 m distance fade with 6-24 steps cost 0.9 ms on the
+  close-up; the pixel-based fade and steps brought it here.
+- **Motion** (ground close-up moving forward at 1.4 m/s, Laplacian ratio
+  motion/still): DLAA + RR 0.862 -> 0.870, TAA 0.871 -> 0.859; shimmer
+  unchanged (1.84 -> 1.82, 2.24 -> 2.27).

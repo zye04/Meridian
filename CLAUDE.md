@@ -407,6 +407,11 @@ barriers account for that.
   never shadows itself where the smooth normal faces the sun). Pyramid
   level 0 bounds each bilinear cell. The quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.
+  Parallax occlusion mapping (`parallaxHit` in mesh.frag) marches the
+  dominant ground layer's height (`TerrainLayer::heightScale`, meters,
+  from the Megascans JSON) and shifts every layer's sample position
+  (`terrainParallax`) by the same world offset; depth, motion vectors and
+  the RR guides stay the raster surface's.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,

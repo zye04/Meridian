@@ -177,12 +177,13 @@ struct GpuTerrainLayer {
   uint32_t arm = 0;
   uint32_t height = 0;
   float tileSize = 0.0f;
+  float heightScale = 0.0f;
   // The camera position wrapped by the layer's period (renderer_frame.cpp).
   float offset[3] = {};
   float occlusionStrength = 1.0f;
   float albedoScale[3] = {1.0f, 1.0f, 1.0f};
 };
-static_assert(sizeof(GpuTerrainLayer) == 48);
+static_assert(sizeof(GpuTerrainLayer) == 52);
 
 // Terrain texture coordinates (mesh.frag) are the camera-relative position
 // plus the camera position wrapped by a period, so they stay small and
@@ -264,11 +265,11 @@ struct GpuTerrain {
   uint32_t forestMaskSeed = 0;
   uint32_t padding[2] = {}; // keeps the next SceneData member 16-byte aligned
 };
-static_assert(sizeof(GpuTerrain) == 976);
+static_assert(sizeof(GpuTerrain) == 1040);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
-          layer.height.index, layer.tileSize, {}, layer.occlusionStrength,
+          layer.height.index, layer.tileSize, layer.heightScale, {}, layer.occlusionStrength,
           {layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]}};
 }
 
@@ -332,7 +333,7 @@ struct SceneData {
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
 };
-static_assert(sizeof(SceneData) == 1776);
+static_assert(sizeof(SceneData) == 1840);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

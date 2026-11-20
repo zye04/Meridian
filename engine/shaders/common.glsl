@@ -282,6 +282,7 @@ struct TerrainLayer {
     uint arm;
     uint height;
     float tileSize;
+    float heightScale;
     // The camera position wrapped by the layer's period (renderer_frame.cpp).
     float offset[3];
     float occlusionStrength;

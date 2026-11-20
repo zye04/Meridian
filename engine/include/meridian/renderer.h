@@ -80,6 +80,8 @@ struct TerrainLayer {
   TextureId arm; // ambient occlusion, roughness, metalness
   TextureId height;
   float tileSize = 2.0f; // meters per texture repeat
+  // Meters the height map's 0..1 range spans, for parallax; 0 = none.
+  float heightScale = 0.0f;
   // How much of the AO map applies, as glTF's occlusion strength: lower it
   // where the base color already carries the cavities' darkness.
   float occlusionStrength = 1.0f;

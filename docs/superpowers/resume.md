@@ -40,8 +40,8 @@ In order, each one only when the user says go. Trees are hidden by
 default since 2026-11-20 (`--trees` restores them; see decisions.md):
 item 3 below is what brings them back.
 
-1. Parallax occlusion mapping on the terrain (after the ground lane G1):
-   height maps, faded out by ~10-20 m, cheap self-shadowing.
+1. Done: parallax occlusion mapping on the terrain (decisions.md,
+   "Terrain parallax occlusion mapping").
 2. Grass and flowers (the downloaded Megascans grass meshes and flowers).
 3. Leaf and bark textures for the Megaplants trees: the USD leaves have
    UVs into a per-species atlas region, so the cook remaps each leaf
