@@ -3,6 +3,35 @@
 Read this first when resuming. Durable state is in git; the SDD ledgers
 under `.superpowers/` are local and git-ignored.
 
+## How work runs from 2026-11-21: one orchestrator
+
+The two lanes (A: forests and quality on main; B: clouds on `clouds`) end
+here. One orchestrator session owns all open work. It talks with the
+user and, per branch, delegates to sub-orchestrators that run
+subagent-driven development (implementer, task reviewer, fixer, final
+reviewer). The orchestrator:
+
+- tells the user concisely what is being worked on, why, which technique,
+  and what it changes in the engine and the game;
+- sequences merges into main, so branches never diverge far: rebase the
+  next branch onto main right after each merge;
+- before each merge, runs a tidiness sweep of the branch against main:
+  no duplicated functions or shaders, no unused code, flags, files or
+  debug views, no stale docs (CLAUDE.md, decisions.md, specs, backlog);
+- keeps `docs/backlog.md` and this file current.
+
+Open branches, in the proposed order (the user may reorder):
+
+1. `wip/m2a-task5` (M2a Task 5): verify, review, squash, merge.
+2. `wip/quality-shadows`: finish per-layer AO strength, review, merge.
+3. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
+   Tasks 6-8, final review, merge.
+4. Then M2a Tasks 7-10 and the rest under "Next after that".
+
+The clouds branch touches the same frame and shading files as the other
+two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
+so rebasing it after each merge keeps conflicts small.
+
 ## Done on main
 
 - M1 (15 km Napf terrain) complete.
@@ -27,9 +56,9 @@ under `.superpowers/` are local and git-ignored.
   strength, unfinished; may contain a temporary luminance debug view).
   Goal: shadowed ground 10-20% of sunlit (now ~6%). Next: finish
   per-layer AO strength (forest_leaves_04 at 0.5), measure, review, merge.
-- Lane B (separate instance): M4 clouds, see below.
+- `clouds`: M4 clouds, see below.
 
-## Where clouds stopped (Lane B)
+## Where clouds stopped
 
 Branch `clouds` on origin (worktree `../meridian-clouds`), not merged.
 Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
@@ -41,8 +70,9 @@ Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
   lines unbounded to receivers, ~3.4 ms at a 2 degree sun; pop and ring
   near a horizon sun; beyond-map term uncalibrated). Fix round is
   69066dd, a labeled WIP commit: builds, tests pass, captures unfinished,
-  not reviewed. Next: finish its captures, scoped re-review, then fold
-  into one commit.
+  not reviewed, fix report not written. Next: a fresh implementer redoes
+  the captures and writes the fix report, scoped re-review, then fold
+  into 0f7e4c1 as one commit.
 - Then Task 6 (sky + cloud capture, ambient, time-lapse), Task 7 (cloud
   look development against `assets/reference/clouds/`; show the user the
   comparisons before Task 8), Task 8 (Release measurement, budget levers
@@ -50,9 +80,13 @@ Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
   not yet on the branch: rebase `clouds` onto main first.
 - Merge: rebase onto main, final whole-branch review, fast-forward main;
   move unresolved minors into `docs/backlog.md`.
-- Local-only: the clouds SDD ledger and look-dev notes are in
-  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`
-  (`progress.md`, `artifacts/cloud-look-notes.md`); copy them across.
+- Ledger: a copy of the clouds SDD ledger (rulings, deferred minors,
+  briefs, reports, Task 7 look-dev notes) is committed on the branch in
+  `docs/superpowers/wip-ledgers/clouds/` (5a64f4d). Copy it back into
+  `.superpowers/sdd/2026-11-19-clouds-weather/` and delete the folder
+  before merging. Capture artifacts (477 MB) stayed local.
+- Task 7 needs the reference photos in `assets/reference/clouds/`
+  (git-ignored; copy them across with `assets/`).
 
 ## Next after that
 
