@@ -1,120 +1,109 @@
-# Where work stopped (2026-11-20, usage limit)
+# Where work stopped (2026-11-20 ~15:40, orchestrator handoff)
 
 Read this first when resuming. Durable state is in git; the SDD ledgers
-under `.superpowers/` are local and git-ignored.
+under `.superpowers/` are local and git-ignored. A new orchestrator
+session takes over from here; the old one finishes lane G2 only.
 
 ## How work runs: one orchestrator
 
 One orchestrator session is the user's only interface. It does no
 implementing, reviewing or research itself: it dispatches one
-sub-orchestrator per lane (background agent, self-contained brief), and
-relays reports and user decisions. Each sub-orchestrator runs
-subagent-driven development (implementer, task reviewer, fixer, final
-reviewer) in its own worktree beside the repo (never under `/tmp`, which
-is wiped on reboot; artifacts under `.superpowers/sdd/<plan>/artifacts/`),
-and merges to main by rebase + fast-forward after a clean review. Every
-game run goes through `flock /tmp/meridian-gpu.lock`.
+sub-orchestrator per lane (background agent, self-contained brief) and
+relays reports and user decisions. Each sub-orchestrator runs SDD
+(Sonnet implementers, Sonnet reviewers, Opus only for look judgment and
+risky reviews; never Fable) in its own worktree beside the repo (never
+under `/tmp`), and merges to main by rebase + fast-forward after review.
 
-Usage budget (the 2026-11-20 window ran out with five lanes at once):
+The user's rules (2026-11-20):
 
-- At most two build lanes at a time; research is a short capped report.
-- Implementers and docs agents on Sonnet; Opus only for risky reviews and
-  judgment. Never Fable.
-- Give the user an expected usage cost before fanning out.
-- Prefer work with a visible result.
-- At ~90% usage: every lane commits labeled WIP, pushes, records its next
-  step here, and stops.
+- Time: every lane gets an absolute local-time deadline, at most ~2 h,
+  sized in hours, never days. Everything in a brief is finished, merged
+  and pushed by the deadline, with no "backlog row instead of doing it";
+  WIP is an emergency fallback only, and a lane at risk messages the
+  orchestrator early.
+- Parallelism: run queued work in parallel when files don't collide.
+  Watch the 5-hour usage window (the user reports %); near the limit,
+  pause lanes with a WIP commit + push + a `next.md`, resume after reset.
+- Don't launch lanes the user didn't ask for; when the user asks for help
+  choosing, answer directly. When the user reports a visual problem,
+  dispatch a fix, not a lane that proves it.
+- Look target: the four Chlorophyll Engine frames in
+  `assets/reference/chlorophyll/`, not fidelity to the Napf (a test bed).
+- Ask the user before deciding look questions; give a recommendation.
 
-Every lane brief carries: no AI attribution in commits; the latest
-version of any SDK (verify at fetch time); the pre-merge tidiness check
-(no temporary debug code, flags or stray files; new CLI flags get a
-CLAUDE.md line; the plan's Status line updated; deferred items as
-backlog rows; docs state current truth only).
+Every lane brief carries: no AI attribution in commits; latest SDK
+versions (verify at fetch time); tidiness (no debug leftovers, new CLI
+flags in CLAUDE.md, plan Status lines, docs state current truth only);
+commit messages and temp files inside the lane's worktree (never the
+shared session scratchpad); every game run through `flock
+/tmp/meridian-gpu.lock`; never `pkill`/`killall` (stop only your own
+PIDs); look at assets before trusting their names; captures at
+2560x1440 and GPU ms compared only with identical `Render WxH` lines;
+DLSS SDK reuse via `-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=
+/home/zye/Projects/dev/meridian-motion-dlss/build/_deps/dlss_sdk-src`.
 
-Reports to the user: "status" = running and waiting work only;
-"overview" = what is done.
+Reports: "status" = running and waiting work only; "overview" = done.
 
-## Queue after the running lanes (user, 2026-11-20)
+## Landed on main 2026-11-20 (see decisions.md for each)
 
-In order, each one only when the user says go. Trees are hidden by
-default since 2026-11-20 (`--trees` restores them; see decisions.md):
-item 3 below is what brings them back.
+Megascans ground material (14 surfaces, 4K colour/normal, height blends,
+colour matching), rock anti-tiling, terrain POM + self-shadow, micro
+shadows (terrain AO relative to layer mean), screen-space contact
+shadows, sun glare (bloom), DLSS DLAA + Ray Reconstruction preset F as
+default (absolute motion-sharpness gates, one fullscreen swapchain),
+exposure + starting grade, leaf transmission, Poly Haven AO, trees hidden
+by default (`--trees`), grass/flower plants cooked (coverage-preserving
+alpha mips), ImGui overlay: G grading panel (grade file
+`~/.config/meridian/grade.json`, Effects toggles), F3 performance
+overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
 
-1. Done: parallax occlusion mapping on the terrain (decisions.md,
-   "Terrain parallax occlusion mapping").
-2. Grass and flowers: the plants are imported and cooked (lane V,
-   `docs/assets.md`, "Grass and flower plants"); placement, rendering
-   and wind are next.
-3. Leaf and bark textures for the Megaplants trees: the USD leaves have
-   UVs into a per-species atlas region, so the cook remaps each leaf
-   region onto a downloaded leaf texture; bark tiles along the branch.
-   Waits on the user downloading a leaf and a bark.
-4. Runtime grading tool: done (G panel, grade file; decisions.md,
-   "In-game overlay: Dear ImGui").
-5. Performance overlay: done (F3, F4 CSV, `--benchmark`; same entry).
-6. Frame pacing (backlog row).
+## Lanes: running, paused, queued
 
-Shadows lane (done 2026-11-20): micro shadows from material AO on the
-direct sun (terrain AO relative to each layer's mean) and screen-space
-contact shadows in a compute pass after the late scene pass (decisions.md
-"Micro and contact shadows"); next for it: the backlog row (soft penumbra,
-wavefront march, terrain terminator).
-
-Bloom lane (done 2026-11-20): sun glare as an energy-conserving
-multi-scale bloom (decisions.md "Sun glare"); next for it: two sliders in
-the grading panel once the overlay is on main (backlog row).
-
-## Priority for the next window (user review, 2026-11-20)
-
-The user played main in Release and judged it "absolutely terrible".
-Screenshots: `.superpowers/user-review-2026-11-20/1-4.png` (local).
-Decision: put the tree/far-field work (M2a Task 8+) and DLSS on hold
-and do a visible-quality pass first. Every asset looks bad, not just
-the trees, which points at a systemic pipeline cause rather than the
-assets themselves. Order:
-
-1. **Asset fidelity investigation** (first lane, diagnose before fixing).
-   Render one tree, one rock and one Poly Haven model in a reference
-   viewer (Blender / a glTF viewer, same HDRI-ish light) and in Meridian,
-   side by side. Check the cook (texture compression, sRGB vs linear,
-   normal-map convention, mip bias, roughness/AO channels, decimation:
-   Megaplants 4M tris to what), the shading (sky ambient, the missing
-   bounce light, near-black shadows, exposure), and the LOD (far trees
-   render as leafless sticks while their RT shadows are full canopies:
-   raster LOD vs full-detail BLAS). Report the root causes with evidence.
-   **Done** (`quality-q1` report, then the quality pass on main
-   2026-11-20): exposure mean at 18% grey, a starting grade toward the
-   Chlorophyll frames (`assets/reference/chlorophyll`), leaf diffuse
-   transmission (trees re-cooked), Poly Haven AO bound (models
-   re-cooked), TLAS-first sun shadows (forest edge 33 -> 22 ms).
-   Deferred (backlog): warm ground bounce until the green ground, the
-   leaf LOD multiplier (too costly; far trees wait for impostors / far
-   field), crown ambient visibility. The look values are a starting
-   point for the user to adjust.
-2. Green ground: the Napf is pasture, but everything renders as bare
-   dirt; the terrain material, then M3 meadow grass. **Terrain material
-   done** (G1 lane, 2026-11-20, 1a7ef7d..e9fa36a): 14 Megascans surfaces
-   by role (meadow, clover, mud, soil, forest path/floor on the forest
-   mask, gravel, scree, rock from 48 degrees), colour-matched, 4K colour
-   and normal; rock anti-tiling at distance. Open: forest floor shows
-   olive-tan under the sparse canopy (trees, not ground); +8.7 s Release
-   startup and ~+500 MiB for the 4K textures (backlog); a faint ~10 m
-   pattern on distant cliffs (backlog). Next: M3 meadow grass.
-3. Rocks: seated on slopes, no floating or tilted slabs.
-4. Steep-slope texture stretching (triplanar or similar): rock was
-   already triplanar; with rock from 48 degrees no planar layer stretches
-   over 1.5x (G1).
-5. Shadow and foliage shimmer in motion: Ray Reconstruction (motion
-   clarity plan) or the fallback denoiser.
-6. Finish and merge clouds.
+- **G2 ground transitions + cliffs** (RUNNING, owned by the old
+  orchestrator session until it merges; deadline 16:30). Branches
+  `ground2` (worktree `../meridian-ground2`) and `ground2-cliffs`
+  (`../meridian-ground2-cliffs`); next steps in each
+  `.superpowers/sdd/ground2/next.md`. Don't touch them until G2 reports.
+- **C2 clouds** (PAUSED at 15:25, branch `clouds` at 197d458, worktree
+  `../meridian-clouds`; user chose: merge to main after Task 8, no look
+  gate). Done: cumulus detail across the body, stepped underside fixed,
+  size variety, altitudes (cumulus base 2.8 km, top 4.8, stratus
+  1.7-2.8, cirrus 9), cost 1.92 ms fair. Next (ledger
+  `docs/superpowers/wip-ledgers/clouds/progress.md`, CHECKPOINT 15:18):
+  explain the darker low-sun shadow map (half-row update? heights? the
+  new .pfm reader?), then refit the cloud-shadow fallback properly (user:
+  no backlog row), motion numbers, Task 8, rebase, Opus final review,
+  squash the WIP commits, merge. Sheets:
+  `.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/sharp/`.
+- **M3 meadow** (PAUSED at 15:01). Branches `meadow` (worktree
+  `../meridian-meadow`: step 1 7c248e0 terrain_roles.glsl + wind clock,
+  also cherry-picked as 68ab406 in `../meridian-meadow-merge`, unpushed;
+  grass WIP eef148d: mesh-shader blades wired, draws nothing yet) and
+  `meadow-accents` (`../meridian-meadow-accents`, 1912f50: flower/clump
+  placement layers 4-10; clover renders black, flowers too sparse,
+  ~1.59M instances vs 1.5M budget). Resume order and details:
+  `../meridian-meadow/.superpowers/sdd/meadow/next.md`, `grass-next.md`,
+  and the accents `next.md`. Put the grass debugging on Opus. This is the
+  biggest visible gap: the ground reads as a flat lawn.
+- **Queue after those** (in order, each when the user says go):
+  1. Terrain detail: near-camera displacement from the material height
+     maps (tessellated near nodes) + erosion-style procedural detail;
+     cliffs via placed rock/cliff meshes. Maybe a more dramatic terrain
+     (user's call; the Napf is gentle).
+  2. Leaf and bark textures for the Megaplants trees (USD leaves have UVs
+     into per-species atlas regions; remap onto a downloaded leaf
+     texture; bark tiles along the branch). Waits on the user
+     downloading a leaf + bark. Crown darkening (cook-baked AO) with it.
+  3. Frame pacing (backlog row).
+  4. RR motion sharpness pass (last, user order): inputs (motion vectors
+     incl. clouds, masks, hit distance, mip bias), tighten gates.
 
 ## Decisions waiting for the user
 
-1. M2a Task 8 gates (see below): tune the voxel far field (C) with the
-   spec's levers, or fall back to option B (2.5D canopy). Measure the
-   shadow and coverage gates first.
-2. Clouds: the motion-sharpness trade-off the clouds lane will write up,
-   then the Task 7 comparisons before Task 8.
+1. M2a Task 8: tune the voxel far field (C) or fall back to B (2.5D
+   canopy); trees are hidden for now, so this waits.
+2. The default grade: the user tunes it in the G panel and saves; read
+   `~/.config/meridian/grade.json` before changing `kStartingGrade`.
 
 ## In progress (WIP branches on origin)
 
@@ -144,18 +133,6 @@ assets themselves. Order:
   shadows 1.5-2.4x the TLAS path. Shadow and coverage gates unmeasured
   (their helper scripts may be lost). Next: measure them, then stop for
   decision 1; afterwards docs, squash, merge or switch to B.
-- **Clouds** (`clouds` at 2399906, worktree `../meridian-clouds`, plan
-  `docs/superpowers/plans/2026-11-19-clouds-weather.md`). Tasks 1-6 done
-  and reviewed. Task 7 (look development) fix round is WIP 2399906:
-  unbuilt, uncaptured, unreviewed. Next steps are in the branch ledger
-  `docs/superpowers/wip-ledgers/clouds/progress.md`: refit the cloud
-  shadow fallback, write up the motion-sharpness trade-off for the user,
-  regenerate the comparisons, regression checks, re-review, fold into
-  782dd03, then stop for the user before Task 8. Comparisons made before
-  the fixes: `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/final/`.
-  Before merging: copy the ledger back into `.superpowers/` and delete
-  `docs/superpowers/wip-ledgers/`; then set the clouds plan's Status line.
-
 ## Done on main
 
 - M1 (15 km Napf terrain).
