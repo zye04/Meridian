@@ -142,9 +142,8 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
     float bottomKm = pc.scene.atmosphere.bottomRadius;
     // Ground bounce: the ground (the atmosphere's albedo, Lambertian) lit
     // by the sun through the local coverage's gaps and by the sky.
-    float coverage = weatherAt(pc.scene, pc.scene.cameraPosition).coverage;
     vec3 groundSun = transmittanceToSun(bottomKm + kPlanetRadiusOffset, sun.y) * max(sun.y, 0.0);
-    vec3 ground = pc.scene.atmosphere.groundAlbedo * (groundSun * (1.0 - coverage) + ambient);
+    vec3 ground = pc.scene.atmosphere.groundAlbedo * (groundSun * (1.0 - c.groundCoverage) + ambient);
     // Isotropic in-scattering of a uniform hemisphere of irradiance E: E / 2 pi.
     ambient /= 2.0 * kPi;
     ground /= 2.0 * kPi;
@@ -193,7 +192,7 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                 }
                 opticalDepth *= kCloudExtinction;
                 if (!exited) {
-                    opticalDepth -= log(max(cloudShadow(cloudPoint(rel + sun * s, radius)), 1e-6));
+                    opticalDepth -= log(max(cloudShadow(cloudPoint(rel + sun * s, radius), true), 1e-6));
                 }
             }
 
