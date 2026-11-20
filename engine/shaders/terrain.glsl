@@ -168,28 +168,29 @@ float terrainCellMax(SceneBuffer scene, uint level, uvec2 c) {
 
 #ifdef TERRAIN_MARCH_BRUTE_FORCE
 // Reference for A/B checks: bilinear height every 1 m for 2 km, then every
-// 8 m.
-bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
+// 8 m (the hit distance is the first sample below the surface).
+float terrainRayDistance(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
     Terrain t = scene.terrain;
     if (t.width == 0u) {
-        return false;
+        return -1.0;
     }
     float top = terrainCellMax(scene, t.pyramidLevels, uvec2(0u));
     float s = 0.0;
     while (s < maxDistance) {
         vec3 p = origin + s * direction;
         if (p.y > top && direction.y >= 0.0) {
-            return false;
+            return -1.0;
         }
         if (p.y < terrainHeight(t, p.xz)) {
-            return true;
+            return s;
         }
         s += s < 2000.0 ? 1.0 : 8.0;
     }
-    return false;
+    return -1.0;
 }
 #else
-// Whether the bilinear heightfield blocks the ray (flat world): a march of
+// Distance along the ray to the first hit of the bilinear heightfield (flat
+// world), or -1 when it has none within maxDistance: a march of
 // the max pyramid (Tevs 2008). Each step tests the cell around the ray at
 // the current level: if the ray stays above the cell's max over the cell,
 // it skips to the cell's exit and tries one level coarser; otherwise it
@@ -200,10 +201,10 @@ bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDi
 // edge samples) the mirrored field is the crop with clamped indices, in
 // local coordinates that reverse on odd tiles; steps stop at tile edges so
 // a cell never straddles one.
-bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
+float terrainRayDistance(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
     Terrain t = scene.terrain;
     if (t.width == 0u) {
-        return false;
+        return -1.0;
     }
     float tEnd = maxDistance;
     float top = terrainCellMax(scene, t.pyramidLevels, uvec2(0u));
@@ -281,7 +282,22 @@ bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDi
                 peak = max(peak, c0 + vertex * (b + vertex * a));
             }
             if (peak > 0.0) {
-                return true;
+                // The first root of the quadratic in [0, u]; the ray starts
+                // below the surface when c0 > 0.
+                if (c0 > 0.0) {
+                    return s;
+                }
+                float root = u;
+                if (abs(a) < 1e-9) {
+                    root = -c0 / b;
+                } else {
+                    float disc = max(b * b - 4.0 * a * c0, 0.0);
+                    float q = -0.5 * (b + (b >= 0.0 ? sqrt(disc) : -sqrt(disc)));
+                    float r0 = q / a;
+                    float r1 = q != 0.0 ? c0 / q : r0;
+                    root = min(r0 >= 0.0 ? r0 : u, r1 >= 0.0 ? r1 : u);
+                }
+                return s + clamp(root, 0.0, u);
             }
         } else {
             float rayLow = origin.y + (direction.y > 0.0 ? s : sNext) * direction.y;
@@ -294,9 +310,13 @@ bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDi
         nudge = kNudge * vec2(lessThanEqual(axisExit, vec2(sNext)));
         level = min(level + 1u, t.pyramidLevels);
     }
-    return false;
+    return -1.0;
 }
 #endif
+
+bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
+    return terrainRayDistance(scene, origin, direction, maxDistance) >= 0.0;
+}
 
 // 0 until the last kTerrainMorphZone of the level's span (from the previous
 // level's range to its own), then up to 1 at its range.
