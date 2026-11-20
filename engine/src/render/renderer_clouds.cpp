@@ -63,6 +63,12 @@ void Renderer::Impl::createClouds() {
                            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                            VK_IMAGE_ASPECT_COLOR_BIT);
+  for (Image *image : {&cloudShadowRaw, &cloudShadowMap}) {
+    *image = createImage(VK_FORMAT_R16G16B16A16_SFLOAT,
+                         {kCloudShadowResolution, kCloudShadowResolution, 1},
+                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT);
+  }
 
   const Image *volumes[] = {&cloudBaseNoise, &cloudDetailNoise};
   for (size_t i = 0; i < 2; ++i) {
@@ -75,19 +81,21 @@ void Renderer::Impl::createClouds() {
     check(vkCreateImageView(dev, &viewInfo, nullptr, &cloudNoiseLevel0[i]), "vkCreateImageView");
   }
 
-  // Must match cloud_noise.comp and weather_map.comp.
-  VkDescriptorSetLayoutBinding bindings[4]{};
-  for (uint32_t b = 0; b < 4; ++b) {
+  // Must match cloud_noise.comp, weather_map.comp, cloud_shadow.comp and
+  // cloud_shadow_blur.comp.
+  constexpr uint32_t kCloudBindings = 6;
+  VkDescriptorSetLayoutBinding bindings[kCloudBindings]{};
+  for (uint32_t b = 0; b < kCloudBindings; ++b) {
     bindings[b] = {b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
   }
   VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
   setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  setLayoutInfo.bindingCount = 4;
+  setLayoutInfo.bindingCount = kCloudBindings;
   setLayoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &setLayoutInfo, nullptr, &cloudSetLayout),
         "vkCreateDescriptorSetLayout");
   // The generator set, then one march set per resolution and parity.
-  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4 + 4 * 6},
+  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kCloudBindings + 4 * 6},
                                             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * 3}};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -101,13 +109,15 @@ void Renderer::Impl::createClouds() {
   allocInfo.descriptorSetCount = 1;
   allocInfo.pSetLayouts = &cloudSetLayout;
   check(vkAllocateDescriptorSets(dev, &allocInfo, &cloudSet), "vkAllocateDescriptorSets");
-  const VkDescriptorImageInfo storage[4] = {
+  const VkDescriptorImageInfo storage[kCloudBindings] = {
       {VK_NULL_HANDLE, cloudNoiseLevel0[0], VK_IMAGE_LAYOUT_GENERAL},
       {VK_NULL_HANDLE, cloudNoiseLevel0[1], VK_IMAGE_LAYOUT_GENERAL},
       {VK_NULL_HANDLE, cloudCurlNoise.view, VK_IMAGE_LAYOUT_GENERAL},
-      {VK_NULL_HANDLE, weatherMap.view, VK_IMAGE_LAYOUT_GENERAL}};
-  VkWriteDescriptorSet writes[4]{};
-  for (uint32_t b = 0; b < 4; ++b) {
+      {VK_NULL_HANDLE, weatherMap.view, VK_IMAGE_LAYOUT_GENERAL},
+      {VK_NULL_HANDLE, cloudShadowRaw.view, VK_IMAGE_LAYOUT_GENERAL},
+      {VK_NULL_HANDLE, cloudShadowMap.view, VK_IMAGE_LAYOUT_GENERAL}};
+  VkWriteDescriptorSet writes[kCloudBindings]{};
+  for (uint32_t b = 0; b < kCloudBindings; ++b) {
     writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[b].dstSet = cloudSet;
     writes[b].dstBinding = b;
@@ -115,7 +125,7 @@ void Renderer::Impl::createClouds() {
     writes[b].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     writes[b].pImageInfo = &storage[b];
   }
-  vkUpdateDescriptorSets(dev, 4, writes, 0, nullptr);
+  vkUpdateDescriptorSets(dev, kCloudBindings, writes, 0, nullptr);
 
   // Set 1 is the bindless table clouds.glsl reads; push constants carry the
   // scene buffer.
@@ -129,10 +139,13 @@ void Renderer::Impl::createClouds() {
   layoutInfo.pPushConstantRanges = &pushRange;
   check(vkCreatePipelineLayout(dev, &layoutInfo, nullptr, &cloudLayout), "vkCreatePipelineLayout");
   weatherMapPipeline = createComputePipeline(dev, "weather_map.comp", cloudLayout);
+  cloudShadowPipeline = createComputePipeline(dev, "cloud_shadow.comp", cloudLayout);
+  cloudShadowBlurPipeline = createComputePipeline(dev, "cloud_shadow_blur.comp", cloudLayout);
   VkPipeline noisePipeline = createComputePipeline(dev, "cloud_noise.comp", cloudLayout);
 
   submitNow([&](VkCommandBuffer cmd) {
-    for (const Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap}) {
+    for (const Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
+                               &cloudShadowRaw, &cloudShadowMap}) {
       transitionImage(cmd, {image->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -184,19 +197,21 @@ void Renderer::Impl::createClouds() {
   cloudCompositePipeline = createComputePipeline(dev, "clouds_composite.comp", cloudMarchLayout);
   createCloudTargets();
 
-  if (textures.size() + 4 > kMaxTextures) {
+  if (textures.size() + 5 > kMaxTextures) {
     throw std::runtime_error("texture table is full");
   }
   const auto first = static_cast<uint32_t>(textures.size());
-  textures.resize(textures.size() + 4);
+  textures.resize(textures.size() + 5);
   clouds.weatherMap = first;
   clouds.baseNoise = first + 1;
   clouds.detailNoise = first + 2;
   clouds.curlNoise = first + 3;
+  clouds.shadowMap = first + 4;
   writeTexture(clouds.weatherMap, weatherMap.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.baseNoise, cloudBaseNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.detailNoise, cloudDetailNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.curlNoise, cloudCurlNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
+  writeTexture(clouds.shadowMap, cloudShadowMap.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 void Renderer::Impl::destroyClouds() {
@@ -206,6 +221,8 @@ void Renderer::Impl::destroyClouds() {
   vkDestroyPipeline(dev, cloudMarchPipeline, nullptr);
   vkDestroyPipelineLayout(dev, cloudMarchLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, cloudMarchSetLayout, nullptr);
+  vkDestroyPipeline(dev, cloudShadowBlurPipeline, nullptr);
+  vkDestroyPipeline(dev, cloudShadowPipeline, nullptr);
   vkDestroyPipeline(dev, weatherMapPipeline, nullptr);
   vkDestroyPipelineLayout(dev, cloudLayout, nullptr);
   vkDestroyDescriptorPool(dev, cloudPool, nullptr);
@@ -213,7 +230,8 @@ void Renderer::Impl::destroyClouds() {
   for (VkImageView view : cloudNoiseLevel0) {
     vkDestroyImageView(dev, view, nullptr);
   }
-  for (Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap}) {
+  for (Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
+                       &cloudShadowRaw, &cloudShadowMap}) {
     destroyImage(*image);
   }
 }
@@ -243,6 +261,52 @@ void Renderer::Impl::drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame)
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+}
+
+// Orthographic along the sun (cloudShadowBasis), centered on the camera and
+// snapped to whole texels in the sun's frame, so shadows don't swim as the
+// camera moves (in double, like the weather map). Off with the clouds.
+void Renderer::Impl::placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection) {
+  if (!cloudsEnabled) {
+    clouds.shadowSize = 0.0f;
+    return;
+  }
+  const SunBasis basis = cloudShadowBasis(sunDirection);
+  constexpr double kTexel = kCloudShadowSize / kCloudShadowResolution;
+  auto fromCenter = [&](Vec3 axis) {
+    const double u = double{cameraPosition.x} * axis.x + double{cameraPosition.y} * axis.y +
+                     double{cameraPosition.z} * axis.z;
+    return static_cast<float>(u - std::floor(u / kTexel) * kTexel);
+  };
+  const Vec3 *axes[] = {&basis.right, &basis.up, &basis.forward};
+  float *targets[] = {clouds.shadowRight, clouds.shadowUp, clouds.shadowForward};
+  for (int i = 0; i < 3; ++i) {
+    targets[i][0] = axes[i]->x;
+    targets[i][1] = axes[i]->y;
+    targets[i][2] = axes[i]->z;
+  }
+  clouds.shadowSize = static_cast<float>(kCloudShadowSize);
+  clouds.shadowCamera[0] = fromCenter(basis.right);
+  clouds.shadowCamera[1] = fromCenter(basis.up);
+}
+
+// After the weather map (the march reads it): the Beer shadow map, then its
+// blur into the map the scene and the cloud march sample.
+void Renderer::Impl::drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame) {
+  const VkDescriptorSet sets[] = {cloudSet, materialSet};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudLayout, 0, 2, sets, 0,
+                          nullptr);
+  PushConstants push;
+  push.sceneBuffer = frame.sceneBuffer.address;
+  vkCmdPushConstants(cmd, cloudLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+  for (VkPipeline pipeline : {cloudShadowPipeline, cloudShadowBlurPipeline}) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdDispatch(cmd, kCloudShadowResolution / 8, kCloudShadowResolution / 8, 1);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  }
 }
 
 // Called with the swapchain (the targets follow the render size) and once the

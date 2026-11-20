@@ -84,7 +84,8 @@ foreach(source
     cluster_traverse.comp cluster_cull.comp mesh.mesh terrain_select.comp
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp cloud_noise.comp weather_map.comp
-    clouds_march.comp clouds_resolve.comp clouds_composite.comp)
+    clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
+    cloud_shadow_blur.comp)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})

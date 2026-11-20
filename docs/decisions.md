@@ -1826,3 +1826,123 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Salvi, An Excursion in Temporal Supersampling (GDC 2016, variance clipping): http://behindthepixels.io/assets/files/TemporalAA.pdf
   - Kopf, Cohen, Lischinski, Uyttendaele: Joint Bilateral Upsampling (SIGGRAPH 2007): https://johanneskopf.de/publications/jbu/
+
+## Cloud shadow map (M4 clouds, 2026-11-19)
+
+- **Beer shadow map (Approaches 4):** every frame in pass `weather`
+  after the weather map (`cloud_shadow.comp`), RGBA16F 1024^2 over
+  30.72 km across the sun (30 m texels), orthographic along the light,
+  centered on the camera and snapped to whole texels in the sun's frame
+  (in double, like the weather map), so shadows don't swim as the camera
+  moves (high oblique view moving 100 m/s laterally: shadow-edge crop
+  Laplacian moving / still 0.92 with cloud shadows vs 0.90 with clouds
+  off, i.e. TAA's own loss, no swimming). Per texel one line through the
+  layer envelope (1.8-4.5 km, flat world: the scene is lit in it), 32
+  steps at their centers, no jitter (a static map has no history to
+  average it): R front depth along the light (km from the camera's
+  plane), G mean extinction from the first to the last cloudy step, B
+  total optical depth, A 1 (0: not marched); `T(d) = exp(-min(maxOD,
+  meanExt max(0, d - front)))`. Only lines that reach a receiver the map
+  serves are marched: between sea level and the layer top, within half
+  the map (15.36 km) horizontally from the camera, plus the 3 texels the
+  blur and the bilinear read reach (a texel across the sun moves the
+  line's ground track by its size / sin elevation). At a low sun most of
+  the map's plane would otherwise serve terrain far along the sun,
+  through the expensive analytic weather fallback (2 degree sun: weather
+  pass 3.41 ms unbounded). The front depth stays within ~15 km + 4.5 km /
+  sin elevation, ~100 km at 3 degrees, where fp16 rounds it to +-31 m
+  along the light (~2 m vertically). `cloud_shadow_blur.comp` blurs G
+  and B with a 5x5 binomial weighted by front-depth similarity (1 km),
+  so clouds at different depths along the light don't mix; front stays
+  the texel's; unmarched texels (A 0) don't contribute, and the read
+  divides by the filtered A. Rejected: exponential shadow maps
+  (over-darken over long distances, the spec's choice).
+- **Low sun:** the map's weight fades with the sun, `smoothstep(sin 3,
+  sin 6 degrees, sun.y)`, into the fallback, and below 3 degrees it
+  isn't marched. Lower, its 32 steps per line span over 50 km of layer:
+  the noise mip that step length selects erases the cumulus (fair, 2
+  degrees: mean map T 0.98 against 0.06 with the mip capped at 1), and
+  finer mips alias into blocky self-shadow on the clouds (seen at mip
+  caps 1, 2.5 and 3.5). The fallback is continuous through the fade and
+  holds its 3 degree value below it.
+- The CPU twin (`beerShadowTexel` / `beerShadowTransmittance`) is tested
+  against a brute-force optical depth: on a uniform column, optical
+  depth within 5% of the column's at 10 depths from before it to 1.5 km
+  past it; on a cumulus-like column (soft top, thinning base),
+  transmittance within 0.05 at 10 depths through it and at 5 and 8 km
+  (both fail without the max optical depth clamp). The
+  linear-optical-depth model overestimates where a column thins (up to
+  7% of its total optical depth on that column), the known cost of the
+  format.
+  - Hillaire, Physically Based and Scalable Atmospheres / clouds in Unreal Engine (SIGGRAPH 2020 course; Beer shadow map: front depth, mean extinction, max optical depth): https://blog.selfshadow.com/publications/s2020-shading-course/hillaire/s2020_pbs_hillaire_slides.pdf
+  - UE volumetric cloud component (cloud shadow map): https://dev.epicgames.com/documentation/en-us/unreal-engine/volumetric-cloud-component-in-unreal-engine
+  - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016, cloud shadows on the scene from a transmittance map along the sun): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
+- **Basis (`cloudShadowBasis`, weather.h):** Frisvad's orthonormal basis
+  from the sun direction (right x up = sun, forward = the light's
+  travel), on the axes cycled (x, y, z) -> (z, x, y) so its one
+  singular direction (n.z = -1) is the nadir, where the sun never lights
+  anything. It neither flips nor spins as the sun crosses the zenith or
+  the north horizon (tested in 0.5 degree steps: east to west through
+  overhead, along the horizon through north, and up through north from
+  -10 to 10 degrees; neighbouring axes within 0.999), and it stays
+  orthonormal at 90, 45, 2, 0, -5 and -90 degrees for any azimuth
+  (tested; a `cross(sun, worldUp)` basis is undefined overhead and flips
+  across it).
+  - Frisvad, Building an Orthonormal Basis from a 3D Unit Vector Without Normalization (JGT 2012): https://doi.org/10.1080/2165347X.2012.689606
+- **Use:** `cloudShadow(world)` (clouds.glsl) multiplies the sun at
+  every surface (mesh.frag, terrain too: the sun transmittance, so the
+  ground bounce term is dimmed as well). The map fades out over the
+  outer 10% of its half-size (1.5 km), across the sun and horizontally
+  from the camera (13.8 to 15.4 km), into the fallback beyond (1 above
+  the layer). One crossing of the layer passes `1 - k R`, R the weather
+  coverage (`weatherMapAt`: the map inside its 60 km window, the
+  one-octave analytic fallback beyond) where the sun ray crosses the
+  middle of the layer. k is calibrated, not derived: coverage R = 1 is
+  cloudy over only part of its area (the shape cut and erosion carve
+  gaps), more so for cumulus; binned by type, k falls steeply only
+  toward pure cumulus (the stratus shape floor fills the gaps below type
+  ~0.8), so `k = 1 - 0.53 type^3.5`. A low sun's ray runs S = layer
+  height / tan elevation through the layer and crosses about n = S / L
+  independent clouds; the n - 1 beyond the first pass the regional mean
+  `1 - k(local type) c'`, c' the local state's mean coverage under
+  weatherFromNoise's soft threshold over an about uniform noise
+  (`c (1 + 0.15) - 0.075`). L = 5.5 km, fitted at 6.5, 10 and 20
+  degrees; n = 1 from 26 degrees up. Calibration: top-down captures at
+  9 km (map weight 1 on every pixel), mean map T vs mean fallback T on
+  the same pixels; default 40.5 degree sun, 6 positions: fair 0.816 vs
+  0.829 (`1 - R`: 0.680), broken 0.417 vs 0.437 (`1 - R`: 0.382),
+  overcast 0.000 vs 0.000; 3 positions per elevation: fair 0.443 vs
+  0.466 (6.5 degrees), 0.613 vs 0.618 (10), 0.783 vs 0.816 (20); broken
+  0.027 vs 0.017, 0.125 vs 0.075, 0.324 vs 0.360. On high oblique views
+  (6500 m, pitch -0.25) swept from 0 to 20 degrees of sun, the mean
+  applied transmittance 11.5-13.8 km and 15.4-17.5 km from the camera
+  differs with the cloud pattern either way, except at 4-5.5 degrees,
+  where the near band was consistently brighter (by 0.03-0.22 in fair,
+  looking toward and away from the sun); the view's mean changes by at
+  most 0.10 per half degree.
+  Only the sun is dimmed: no local occlusion of ambient (spec). The
+  cloud march's 1.2 km sun march adds the map's optical depth from
+  where it ends (unless it left the layer), weighted by the map's fade,
+  so cloud self-shadowing reaches through the whole layer near the
+  camera; beyond ~15 km horizontally from the camera and below 6
+  degrees of sun that weight falls to 0 and the march adds no optical
+  depth past its 1.2 km (far and dusk clouds too bright; deferred to
+  Task 7). `--clouds
+  off` turns the shadows off too (shadow size 0).
+- Verified: shadows sit against the sun (top-down broken view, shadow
+  mask with the sun 45 degrees east vs west: shifted 54 px each way,
+  ~1.6 km, the cloud base-to-ground height at 45 degrees); overcast
+  ground view loses the sun term (only sky light remains; exposure
+  adapts); clear unchanged (MAE 0 vs Task 4); dusk (2 degrees) and sun
+  overhead render without NaN.
+- Cost (`weather` / `clouds` GPU ms, 2560x1440): Debug, before (Task 4)
+  -> after: clear ground 0.09 / 0.61 -> 0.23 / 0.63, fair ground
+  0.09 / 1.00 -> 0.34 / 1.02, broken above the layer 0.10 / 0.94 ->
+  0.52 / 1.04, overcast 0.09 / 0.49 -> 0.48 / 0.44. Release (median of
+  5): fair ground 0.34 / 1.08, above 0.40 / 1.00, inside 0.34 / 1.66,
+  clear 0.24 / 0.60. By sun elevation (Debug, 1920x1080, weather pass,
+  ground view): 40.5 degrees 0.28, 6.5 degrees 0.37, 4.5 degrees 0.52
+  (the most texels marched over the longest lines), 2 degrees 0.12 (map
+  not marched). Over the ~1 ms budget; levers, not applied: amortize the
+  map (a quarter of the texels per frame), fewer steps (16), or a
+  cheaper analytic weather lookup.

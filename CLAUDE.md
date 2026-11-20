@@ -101,7 +101,13 @@ SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
 with the wind). Capture runs print the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
-`--clouds off` skips the cloud march and composite (A/B).
+`--clouds off` skips the cloud march, composite and cloud shadows (A/B).
+Surfaces (mesh.frag, terrain too) multiply the sun by `cloudShadow` at
+their flat world position: the shadow map within ~13.8 km of the camera
+(horizontally and across the sun), blended over 1.5 km into the
+coverage-based fallback beyond (`1 - k R` per crossing, darkened by the
+number of clouds a low sun's ray crosses; calibrated against the map);
+the map fades out as the sun sets (6 to 3 degrees).
 `--dump-weather-map out.png` saves the weather map after the last frame
 (R coverage, G type, B precipitation; row 0 = north) and prints its
 window; two dumps at `--time-scale 0` and `--time-scale 60 --frames 60`
@@ -214,7 +220,8 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            Renderer constructor takes an optional
                            provider), weather.h (WeatherState,
                            presets, Weather: blend, wind integral,
-                           history, stateAt; windVelocityAt), window.h,
+                           history, stateAt; windVelocityAt;
+                           cloudShadowBasis, Beer shadow texel), window.h,
                            math/{vec3,mat4}.h
 engine/dlss/               meridian_dlss (MERIDIAN_DLSS, default ON):
                            dlss.h (createProvider, attribution),
@@ -246,7 +253,8 @@ engine/src/render/         renderer internals:
                            sharpen.comp, their pipelines and the
                            ping-pong history
   renderer_clouds.cpp      cloud noise volumes (at load), weather map
-                           window and pass, dumpWeatherMap, cloud march
+                           window and pass, cloud shadow map placement
+                           and pass, dumpWeatherMap, cloud march
                            targets and histories (quarter/half res) and
                            the cloud pass (march, resolve, composite)
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
@@ -271,8 +279,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            weather.glsl (weatherAt: history lookup),
                            clouds.glsl (tileable noise, weatherMapAt +
                            analytic fallback, layer profiles,
-                           cloudDensity), cloud_noise.comp,
-                           weather_map.comp, clouds_march.comp,
+                           cloudDensity, cloudShadow), cloud_noise.comp,
+                           weather_map.comp, cloud_shadow.comp,
+                           cloud_shadow_blur.comp, clouds_march.comp,
                            clouds_resolve.comp, clouds_composite.comp,
                            clouds_temporal.glsl (their push constants,
                            cloud reprojection)
@@ -312,8 +321,13 @@ clusters) -> cull clusters (cluster_cull.comp, dispatched indirectly:
 Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
-single/double-sided) -> weather map (weather_map.comp: 512^2 over 60 km
-around the camera, texel-snapped) -> atmosphere LUTs
+single/double-sided) -> weather (weather_map.comp: 512^2 over 60 km
+around the camera, texel-snapped; then the cloud shadow map,
+cloud_shadow.comp: a Beer shadow map, 1024^2 over 30 km across the sun,
+orthographic along it, texel-snapped in its frame, 32 steps per texel
+across the layer, only for lines that reach a receiver within ~15 km of
+the camera, and cloud_shadow_blur.comp, a bilateral 5x5 of its
+extinction and optical depth) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
@@ -431,10 +445,11 @@ barriers account for that.
   set 0 = HDR, motion, history read/write, output (two ping-pong sets,
   shared by taa.comp and sharpen.comp); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler); cloud
-  layout set 0 = the cloud noise and weather map storage images, set 1 =
-  bindless. The bindless table also holds the cloud noise volumes as 3D
-  views, read through `textures3D[]` (clouds.glsl, same binding), and
-  the weather map; all four stay in GENERAL layout. Cloud march layout:
+  layout set 0 = the cloud noise, weather map and cloud shadow map (raw,
+  blurred) storage images, set 1 = bindless. The bindless table also
+  holds the cloud noise volumes as 3D views, read through `textures3D[]`
+  (clouds.glsl, same binding), the weather map and the blurred cloud
+  shadow map; all stay in GENERAL layout. Cloud march layout:
   set 0 = atmosphere LUTs, set 1 = bindless, set 2 = scene depth + the
   march targets, the history to read (sampled) and to write, HDR and
   motion (storage), all GENERAL; one set per resolution and frame parity
