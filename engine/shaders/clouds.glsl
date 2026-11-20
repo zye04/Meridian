@@ -34,13 +34,13 @@ const vec2 kShapeRange = vec2(0.78, 0.92);
 // shape so overcast reads as a continuous sheet (gaps only where the
 // profile thins at its top and bottom and the detail erodes it), while
 // mixed types keep holes.
-const float kStratusShapeFloor = 0.6;
+const float kStratusShapeFloor = 0.4;
 // Vertical frequency of the base shape over its horizontal one: cells
 // wider than tall, so cumulus spread into flat-based loaves.
 const float kShapeSquash = 2.0;
 // Scales the eroded shape before it saturates at 1: cores reach the full
 // extinction and edges sharpen.
-const float kDensityGain = 6.0;
+const float kDensityGain = 3.0;
 // Extinction (1/m) at density 1.
 const float kCloudExtinction = 0.06;
 
@@ -308,7 +308,7 @@ float cloudShadowMap(vec3 world, out float weight) {
 // marched: world is a cloud sample whose own cloud the march's sun steps
 // already crossed, so only the regional mean over the rest of the path
 // applies. 1 above the layer.
-const vec2 kCloudShadowFallbackFit = vec2(0.53, 3.5); // a, p
+const vec2 kCloudShadowFallbackFit = vec2(0.72, 2.6); // a, p
 const float kCloudShadowCrossingLength = 5500.0;
 
 float cloudShadowFallback(vec3 world, bool marched) {

@@ -15,9 +15,14 @@ const vec3 kPhase = vec3(0.8, -0.3, 0.3);
 // contribution x b, eccentricity x c.
 const int kOctaves = 4;
 const vec3 kOctaveScale = vec3(0.5, 0.5, 0.5);
+// Diffuse multiple scattering deep inside: light diffuses through a thick
+// cloud with an algebraic, not exponential, falloff (two-stream:
+// transmittance 1 / (1 + 0.75 (1 - g) tau)); isotropic, scaled by x.
+const vec2 kDiffuse = vec2(0.8, 0.75 * (1.0 - 0.6));
 // Ambient at the far side of the layer relative to the near side: the sky
-// at the bottom, the ground bounce at the top.
-const float kAmbientBottom = 0.35;
+// at the bottom, the ground bounce at the top; under full coverage the
+// bases see other clouds, not the sky (x clear, y overcast).
+const vec2 kAmbientBottom = vec2(0.35, 0.05);
 const float kMaxDistance = 300000.0;
 const float kOpaque = 0.01;
 // Sun march: steps doubling from kLightStep (5 steps cover 1.2 km).
@@ -146,6 +151,7 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
     vec3 ground = pc.scene.atmosphere.groundAlbedo * (groundSun * (1.0 - c.groundCoverage) + ambient);
     // Isotropic in-scattering of a uniform hemisphere of irradiance E: E / 2 pi.
     ambient /= 2.0 * kPi;
+    float ambientBottom = mix(kAmbientBottom.x, kAmbientBottom.y, c.groundCoverage);
     ground /= 2.0 * kPi;
 
     float depthSum = 0.0;
@@ -204,10 +210,11 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                 a *= kOctaveScale.x;
                 b *= kOctaveScale.y;
             }
+            scattered += kDiffuse.x / (4.0 * kPi * (1.0 + kDiffuse.y * opticalDepth));
 
             vec3 source = kAlbedo * (sunLight * scattered +
-                                    ambient * mix(kAmbientBottom, 1.0, heightFraction) +
-                                    ground * mix(1.0, kAmbientBottom, heightFraction));
+                                    ambient * mix(ambientBottom, 1.0, heightFraction) +
+                                    ground * mix(1.0, kAmbientBottom.x, heightFraction));
             // Energy-conserving integration over the step (Hillaire 2016).
             float sigma = density * kCloudExtinction;
             float stepTransmittance = exp(-sigma * dt);
@@ -226,6 +233,78 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
         result.distance = depthSum / weightSum;
     }
     return result;
+}
+
+// Cirrus: a thin sheet of ice crystals at kCirrusAltitude, a 2D layer (no
+// volume, no shadow): fibrous streaks stretched along the wind and bent by
+// a slow warp, in patches over part of the sky, from gradient noise. Its
+// amount follows the local coverage (none in clear weather). The streaks
+// turn with the wind direction, so their noise doesn't tile with the wind
+// offset's period: the pattern jumps once per 262 km of wind travel.
+const float kCirrusAltitude = 9000.0;
+// Noise scales (m): streaks along and across the wind, the warp, patches.
+const vec4 kCirrusScale = vec4(16384.0, 1024.0, 16384.0, 32768.0);
+const float kCirrusOpacity = 0.6;
+// Ice crystals scatter strongly forward.
+const float kCirrusPhase = 0.75;
+
+// The cirrus sheet along a ray from the camera: in-scattered luminance (sun
+// illuminance 1), transmittance and distance (m; 0 = none).
+CloudMarch cirrusLayer(vec3 direction, vec3 ambient) {
+    CloudMarch result = CloudMarch(vec3(0.0), 1.0, 0.0);
+    float h = pc.scene.cameraPosition.y;
+    if (h >= kCirrusAltitude) {
+        return result;
+    }
+    float radius = pc.scene.atmosphere.bottomRadius * 1000.0;
+    float t = shellIntersect(radius, h, direction.y, kCirrusAltitude).y;
+    if (t <= 0.0 || t > kMaxDistance) {
+        return result;
+    }
+    vec3 world = cloudPoint(direction * t, radius);
+    WeatherSample local = weatherAt(pc.scene, vec3(world.x, 0.0, world.z));
+    float amount = smoothstep(0.05, 0.6, local.coverage);
+    if (amount <= 0.0) {
+        return result;
+    }
+    Clouds c = pc.scene.clouds;
+    vec2 wind = normalize(pc.scene.wind.direction + vec2(1e-6, 0.0));
+    vec2 p = world.xz - c.windOffset * 2.0;
+    ivec3 period = ivec3(1 << 12);
+    vec2 r = vec2(dot(p, wind), dot(p, vec2(-wind.y, wind.x)));
+    r.y += 3000.0 * (gradientNoise(vec3(p / kCirrusScale.z, 0.5), period) - 0.5);
+    float streaks = gradientOctaves(vec3(r / kCirrusScale.xy, 1.5), period, 3);
+    float patches = gradientOctaves(vec3(p / kCirrusScale.w, 2.5), period, 2);
+    float density = smoothstep(0.5, 0.72, streaks) * smoothstep(0.45, 0.6, patches) * amount;
+    if (density <= 0.0) {
+        return result;
+    }
+    // Slant path through the thin sheet: more opaque toward the horizon.
+    float slant = min(1.0 / max(abs(direction.y), 0.05), 6.0);
+    float opacity = 1.0 - exp(-kCirrusOpacity * density * slant);
+    vec3 sun = pc.scene.sunDirection;
+    vec3 up = normalize(vec3(direction.x * t, radius + h + direction.y * t, direction.z * t));
+    vec3 sunLight = transmittanceToSun(pc.scene.atmosphere.bottomRadius + kCirrusAltitude * 0.001,
+                                       dot(sun, up));
+    float phase = mix(henyeyGreensteinPhase(kCirrusPhase, -dot(sun, direction)), 1.0 / (4.0 * kPi), 0.3);
+    result.luminance = kAlbedo * (sunLight * phase + ambient / (2.0 * kPi)) * opacity;
+    result.transmittance = 1.0 - opacity;
+    result.distance = t;
+    return result;
+}
+
+// The cirrus sheet behind a march of the low layer.
+CloudMarch withCirrus(CloudMarch march, vec3 direction, vec3 ambient) {
+    CloudMarch cirrus = cirrusLayer(direction, ambient);
+    if (cirrus.distance <= 0.0 || march.transmittance < kOpaque) {
+        return march;
+    }
+    march.luminance += march.transmittance * cirrus.luminance;
+    if (march.distance <= 0.0) {
+        march.distance = cirrus.distance;
+    }
+    march.transmittance *= cirrus.transmittance;
+    return march;
 }
 
 #endif

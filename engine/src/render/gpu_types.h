@@ -311,7 +311,7 @@ constexpr float kCloudWindAltitude = 3000.0f;
 // air has moved.
 constexpr uint32_t kCloudNoisePeriod = 1u << 18;
 constexpr uint32_t kWeatherCell = 4096;
-constexpr uint32_t kBaseNoisePeriod = 4096;
+constexpr uint32_t kBaseNoisePeriod = 8192;
 constexpr uint32_t kDetailNoisePeriod = 512;
 constexpr uint32_t kCurlNoisePeriod = 4096;
 static_assert(kCloudNoisePeriod % kWeatherCell == 0 && kCloudNoisePeriod % kBaseNoisePeriod == 0 &&
