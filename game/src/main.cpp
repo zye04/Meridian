@@ -532,9 +532,9 @@ struct Options {
   // demanding configuration down, decisions.md).
   std::optional<meridian::DlssMode> dlssMode;
   char dlssPreset = 0; // 0: the DLSS module's per-mode default
-  // Ray Reconstruction under DLSS: it removes the ray-traced shadow
-  // shimmer, decisions.md.
-  bool rayReconstruction = true;
+  // Ray Reconstruction under DLSS, an A/B option; Super Resolution DLAA
+  // is the default (decisions.md).
+  bool rayReconstruction = false;
   // TAA's render size over display size, in (0, 1].
   std::optional<float> renderScale;
   // Fullscreen by default: consistent size for GPU timings, and the way the

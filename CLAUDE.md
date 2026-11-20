@@ -120,12 +120,13 @@ clean = Bruneton's very clean defaults, for A/B).
 
 `--aa dlss|taa` picks the upscaler: DLSS (default; falls back to TAA
 with the log line `DLSS unavailable: <reason>; using TAA` when NGX
-reports no Super Resolution). `--rr on|off` (default on: RR removes the
-ray-traced shadow shimmer, decisions.md) picks Ray Reconstruction under DLSS
+reports no Super Resolution). `--rr on|off` (default off: Super
+Resolution DLAA, ~2.3 ms at 1440p against RR's ~4.7, decisions.md) picks
+Ray Reconstruction under DLSS, an A/B
 (preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super
 Resolution DLAA with `DLSS Ray Reconstruction unavailable; using Super
 Resolution`). `--dlss-mode dlaa|quality|balanced|performance` (default
-dlaa; RR DLAA is ~4.7 ms at 1440p) and `--dlss-preset E|F|J|K|L|M` (Super
+dlaa) and `--dlss-preset E|F|J|K|L|M` (Super
 Resolution only; default: M for DLAA, Quality and Balanced, NGX's own
 for Performance, `defaultPreset` in dlss.cpp; A/B override) set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
 at the display size times S for TAA (`--aa taa`); DLSS picks its own render size.

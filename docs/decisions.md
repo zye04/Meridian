@@ -1697,6 +1697,9 @@ restores the previous behaviour exactly (2645325 instances, hash
 
 ## DLSS DLAA with Ray Reconstruction is the default (2026-11-20)
 
+Superseded by "Super Resolution DLAA is the default, RR an A/B" (below):
+the fallbacks and gate definitions here still hold.
+
 - Default: `--aa dlss --rr on --dlss-mode dlaa` (preset F), 4.7 ms for the
   `aa` pass at 1440p. Fallbacks, each logged once at startup: RR
   unavailable -> Super Resolution DLAA preset M (`DLSS Ray Reconstruction
@@ -2934,3 +2937,27 @@ weather time-lapse with the sun behind a cloud (`1119 1356 -431 0.895
 value around the sun 0.988 -> 0.675; overcast: the disk is gone. Thinner
 cloud edges (transmittance above 0.01) still pass a dimmed disk, as real
 thin cloud does.
+
+## Super Resolution DLAA is the default, RR an A/B (2026-11-20)
+
+Supersedes the default in "DLSS DLAA with Ray Reconstruction is the
+default". User decision: raster rendering in the style of Chlorophyll
+Engine (no ray tracing, art-directed), for image clarity, motion clarity
+and performance. RR's reason to be the default was the ray-traced sun
+shadow's per-pixel noise; the raster sun shadows that replace the ray
+(spec `2026-11-20-raster-sun-shadows-design.md`) have none to denoise.
+
+- **Choice:** `--rr` defaults to off: DLSS Super Resolution DLAA, preset
+  M (the SR default). `--rr on` stays as an A/B. Under SR the upscaler
+  doesn't want guides, so the guide images aren't created, the jitter
+  sequence has 8 phases instead of 32, and `SceneData.whiteNoise` is 0
+  (interleaved gradient noise for the sun-disk sample, the cloud march and
+  contact shadows).
+- **Measured** (Release, 2560x1440, `tools/motion-gates.sh`, same build,
+  `--rr on` vs off): `aa` 4.65 -> 2.35 ms, frame GPU 9.31 -> 6.84 ms (ground
+  still, `--placement off`); Laplacian fwd5 ground 0.115 / 0.116, side5
+  ground 0.127 / 0.119, fwd5 beech 0.209 / 0.214, pitch 0.114 / 0.113 (all
+  pass); shimmer crown 1.79 / 1.73, shadow 0.29 / 0.36 (pass); the
+  ray-traced shadow shimmers more without RR, as expected until the raster
+  shadows land. SSIM fwd5 ground 0.959 / 0.960 fails the 0.98 gate under
+  both, so it predates this change (backlog).
