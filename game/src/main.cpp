@@ -203,7 +203,7 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
 }
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
-// placed on the GPU at load (placement.h). Not drawn yet.
+// placed on the GPU at load (placement.h).
 void placeScenery(meridian::Renderer &renderer) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
@@ -533,13 +533,17 @@ int main(int argc, char **argv) {
   }
 
   if (!interactive) {
+    const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, %u dropped by full cull lists, "
+                "%u triangles, %u terrain nodes, cells %u, %u dropped by full cull lists "
+                "(chunks %u, work items %u, clusters %u, terrain nodes %u), "
                 "placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
-                renderer.drawnTerrainNodeCount(), renderer.droppedCullEntryCount(),
-                renderer.placedInstanceCount(), renderer.validationErrorCount());
+                renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
+                renderer.droppedCullEntryCount(), drops.chunks, drops.workItems, drops.clusters,
+                drops.terrainNodes, renderer.placedInstanceCount(),
+                renderer.validationErrorCount());
     std::printf("GPU passes:");
     const char *separator = " ";
     for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {

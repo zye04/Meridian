@@ -22,10 +22,9 @@ reviewer). The orchestrator:
 
 Open branches, in the proposed order (the user may reorder):
 
-1. `wip/m2a-task5` (M2a Task 5): verify, review, squash, merge.
-2. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
+1. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
    Tasks 6-8, final review, merge.
-3. Then M2a Tasks 7-12 and the rest under "Next after that".
+2. Then M2a Tasks 7-12 and the rest under "Next after that".
 
 The clouds branch touches the same frame and shading files as the other
 two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
@@ -35,7 +34,9 @@ so rebasing it after each merge keeps conflicts small.
 
 - M1 (15 km Napf terrain) complete.
 - M2a forests: Task 1 (static TLAS), 2 (Megaplants import), 3 (placement
-  rules), 4 (GPU placement at load, 2.9M instances), 6 (cluster-group BVH)
+  rules), 4 (GPU placement at load, 2.9M instances), 5 (cell cull,
+  prototype BLAS + TLAS fill, placed trees and rocks drawn; wide forest
+  views overflow the flat work items until Task 7), 6 (cluster-group BVH)
   done, reviewed, pushed.
 - Quality pass step 1: sky dithering, summer haze default (AOD 0.10,
   scale height 0.5 km), terrain march lifted above its own cell (contour
@@ -46,12 +47,6 @@ so rebasing it after each merge keeps conflicts small.
 
 ## In progress (WIP branches on origin, not reviewed)
 
-- `wip/m2a-task5`: M2a Task 5 (cell cull, TLAS fill, placed branch of
-  `loadInstance`). Builds; not verified. Resume it with the Task 5 brief in
-  `docs/superpowers/plans/2026-11-19-forests.md`, then squash into one
-  commit. Carried items for Task 5: ridge capture backing the ground-fit
-  decision (trees at 1-2 km); keep the moss rock sets' authored offsets;
-  Task 5 is exempt from the 0-drop rule (work items overflow until Task 7).
 - `clouds`: M4 clouds, see below.
 
 ## Where clouds stopped

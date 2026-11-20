@@ -30,7 +30,7 @@ cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
-./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation + scale)
+./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 ./tools/fetch-sample-assets.sh ~/Downloads       # + imports the Megascans Megaplants tree_*_usd.zip and the Fab sandstone cliff (*_ue_high.zip) found there
@@ -67,10 +67,11 @@ clean = Bruneton's very clean defaults, for A/B).
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
-geometry).
-They also print drawn terrain nodes (2048 triangles each), `placed N`
+geometry), per list: chunks, work items, clusters, terrain nodes.
+They also print drawn terrain nodes (2048 triangles each), `cells N`
+(placement cells visible), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull early, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -86,7 +87,14 @@ sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 --sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
 0`; float precision far out, at the crop's corner (ground 1286.5 m),
 `7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
-Laplacian with the still's).
+Laplacian with the still's). Placed forests (seed 1; until M2a Task 7
+the work-item list overflows at wide forest views, so most trees are
+missing from the raster there while all cast shadows): forest edge
+`600 1205.6 -400 -1.55 0.02`; forest interior `85 1158.6 -53 -1.55
+0.25` (fits the lists); forest overview `700 1450 -400 -1.55 -0.5`;
+canopy from 40 m above `85 1200 -53 -1.55 -1.2` (fits the lists); a
+placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
+the summit ridge at ~1.5 km: the open view toward the summit.
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
@@ -95,13 +103,15 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 so without the Megaplants trees the same seed places different content
 and these views differ.
 The game places forests, lone trees and rocks over the whole Napf at load
-(`placeScenery` in main.cpp; ~2.9M instances, not drawn until M2a Task 5),
+(`placeScenery` in main.cpp; ~2.9M instances),
 which loads the Megaplants trees and rocks as prototypes: Debug startup
 ~95 s, Release ~9.4 s. `--placement off` skips it (Debug ~18 s, Release
 ~2.3 s; heightfield pyramid and normal map); use it for captures that
 don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches) and `placement hash 0x...`
-(0x0d994d776496812c for seed 1 with every asset present).
+(0x1c6b673748ee8f8f for seed 1 with every asset present). Loading
+placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
+before and after compaction, cell margin).
 
 ## Testing policy (usage matters)
 
@@ -147,11 +157,16 @@ engine/src/render/         renderer internals:
   renderer_impl.h          Renderer::Impl + submitNow()
   renderer_setup.cpp       init/teardown: swapchain, frames, descriptors,
                            pipelines, atmosphere, materials
-  renderer_resources.cpp   buffers, images, BLAS, texture/material/mesh upload
+  renderer_resources.cpp   buffers, images, BLAS (buildBlas: one geometry
+                           per mesh, compacted; a hand-placed mesh's on
+                           its first addInstance), texture/material/mesh
+                           upload
   renderer_terrain.cpp     setTerrain (height image, normal map, pyramid),
                            CDLOD selection dispatches, terrain draw
   renderer_placement.cpp   setPlacement: count, scan, write at load (two
-                           submits), Debug check against evaluatePoint
+                           submits), Debug check against evaluatePoint;
+                           buildPlacedTlas: prototype BLAS + PrototypeInfo,
+                           cell margin, TLAS fill (tlas_fill.comp) + build
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
@@ -166,7 +181,10 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            placement.glsl: integer keep/reject twin of
                            placement.cpp; placement.comp
                            (PLACEMENT_COUNT / PLACEMENT_WRITE variants)
-                           and scan.comp (exclusive scan) run at load
+                           and scan.comp (exclusive scan) run at load;
+                           tlas_fill.comp writes the placed TLAS records.
+                           cell_cull.comp: placement cells -> instance
+                           chunks for cull.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten), ktx2.cpp (shared encoder)
@@ -179,13 +197,20 @@ docs/decisions.md          technique decisions with sources
 ## Frame (renderer_frame.cpp, in order)
 
 Instance table upload + TLAS build over all instances (only on the first
-frame and after instances change; one TLAS shared by both frames) ->
+frame and after instances change; one TLAS shared by both frames; its
+records are the placed instances', written once at setPlacement by
+tlas_fill.comp, then the hand-placed ones', copied in before each build) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the
 camera is within the next finer level's range, else emit to the terrain
-draw list) -> early cull (cull.comp phase 0: instances visible last frame, frustum test
-only, emit work items of up to 64 clusters; then cluster_cull.comp,
+draw list) -> cull cells (cell_cull.comp phase 0: placement cells visible
+last frame, frustum (displayed box) and the layers' draw distance; emits
+chunks of up to 64 consecutive instance ids; the hand-placed instances
+are chunks too) -> early cull (cull.comp, one workgroup per chunk, phase
+0: instances visible last frame, frustum test (placed: the prototype's
+sphere and draw distance) only, emit work items of up to 64 clusters per
+(instance, mesh); then cluster_cull.comp,
 dispatched indirectly: Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
@@ -197,7 +222,9 @@ the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
-cull (phase 1: every instance against frustum + pyramid; the newly visible
+cull (cell cull phase 1: every cell against frustum + pyramid, writing
+cell visibility; then every instance of the emitted chunks against
+frustum + pyramid; the newly visible
 go through the cluster cull, and phase 0's queued clusters are retested
 against the new pyramid; writes the per-instance visibility buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
@@ -228,17 +255,21 @@ account for that.
   previous position each with its own camera. Varyings carry the flat
   relative position; aerial perspective and the surface's atmosphere
   lookups (sun transmittance, sky luminance) use the displayed one.
-  Culling tests displayed bounds (`displayedSphere` in cull.glsl; terrain
-  boxes in terrain_select.comp); LOD distances stay flat.
+  Culling tests displayed bounds (spheres: `displayedSphere` in
+  cull.glsl; terrain node and cell boxes: `displayedBoxInFrustum` in
+  common.glsl); LOD distances stay flat.
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
   allocated); `MeshInfo` and `InstanceData` tables are on the GPU. One
   24-bit instance id space (`kMaxInstanceId`) serves culling, draw lists,
   visibility and the TLAS custom index: ids below `kPlacedBase` index
   `InstanceData`, the rest index the placed table (`PlacedInstance`, 24
   B, order (cell, layer, pattern point); its index is not a persistent
-  id, (layer id, cell, point) is), whose `loadInstance` branch is still
-  to come; shaders read instances only through `loadInstance`
-  (common.glsl). `SceneData` carries the placed table, the `Cell` table
+  id, (layer id, cell, point) is), each a prototype (`PrototypeInfo`:
+  its meshes, bounds, BLAS); shaders read instances only through
+  `loadInstance` (common.glsl), and a ray hit's mesh through
+  `instanceMesh` (the hit's geometry index picks a prototype's mesh).
+  The visibility buffer holds one uint per instance id, then one per
+  cell. `SceneData` carries the placed table, the `Cell` table
   (64 m cells, row-major from the north-west of `cellGrid`) and the grid. Opaque/masked
   meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
   and cluster-triangle pools; draw list entries are (instance, cluster));
@@ -270,7 +301,7 @@ account for that.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
-  `ScanConstants` in scan.comp; `PlacedInstance` in placement.h); change
+  `ScanConstants` in scan.comp, `TlasFillConstants` in tlas_fill.comp; `PlacedInstance` in placement.h); change
   both together (static_asserts check the sizes). `placement.glsl` mirrors
   `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's
   integer core operation for operation: placement keep/reject must be
@@ -339,8 +370,10 @@ account for that.
   slopes the smooth shading normal lights dimly; the terrain's detail
   displacement (+-0.3 m, near the camera) casts no shadows (the march tests
   the bilinear heightfield); the sunset view (3 degree sun) makes the march
-  cost ~1.15 ms; shadow rays are limited to 20 km; placed vegetation
-  isn't drawn yet (M2a Task 5); placed instances stand on the bilinear
+  cost ~1.15 ms; shadow rays are limited to 20 km; the flat work items
+  (every cluster of every DAG level per (instance, mesh)) overflow at wide
+  forest views, so most trees are missing from the raster there (M2a
+  Task 7's BVH traversal fixes it); placed instances stand on the bilinear
   heightfield while distant CDLOD levels draw ridges up to a few meters
   lower (accepted for impostor range, numbers in decisions.md); the terrain quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.

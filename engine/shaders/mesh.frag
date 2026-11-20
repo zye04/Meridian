@@ -70,9 +70,9 @@ const uint kShadowCasterMask = 0x01u;
 // ray query reports each candidate hit; we accept it only where the base
 // color alpha passes the material's cutoff.
 bool alphaTestCandidate(rayQueryEXT query) {
-    LoadedInstance instance = loadInstance(
-        pc.scene, rayQueryGetIntersectionInstanceCustomIndexEXT(query, false));
-    MeshInfo mesh = pc.scene.meshes.meshes[instance.meshOrPrototype];
+    MeshInfo mesh = pc.scene.meshes.meshes[instanceMesh(
+        pc.scene, rayQueryGetIntersectionInstanceCustomIndexEXT(query, false),
+        rayQueryGetIntersectionGeometryIndexEXT(query, false))];
     uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
     vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, false);
 

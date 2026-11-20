@@ -90,8 +90,9 @@ struct ClusterInfo {
     uint firstTriangle;
     uint vertexCount;
     uint triangleCount;
+    // The mesh it belongs to: placed instances name only a prototype.
+    uint mesh;
     uint pad0;
-    uint pad1;
 };
 
 layout(buffer_reference, std430) readonly buffer ClusterBuffer {
@@ -158,6 +159,31 @@ layout(buffer_reference, std430) buffer CellBuffer {
     Cell cells[];
 };
 
+// Must match kCellSize in placement.h.
+const float kCellSize = 64.0;
+
+// A placed prototype. Must match PrototypeInfo in C++: its meshes
+// (PrototypeMeshBuffer from firstMesh; a ray hit's geometry index counts
+// from there), their bounding sphere and BLAS, the projected size below
+// which it becomes an impostor (0: never) and its draw distance (0: none).
+struct PrototypeInfo {
+    uint firstMesh;
+    uint meshCount;
+    vec3 boundsCenter;
+    float boundsRadius;
+    uvec2 blasAddress;
+    float transitionSize;
+    float maxDrawDistance;
+};
+
+layout(buffer_reference, std430) readonly buffer PrototypeBuffer {
+    PrototypeInfo prototypes[];
+};
+
+layout(buffer_reference, std430) readonly buffer PrototypeMeshBuffer {
+    uint meshes[];
+};
+
 vec4 placedRotation(PlacedInstance instance) {
     vec3 xyz = vec3(unpackSnorm2x16(instance.rotationXY),
                     unpackSnorm2x16(instance.rotationZScale).x);
@@ -171,6 +197,15 @@ float placedScale(PlacedInstance instance) {
 
 vec3 rotateByQuaternion(vec4 q, vec3 v) {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+mat4 placedTransform(PlacedInstance instance) {
+    vec4 q = placedRotation(instance);
+    float s = placedScale(instance);
+    return mat4(vec4(rotateByQuaternion(q, vec3(s, 0.0, 0.0)), 0.0),
+                vec4(rotateByQuaternion(q, vec3(0.0, s, 0.0)), 0.0),
+                vec4(rotateByQuaternion(q, vec3(0.0, 0.0, s)), 0.0),
+                vec4(instance.positionX, instance.positionY, instance.positionZ, 1.0));
 }
 
 // Must match AtmosphereParameters in C++. Distances in km, coefficients
@@ -309,6 +344,14 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     CellBuffer cells;
     ivec2 cellGrid;
     uvec2 cellGridSize;
+    PrototypeBuffer prototypes;
+    PrototypeMeshBuffer prototypeMeshes;
+    uint placedCount;
+    // Cells: the largest layer draw distance (0: some layer has none) and
+    // how far instances' bounds reach past their cell horizontally.
+    float cellDrawDistance;
+    float cellMargin;
+    uint pad3;
 };
 
 // Largest axis scale of a transform: a conservative bound under
@@ -319,8 +362,8 @@ float maxScale(mat4 transform) {
 }
 
 // One instance id space for culling, draw lists, visibility and the TLAS
-// custom index: ids below kPlacedBase index InstanceBuffer, ids from it are
-// reserved for placed instances. Must match kPlacedBase in C++.
+// custom index: ids below kPlacedBase index InstanceBuffer, ids from it the
+// placed table. Must match kPlacedBase in C++.
 const uint kPlacedBase = 65536u;
 
 struct LoadedInstance {
@@ -333,13 +376,32 @@ struct LoadedInstance {
 };
 
 LoadedInstance loadInstance(SceneBuffer scene, uint id) {
-    InstanceData instance = scene.instances.instances[id];
     LoadedInstance loaded;
+    if (id >= kPlacedBase) {
+        PlacedInstance placed = scene.placedInstances.placed[id - kPlacedBase];
+        loaded.transform = placedTransform(placed);
+        loaded.scale = placedScale(placed);
+        loaded.meshOrPrototype = placed.prototype;
+        loaded.placed = true;
+        return loaded;
+    }
+    InstanceData instance = scene.instances.instances[id];
     loaded.transform = instance.transform;
     loaded.scale = maxScale(instance.transform);
     loaded.meshOrPrototype = instance.meshIndex;
     loaded.placed = false;
     return loaded;
+}
+
+// The mesh of an instance's BLAS geometry (a ray hit's geometry index):
+// hand-placed instances have one mesh, placed ones their prototype's.
+uint instanceMesh(SceneBuffer scene, uint id, uint geometry) {
+    if (id < kPlacedBase) {
+        return scene.instances.instances[id].meshIndex;
+    }
+    uint prototype = scene.placedInstances.placed[id - kPlacedBase].prototype;
+    return scene.prototypeMeshes.meshes[scene.prototypes.prototypes[prototype].firstMesh +
+                                        geometry];
 }
 
 // Curvature as a display warp: the world stays flat (lighting, shadow rays,
@@ -352,6 +414,24 @@ float curvatureDrop(SceneBuffer scene, vec3 relative) {
 
 vec4 displayedPosition(SceneBuffer scene, vec3 relative) {
     return vec4(relative.x, relative.y - curvatureDrop(scene, relative), relative.z, 1.0);
+}
+
+// Whether a box relative to the camera, as displayed under the curvature
+// warp, touches the view frustum: the drop is smallest at the box's nearest
+// point and largest at its farthest corner.
+bool displayedBoxInFrustum(SceneBuffer scene, vec3 lo, vec3 hi) {
+    vec2 nearest = max(max(lo.xz, -hi.xz), vec2(0.0));
+    vec2 farthest = max(abs(lo.xz), abs(hi.xz));
+    lo.y -= curvatureDrop(scene, vec3(farthest.x, 0.0, farthest.y));
+    hi.y -= curvatureDrop(scene, vec3(nearest.x, 0.0, nearest.y));
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = scene.frustumPlanes[i];
+        vec3 farthestAlong = mix(lo, hi, greaterThanEqual(plane.xyz, vec3(0.0)));
+        if (dot(plane.xyz, farthestAlong) + plane.w < 0.0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Shaders with their own push constants (cull.comp) define

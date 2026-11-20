@@ -114,10 +114,12 @@ template <typename Fn> void editFloatAccessor(fastgltf::Asset &asset, size_t ind
 }
 
 // Scans arrive in centimeters and Z up through their node's rotation and
-// scale. Baking those into a mesh that one childless node uses alone leaves
-// the mesh upright in meters, so it can stand on its own (a placement
-// prototype). Translations stay on the nodes; drawn models don't change.
-void bakeNodeRotationScale(fastgltf::Asset &asset) {
+// scale, and rocks of a set sit on the ground through their node's vertical
+// offset. Baking those into a mesh that one childless node uses alone
+// leaves the mesh upright in meters with its base where the set's ground
+// is, so it can stand on its own (a placement prototype). Horizontal
+// translations stay on the nodes; drawn models don't change.
+void bakeNodeTransform(fastgltf::Asset &asset) {
   constexpr const char *kBaked[] = {"POSITION", "NORMAL", "TANGENT"};
   std::vector<size_t> users(asset.meshes.size(), 0);
   for (const fastgltf::Node &node : asset.nodes) {
@@ -125,20 +127,19 @@ void bakeNodeRotationScale(fastgltf::Asset &asset) {
       ++users[*node.meshIndex];
     }
   }
-  // Per mesh, the rotation and scale to bake (none: left as is), and per
-  // accessor, the meshes whose baked attributes read it.
-  std::vector<std::optional<std::array<float, 7>>> bakes(asset.meshes.size());
+  // Per mesh, the rotation, scale and vertical offset to bake (none: left as
+  // is), and per accessor, the meshes whose baked attributes read it.
+  std::vector<std::optional<std::array<float, 8>>> bakes(asset.meshes.size());
   for (fastgltf::Node &node : asset.nodes) {
     const auto *trs = std::get_if<fastgltf::TRS>(&node.transform);
     if (!trs || !node.meshIndex || !node.children.empty() || users[*node.meshIndex] != 1) {
       continue;
     }
-    const std::array<float, 7> rotationScale = {trs->rotation[0], trs->rotation[1],
-                                                trs->rotation[2], trs->rotation[3],
-                                                trs->scale[0],    trs->scale[1],
-                                                trs->scale[2]};
-    if (rotationScale != std::array<float, 7>{0, 0, 0, 1, 1, 1, 1}) {
-      bakes[*node.meshIndex] = rotationScale;
+    const std::array<float, 8> bake = {trs->rotation[0], trs->rotation[1], trs->rotation[2],
+                                       trs->rotation[3], trs->scale[0],    trs->scale[1],
+                                       trs->scale[2],    trs->translation[1]};
+    if (bake != std::array<float, 8>{0, 0, 0, 1, 1, 1, 1, 0}) {
+      bakes[*node.meshIndex] = bake;
     }
   }
   std::map<size_t, std::set<size_t>> accessorMeshes;
@@ -153,15 +154,15 @@ void bakeNodeRotationScale(fastgltf::Asset &asset) {
     }
   }
   // A shared accessor is baked once, so every mesh reading it must bake the
-  // same rotation and scale.
+  // same rotation, scale and vertical offset.
   for (const auto &[accessor, meshes] : accessorMeshes) {
     const auto &first = bakes[*meshes.begin()];
     for (size_t m : meshes) {
       if (bakes[m] != first) {
         throw std::runtime_error("cannot bake node transforms: accessor " +
                                  std::to_string(accessor) +
-                                 " is shared by meshes with different node rotations or "
-                                 "scales");
+                                 " is shared by meshes with different node rotations, "
+                                 "scales or vertical offsets");
       }
     }
   }
@@ -180,7 +181,9 @@ void bakeNodeRotationScale(fastgltf::Asset &asset) {
     const float r[3][3] = {{1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)},
                            {2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)},
                            {2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)}};
-    // Rotates v after scaling it by scale^power (1: points, -1: normals).
+    const float offsetY = trs->translation[1];
+    // Rotates v after scaling it by scale^power (1: points, -1: normals);
+    // points also move up by the node's vertical offset.
     const auto apply = [&](float *v, int power, bool unit) {
       float scaled[3], out[3];
       for (int i = 0; i < 3; ++i) {
@@ -193,6 +196,9 @@ void bakeNodeRotationScale(fastgltf::Asset &asset) {
                                 : 1.0f;
       for (int i = 0; i < 3; ++i) {
         v[i] = length > 0.0f ? out[i] / length : out[i];
+      }
+      if (power > 0 && !unit) {
+        v[1] += offsetY;
       }
     };
     for (const fastgltf::Primitive &primitive : asset.meshes[*node.meshIndex].primitives) {
@@ -224,7 +230,8 @@ void bakeNodeRotationScale(fastgltf::Asset &asset) {
     }
     trs->rotation = fastgltf::math::nquat(0.0f, 0.0f, 0.0f, 1.0f);
     trs->scale = fastgltf::math::nvec3(1.0f);
-    std::printf("Baked node %s's rotation and scale into its mesh\n",
+    trs->translation[1] = 0.0f;
+    std::printf("Baked node %s's rotation, scale and vertical offset into its mesh\n",
                 std::string(node.name).c_str());
   }
 }
@@ -244,7 +251,7 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
                              std::string(fastgltf::getErrorMessage(loaded.error())));
   }
   fastgltf::Asset &asset = loaded.get();
-  bakeNodeRotationScale(asset);
+  bakeNodeTransform(asset);
 
   basisu::basisu_encoder_init();
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));

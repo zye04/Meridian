@@ -30,8 +30,8 @@ void main() {
     uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
                                           gl_WorkGroupID.x];
     LoadedInstance instance = loadInstance(scene, entry.x);
-    MeshInfo mesh = scene.meshes.meshes[instance.meshOrPrototype];
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
+    MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
 
     // Normals use the inverse transpose so non-uniform scale stays correct.

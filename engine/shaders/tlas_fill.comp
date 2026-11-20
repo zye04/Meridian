@@ -1,0 +1,53 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+
+// The TLAS instance records of the placed instances, one thread each: the
+// prototype's BLAS under the instance's transform, custom index kPlacedBase
+// + table index (loadInstance's id).
+
+layout(local_size_x = 64) in;
+
+// VkAccelerationStructureInstanceKHR: a row-major 3x4 transform, then
+// custom index | mask << 24, SBT offset | flags << 24, BLAS address.
+struct TlasInstance {
+    vec4 rows[3];
+    uint customIndexMask;
+    uint sbtOffsetFlags;
+    uvec2 blasAddress;
+};
+
+layout(buffer_reference, std430) writeonly buffer TlasInstanceBuffer {
+    TlasInstance records[];
+};
+
+// Must match TlasFillConstants in C++.
+layout(push_constant) uniform TlasFillConstants {
+    PlacedInstanceBuffer placed;
+    PrototypeBuffer prototypes;
+    TlasInstanceBuffer records;
+    uint count;
+} fill;
+
+// Must match kShadowCasterMask in C++; placed prototypes have no blended
+// meshes, so every one casts shadows.
+const uint kShadowCasterMask = 0x01u;
+const uint kTriangleFacingCullDisable = 0x01u;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= fill.count) {
+        return;
+    }
+    PlacedInstance instance = fill.placed.placed[index];
+    mat4 m = placedTransform(instance);
+    TlasInstance record;
+    for (int row = 0; row < 3; ++row) {
+        record.rows[row] = vec4(m[0][row], m[1][row], m[2][row], m[3][row]);
+    }
+    record.customIndexMask = (kPlacedBase + index) | (kShadowCasterMask << 24);
+    record.sbtOffsetFlags = kTriangleFacingCullDisable << 24;
+    record.blasAddress = fill.prototypes.prototypes[instance.prototype].blasAddress;
+    fill.records.records[index] = record;
+}

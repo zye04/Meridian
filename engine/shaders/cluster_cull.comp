@@ -25,21 +25,20 @@ float projectedError(vec3 center, float radius, float error) {
            scene.inverseResolution.y;
 }
 
-void draw(uint instanceIndex, uint clusterIndex, uint triangleCount) {
-    LoadedInstance instance = loadInstance(cull.scene, instanceIndex);
-    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshOrPrototype];
+void draw(uint instanceIndex, uint clusterIndex, ClusterInfo cluster) {
+    MeshInfo mesh = cull.scene.meshes.meshes[cluster.mesh];
     // Retested clusters are drawn in the late pass.
     uint list = min(cull.phase, 1u) * kDrawBuckets + mesh.drawBucket;
     uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
     if (slot >= kMaxDrawnClusters) {
         // The count is the mesh task count: keep it at the capacity.
         atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], uint(-1));
-        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+        countDrops(2u, 1u);
         return;
     }
     cull.scene.drawLists.entries[list * kMaxDrawnClusters + slot] =
         uvec2(instanceIndex, clusterIndex);
-    atomicAdd(cull.counters.counters[kCounterTriangles], triangleCount);
+    atomicAdd(cull.counters.counters[kCounterTriangles], cluster.triangleCount);
 }
 
 void retest() {
@@ -54,7 +53,7 @@ void retest() {
                                       cull.scene.cameraPosition,
                                   cluster.boundsRadius * instance.scale);
     if (!occluded(sphere, cull.scene.view)) {
-        draw(entry.x, entry.y, cluster.triangleCount);
+        draw(entry.x, entry.y, cluster);
     }
 }
 
@@ -107,7 +106,7 @@ void main() {
         uint slot = atomicAdd(cull.counters.counters[kCounterRetest], 1u);
         if (slot >= kMaxRetestClusters) {
             // Dropping it could hide something visible: draw it now instead.
-            draw(instanceIndex, clusterIndex, cluster.triangleCount);
+            draw(instanceIndex, clusterIndex, cluster);
             return;
         }
         // One retest workgroup per 64 entries.
@@ -121,5 +120,5 @@ void main() {
         occluded(sphere, cull.scene.view)) {
         return;
     }
-    draw(instanceIndex, clusterIndex, cluster.triangleCount);
+    draw(instanceIndex, clusterIndex, cluster);
 }

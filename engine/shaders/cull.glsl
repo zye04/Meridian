@@ -1,5 +1,5 @@
-// Shared by the instance and cluster culling passes (cull.comp,
-// cluster_cull.comp). Include after common.glsl with
+// Shared by the cell, instance and cluster culling passes (cell_cull.comp,
+// cull.comp, cluster_cull.comp). Include after common.glsl with
 // MERIDIAN_CUSTOM_PUSH_CONSTANTS defined.
 
 // Work items: up to 64 clusters of one instance, culled by one cluster_cull
@@ -9,6 +9,16 @@ const uint kClustersPerWorkItem = 64u;
 
 layout(buffer_reference, std430) buffer WorkItemBuffer {
     uvec2 items[];
+};
+
+// Chunks: up to 64 consecutive instance ids, culled by one cull.comp
+// workgroup. x: first id; y: count, plus kChunkCellWasVisible when phase 0
+// processed the cell's instances (their visibility bits are current).
+const uint kMaxChunks = 1u << 17;
+const uint kChunkCellWasVisible = 1u << 31;
+
+layout(buffer_reference, std430) buffer ChunkBuffer {
+    uvec2 chunks[];
 };
 
 // Must match DrawCounters in C++: per phase, the cluster cull's dispatch
@@ -21,6 +31,11 @@ const uint kCounterInstances = 33u;
 const uint kCounterTriangles = 34u;
 const uint kCounterOverflow = 35u;
 const uint kCounterRetest = 36u;
+const uint kCounterCells = 38u;
+const uint kCounterChunkDispatch = 39u;
+// Per list: chunks, work items, cluster draw list entries (terrain nodes:
+// terrain_select.comp).
+const uint kCounterDrops = 45u;
 
 // Clusters phase 0 found occluded by last frame's pyramid: (instance,
 // cluster), retested in phase 1 against this frame's.
@@ -57,7 +72,30 @@ layout(push_constant) uniform CullConstants {
     uint previousPyramid;
     vec2 pyramidSize;
     RetestBuffer retest;
+    ChunkBuffer chunks;
 } cull;
+
+// Counts entries dropped from a full list.
+void countDrops(uint list, uint count) {
+    atomicAdd(cull.counters.counters[kCounterOverflow], count);
+    atomicAdd(cull.counters.counters[kCounterDrops + list], count);
+}
+
+// Reserves `count` consecutive entries of a list whose length is also an
+// indirect dispatch's group count (counters[counter]). What doesn't fit is
+// given back, so the length ends at the capacity, and counted as dropped;
+// `count` becomes what fits. Returns the first entry.
+uint reserveEntries(uint counter, uint capacity, uint list, inout uint count) {
+    uint first = atomicAdd(cull.counters.counters[counter], count);
+    uint end = min(first + count, capacity);
+    uint kept = end > first ? end - first : 0u;
+    if (kept < count) {
+        atomicAdd(cull.counters.counters[counter], kept - count);
+        countDrops(list, count - kept);
+        count = kept;
+    }
+    return first;
+}
 
 // A sphere (relative to the camera it is seen from) as displayed under the
 // curvature warp: its points drop between the drop at its nearest and

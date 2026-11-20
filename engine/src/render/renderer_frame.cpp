@@ -61,6 +61,9 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
   for (auto &dispatch : initial.workDispatch) {
     dispatch[1] = dispatch[2] = 1;
   }
+  for (auto &dispatch : initial.chunkDispatch) {
+    dispatch[1] = dispatch[2] = 1;
+  }
   for (auto &lists : initial.meshTasks) {
     for (auto &tasks : lists) {
       tasks[1] = tasks[2] = 1;
@@ -74,13 +77,7 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-// Culls on the GPU and fills one phase's cluster draw lists. Phase 0 takes
-// last frame's visible instances (frustum test only); phase 1 tests all of
-// them against the depth pyramid, adds the newly visible ones and records
-// visibility for the next frame. In each phase the instance cull emits work
-// items, which the cluster cull LOD-selects and frustum-culls.
-void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
-                                   uint32_t phase) {
+CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t phase) const {
   CullConstants constants;
   constants.sceneBuffer = frame.sceneBuffer.address;
   constants.workItems =
@@ -94,12 +91,47 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
   constants.pyramidLevels = static_cast<uint32_t>(depthPyramidLevels.size());
   constants.previousPyramid = pyramidValid ? 1 : 0;
   constants.retest = retestClusters.address;
+  constants.chunks = chunks.address + VkDeviceSize{phase} * kMaxChunks * 2 * sizeof(uint32_t);
+  return constants;
+}
+
+// One phase of the cell cull: placement cells (and the hand-placed
+// instances) become chunks of instances for cullInstances. Phase 1 also
+// waits on phase 0's visibility reads before writing.
+void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase) {
+  const CullConstants constants = cullConstants(frame, phase);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1, &cullSet, 0,
+                          nullptr);
+  vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
+                     &constants);
+  const uint32_t threads = placementGrid.columns * placementGrid.rows +
+                           (static_cast<uint32_t>(instances.size()) + 63) / 64;
+  vkCmdDispatch(cmd, std::max(1u, (threads + 63) / 64), 1, 1);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
+// Culls on the GPU and fills one phase's cluster draw lists. Phase 0 takes
+// last frame's visible instances (frustum test only); phase 1 tests all of
+// them against the depth pyramid, adds the newly visible ones and records
+// visibility for the next frame. In each phase the instance cull runs over
+// cullCells' chunks and emits work items, which the cluster cull
+// LOD-selects and frustum-culls.
+void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
+                                   uint32_t phase) {
+  CullConstants constants = cullConstants(frame, phase);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 1,
                           &cullSet, 0, nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
-  vkCmdDispatch(cmd, (static_cast<uint32_t>(instances.size()) + 63) / 64, 1, 1);
+  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+                        offsetof(DrawCounters, chunkDispatch) +
+                            phase * sizeof(DrawCounters::chunkDispatch[0]));
 
   // Phase 1 also waits on phase 0's visibility reads before writing.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -181,9 +213,11 @@ void Renderer::Impl::buildDepthPyramid(VkCommandBuffer cmd) {
 }
 
 // Builds the TLAS over all instances (including those outside the view:
-// they still cast shadows into it). Both frames in flight share it, so the
-// build waits for earlier frames' ray queries and builds, and the barrier
-// after it covers every later frame on the queue.
+// they still cast shadows into it): the placed instances' records, written
+// at setPlacement, then the hand-placed ones', copied from the frame's
+// staging. Both frames in flight share it, so the build waits for earlier
+// frames' ray queries and builds, and the barrier after it covers every
+// later frame on the queue.
 void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   auto *tlasInstances = static_cast<VkAccelerationStructureInstanceKHR *>(
       frame.instanceBuffer.mapped);
@@ -213,21 +247,31 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
                          VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
   barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-  barrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                         VK_PIPELINE_STAGE_2_COPY_BIT;
   barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-                          VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+                          VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+                          VK_ACCESS_2_TRANSFER_WRITE_BIT;
   VkDependencyInfo dependency{};
   dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
   dependency.memoryBarrierCount = 1;
   dependency.pMemoryBarriers = &barrier;
   vkCmdPipelineBarrier2(cmd, &dependency);
+  if (!instances.empty()) {
+    constexpr VkDeviceSize kRecord = sizeof(VkAccelerationStructureInstanceKHR);
+    const VkBufferCopy copy{0, placedCount * kRecord, instances.size() * kRecord};
+    vkCmdCopyBuffer(cmd, frame.instanceBuffer.buffer, tlasRecords.buffer, 1, &copy);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                  VK_ACCESS_2_SHADER_READ_BIT);
+  }
 
   VkAccelerationStructureGeometryKHR geometry{};
   geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
   geometry.geometry.instances.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-  geometry.geometry.instances.data.deviceAddress = frame.instanceBuffer.address;
+  geometry.geometry.instances.data.deviceAddress = tlasRecords.address;
 
   VkAccelerationStructureBuildGeometryInfoKHR build{};
   build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -240,7 +284,7 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   build.scratchData.deviceAddress = tlasScratch.address;
 
   VkAccelerationStructureBuildRangeInfoKHR range{};
-  range.primitiveCount = static_cast<uint32_t>(instances.size());
+  range.primitiveCount = placedCount + static_cast<uint32_t>(instances.size());
   const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
   {
     DriverLeakScope driverLeak;
@@ -267,6 +311,13 @@ uint32_t Renderer::drawnClusterCount() const { return impl_->drawnClusters; }
 uint32_t Renderer::drawnTriangleCount() const { return impl_->drawnTriangles; }
 
 uint32_t Renderer::droppedCullEntryCount() const { return impl_->droppedEntries; }
+
+CullDrops Renderer::droppedCullEntries() const {
+  const auto &d = impl_->droppedByList;
+  return {d[0], d[1], d[2], d[3]};
+}
+
+uint32_t Renderer::drawnCellCount() const { return impl_->drawnCells; }
 
 void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
 
@@ -335,6 +386,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->drawnTriangles = counters->triangles;
     impl_->droppedEntries = counters->overflow;
     impl_->drawnTerrainNodes = counters->terrainNodes;
+    impl_->drawnCells = counters->cells;
+    std::copy(std::begin(counters->drops), std::end(counters->drops),
+              impl_->droppedByList.begin());
     impl_->drawnClusters = 0;
     for (const auto &lists : counters->meshTasks) {
       for (const auto &tasks : lists) {
@@ -438,6 +492,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.cellGrid[1] = impl_->placementGrid.firstZ;
   scene.cellGridSize[0] = impl_->placementGrid.columns;
   scene.cellGridSize[1] = impl_->placementGrid.rows;
+  scene.prototypes = impl_->prototypeTable.address;
+  scene.prototypeMeshes = impl_->prototypeMeshTable.address;
+  scene.placedCount = impl_->placedCount;
+  scene.cellDrawDistance = impl_->cellDrawDistance;
+  scene.cellMargin = impl_->cellMargin;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,
@@ -482,6 +541,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->resetDrawCounters(cmd);
   impl_->selectTerrain(cmd, frame);
   endPass("terrain select");
+  impl_->cullCells(cmd, frame, 0);
+  endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);
   endPass("cull early");
 
@@ -649,6 +710,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->buildDepthPyramid(cmd);
   impl_->pyramidValid = true;
   endPass("pyramid");
+  impl_->cullCells(cmd, frame, 1);
   impl_->cullInstances(cmd, frame, 1);
   endPass("cull late");
 

@@ -62,6 +62,7 @@ Renderer::Impl::createAccelerationStructure(VkAccelerationStructureTypeKHR type,
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
   addressInfo.accelerationStructure = as.handle;
   as.address = dispatch.getAccelerationStructureDeviceAddressKHR(&addressInfo);
+  as.size = size;
   return as;
 }
 
@@ -69,6 +70,115 @@ void Renderer::Impl::destroyAccelerationStructure(AccelerationStructure &as) {
   dispatch.destroyAccelerationStructureKHR(as.handle, nullptr);
   destroyBuffer(as.buffer);
   as = {};
+}
+
+AccelerationStructure Renderer::Impl::buildBlas(std::span<const uint32_t> meshIndices,
+                                                VkDeviceSize *builtBytes) {
+  std::vector<VkAccelerationStructureGeometryKHR> geometries;
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
+  std::vector<uint32_t> triangleCounts;
+  for (uint32_t index : meshIndices) {
+    const GpuMesh &mesh = meshes.at(index);
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    // Alpha-masked geometry must reach the shader's alpha test.
+    geometry.flags = mesh.alphaMode == AlphaMode::Mask ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
+    auto &triangles = geometry.geometry.triangles;
+    triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexData.deviceAddress =
+        vertexPool.address + VkDeviceSize(mesh.vertexOffset) * sizeof(Vertex);
+    triangles.vertexStride = sizeof(Vertex);
+    triangles.maxVertex = mesh.vertexCount - 1;
+    triangles.indexType = VK_INDEX_TYPE_UINT32;
+    triangles.indexData.deviceAddress =
+        indexPool.address + VkDeviceSize{mesh.firstIndex} * sizeof(uint32_t);
+    geometries.push_back(geometry);
+    triangleCounts.push_back(mesh.indexCount / 3);
+    ranges.push_back({mesh.indexCount / 3, 0, 0, 0});
+  }
+
+  VkAccelerationStructureBuildGeometryInfoKHR build{};
+  build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+  build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  build.geometryCount = static_cast<uint32_t>(geometries.size());
+  build.pGeometries = geometries.data();
+
+  VkAccelerationStructureBuildSizesInfoKHR sizes{};
+  sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  dispatch.getAccelerationStructureBuildSizesKHR(VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                 &build, triangleCounts.data(), &sizes);
+  AccelerationStructure built = createAccelerationStructure(
+      VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizes.accelerationStructureSize);
+  Buffer scratch = createBuffer(
+      sizes.buildScratchSize,
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 0,
+      scratchAlignment);
+  build.dstAccelerationStructure = built.handle;
+  build.scratchData.deviceAddress = scratch.address;
+
+  VkQueryPoolCreateInfo queryInfo{};
+  queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+  queryInfo.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+  queryInfo.queryCount = 1;
+  VkQueryPool query = VK_NULL_HANDLE;
+  check(vkCreateQueryPool(device.device, &queryInfo, nullptr, &query), "vkCreateQueryPool");
+
+  VkMemoryBarrier2 barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+  barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  // Property queries and copies run in the build stage too (without
+  // VK_KHR_ray_tracing_maintenance1).
+  barrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+  VkDependencyInfo dependency{};
+  dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+  dependency.memoryBarrierCount = 1;
+  dependency.pMemoryBarriers = &barrier;
+  submitNow([&](VkCommandBuffer cmd) {
+    vkCmdResetQueryPool(cmd, query, 0, 1);
+    const VkAccelerationStructureBuildRangeInfoKHR *rangeInfos = ranges.data();
+    {
+      DriverLeakScope driverLeak;
+      dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build, &rangeInfos);
+    }
+    vkCmdPipelineBarrier2(cmd, &dependency);
+    dispatch.cmdWriteAccelerationStructuresPropertiesKHR(
+        cmd, 1, &built.handle, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, query,
+        0);
+  });
+  VkDeviceSize compactedBytes = 0;
+  check(vkGetQueryPoolResults(device.device, query, 0, 1, sizeof(compactedBytes),
+                              &compactedBytes, sizeof(compactedBytes),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT),
+        "vkGetQueryPoolResults");
+  vkDestroyQueryPool(device.device, query, nullptr);
+  destroyBuffer(scratch);
+
+  AccelerationStructure compacted =
+      createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, compactedBytes);
+  submitNow([&](VkCommandBuffer cmd) {
+    VkCopyAccelerationStructureInfoKHR copy{};
+    copy.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copy.src = built.handle;
+    copy.dst = compacted.handle;
+    copy.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    dispatch.cmdCopyAccelerationStructureKHR(cmd, &copy);
+    // Later TLAS builds and ray queries reference it.
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+  });
+  if (builtBytes) {
+    *builtBytes = sizes.accelerationStructureSize;
+  }
+  destroyAccelerationStructure(built);
+  return compacted;
 }
 
 // A GPU-only 2D image, or 3D when extent.depth > 1.
@@ -249,6 +359,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     builtClusters = buildClusterLod(data);
   }
   const ClusterLod &lod = data.clusters.clusters.empty() ? builtClusters : data.clusters;
+  const auto meshIndex = static_cast<uint32_t>(impl_->meshes.size());
   std::vector<ClusterInfo> clusterInfos;
   std::vector<uint32_t> clusterTriangles;
   if (clustered) {
@@ -267,6 +378,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;
       info.vertexCount = c.vertexCount;
       info.triangleCount = c.triangleCount;
+      info.mesh = meshIndex;
       clusterInfos.push_back(info);
     }
     clusterTriangles.reserve(lod.triangles.size() / 3);
@@ -293,6 +405,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   GpuMesh mesh;
   mesh.firstIndex = impl_->indexCount;
   mesh.indexCount = indexCount;
+  mesh.vertexCount = vertexCount;
   mesh.vertexOffset = static_cast<int32_t>(impl_->vertexCount);
   mesh.materialIndex = material.index;
   mesh.alphaMode = materialData.alphaMode;
@@ -381,48 +494,6 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
                            VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
-  VkAccelerationStructureGeometryKHR geometry{};
-  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-  geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  // Alpha-masked geometry must reach the shader's alpha test.
-  geometry.flags = mesh.alphaMode == AlphaMode::Mask ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
-  auto &triangles = geometry.geometry.triangles;
-  triangles.sType =
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-  triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-  triangles.vertexData.deviceAddress = impl_->vertexPool.address + vertexPoolOffset;
-  triangles.vertexStride = sizeof(Vertex);
-  triangles.maxVertex = vertexCount - 1;
-  triangles.indexType = VK_INDEX_TYPE_UINT32;
-  triangles.indexData.deviceAddress = impl_->indexPool.address + indexPoolOffset;
-
-  VkAccelerationStructureBuildGeometryInfoKHR build{};
-  build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-  build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-  build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-  build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-  build.geometryCount = 1;
-  build.pGeometries = &geometry;
-
-  const uint32_t triangleCount = indexCount / 3;
-  VkAccelerationStructureBuildSizesInfoKHR sizes{};
-  sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-  impl_->dispatch.getAccelerationStructureBuildSizesKHR(
-      VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &triangleCount,
-      &sizes);
-
-  mesh.blas = impl_->createAccelerationStructure(
-      VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-      sizes.accelerationStructureSize);
-  Buffer scratch = impl_->createBuffer(
-      sizes.buildScratchSize,
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-      0, impl_->scratchAlignment);
-  build.dstAccelerationStructure = mesh.blas.handle;
-  build.scratchData.deviceAddress = scratch.address;
-
-  const auto meshIndex = static_cast<uint32_t>(impl_->meshes.size());
   impl_->submitNow([&](VkCommandBuffer cmd) {
     VkBufferCopy vertexCopy{0, vertexPoolOffset, vertexBytes};
     vkCmdCopyBuffer(cmd, staging.buffer, impl_->vertexPool.buffer, 1, &vertexCopy);
@@ -464,31 +535,8 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     dependency.memoryBarrierCount = 1;
     dependency.pMemoryBarriers = &copied;
     vkCmdPipelineBarrier2(cmd, &dependency);
-
-    VkAccelerationStructureBuildRangeInfoKHR range{};
-    range.primitiveCount = triangleCount;
-    const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
-    {
-      DriverLeakScope driverLeak;
-      impl_->dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build,
-                                                        &ranges);
-    }
-
-    // Later TLAS builds reference this BLAS.
-    VkMemoryBarrier2 built{};
-    built.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    built.srcStageMask =
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-    built.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-    built.dstStageMask =
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    built.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-    dependency.pMemoryBarriers = &built;
-    vkCmdPipelineBarrier2(cmd, &dependency);
   });
 
-  impl_->destroyBuffer(scratch);
   impl_->destroyBuffer(staging);
 
   impl_->meshes.push_back(mesh);
@@ -502,6 +550,10 @@ uint32_t Renderer::instanceCount() const {
 InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
   if (impl_->instances.size() == kMaxInstances) {
     throw std::runtime_error("instance table is full");
+  }
+  GpuMesh &gpuMesh = impl_->meshes.at(mesh.index);
+  if (gpuMesh.blas.handle == VK_NULL_HANDLE) {
+    gpuMesh.blas = impl_->buildBlas(std::span(&mesh.index, 1));
   }
   InstanceData instance;
   instance.transform = transform;

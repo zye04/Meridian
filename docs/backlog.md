@@ -41,7 +41,10 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Cluster compression and streaming | Memory at larger scale | VG spec | VG slice 5 |
 | Tree wind | Trees are static | Roadmap (RT BLAS can't sway with the raster) | After clouds' wind interface; with RT on clusters |
 | Placed-instance rotation precision | Up to 0.6 deg error near 180 deg (xyz snorm16) | M2a Task 4 | Smallest-three encoding if it ever shows |
-| Trees beyond ~1.3 km may float/sink up to ~3 m on coarse terrain | Ground fit | M1 final review, M2a Task 4 | Checked in M2a Task 5 |
+| Trees beyond ~1.3 km may float/sink up to ~3 m on coarse terrain | Ground fit; not visible at 1080p on the summit ridge at 1.5 km (M2a Task 5) | M1 final review, M2a Task 4 | Recheck at 1440p with impostors (M2a Task 9); fix = snap to displayed CDLOD height |
+| Flat work items overflow at wide forest views | Most trees missing from the raster (24.9M work items dropped at the forest edge); which ones survive varies per run | M2a Task 5 | M2a Task 7 (BVH traversal) |
+| Cliff prototype shares the boulders' full random rotation | The 10.6 m sandstone cliff shows as tilted slabs sticking out of slopes | M2a Tasks 4-5 | Content tuning: yaw-only rotation or its own layer |
+| Cooked assets aren't re-cooked when the cook changes | `fetch-sample-assets.sh` cooks only missing models; moss rock sets cooked before the vertical-offset bake lose rock07's scale and offsets (delete `assets/rock_moss_set_0{1,2}` and re-run) | M2a Task 5 | Tooling: stamp cooked output with a cook version |
 | Blended instances not culled, full detail | Cost if a blended asset is scattered | CLAUDE.md known gap | When needed |
 | Masked-geometry RT shadows not visually verified | Possible wrong alpha-tested shadows | CLAUDE.md known gap | M2b (ferns with opacity micromaps) |
 | Grass and grass wind | Meadows are bare | Roadmap | M3, reading M4's global wind |
@@ -67,6 +70,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
+| TLAS build scratch (228 MiB) stays allocated | The TLAS is rebuilt only when instances change, yet its scratch is kept for the whole run | M2a Task 5 review | M2b (memory accounting) |
 | Debug startup ~95 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
 | Ground material costs ~1.1-1.4 ms on steep slopes | Budget | M1 | M5 |
 | Renderer constructor leaks partial Vulkan state on throw | Robustness | CLAUDE.md | Later |

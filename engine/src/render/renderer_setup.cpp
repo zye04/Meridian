@@ -232,14 +232,34 @@ void Renderer::Impl::createFrames() {
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
         kMaxInstances * sizeof(VkAccelerationStructureInstanceKHR),
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
   }
+  createTlas(kMaxInstances);
 
-  // Size the TLAS for the maximum instance count once, so rebuilds never
-  // allocate.
+  check(vkCreateCommandPool(dev, &poolInfo, nullptr, &uploadPool),
+        "vkCreateCommandPool");
+  allocInfo.commandPool = uploadPool;
+  check(vkAllocateCommandBuffers(dev, &allocInfo, &uploadCommandBuffer),
+        "vkAllocateCommandBuffers");
+  fenceInfo.flags = 0;
+  check(vkCreateFence(dev, &fenceInfo, nullptr, &uploadFence),
+        "vkCreateFence");
+
+  VkQueryPoolCreateInfo queryInfo{};
+  queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+  queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+  queryInfo.queryCount = kFramesInFlight * (kMaxPassTimes + 1);
+  check(vkCreateQueryPool(dev, &queryInfo, nullptr, &timestampPool),
+        "vkCreateQueryPool");
+}
+
+// Sized for `capacity` instances once, so rebuilds never allocate.
+void Renderer::Impl::createTlas(uint32_t capacity) {
+  destroyAccelerationStructure(tlas);
+  destroyBuffer(tlasScratch);
+  destroyBuffer(tlasRecords);
   VkAccelerationStructureGeometryKHR tlasGeometry{};
   tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
   tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -258,7 +278,7 @@ void Renderer::Impl::createFrames() {
   tlasSizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
   dispatch.getAccelerationStructureBuildSizesKHR(
       VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuild,
-      &kMaxInstances, &tlasSizes);
+      &capacity, &tlasSizes);
 
   tlas = createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                                      tlasSizes.accelerationStructureSize);
@@ -266,22 +286,26 @@ void Renderer::Impl::createFrames() {
       tlasSizes.buildScratchSize,
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0, scratchAlignment);
+  tlasRecords = createBuffer(
+      VkDeviceSize{capacity} * sizeof(VkAccelerationStructureInstanceKHR),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+}
 
-  check(vkCreateCommandPool(dev, &poolInfo, nullptr, &uploadPool),
-        "vkCreateCommandPool");
-  allocInfo.commandPool = uploadPool;
-  check(vkAllocateCommandBuffers(dev, &allocInfo, &uploadCommandBuffer),
-        "vkAllocateCommandBuffers");
-  fenceInfo.flags = 0;
-  check(vkCreateFence(dev, &fenceInfo, nullptr, &uploadFence),
-        "vkCreateFence");
-
-  VkQueryPoolCreateInfo queryInfo{};
-  queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-  queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-  queryInfo.queryCount = kFramesInFlight * (kMaxPassTimes + 1);
-  check(vkCreateQueryPool(dev, &queryInfo, nullptr, &timestampPool),
-        "vkCreateQueryPool");
+void Renderer::Impl::createVisibility() {
+  destroyBuffer(visibility);
+  const uint32_t cellCount = placementGrid.columns * placementGrid.rows;
+  visibility = createBuffer(
+      (VkDeviceSize{kPlacedBase} + placedCount + cellCount) * sizeof(uint32_t),
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      0);
+  // New instances start invisible; the late culling phase picks them up.
+  submitNow([&](VkCommandBuffer cmd) {
+    vkCmdFillBuffer(cmd, visibility.buffer, 0, VK_WHOLE_SIZE, 0);
+  });
 }
 
 void Renderer::Impl::createDescriptors() {
@@ -662,6 +686,7 @@ void Renderer::Impl::createScene() {
   // Two phases of work items and draw lists (see cullInstances).
   constexpr VkBufferUsageFlags kListUsage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  chunks = createBuffer(VkDeviceSize{2} * kMaxChunks * 2 * sizeof(uint32_t), kListUsage, 0);
   workItems = createBuffer(VkDeviceSize{2} * kMaxWorkItems * 2 * sizeof(uint32_t),
                            kListUsage, 0);
   drawLists = createBuffer(VkDeviceSize{2 * kDrawBuckets} * kMaxDrawnClusters * 2 *
@@ -675,11 +700,7 @@ void Renderer::Impl::createScene() {
           VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
-  visibility = createBuffer(
-      kMaxInstances * sizeof(uint32_t),
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-      0);
+  createVisibility();
   terrainCounters = createBuffer(
       sizeof(TerrainCounters),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
@@ -689,10 +710,6 @@ void Renderer::Impl::createScene() {
   constexpr VkDeviceSize kNodeSize = 2 * sizeof(uint32_t);
   terrainLists = createBuffer(VkDeviceSize{3} * kMaxTerrainNodes * kNodeSize, kListUsage, 0);
   terrain.nodes = terrainLists.address + VkDeviceSize{2} * kMaxTerrainNodes * kNodeSize;
-  // New instances start invisible; the late culling phase picks them up.
-  submitNow([&](VkCommandBuffer cmd) {
-    vkCmdFillBuffer(cmd, visibility.buffer, 0, VK_WHOLE_SIZE, 0);
-  });
 }
 
 void Renderer::Impl::createPipelines() {
@@ -766,6 +783,7 @@ void Renderer::Impl::createPipelines() {
   cullLayoutInfo.pPushConstantRanges = &cullPushRange;
   check(vkCreatePipelineLayout(dev, &cullLayoutInfo, nullptr, &cullLayout),
         "vkCreatePipelineLayout");
+  cellCullPipeline = createComputePipeline(dev, "cell_cull.comp", cullLayout);
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
   clusterCullPipeline = createComputePipeline(dev, "cluster_cull.comp", cullLayout);
 
@@ -970,13 +988,17 @@ Renderer::~Renderer() {
   for (GpuMesh &mesh : impl_->meshes) {
     impl_->destroyAccelerationStructure(mesh.blas);
   }
+  for (AccelerationStructure &blas : impl_->prototypeBlas) {
+    impl_->destroyAccelerationStructure(blas);
+  }
   for (Buffer *buffer :
        {&impl_->vertexPool, &impl_->indexPool, &impl_->meshTable,
         &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,
         &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
-        &impl_->terrainPyramid, &impl_->placedInstances, &impl_->cells}) {
+        &impl_->terrainPyramid, &impl_->placedInstances, &impl_->cells, &impl_->chunks,
+        &impl_->prototypeTable, &impl_->prototypeMeshTable, &impl_->tlasRecords}) {
     impl_->destroyBuffer(*buffer);
   }
 
@@ -991,6 +1013,7 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->pyramidPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
+  vkDestroyPipeline(dev, impl_->cellCullPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->clusterCullPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);

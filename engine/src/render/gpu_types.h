@@ -63,6 +63,9 @@ constexpr uint32_t kDrawBuckets = 4;
 // dropped and counted, and the counts that size indirect dispatches stay at
 // capacity (the device must allow dispatches that large).
 constexpr uint32_t kMaxWorkItems = 1u << 19;
+// Per culling phase: instance chunks (up to 64 consecutive ids) the cell cull
+// emits. Every cell of the crop visible needs ~55K + 2.9M / 64 = ~100K.
+constexpr uint32_t kMaxChunks = 1u << 17;
 constexpr uint32_t kMaxDrawnClusters = 1u << 20;
 constexpr uint32_t kMaxRetestClusters = 1u << 20;
 constexpr uint32_t kDrawBucketBlended = 4;
@@ -90,6 +93,7 @@ struct AccelerationStructure {
   VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
   Buffer buffer;
   VkDeviceAddress address = 0;
+  VkDeviceSize size = 0;
 };
 
 // CPU-side record of an uploaded mesh; its geometry is a range of the shared
@@ -102,10 +106,13 @@ struct GpuMesh {
   uint32_t drawBucket = 0;
   AlphaMode alphaMode = AlphaMode::Opaque;
   bool doubleSided = false;
+  uint32_t vertexCount = 0;
   // Bounding sphere (MeshInfo's), for placement's cell bounds.
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
-  // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
+  // Bottom-level acceleration structure: the mesh's triangles for ray
+  // tracing. Built when an instance first uses the mesh (placed prototypes
+  // have their own).
   AccelerationStructure blas;
 };
 
@@ -287,8 +294,17 @@ struct SceneData {
   VkDeviceAddress cells = 0;
   int32_t cellGrid[2] = {};
   uint32_t cellGridSize[2] = {};
+  // PrototypeInfo per prototype and the mesh lists they index.
+  VkDeviceAddress prototypes = 0;
+  VkDeviceAddress prototypeMeshes = 0;
+  uint32_t placedCount = 0;
+  // Cells: the largest layer draw distance (0: some layer has none) and how
+  // far instances' bounds reach past their cell horizontally.
+  float cellDrawDistance = 0.0f;
+  float cellMargin = 0.0f;
+  uint32_t pad3 = 0;
 };
-static_assert(sizeof(SceneData) == 1008);
+static_assert(sizeof(SceneData) == 1040);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -321,9 +337,30 @@ struct ClusterInfo {
   uint32_t firstTriangle = 0;
   uint32_t vertexCount = 0;
   uint32_t triangleCount = 0;
-  uint32_t pad[2] = {};
+  // The mesh it belongs to: placed instances name only a prototype.
+  uint32_t mesh = 0;
+  uint32_t pad = 0;
 };
 static_assert(sizeof(ClusterInfo) == 80);
+
+// Must match PrototypeInfo in common.glsl. A placed prototype: its meshes
+// (prototypeMeshes[firstMesh..]; a ray hit's geometry index counts from
+// firstMesh), their combined bounding sphere and the BLAS holding them.
+// transitionSize: projected size below which it is drawn as an impostor
+// (0: never). maxDrawDistance: the largest of its layers' (0: none).
+struct PrototypeInfo {
+  uint32_t firstMesh = 0;
+  uint32_t meshCount = 0;
+  uint32_t pad[2] = {}; // std430 aligns the vec3 to 16 bytes
+  Vec3 boundsCenter;
+  float boundsRadius = 0.0f;
+  VkDeviceAddress blasAddress = 0;
+  float transitionSize = 0.0f;
+  float maxDrawDistance = 0.0f;
+};
+static_assert(sizeof(PrototypeInfo) == 48);
+static_assert(offsetof(PrototypeInfo, boundsCenter) == 16);
+static_assert(offsetof(PrototypeInfo, blasAddress) == 32);
 
 // Must match DrawCounters in cull.glsl. Indirect arguments and statistics
 // written by the culling passes, reset every frame.
@@ -343,9 +380,17 @@ struct DrawCounters {
   uint32_t retestCount;
   // Nodes terrain_select.comp put in the terrain draw list.
   uint32_t terrainNodes;
-  uint32_t pad[2];
+  // Placement cells visible in phase 1.
+  uint32_t cells;
+  // Per phase: the instance cull's dispatch arguments, one workgroup per
+  // chunk.
+  uint32_t chunkDispatch[2][3];
+  // What overflow counts, per list: chunks, work items, cluster draw list
+  // entries, terrain nodes.
+  uint32_t drops[4];
+  uint32_t pad[3];
 };
-static_assert(sizeof(DrawCounters) == 160);
+static_assert(sizeof(DrawCounters) == 208);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -355,6 +400,9 @@ static_assert(offsetof(DrawCounters, triangles) == 34 * 4);
 static_assert(offsetof(DrawCounters, overflow) == 35 * 4);
 static_assert(offsetof(DrawCounters, retestCount) == 36 * 4);
 static_assert(offsetof(DrawCounters, terrainNodes) == 37 * 4);
+static_assert(offsetof(DrawCounters, cells) == 38 * 4);
+static_assert(offsetof(DrawCounters, chunkDispatch) == 39 * 4);
+static_assert(offsetof(DrawCounters, drops) == 45 * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -422,6 +470,17 @@ struct PlacementConstants {
 };
 static_assert(sizeof(PlacementConstants) == 120);
 
+// Must match the push constants in tlas_fill.comp.
+struct TlasFillConstants {
+  VkDeviceAddress placed = 0;
+  VkDeviceAddress prototypes = 0;
+  VkDeviceAddress records = 0; // VkAccelerationStructureInstanceKHR
+  uint32_t count = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(TlasFillConstants) == 32);
+static_assert(sizeof(VkAccelerationStructureInstanceKHR) == 64);
+
 // Must match the push constants in scan.comp.
 struct ScanConstants {
   VkDeviceAddress values = 0;
@@ -456,8 +515,10 @@ struct CullConstants {
   uint32_t previousPyramid = 0;
   float pyramidSize[2] = {};
   VkDeviceAddress retest = 0;
+  // This phase's instance chunks.
+  VkDeviceAddress chunks = 0;
 };
-static_assert(sizeof(CullConstants) == 64);
+static_assert(sizeof(CullConstants) == 72);
 constexpr uint32_t kCullRetest = 2;
 
 // Must match TerrainCounters in terrain_select.comp. Per quadtree level: the
@@ -572,8 +633,9 @@ struct FrameData {
   VkSemaphore imageAvailable = VK_NULL_HANDLE;
   Buffer sceneBuffer;
   // CPU-written when instances change: the instance table's upload source
-  // and the TLAS build's instance records. Per frame because the CPU may
-  // write them while the other frame's commands still read its own.
+  // and the hand-placed instances' TLAS records (copied into
+  // Renderer::Impl::tlasRecords). Per frame because the CPU may write them
+  // while the other frame's commands still read its own.
   Buffer instanceStaging;
   Buffer instanceBuffer;
   // This frame's DrawCounters, copied back for statistics.

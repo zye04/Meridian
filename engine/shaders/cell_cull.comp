@@ -1,0 +1,73 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "cull.glsl"
+
+// Cell culling, one thread per 64 m placement cell, in both phases of the
+// instance cull (cull.comp): phase 0 takes the cells visible last frame
+// (frustum only), phase 1 tests every cell against the frustum and this
+// frame's depth pyramid and records cell visibility. A cell's box is its
+// square grown by the instances' horizontal reach (cellMargin) and their
+// height range. Survivors emit their instances as chunks of up to 64 ids;
+// threads past the cells emit the hand-placed instances the same way.
+
+layout(local_size_x = 64) in;
+
+void emitChunks(uint firstId, uint count, bool cellWasVisible) {
+    uint chunkCount = (count + 63u) / 64u;
+    uint first = reserveEntries(kCounterChunkDispatch + cull.phase * 3u, kMaxChunks, 0u,
+                                chunkCount);
+    for (uint i = 0u; i < chunkCount; ++i) {
+        uint size = min(64u, count - i * 64u);
+        cull.chunks.chunks[first + i] =
+            uvec2(firstId + i * 64u, size | (cellWasVisible ? kChunkCellWasVisible : 0u));
+    }
+}
+
+void main() {
+    SceneBuffer scene = cull.scene;
+    uint index = gl_GlobalInvocationID.x;
+    uint cellCount = scene.cellGridSize.x * scene.cellGridSize.y;
+    if (index >= cellCount) {
+        uint first = (index - cellCount) * 64u;
+        // Phase 0 is skipped without occlusion culling (see cull.comp).
+        if (first < scene.instanceCount && (cull.phase == 1u || cull.occlusion != 0u)) {
+            emitChunks(first, min(64u, scene.instanceCount - first), true);
+        }
+        return;
+    }
+    Cell cell = scene.cells.cells[index];
+    if (cell.instanceCount == 0u) {
+        return;
+    }
+    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
+    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize - scene.cellMargin;
+    vec2 hi = lo + kCellSize + 2.0 * scene.cellMargin;
+    vec3 boxLo = vec3(lo.x, cell.minY, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(hi.x, cell.maxY, hi.y) - scene.cameraPosition;
+    bool visible = displayedBoxInFrustum(scene, boxLo, boxHi) &&
+                   (scene.cellDrawDistance == 0.0 ||
+                    length(max(max(boxLo, -boxHi), vec3(0.0))) <= scene.cellDrawDistance);
+
+    // Cell bits follow the instance ids' in the visibility buffer.
+    uint visibilityIndex = kPlacedBase + scene.placedCount + index;
+    bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
+    if (cull.phase == 0u) {
+        if (cull.occlusion != 0u && wasVisible && visible) {
+            emitChunks(kPlacedBase + cell.firstInstance, cell.instanceCount, true);
+        }
+        return;
+    }
+    if (visible && cull.occlusion != 0u) {
+        vec3 center = (boxLo + boxHi) * 0.5;
+        visible = !occluded(displayedSphere(center, length(boxHi - boxLo) * 0.5), scene.view);
+    }
+    cull.visibility.visible[visibilityIndex] = visible ? 1u : 0u;
+    if (!visible) {
+        return;
+    }
+    atomicAdd(cull.counters.counters[kCounterCells], 1u);
+    emitChunks(kPlacedBase + cell.firstInstance, cell.instanceCount,
+               cull.occlusion != 0u && wasVisible);
+}

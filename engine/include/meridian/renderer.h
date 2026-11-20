@@ -44,7 +44,7 @@ enum class AlphaMode {
 };
 
 // glTF metallic-roughness material. Factors multiply the textures.
-// Upper bound on instances, sizing the instance table and each frame's TLAS.
+// Upper bound on (hand-placed) instances, sizing the instance table.
 constexpr uint32_t kMaxInstances = 65536;
 
 struct MaterialData {
@@ -128,6 +128,14 @@ struct PassTime {
   float ms;
 };
 
+// Entries the culling passes dropped because a list was full, per list.
+struct CullDrops {
+  uint32_t chunks = 0;
+  uint32_t workItems = 0;
+  uint32_t clusters = 0;
+  uint32_t terrainNodes = 0;
+};
+
 // A mesh placed in the world (what loadGltf returns per node primitive).
 struct DrawItem {
   MeshId mesh;
@@ -191,6 +199,9 @@ public:
   // Work items, clusters and terrain nodes the culling passes dropped in a
   // recent frame because a list was full (nonzero means geometry is missing).
   uint32_t droppedCullEntryCount() const;
+  CullDrops droppedCullEntries() const;
+  // Placement cells found visible in a recent frame.
+  uint32_t drawnCellCount() const;
 
   // Level of detail: the largest simplification error allowed on screen, in
   // pixels (default 1; 0 draws full detail).

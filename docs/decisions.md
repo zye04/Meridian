@@ -928,6 +928,10 @@ foliage that survives simplification).
   placement) shows sky under canopies, the fix is to snap each drawn
   instance to the displayed CDLOD height at its origin (same morph as
   terrain.mesh) rather than to sink.
+  Checked with the first drawn placement (open view toward the summit,
+  trees on the summit ridge at ~1.5 km, 1920x1080, work-item list raised
+  so every tree is drawn): trunk bases meet the ridge line, no sky shows under canopies,
+  so no snap.
   - https://www.guerrilla-games.com/media/News/Files/GDC2017_VanMuijden_GPUBasedProceduralPlacementInHorizonZeroDawn.pdf
   - Harris, Sengupta and Owens, "Parallel Prefix Sum (Scan) with CUDA",
     GPU Gems 3 ch. 39 (stream compaction by count + scan + write):
@@ -996,3 +1000,64 @@ foliage that survives simplification).
   - https://hal.archives-ouvertes.fr/hal-01468817v1 (Loubet and Neyret
     2017, mesh-volume LoDs)
   - http://www.cse.yorku.ca/~amana/research/grid.pdf (voxel DDA)
+
+## Placed rendering: cells, chunks, prototype BLAS (M2a, 2026-11-20)
+
+- **Cell cull -> chunks -> instance cull.** `cell_cull.comp` runs one
+  thread per 64 m cell in both culling phases (two-phase occlusion as
+  for instances: phase 0 takes cells visible last frame, frustum only;
+  phase 1 tests every cell against the frustum and this frame's depth
+  pyramid and records each cell's visibility in the visibility buffer,
+  one uint per cell after the instance ids' one uint each). The cell box is its square grown by the instances' horizontal
+  reach (`cellMargin`, the prototypes' sphere extent x the layers' max
+  scale: 28.8 m on the Napf) and its stored height range, tested as
+  displayed under the curvature drop. Survivors emit chunks of up to 64
+  consecutive ids (`uvec2(first, count)`); the hand-placed instances are
+  one more chunk source. `cull.comp` runs one workgroup per chunk
+  (indirect dispatch), testing the prototype's sphere; a chunk flag says
+  whether phase 0 already processed the cell, so phase 1 neither redraws
+  nor skips an instance whose cell was culled last frame.
+- **Draw distance per prototype.** Cells mix layers, so the cell test
+  uses the largest layer draw distance (none on the Napf: trees have
+  none); the instance test uses `PrototypeInfo.maxDrawDistance`, the
+  largest of the prototype's layers (rocks: 1500 m). It fills the brief's
+  pad slot, keeping `PrototypeInfo` 48 B.
+- **One BLAS per prototype**, a geometry per mesh (a ray hit's geometry
+  index finds the mesh for the alpha test, `instanceMesh`), full detail,
+  built with ALLOW_COMPACTION and compacted: 21 prototypes, 944 -> 339
+  MiB. Hand-placed meshes get their BLAS on their first `addInstance`
+  (prototype-only meshes never get one).
+- **TLAS fill on the GPU.** `tlas_fill.comp` writes one
+  `VkAccelerationStructureInstanceKHR` per placed instance at
+  `setPlacement` (custom index `kPlacedBase` + table index); the
+  hand-placed records are copied in after them before each build. One
+  build of 2,916,652 records: 178 MiB of records, TLAS 524 MiB, scratch
+  228 MiB, ~7 ms (wall time of the submit). Device memory allocated
+  after load 4140 MiB; VRAM in use at the forest views 4.6 GB of 16 GB
+  (nvidia-smi), so >= 3 GB stays free.
+- **Moss rock sets**: each rock stays its own prototype; `meridian-cook`
+  now also bakes a lone node's vertical offset (besides rotation and
+  scale) into its mesh, so a rock keeps its authored scale (rock07
+  0.679) and its base height, and only the horizontal offset (up to 3 m,
+  which would float or sink it on the steep slopes rocks sit on) is
+  dropped. Drawn models are unchanged (the node keeps the horizontal
+  offset). The rock sets' bounds change the cells' height ranges, so the
+  placement hash is now 0x1c6b673748ee8f8f (instances unchanged; the old
+  cook still gives 0x0d994d776496812c).
+- **Measured** (Release, 1920x1080, forest edge `600 1205.6 -400 -1.55
+  0.02`, median of 5): GPU 4.73 ms (cull cells 0.01, cull early 1.49,
+  scene early 1.48, cull late 1.51); 23,759 instances, 2,369 cells.
+  The flat work items (every cluster of every DAG level per instance and
+  mesh, ~1,100 per tree) overflow the 512K list: 24.9M dropped at the
+  edge, 457M at the overview, 164M at the start, so most trees there are
+  missing from the raster (the TLAS still shadows with all of them).
+  Chunks, clusters and terrain nodes drop 0 everywhere. With the list
+  raised to 2^26 for a test (not kept), the edge draws every tree at
+  81 ms, 65 of them the flat cull: Task 7's BVH traversal replaces it.
+  - https://developer.nvidia.com/blog/rtx-best-practices/ (compaction,
+    one BLAS per object with its geometries, static TLAS)
+  - https://docs.vulkan.org/spec/latest/chapters/accelstructures.html (instance records, geometry index, compaction queries)
+  - https://github.com/zeux/niagara (two-phase occlusion culling)
+  - https://github.com/nvpro-samples/vk_lod_clusters (instance cull feeding cluster LOD)
+  - Wihlidal, "Optimizing the Graphics Pipeline with Compute", GDC 2016
+    (coarse chunk culling ahead of finer culling)

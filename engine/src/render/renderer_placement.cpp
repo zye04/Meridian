@@ -184,6 +184,12 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   std::vector<std::array<float, 4>> bounds;
   for (const Prototype &prototype : prototypes) {
     bounds.push_back(prototypeSphere(prototype, r.meshes));
+    for (MeshId id : prototype.meshes) {
+      // The cluster path draws opaque and masked meshes only.
+      if (r.meshes[id.index].alphaMode == AlphaMode::Blend) {
+        throw std::runtime_error("placement prototype with a blended mesh");
+      }
+    }
   }
 
   // The samples two per uint (the last one padded).
@@ -238,8 +244,6 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   };
 
   check(vkDeviceWaitIdle(dev), "vkDeviceWaitIdle");
-  r.destroyBuffer(r.placedInstances);
-  r.destroyBuffer(r.cells);
 
   PlacementConstants constants;
   constants.heights = heights.address;
@@ -285,10 +289,18 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   const uint32_t total = offsets.back();
   if (total > kMaxInstanceId - kPlacedBase + 1) {
     releaseTemporaries();
-    r.placementGrid = {};
-    r.placedCount = 0; // the earlier placement is gone
     throw std::runtime_error("placement exceeds the 24-bit instance id space");
   }
+
+  // Only now: a throw above keeps the earlier placement and its TLAS valid.
+  r.destroyBuffer(r.placedInstances);
+  r.destroyBuffer(r.cells);
+  r.destroyBuffer(r.prototypeTable);
+  r.destroyBuffer(r.prototypeMeshTable);
+  for (AccelerationStructure &blas : r.prototypeBlas) {
+    r.destroyAccelerationStructure(blas);
+  }
+  r.prototypeBlas.clear();
 
   constexpr VkBufferUsageFlags kTableUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -332,6 +344,8 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   }
   std::printf(")\n");
 
+  r.buildPlacedTlas(prototypes, layers, bounds);
+
   if (kEnableValidation) {
     const VkDeviceSize instanceBytes = VkDeviceSize{total} * sizeof(PlacedInstance);
     const VkDeviceSize cellBytes = VkDeviceSize{cellCount} * sizeof(Cell);
@@ -360,6 +374,122 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     r.destroyBuffer(readback);
   }
 
+}
+
+// Each prototype's BLAS and PrototypeInfo, the cells' reach and draw
+// distance, and the static TLAS over the placed and hand-placed instances:
+// tlas_fill.comp writes the placed records once, then one build. Prints
+// what M2b's ray representations are measured against.
+void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
+                                     std::span<const PlacementLayer> layers,
+                                     const std::vector<std::array<float, 4>> &bounds) {
+  Impl &r = *this;
+  using Clock = std::chrono::steady_clock;
+  const auto msSince = [](Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+  };
+  const auto blasStart = Clock::now();
+  std::vector<PrototypeInfo> infos;
+  std::vector<uint32_t> meshList;
+  VkDeviceSize builtBytes = 0, blasBytes = 0;
+  for (uint32_t p = 0; p < prototypes.size(); ++p) {
+    PrototypeInfo info;
+    info.boundsCenter = {bounds[p][0], bounds[p][1], bounds[p][2]};
+    info.boundsRadius = bounds[p][3];
+    info.firstMesh = static_cast<uint32_t>(meshList.size());
+    info.meshCount = static_cast<uint32_t>(prototypes[p].meshes.size());
+    for (MeshId id : prototypes[p].meshes) {
+      meshList.push_back(id.index);
+    }
+    VkDeviceSize built = 0;
+    r.prototypeBlas.push_back(r.buildBlas(
+        std::span(meshList).subspan(info.firstMesh, info.meshCount), &built));
+    builtBytes += built;
+    blasBytes += r.prototypeBlas.back().size;
+    info.blasAddress = r.prototypeBlas.back().address;
+    // The largest draw distance of its layers; 0 if any has none.
+    bool unlimited = false;
+    for (const PlacementLayer &layer : layers) {
+      for (const auto &[prototype, weight] : layer.prototypes) {
+        if (prototype == p) {
+          unlimited = unlimited || layer.maxDrawDistance <= 0.0f;
+          info.maxDrawDistance = std::max(info.maxDrawDistance, layer.maxDrawDistance);
+        }
+      }
+    }
+    if (unlimited) {
+      info.maxDrawDistance = 0.0f;
+    }
+    infos.push_back(info);
+  }
+  const double blasMs = msSince(blasStart);
+  r.prototypeTable = r.uploadStorage(infos.data(), infos.size() * sizeof(PrototypeInfo));
+  r.prototypeMeshTable = r.uploadStorage(meshList.data(), meshList.size() * sizeof(uint32_t));
+
+  // An instance's bounds reach past its cell by its sphere's horizontal
+  // extent from the origin (any direction under full rotation).
+  float margin = 0.0f, drawDistance = 0.0f;
+  bool unlimited = false;
+  for (const PlacementLayer &layer : layers) {
+    unlimited = unlimited || layer.maxDrawDistance <= 0.0f;
+    drawDistance = std::max(drawDistance, layer.maxDrawDistance);
+    for (const auto &[prototype, weight] : layer.prototypes) {
+      const auto &[x, y, z, radius] = bounds[prototype];
+      const float extent = layer.rotation == Rotation::Full ? std::sqrt(x * x + y * y + z * z)
+                                                            : std::sqrt(x * x + z * z);
+      // 1.001: the half-float scale rounds up by at most 2^-11.
+      margin = std::max(margin, (extent + radius) * layer.scaleMax * 1.001f);
+    }
+  }
+  r.cellMargin = margin;
+  r.cellDrawDistance = unlimited ? 0.0f : drawDistance;
+
+  r.createVisibility();
+  r.createTlas(r.placedCount + kMaxInstances);
+  VkDevice dev = r.device.device;
+  const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(TlasFillConstants)};
+  VkPipelineLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layoutInfo.pushConstantRangeCount = 1;
+  layoutInfo.pPushConstantRanges = &range;
+  VkPipelineLayout fillLayout = VK_NULL_HANDLE;
+  check(vkCreatePipelineLayout(dev, &layoutInfo, nullptr, &fillLayout), "vkCreatePipelineLayout");
+  VkPipeline fillPipeline = createComputePipeline(dev, "tlas_fill.comp", fillLayout);
+  const TlasFillConstants fill{r.placedInstances.address, r.prototypeTable.address,
+                               r.tlasRecords.address, r.placedCount, 0};
+  r.submitNow([&](VkCommandBuffer cmd) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, fillPipeline);
+    vkCmdPushConstants(cmd, fillLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(fill), &fill);
+    vkCmdDispatch(cmd, (r.placedCount + 63) / 64, 1, 1);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                  VK_ACCESS_2_SHADER_READ_BIT);
+  });
+  vkDestroyPipeline(dev, fillPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, fillLayout, nullptr);
+
+  const auto buildStart = Clock::now();
+  r.submitNow([&](VkCommandBuffer cmd) {
+    r.uploadInstances(cmd, r.frames[0]);
+    r.buildTlas(cmd, r.frames[0]);
+  });
+  const double buildMs = msSince(buildStart);
+  r.instancesDirty = false;
+
+  VmaTotalStatistics stats;
+  vmaCalculateStatistics(r.allocator, &stats);
+  VmaAllocationInfo scratch;
+  vmaGetAllocationInfo(r.allocator, r.tlasScratch.allocation, &scratch);
+  constexpr double kMiB = 1.0 / (1 << 20);
+  const uint32_t records = r.placedCount + static_cast<uint32_t>(r.instances.size());
+  std::printf("TLAS: %u records (%.0f MiB of records), TLAS %.0f MiB, scratch %.0f MiB, "
+              "build %.1f ms; %zu prototype BLAS %.0f MiB (%.0f MiB before compaction, "
+              "%.0f ms); cell margin %.1f m; device memory allocated %.0f MiB\n",
+              records, VkDeviceSize{records} * sizeof(VkAccelerationStructureInstanceKHR) * kMiB,
+              r.tlas.size * kMiB, scratch.size * kMiB, buildMs,
+              r.prototypeBlas.size(), blasBytes * kMiB, builtBytes * kMiB, blasMs, margin,
+              stats.total.statistics.blockBytes * kMiB);
 }
 
 uint32_t Renderer::placedInstanceCount() const { return impl_->placedCount; }

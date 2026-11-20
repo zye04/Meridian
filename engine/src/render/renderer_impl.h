@@ -75,7 +75,9 @@ struct Renderer::Impl {
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
   uint32_t droppedEntries = 0;
+  std::array<uint32_t, 4> droppedByList{};
   uint32_t drawnTerrainNodes = 0;
+  uint32_t drawnCells = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
 
@@ -90,6 +92,7 @@ struct Renderer::Impl {
   VkPipeline maskedMeshPipeline = VK_NULL_HANDLE;
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
+  VkPipeline cellCullPipeline = VK_NULL_HANDLE;
   VkPipeline cullPipeline = VK_NULL_HANDLE;
   VkPipeline clusterCullPipeline = VK_NULL_HANDLE;
   VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
@@ -111,9 +114,13 @@ struct Renderer::Impl {
   // after instances change.
   bool instancesDirty = true;
   // Top-level acceleration structure over all instances, shared by both
-  // frames in flight.
+  // frames in flight, and its instance records: the placed instances'
+  // (tlas_fill.comp, at setPlacement), then the hand-placed ones' (copied
+  // from FrameData::instanceBuffer at each build). Sized for placedCount +
+  // kMaxInstances records.
   AccelerationStructure tlas;
   Buffer tlasScratch;
+  Buffer tlasRecords;
   // Cluster hierarchies of every mesh, bump-allocated like the pools above.
   Buffer clusterPool;
   Buffer clusterVertexPool;
@@ -121,14 +128,17 @@ struct Renderer::Impl {
   uint32_t clusterCount = 0;
   uint32_t clusterVertexCount = 0;
   uint32_t clusterTriangleCount = 0;
-  // Culling output, both phases: work items for the cluster cull, cluster
-  // draw lists, and the DrawCounters (indirect arguments and statistics).
+  // Culling output, both phases: instance chunks for the instance cull, work
+  // items for the cluster cull, cluster draw lists, and the DrawCounters
+  // (indirect arguments and statistics).
+  Buffer chunks;
   Buffer workItems;
   Buffer drawLists;
   // Clusters the early cull found occluded, retested by the late cull.
   Buffer retestClusters;
   Buffer drawCounters;
-  // Per instance: visible at the end of last frame's culling (1) or not.
+  // Visible at the end of last frame's culling (1) or not: per instance id
+  // (kPlacedBase + placedCount of them), then per placement cell.
   Buffer visibility;
 
   // Terrain (renderer_terrain.cpp): the heightfield, its normal map (both
@@ -154,6 +164,13 @@ struct Renderer::Impl {
   Buffer cells;
   PlacementGrid placementGrid{};
   uint32_t placedCount = 0;
+  // PrototypeInfo per prototype, the mesh lists they index, and their BLAS
+  // (one per prototype, a geometry per mesh, compacted).
+  Buffer prototypeTable;
+  Buffer prototypeMeshTable;
+  std::vector<AccelerationStructure> prototypeBlas;
+  float cellDrawDistance = 0.0f;
+  float cellMargin = 0.0f;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -247,9 +264,24 @@ struct Renderer::Impl {
   createAccelerationStructure(VkAccelerationStructureTypeKHR type,
                               VkDeviceSize size);
   void destroyAccelerationStructure(AccelerationStructure &as);
+  // One geometry per mesh (a hit's geometry index is the position in
+  // `meshIndices`), compacted. builtBytes: the size before compaction.
+  AccelerationStructure buildBlas(std::span<const uint32_t> meshIndices,
+                                  VkDeviceSize *builtBytes = nullptr);
+  // (Re)creates the TLAS and its scratch and record buffers for `capacity`
+  // instances.
+  void createTlas(uint32_t capacity);
+  // (Re)creates the visibility buffer for the current placement, all
+  // invisible.
+  void createVisibility();
   void buildTlas(VkCommandBuffer cmd, FrameData &frame);
+  void buildPlacedTlas(std::span<const Prototype> prototypes,
+                       std::span<const PlacementLayer> layers,
+                       const std::vector<std::array<float, 4>> &bounds);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
   void resetDrawCounters(VkCommandBuffer cmd);
+  CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;
+  void cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   void selectTerrain(VkCommandBuffer cmd, const FrameData &frame);
   void drawTerrain(VkCommandBuffer cmd);

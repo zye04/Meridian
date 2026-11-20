@@ -4,65 +4,88 @@
 #include "common.glsl"
 #include "cull.glsl"
 
-// GPU-driven instance culling, one thread per instance, in two phases
-// around a depth pyramid (two-phase occlusion culling, as in niagara and
-// Nanite):
+// GPU-driven instance culling, one workgroup per chunk of up to 64
+// instances (cell_cull.comp emits them), one thread per instance, in two
+// phases around a depth pyramid (two-phase occlusion culling, as in niagara
+// and Nanite):
 //   0: what was visible last frame, testing only the view frustum;
 //   1: everything against the pyramid of phase 0's depth: what is visible
 //      but wasn't processed in phase 0, recording visibility for the next
 //      frame.
-// Survivors append work items covering their clusters; cluster_cull.comp
-// then culls and LOD-selects the clusters themselves.
+// Placed instances are tested with their prototype's bounds and draw
+// distance. Survivors append work items covering each of their meshes'
+// clusters; cluster_cull.comp then culls and LOD-selects the clusters.
 
 layout(local_size_x = 64) in;
 
+void emitWorkItems(uint id, MeshInfo mesh) {
+    uint itemCount = (mesh.clusterCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
+    uint first = reserveEntries(cull.phase * 3u, kMaxWorkItems, 1u, itemCount);
+    for (uint i = 0u; i < itemCount; ++i) {
+        uint offset = i * kClustersPerWorkItem;
+        uint count = min(kClustersPerWorkItem, mesh.clusterCount - offset);
+        cull.work.items[first + i] = uvec2(id, (mesh.firstCluster + offset) | ((count - 1u) << 26));
+    }
+}
+
 void main() {
-    uint index = gl_GlobalInvocationID.x;
-    if (index >= cull.scene.instanceCount) {
+    if (gl_WorkGroupID.x >= kMaxChunks) {
         return;
     }
-    LoadedInstance instance = loadInstance(cull.scene, index);
-    MeshInfo mesh = cull.scene.meshes.meshes[instance.meshOrPrototype];
-    if (mesh.drawBucket == kDrawBucketBlended) {
+    uvec2 chunk = cull.chunks.chunks[gl_WorkGroupID.x];
+    if (gl_LocalInvocationID.x >= (chunk.y & ~kChunkCellWasVisible)) {
         return;
     }
+    uint id = chunk.x + gl_LocalInvocationID.x;
+    SceneBuffer scene = cull.scene;
+    LoadedInstance instance = loadInstance(scene, id);
+    vec3 center;
+    float radius;
+    float maxDistance = 0.0;
+    PrototypeInfo prototype;
+    if (instance.placed) {
+        prototype = scene.prototypes.prototypes[instance.meshOrPrototype];
+        center = prototype.boundsCenter;
+        radius = prototype.boundsRadius;
+        maxDistance = prototype.maxDrawDistance;
+    } else {
+        MeshInfo mesh = scene.meshes.meshes[instance.meshOrPrototype];
+        if (mesh.drawBucket == kDrawBucketBlended) {
+            return;
+        }
+        center = mesh.boundsCenter;
+        radius = mesh.boundsRadius;
+    }
 
-    vec4 sphere = displayedSphere((instance.transform * vec4(mesh.boundsCenter, 1.0)).xyz -
-                                      cull.scene.cameraPosition,
-                                  mesh.boundsRadius * instance.scale);
-    bool visibleInFrustum = inFrustum(sphere.xyz, sphere.w);
+    vec3 relative = (instance.transform * vec4(center, 1.0)).xyz - scene.cameraPosition;
+    vec4 sphere = displayedSphere(relative, radius * instance.scale);
+    bool visibleInFrustum = inFrustum(sphere.xyz, sphere.w) &&
+                            (maxDistance == 0.0 ||
+                             length(relative) - radius * instance.scale <= maxDistance);
 
-    bool wasVisible = cull.visibility.visible[index] != 0u;
+    bool wasVisible = cull.visibility.visible[id] != 0u;
     if (cull.phase == 0u) {
         if (cull.occlusion == 0u || !wasVisible || !visibleInFrustum) {
             return;
         }
     } else {
         bool visible = visibleInFrustum &&
-                       (cull.occlusion == 0u || !occluded(sphere, cull.scene.view));
-        cull.visibility.visible[index] = visible ? 1u : 0u;
+                       (cull.occlusion == 0u || !occluded(sphere, scene.view));
+        cull.visibility.visible[id] = visible ? 1u : 0u;
         // Instances processed in phase 0 aren't processed again.
-        if (!visible || (cull.occlusion != 0u && wasVisible)) {
+        bool processed = cull.occlusion != 0u && wasVisible &&
+                         (chunk.y & kChunkCellWasVisible) != 0u;
+        if (!visible || processed) {
             return;
         }
     }
 
     atomicAdd(cull.counters.counters[kCounterInstances], 1u);
-    uint itemCount = (mesh.clusterCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
-    uint first = atomicAdd(cull.counters.counters[cull.phase * 3u], itemCount);
-    // The count is the cluster cull's dispatch size: give back what doesn't
-    // fit so it ends at the capacity.
-    uint end = min(first + itemCount, kMaxWorkItems);
-    uint dropped = itemCount - (end > first ? end - first : 0u);
-    if (dropped > 0u) {
-        atomicAdd(cull.counters.counters[cull.phase * 3u], -dropped);
-        atomicAdd(cull.counters.counters[kCounterOverflow], dropped);
-        itemCount -= dropped;
+    if (!instance.placed) {
+        emitWorkItems(id, scene.meshes.meshes[instance.meshOrPrototype]);
+        return;
     }
-    for (uint i = 0u; i < itemCount; ++i) {
-        uint offset = i * kClustersPerWorkItem;
-        uint count = min(kClustersPerWorkItem, mesh.clusterCount - offset);
-        cull.work.items[first + i] =
-            uvec2(index, (mesh.firstCluster + offset) | ((count - 1u) << 26));
+    for (uint i = 0u; i < prototype.meshCount; ++i) {
+        emitWorkItems(id, scene.meshes.meshes[scene.prototypeMeshes.meshes[prototype.firstMesh + i]]);
     }
 }
