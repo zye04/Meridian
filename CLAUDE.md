@@ -431,10 +431,15 @@ game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
 game/src/perf_overlay.{h,cpp}  performance overlay (F3), CSV recording
                            (F4, --benchmark); frame_stats.h: lows
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
-                           prune, flatten, leaf diffuse transmission),
-                           ktx2.cpp (shared encoder)
+                           prune, flatten, leaf diffuse transmission;
+                           textured materials keep UVs and maps),
+                           ktx2.cpp (shared encoder, coverage mips)
 tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
-                           in a git-ignored venv made by setup.sh)
+                           in a git-ignored venv made by setup.sh;
+                           UsdUVTexture inputs -> glTF textures)
+tools/unreal/              export_trees.py (Unreal editor Python:
+                           Megaplants inventory + glTF/PNG export,
+                           docs/assets.md)
 tests/                     doctest unit tests
 docs/                      see "Docs" at the top
 ```

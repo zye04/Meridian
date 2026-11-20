@@ -17,6 +17,10 @@ tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd
   leftHanded winding (usd2gltf flips it), and leaf materials named
   `TwoSided_Material` (usd2gltf marks them double-sided; the cook treats
   double-sided materials as leaves).
+- Textured trees: the USD has no textures, so they come from Unreal
+  ("Textured Megaplants trees from Unreal" below). The cook keeps UVs and maps for any material with a base
+  colour texture; untextured ones get the tint palette and Bark012.
+
 - The Fab sandstone cliff lands in
   `massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf` there (10.6 m
   tall, origin at its base).
@@ -50,6 +54,58 @@ tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd
   (green up): correlated against the gradient of the H map, R with -dh/dx
   and G with +dh/dy (rows down), +0.6 to +0.95 for all, so the cook leaves
   them as they are.
+
+## Textured Megaplants trees from Unreal
+
+The Megaplants' textures (leaf atlases with opacity, normal, roughness,
+translucency, bark) exist only in their Unreal assets, which are presets
+of the Procedural Vegetation Editor (PVE, Experimental). One-time setup
+in Unreal Engine 5.7+ (Linux editor):
+
+1. Create an empty project. Edit > Plugins: enable "Procedural Vegetation
+   Editor" (restart). Project Settings: enable "Nanite Foliage
+   (Experimental)" (restart).
+2. On fab.com, add the Megaplants (beech first) to your Library; in the
+   editor, open the Fab window and add them to the project.
+3. Open the beech preset in the PVE and generate/bake a variant (static or
+   skeletal output). Optionally drag one tree into the open level: if the
+   tree is an assembly of placed branch meshes, the script reads their
+   placements from the level.
+4. Diagnostics first (writes only `inventory.json` and the log), in the
+   editor's Output Log, Python mode:
+   `py /home/zye/Projects/dev/meridian/tools/unreal/export_trees.py --folder /Game/<pack folder> --species beech --inventory-only`
+5. Then the export, the same command without `--inventory-only`:
+   `~/Downloads/unreal-export/beech/` gets `<asset>.gltf` (+ .bin, PNG
+   textures), `textures/*.png` (every texture the materials reference),
+   `manifest.json` (meshes, triangle counts, material slots, textures by
+   role: base colour, normal, ORM/roughness, translucency, opacity),
+   `placements.json` (only for placed instanced meshes) and
+   `export_log.txt`. Headless:
+   `UnrealEditor <project>.uproject -run=pythonscript -script="<path>/export_trees.py --folder /Game/<pack folder> --species beech"`.
+
+The script is a draft written from the API docs, never run: its first run
+on one beech is diagnostic. Send back `inventory.json`, `manifest.json`,
+`export_log.txt` and `ls -lR ~/Downloads/unreal-export/beech` (and the
+tail of `Saved/Logs/<project>.log` if the editor crashed). Wind (Dynamic
+Wind: skeletal bones and weights) is listed in the inventory, not
+exported.
+
+Cook (the glTF is meters, Y up; one mesh or an unflattened assembly):
+
+```bash
+./build/tools/cook/meridian-cook --tree ~/Downloads/unreal-export/beech/<asset>.gltf assets/source/megascans/<name> --triangles 4000000
+```
+
+`--bark-texture` is only needed when the wood material has no texture of
+its own. Then view it with `--trees` (and `--scatter N`, after adding the
+name to the Megaplants list in `scatterModels`, main.cpp), or, without
+touching the game, through a copy of `assets/` in which
+`source/megascans/<an existing tree>` links to the new cook (the game
+reads the assets directory at compile time: `MERIDIAN_ASSET_DIR`).
+
+If glTF export fails, `usd2gltf.py` also reads a USD export with
+textures (UsdPreviewSurface inputs connected to UsdUVTexture files); FBX
+would need a new dependency (assimp via FetchContent), not added.
 
 ## Grass and flower plants
 
