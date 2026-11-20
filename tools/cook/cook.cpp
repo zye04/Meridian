@@ -257,6 +257,209 @@ void bakeNodeTransform(fastgltf::Asset &asset) {
   }
 }
 
+// Megascans 3D plants pack ORT: opacity (R), roughness (G), translucency
+// (B); the nonUE glTF binds it as metallicRoughness, the UE one also as
+// occlusion, and the fern has no alpha in its base color. Rebuild the
+// textures into glTF's layout (base color alpha = opacity, roughness in G,
+// no metal), make the material alpha-masked and diffuse-transmissive by the
+// mean translucency over the opaque texels, leave the billboard material
+// (the LOD 2/3 quads) empty (its textures are cooked on their own), and keep one
+// node per variant's LOD 0, side by side (the engine builds its own LODs).
+struct PlantImages {
+  std::map<size_t, basisu::image> replaced;
+};
+
+PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &directory) {
+  PlantImages result;
+  std::set<size_t> usedMaterials;
+  for (const fastgltf::Node &node : asset.nodes) {
+    if (!node.meshIndex || node.name.find("_LOD") != std::string::npos) {
+      continue;
+    }
+    for (const fastgltf::Primitive &primitive : asset.meshes[*node.meshIndex].primitives) {
+      if (primitive.materialIndex) {
+        usedMaterials.insert(*primitive.materialIndex);
+      }
+    }
+  }
+  const auto imageOf = [&](const auto &info) -> std::optional<size_t> {
+    return info ? asset.textures[info->textureIndex].imageIndex : std::nullopt;
+  };
+  bool plant = false;
+  for (size_t i = 0; i < asset.materials.size(); ++i) {
+    fastgltf::Material &m = asset.materials[i];
+    const auto orImage = imageOf(m.pbrData.metallicRoughnessTexture);
+    const auto *uri = orImage ? std::get_if<fastgltf::sources::URI>(&asset.images[*orImage].data)
+                              : nullptr;
+    if (!usedMaterials.contains(i) || !uri ||
+        uri->uri->fspath().filename().string().find("_ORT") == std::string::npos) {
+      continue;
+    }
+    plant = true;
+    const auto colorImage = imageOf(m.pbrData.baseColorTexture);
+    if (!colorImage) {
+      throw std::runtime_error("plant material without a base color texture");
+    }
+    basisu::image ort = decode(sourceImageBytes(asset, asset.images[*orImage], directory));
+    basisu::image color =
+        decode(sourceImageBytes(asset, asset.images[*colorImage], directory));
+    if (ort.get_width() != color.get_width() || ort.get_height() != color.get_height()) {
+      throw std::runtime_error("ORT and base color sizes differ");
+    }
+    double translucency = 0.0;
+    size_t opaque = 0;
+    for (uint32_t k = 0; k < ort.get_width() * ort.get_height(); ++k) {
+      basisu::color_rgba &o = ort.get_ptr()[k];
+      basisu::color_rgba &c = color.get_ptr()[k];
+      c.a = o.r;
+      if (o.r >= 128) {
+        translucency += o.b / 255.0;
+        ++opaque;
+      }
+      o.r = 255;
+      o.b = 0;
+      o.a = 255;
+    }
+    result.replaced[*orImage] = std::move(ort);
+    result.replaced[*colorImage] = std::move(color);
+    const float factor = opaque ? static_cast<float>(translucency / opaque) : 0.0f;
+    m.occlusionTexture.reset();
+    m.pbrData.metallicFactor = 0.0f;
+    m.alphaMode = fastgltf::AlphaMode::Mask;
+    m.alphaCutoff = 0.5f;
+    m.doubleSided = true;
+    m.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
+    m.diffuseTransmission->diffuseTransmissionFactor = factor;
+    std::printf("Plant material %s: mean translucency %.3f over %zu opaque texels\n",
+                std::string(m.name).c_str(), factor, opaque);
+  }
+  if (!plant) {
+    return result;
+  }
+  for (size_t i = 0; i < asset.materials.size(); ++i) {
+    if (!usedMaterials.contains(i)) {
+      fastgltf::Material &m = asset.materials[i];
+      m.pbrData.baseColorTexture.reset();
+      m.pbrData.metallicRoughnessTexture.reset();
+      m.normalTexture.reset();
+      m.occlusionTexture.reset();
+    }
+  }
+  return result;
+}
+
+// The nodes of a Megascans plant scene: LOD 0 of each variant, in a row.
+// Runs after the node transforms are baked into the meshes.
+void layoutPlantVariants(fastgltf::Asset &asset) {
+  if (asset.scenes.empty()) {
+    return;
+  }
+  auto &roots = asset.scenes[asset.defaultScene.value_or(0)].nodeIndices;
+  std::erase_if(roots, [&](size_t n) {
+    return asset.nodes[n].name.find("_LOD") != std::string::npos;
+  });
+  constexpr float kGap = 0.1f;
+  float cursor = 0.0f;
+  for (size_t n : roots) {
+    fastgltf::Node &node = asset.nodes[n];
+    auto *trs = std::get_if<fastgltf::TRS>(&node.transform);
+    if (!trs || !node.meshIndex) {
+      continue;
+    }
+    float lo[3] = {INFINITY, INFINITY, INFINITY}, hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+    for (const fastgltf::Primitive &primitive : asset.meshes[*node.meshIndex].primitives) {
+      const fastgltf::Accessor &accessor =
+          asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+      for (int i = 0; i < 3; ++i) {
+        lo[i] = std::min(lo[i], static_cast<float>(accessor.min->data<double>()[i]));
+        hi[i] = std::max(hi[i], static_cast<float>(accessor.max->data<double>()[i]));
+      }
+    }
+    trs->translation[0] = cursor - lo[0];
+    trs->translation[2] = -(lo[2] + hi[2]) / 2;
+    cursor += hi[0] - lo[0] + kGap;
+  }
+}
+
+// The plants' glTFs carry no normals. Smooth ones from the faces, so a
+// blade or frond bends across its width; the shader's double-sided
+// handling flips them for back faces.
+void addPlantNormals(fastgltf::Asset &asset) {
+  auto &data = asset.buffers[0].data;
+  if (const auto *array = std::get_if<fastgltf::sources::Array>(&data)) {
+    fastgltf::sources::Vector vector;
+    vector.bytes.assign(array->bytes.begin(), array->bytes.end());
+    data = std::move(vector);
+  }
+  auto *buffer = std::get_if<fastgltf::sources::Vector>(&data);
+  if (!buffer) {
+    throw std::runtime_error("buffer was not loaded");
+  }
+  std::set<size_t> done;
+  for (fastgltf::Mesh &mesh : asset.meshes) {
+    for (fastgltf::Primitive &primitive : mesh.primitives) {
+      const auto position = primitive.findAttribute("POSITION");
+      if (position == primitive.attributes.cend() || !primitive.indicesAccessor ||
+          primitive.findAttribute("NORMAL") != primitive.attributes.cend() ||
+          !done.insert(position->accessorIndex).second) {
+        continue;
+      }
+      const size_t positionIndex = position->accessorIndex;
+      const fastgltf::Accessor &positions = asset.accessors[positionIndex];
+      std::vector<std::array<float, 3>> p(positions.count);
+      fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+          asset, positions,
+          [&](fastgltf::math::fvec3 v, size_t i) { p[i] = {v.x(), v.y(), v.z()}; });
+      const fastgltf::Accessor &indexAccessor = asset.accessors[*primitive.indicesAccessor];
+      std::vector<uint32_t> indices(indexAccessor.count);
+      fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
+      std::vector<std::array<float, 3>> normals(p.size(), {0.0f, 0.0f, 0.0f});
+      for (size_t t = 0; t + 2 < indices.size(); t += 3) {
+        const auto &a = p[indices[t]], &b = p[indices[t + 1]], &c = p[indices[t + 2]];
+        const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+        const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
+                            e1[0] * e2[1] - e1[1] * e2[0]};
+        for (size_t k = 0; k < 3; ++k) {
+          for (int i = 0; i < 3; ++i) {
+            normals[indices[t + k]][i] += n[i];
+          }
+        }
+      }
+      for (auto &n : normals) {
+        const float length = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        n = length > 0.0f ? std::array<float, 3>{n[0] / length, n[1] / length, n[2] / length}
+                          : std::array<float, 3>{0.0f, 0.0f, 1.0f};
+      }
+      const size_t offset = buffer->bytes.size();
+      buffer->bytes.resize(offset + normals.size() * sizeof(float) * 3);
+      std::memcpy(buffer->bytes.data() + offset, normals.data(),
+                  normals.size() * sizeof(float) * 3);
+      asset.buffers[0].byteLength = buffer->bytes.size();
+      fastgltf::BufferView view;
+      view.bufferIndex = 0;
+      view.byteOffset = offset;
+      view.byteLength = normals.size() * sizeof(float) * 3;
+      asset.bufferViews.push_back(view);
+      fastgltf::Accessor accessor;
+      accessor.bufferViewIndex = asset.bufferViews.size() - 1;
+      accessor.count = normals.size();
+      accessor.type = fastgltf::AccessorType::Vec3;
+      accessor.componentType = fastgltf::ComponentType::Float;
+      asset.accessors.push_back(std::move(accessor));
+      const size_t normalAccessor = asset.accessors.size() - 1;
+      for (fastgltf::Mesh &other : asset.meshes) {
+        for (fastgltf::Primitive &user : other.primitives) {
+          const auto shared = user.findAttribute("POSITION");
+          if (shared != user.attributes.cend() && shared->accessorIndex == positionIndex) {
+            user.attributes.push_back({"NORMAL", normalAccessor});
+          }
+        }
+      }
+    }
+  }
+}
+
 void cook(const std::filesystem::path &input, const std::filesystem::path &output) {
   fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
                           fastgltf::Extensions::KHR_materials_emissive_strength |
@@ -275,6 +478,11 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
   fastgltf::Asset &asset = loaded.get();
   bakeNodeTransform(asset);
   bindArmOcclusion(asset);
+  PlantImages plantImages = preparePlants(asset, input.parent_path());
+  if (!plantImages.replaced.empty()) {
+    layoutPlantVariants(asset);
+    addPlantNormals(asset);
+  }
 
   basisu::basisu_encoder_init();
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));
@@ -285,8 +493,11 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
     fastgltf::Image &image = asset.images[index];
     std::printf("Encoding image %zu (%s)\n", index,
                 usage == Usage::Color ? "color" : usage == Usage::Normal ? "normal" : "data");
+    const auto replaced = plantImages.replaced.find(index);
     const basisu::image decoded =
-        decode(sourceImageBytes(asset, image, input.parent_path()));
+        replaced != plantImages.replaced.end()
+            ? std::move(replaced->second)
+            : decode(sourceImageBytes(asset, image, input.parent_path()));
     if (!decoded.has_alpha()) {
       opaqueImages.insert(index);
     }

@@ -58,7 +58,8 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Cooked assets aren't re-cooked when the cook changes | `fetch-sample-assets.sh` cooks only missing models; moss rock sets cooked before the vertical-offset bake lose rock07's scale and offsets (delete `assets/rock_moss_set_0{1,2}` and re-run) | M2a Task 5 | Tooling: stamp cooked output with a cook version |
 | Blended instances not culled, full detail | Cost if a blended asset is scattered | Known gap before the backlog | When needed |
 | Masked-geometry RT shadows not visually verified | Possible wrong alpha-tested shadows | Known gap before the backlog | M2b (ferns with opacity micromaps) |
-| Grass and grass wind | Meadows are bare | Roadmap | M3, reading M4's global wind |
+| Grass and grass wind | Meadows are bare; the plants are cooked in `assets/<id>/` (docs/assets.md) | Roadmap | M3, reading M4's global wind |
+| Plant alpha-mask coverage at distance | The KTX2 mips of the plants' base color alpha are plain averages (no coverage preservation), so masked plants thin out far away | Lane V | Grass lane (or alpha-to-coverage / billboard far LOD) |
 | Undergrowth (shrubs, ferns) | Forest floor is bare | M2a spec non-goal | M2b first layer; revisit layered dithering between placement layers then |
 | Real land-cover data (swissTLM3D forest polygons as a mask) | Forests follow rules, not the real map | M2a spec non-goal | Content; the placement mask input is ready |
 | Low-end far field (pure 2D canopy, Chlorophyll-style scaling) | Lower-end GPUs and VRAM; the voxel far field targets this machine | Far-field spec, user 2026-11-20 | Later; option B's 2.5D layer is the starting point |

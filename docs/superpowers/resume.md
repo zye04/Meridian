@@ -42,7 +42,9 @@ item 3 below is what brings them back.
 
 1. Done: parallax occlusion mapping on the terrain (decisions.md,
    "Terrain parallax occlusion mapping").
-2. Grass and flowers (the downloaded Megascans grass meshes and flowers).
+2. Grass and flowers: the plants are imported and cooked (lane V,
+   `docs/assets.md`, "Grass and flower plants"); placement, rendering
+   and wind are next.
 3. Leaf and bark textures for the Megaplants trees: the USD leaves have
    UVs into a per-species atlas region, so the cook remaps each leaf
    region onto a downloaded leaf texture; bark tiles along the branch.

@@ -18,7 +18,8 @@
 # import variant A of each through tools/usd2gltf and meridian-cook --tree.
 # The same directory may hold Megascans rock downloads (*_ue_high.zip, Fab):
 # the massive sandstone cliff is cooked for placement; and the ground
-# surfaces (*_4k_ue_high.zip) for the terrain material.
+# surfaces (*_4k_ue_high.zip) for the terrain material; and the grass and
+# flower plants (*_ue_high.zip, *_2k.zip atlases).
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
 megaplants="${1:-}"
@@ -245,6 +246,62 @@ else
     done
     magick "$staging/base_color.png" -colorspace RGB -scale 1x1\! \
       -format '%[fx:r] %[fx:g] %[fx:b]\n' info: > "$dest/albedo.txt"
+  done
+  # Megascans 3D plants for the grass and flower layers (Fab *_ue_high.zip,
+  # same directory): the nonUE glTF when the zip has one (the fern has only
+  # the UE one), LOD 0 of every variant in a row, cooked into assets/<id>/
+  # (docs/assets.md). The billboard textures (all variants in one atlas)
+  # are cooked beside it for the far LOD. The two 2K flower atlases have no
+  # mesh: their textures are cooked to assets/<id>/ as card material.
+  for id in grass_clumps_qmbr2 rough_meadow_grass_skfjj wild_grass_sjliz wild_grass_vlkhcbxia \
+      common_fern_rhdso clovers_rbdjz field_poppy_vmcobd0ja goldenrods_xg1lbfxia \
+      yellow_flower_xchjef3ia; do
+    zip="$megaplants/${id}_ue_high.zip"
+    out="$root/assets/$id"
+    [[ -f "$zip" && ! -d "$out" ]] || continue
+    extract="$megascans/_extract/${id}_ue_high"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part" '*_tier_1*.gltf' '*_tier_1.bin' 'Textures/*'
+      mv "$extract.part" "$extract"
+    fi
+    gltf=""
+    [[ ! -d "$extract/standard" ]] ||
+      gltf="$(find "$extract/standard" -maxdepth 1 -name '*_tier_1_nonUE.gltf' | head -n 1)"
+    [[ -n "$gltf" ]] || gltf="$(find "$extract" -maxdepth 1 -name '*_tier_1.gltf' | head -n 1)"
+    rm -rf "$out.part"
+    "$cook" "$gltf" "$out.part"
+    mkdir -p "$out.part/billboard"
+    "$cook" --texture "$(find "$extract/Textures" -name '*_4K_Billboard_B-O.png')" \
+      "$out.part/billboard/base_color.ktx2" color
+    "$cook" --texture "$(find "$extract/Textures" -name '*_4K_Billboard_N-T.png')" \
+      "$out.part/billboard/normal_translucency.ktx2" data
+    mv "$out.part" "$out"
+  done
+
+  # Flower atlases without meshes (Fab *_2k.zip, JPEG): colour, opacity,
+  # translucency, roughness and normal cooked as they are.
+  for id in meadow_buttercup_sf2occci2 assorted_flowers_pepju2; do
+    zip="$megaplants/${id}_2k.zip"
+    out="$root/assets/$id"
+    [[ -f "$zip" && ! -d "$out" ]] || continue
+    extract="$megascans/_extract/${id}_2k"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part"
+      mv "$extract.part" "$extract"
+    fi
+    rm -rf "$out.part"
+    mkdir -p "$out.part"
+    for map in "BaseColor base_color color" "Opacity opacity data" "Translucency translucency data" \
+        "Roughness roughness data" "Normal normal normal"; do
+      read -r suffix name usage <<<"$map"
+      "$cook" --texture "$(find "$extract" -iname "*_2K_${suffix}.jpg")" \
+        "$out.part/$name.ktx2" "$usage"
+    done
+    mv "$out.part" "$out"
   done
 fi
 
