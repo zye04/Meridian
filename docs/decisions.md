@@ -1597,11 +1597,11 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   load (`cloud_noise.comp`, one dispatch, then box-filtered 3D mips by
   blits, `lod` in `cloudDensity` picks them). Base 128^3 RGBA8: R
   Perlin-Worley (Perlin fBm dilated by Worley fBm, `remap(perlin, 0, 1,
-  worley, 1)`), GBA Worley fBm at 4, 8, 16 cells per tile; detail 32^3
+  worley, 1)`), GBA Worley fBm at 4, 8, 16 cells per tile; detail 64^3
   RGBA8: Worley fBm at 2, 4, 8 cells; curl 128^2 RGBA16F: the curl of 2D
   Perlin fBm (divergence-free, so the detail lookup swirls without
-  bunching). World tiles: base 4096 m (32 m texels, ~1 km cells, sampled
-  at twice the vertical frequency), detail 512 m (16 m texels), curl
+  bunching). World tiles: base 8192 m (64 m texels, ~2 km cells, sampled
+  at twice the vertical frequency), detail 256 m (4 m texels), curl
   4096 m (sizes: "Cloud look development" below). Every lattice wraps, so all of them
   tile seamlessly.
   - Schneider, Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
@@ -1616,7 +1616,7 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   and shrink fair well below its coverage, so coverage stays out of the
   cut. Erosion depends on type like the
   profile: cumulus wispy at the base and billowy above, stratus wispy
-  throughout, both carving up to 0.5. The eroded density is scaled by 6
+  throughout, carving up to 0.6 (cumulus) and 0.5 (stratus). The eroded density is scaled by 3
   and saturated at 1 (crisp edges, full cores). Output is in [0, 1]; the
   march scales it to extinction.
   `world.y` is the altitude on the curved shell, so the caller decides
@@ -1697,8 +1697,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   low-discrepancy per-pixel sequence); the march stops at the scene
   depth, the sea-level sphere, 300 km, or transmittance 0.01.
 - **Lighting:** extinction 0.06/m at density 1, albedo 0.99 (no edge
-  darkening; "Cloud look development" below); sun transmittance by a 5-step light
-  march (40 m doubling, 1.2 km); sun color from the transmittance LUT at
+  darkening; "Cloud look development" below); sun transmittance by a 6-step light
+  march (20 m doubling, 1.26 km); sun color from the transmittance LUT at
   the sample, zero in the planet's shadow (the LUT alone returns the
   transmittance to the ground there, which made clouds glow after
   sunset; the light march is skipped there and stops once it leaves the
@@ -1907,7 +1907,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   cloudy over only part of its area (the shape cut and erosion carve
   gaps), more so for cumulus; binned by type, k falls steeply only
   toward pure cumulus (the stratus shape floor fills the gaps below type
-  ~0.8), so `k = 1 - 0.53 type^3.5`. A low sun's ray runs S = layer
+  ~0.8), so `k = 1 - 0.72 type^2.6` (refitted to the cloud look's
+  shape, see "Cloud look development"). A low sun's ray runs S = layer
   height / tan elevation through the layer and crosses about n = S / L
   independent clouds; the n - 1 beyond the first pass the regional mean
   `1 - k(local type) c'`, c' the local state's mean coverage under
@@ -2006,69 +2007,93 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
 
 ## Cloud look development (M4 clouds, 2026-11-20)
 
-Matched against reference photos (`assets/reference/clouds/`, git-ignored)
-with `tools/cloud-compare.sh`: midday from the ground looking up (cloud1,
-cloud5) and toward the horizon (cloud3, cloud4), sunset from above a
-broken layer (cloud2). It prints, from `.pfm` captures with clouds on and
-off (exposure divided out), sunlit tops (95th percentile) and bases (just
-inside each cloud's bottom edge) over the clear sky behind them, cover,
-base spread and shading contrast (median / tops), and the same measured
-by color segmentation on the photos and on the capture's image
-(display-referred; photo whites clip, so they bound from below).
+Matched side by side against the Chlorophyll Engine frames
+(`assets/reference/chlorophyll/`: fair cumulus with bright tops and
+flatter, light-grey bases, a high cirrus streak layer, a hazier
+stratocumulus sky) and a sunset photo (`assets/reference/clouds/cloud2`),
+under the game's grade; the earlier photo metrics
+(`tools/cloud-compare.sh`, `tools/cloud-metrics.py`) stay for numbers.
+The photos' tops measure 5.9-13x the sky beside them and their bases
+2.1-3.4x (display-referred, whites clipped): bases are lit, not dark.
 
 - **Material:** albedo 0.99 (Frostbite: rho = 1, sigma_s = sigma_t;
-  Hess 1998 cumulus sigma_t 0.05-0.12 /m) with no edge darkening (the
-  lowered albedo at thin edges was a non-physical stand-in for HZD's
-  powder term; the octaves replace both). Dual-lobe HG 0.8 / -0.3, 30% backward (Frostbite eq. 18;
-  the back lobe lights sun-behind views). Octaves: 4, extinction,
-  contribution and eccentricity each x0.5 (Wrenninge's defaults);
-  Frostbite's energy rule is contribution factor <= extinction factor,
-  which the earlier x0.7 contribution over x0.25 extinction broke. With
-  b = 0.75 the tops measured 7.1x the sky instead of 4.7x and the
-  display barely changed (auto-exposure absorbs it), so the energy-
-  conserving value stays.
-- **Ground bounce (`marchClouds`):** the atmosphere's ground albedo
-  (Lambertian) under the sun through the local coverage's gaps plus the
-  clear sky, in-scattered as E / 2 pi, weighted 1 at the base to 0.35 at
-  the top (the sky term mirrored). It turned grey undersides light grey,
-  as in the photos (HZD: ambient rises with height; Frostbite biases its
-  height gradient for ground bounce; Revision 2013's slab has a bottom
-  term with ground light).
-- **Edges:** the eroded density is scaled by 6 and saturated at 1
-  (Nubis: remap rather than multiply keeps core density); edges sharpen
-  from a few hundred metres of soft ramp to tens, and cauliflower lobes
-  read in the shading.
-- **Scale:** base noise 4096 m (cells ~1 km) sampled at twice the
-  vertical frequency, detail 512 m, cumulus cut 0.6, erosion 0.5 for
-  cumulus too (HZD: billowy detail toward the top). At 8192 m the
-  clouds were 2-3 km isotropic blobs; at 4096 m isotropic they were
-  heaps; squashed they spread into flat-based loaves 0.3-1.5 km wide, as
-  in cloud3/cloud4. The cut brings fair cover to the photos' range
-  (0.34-0.42 of the sky vs 0.23-0.44).
-- **Flat bases:** the cumulus base ramp multiplies after the shape cut
-  (the thinning toward the top stays before it), so every cloud starts
-  at the layer bottom instead of where its shape first exceeds the cut
-  (rounded undersides; the forum's "modify the coverage, not the
-  density"). Freezing the shape's vertical variation below 10-25% of the
-  layer gave straight-walled columns and was dropped.
-- **Far and dusk self-shadowing:** see "Cloud shadow map" (the march adds
-  the fallback's optical depth where the map fades). The fallback's fit
-  predates this shape and is not refitted yet (backlog).
-- **Measured (2560x1440, Debug):** fair, ground looking up / toward the
-  horizon: tops 4.3x / 3.2x the clear sky behind them (10.7k cd/m^2;
-  user target 1.5-3x; photos 4.7-11x display-referred, whites clipped),
-  bases 1.24x / 1.22x (target < 1; photos 2.0-2.8x: lit by the ground,
-  they are brighter than the deep sky above), base spread 0.42 (photos
-  0.29-0.39), cover 0.34 / 0.42 (photos 0.23-0.44). `clouds` ms (same
-  clock state, median of 3): ground 1.08 -> 0.89, horizon 1.05 -> 0.81,
-  sunset from above (fair) 1.31 -> 0.86 (fewer, smaller clouds).
+  Hess 1998 cumulus sigma_t 0.05-0.12 /m), extinction 0.06 /m at density
+  1, no edge darkening (the octaves and the diffuse term replace HZD's
+  powder). Dual-lobe HG 0.8 / -0.3, 30% backward (Frostbite eq. 18).
+  Octaves: 4, extinction, contribution and eccentricity each x0.5
+  (Wrenninge's defaults; contribution <= extinction factor is Frostbite's
+  energy rule, which holds the sum to ~1.9x single scattering as tau ->
+  0, so "energy-conserving" is approximate).
+- **Diffuse multiple scattering:** the octaves still decay exponentially
+  with the sun's optical depth, so cores and bases went grey and an
+  overcast deck took only the blue sky ambient (it read as clear sky).
+  Light that diffuses through a thick cloud falls off algebraically
+  (two-stream: transmittance 1 / (1 + 0.75 (1 - g) tau)); an isotropic
+  term `0.8 / (4 pi (1 + 0.3 tau))` (g_eff 0.6) is added to the octave
+  sum. It made fair cumulus white with light-grey bases, as in the
+  frames, and the overcast deck a neutral grey. With g_eff 0.85 (slope
+  0.11) and weight 1 every sunset cloud lit flat orange with no shadowed
+  side; 0.6 keeps the shading.
+- **Ambient:** the clear sky's irradiance at the top, falling to 0.35 of
+  it at the base, and to 0.05 under full coverage (`groundCoverage`):
+  a deck's base sees other clouds, not the blue sky. Ground bounce: the
+  atmosphere's ground albedo (Lambertian) under the sun through the local
+  coverage's gaps plus the clear sky, E / 2 pi, 1 at the base to 0.35 at
+  the top (HZD: ambient rises with height; Frostbite biases its height
+  gradient for ground bounce).
+- **Scale and edges:** base noise 8192 m (128^3, 64 m texels) at twice
+  the vertical frequency: fewer, larger cells, 1-3 km cumulus with wide
+  gaps, closer to the frames than the 4096 m field of many small cells.
+  Detail noise 64^3 over 256 m (4 m texels; was 32^3 over 512 m) and
+  cumulus erosion 0.6 (stratus 0.5) give cauliflower lobes and crisp
+  inner structure up close at no measurable cost. Density gain 3 (eroded
+  density scaled and saturated, Nubis' remap): 6 gave hard silhouettes
+  and cost motion sharpness (see the trade below). Cumulus cut 0.6.
+- **Flat bases:** the cumulus base ramp multiplies after the shape cut,
+  so every cloud starts at the layer bottom. Extruding the shape below
+  10-25% of the layer gave straight-walled boxes, dropped (twice).
+- **Self-shadowing:** 6 sun steps doubling from 20 m (1.26 km; was 5
+  from 40 m): sharper lobe shading, +0.04 ms.
+- **Stratocumulus / overcast:** the stratus shape floor is 0.4 (was 0.6):
+  the deck keeps thickness variation, which the diffuse term turns into
+  brighter and darker patches, without opening holes at coverage 1.
+- **Cirrus (`cirrusLayer`, clouds_march.glsl):** a 2D sheet at 9 km
+  composited behind the low layer in the view march (not in the sky
+  capture, not shadowing). Gradient-noise streaks 16 km along by 1 km
+  across the wind, bent by a 3 km warp, in 32 km patches; amount
+  `smoothstep(0.05, 0.6, coverage)` (none in clear weather; broken and
+  fair show it, overcast hides it); optical depth 0.6 x density over the
+  slant path, single scattering with HG 0.75 forward (ice) and 30%
+  isotropic, plus the sky ambient. The streak noise turns with the wind,
+  so it doesn't tile with the wind offset's period (jumps once per
+  262 km of travel). A tiled base-noise slice gave cellular blotches
+  (mackerel sky) and long straight streaks a zoom-blur of rays.
+- **March resolution:** half instead of quarter changed nothing visible
+  on a near cumulus at 1:1 (the detail is in the noise, not the
+  sampling) and cost +0.65 ms (fair 0.87 -> 1.51), so the march stays at
+  quarter resolution.
+- **Motion vs density gain (user decision):** fast turn (1 rad/s, view
+  `1119 1355.9 -431 -1.55 0.15`), moving/still Laplacian ratio over the
+  sky crop, Release 2560x1440 (before the finer detail): gain 6: 0.848,
+  3: 0.869, 1.5: 0.890; clouds off 0.935. A higher gain sharpens edges
+  in a still frame that the temporal resolve then cannot keep in motion.
+  Gain 3 is the middle; with the finer detail noise the ratio is 0.880.
+- **Cloud shadow fallback refit:** the Task 5 procedure (top-down
+  captures at 9 km, mean map vs fallback T where the map weight is 1, 3
+  positions per sun elevation): `k = 1 - 0.72 type^2.6`, L = 5.5 km.
+  Fallback minus map: fair -0.009 (40.5 deg), +0.026 (20), +0.006 (10),
+  -0.053 (6.5); broken -0.008, +0.120, +0.077, +0.040 (the stale fit was
+  -0.07..-0.16 fair, -0.06..+0.17 broken). L = 3.5 km made fair at 6.5
+  deg and broken at 10 deg worse (-0.13, -0.08): the remaining error is
+  the step from one crossing to many at ~26 deg, not L.
+- **Measured (Release, 2560x1440):** `clouds` ms, fair from 1500 m 0.88
+  (was 0.83 at the rebase), looking up 1.0, broken 1.0-1.25, overcast
+  0.55, sunset from above 0.9; `weather` 0.34-0.5.
 - **Contour bands at full render scale** (Task 5 note): the stacked
   shelves came from the old profile x shape product under the steep
-  shape stretch, not from sampling: forcing noise mip 0 changed nothing,
-  and `--render-scale 0.5` only blurred them (cloud targets at 1/8 of
-  the display). The flat-base profile and the finer noise removed them;
-  what remains is the quarter-resolution march's texel stair-step on
-  small distant clouds (backlog).
+  shape stretch, not from sampling; the flat-base profile and finer noise
+  removed them. What remains is the quarter-resolution march's texel
+  stair-step on small distant clouds (backlog).
 - **Catmull-Rom upsample overshoot:** clamping to the central 2x2 range
   changed the sunset-from-above view by MAE 1.4e-4 with no visible ring
   removed, so the composite is unchanged.

@@ -152,7 +152,10 @@ Laplacian with the still's). Placed forests (seed 1): forest edge
 canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
 placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
 the summit ridge at ~1.5 km: the open view toward the summit.
-Clouds (layer 1.8-4.5 km above sea level): fair cumulus from the
+Clouds (layer 1.8-4.5 km above sea level, cirrus sheet at 9 km): beside
+the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
+0.5`, stratocumulus the fair view with `--weather broken`, overcast
+`1119 1356 -431 -1.55 0.25 --weather overcast`; fair cumulus from the
 ground `1119 1355.9 -431 -1.55 0.15`; above the layer `1119 6500 -431
 -1.55 -0.25` (pitch -0.1 looks across the weather map's 30 km edge);
 inside the layer (half-resolution march) `1119 3200 -431 -1.55 0`; the
@@ -161,7 +164,8 @@ development (`tools/cloud-compare.sh`, each beside its photo in
 `assets/reference/clouds/`, git-ignored): midday from the ground looking
 up `1119 1356 -431 -1.55 0.5 --sun 0.45 0.85 0.25` (cloud1, cloud5), the
 same toward the horizon at pitch 0.1 (cloud3, cloud4), sunset from above
-the layer `1119 5500 -431 -1.55 -0.2 --sun -0.998 0.05 0.03` (cloud2);
+the layer `1119 5500 -431 -1.55 -0.2 --sun -0.998 0.05 0.03 --weather
+broken` (cloud2);
 the script also captures `.pfm`s with clouds on and off and prints the
 sunlit tops and the bases over the clear sky behind them, the cover, the
 spread of the bases and the shading contrast, and the same measured on
@@ -373,10 +377,12 @@ late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it: luminance with
 haze + transmittance, mean cloud depth d, stored -1 - d where scene
-geometry cut the march; clouds_resolve.comp accumulates it into a per-resolution history
+geometry cut the march; the cirrus sheet (`cirrusLayer`) behind it on
+sky pixels; clouds_resolve.comp accumulates it into a per-resolution history
 reprojected by cloud depth + wind; clouds_composite.comp upsamples it
-bilaterally on scene depth over HDR (as storage, GENERAL) and writes
-cloud motion where opacity > 0.5) -> upscaler (`Upscaler::evaluate` with an
+bilaterally on scene depth over HDR (as storage, GENERAL), writes
+cloud motion where opacity > 0.5 and raises the transparency mask to the
+cloud coverage) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask (and the guides
 when `wantsGuides()`) in SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
