@@ -1,101 +1,107 @@
-# Where work stopped (2026-11-20)
+# Where work stopped (2026-11-20, usage limit)
 
 Read this first when resuming. Durable state is in git; the SDD ledgers
 under `.superpowers/` are local and git-ignored.
 
-## How work runs from 2026-11-21: one orchestrator
+## How work runs: one orchestrator
 
-The two lanes (A: forests and quality on main; B: clouds on `clouds`) end
-here. One orchestrator session owns all open work. It talks with the
-user and, per branch, delegates to sub-orchestrators that run
+One orchestrator session is the user's only interface. It does no
+implementing, reviewing or research itself: it dispatches one
+sub-orchestrator per lane (background agent, self-contained brief), and
+relays reports and user decisions. Each sub-orchestrator runs
 subagent-driven development (implementer, task reviewer, fixer, final
-reviewer; push after a clean review). `/tmp` is wiped on reboot: keep
-artifacts under `.superpowers/sdd/<plan>/artifacts/`. The orchestrator:
+reviewer) in its own worktree beside the repo (never under `/tmp`, which
+is wiped on reboot; artifacts under `.superpowers/sdd/<plan>/artifacts/`),
+and merges to main by rebase + fast-forward after a clean review. Every
+game run goes through `flock /tmp/meridian-gpu.lock`.
 
-- tells the user concisely what is being worked on, why, which technique,
-  and what it changes in the engine and the game;
-- sequences merges into main, so branches never diverge far: rebase the
-  next branch onto main right after each merge;
-- before each merge, runs a tidiness sweep of the branch against main:
-  no duplicated functions or shaders, no unused code, flags, files or
-  debug views, no stale docs (CLAUDE.md, decisions.md, specs, backlog);
-- keeps `docs/backlog.md` and this file current.
+Usage budget (the 2026-11-20 window ran out with five lanes at once):
 
-Open branches, in the proposed order (the user may reorder):
+- At most two build lanes at a time; research is a short capped report.
+- Implementers and docs agents on Sonnet; Opus only for risky reviews and
+  judgment. Never Fable.
+- Give the user an expected usage cost before fanning out.
+- Prefer work with a visible result.
+- At ~90% usage: every lane commits labeled WIP, pushes, records its next
+  step here, and stops.
 
-1. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
-   Tasks 6-8, final review, merge.
-2. Then M2a Tasks 8-12 and the rest under "Next after that".
+Every lane brief carries: no AI attribution in commits; the latest
+version of any SDK (verify at fetch time); the pre-merge tidiness check
+(no temporary debug code, flags or stray files; new CLI flags get a
+CLAUDE.md line; the plan's Status line updated; deferred items as
+backlog rows; docs state current truth only).
 
-The clouds branch touches the same frame and shading files as the other
-two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
-so rebasing it after each merge keeps conflicts small.
+Reports to the user: "status" = running and waiting work only;
+"overview" = what is done.
+
+## Decisions waiting for the user
+
+1. M2a Task 8 gates (see below): tune the voxel far field (C) with the
+   spec's levers, or fall back to option B (2.5D canopy). Measure the
+   shadow and coverage gates first.
+2. Clouds: the motion-sharpness trade-off the clouds lane will write up,
+   then the Task 7 comparisons before Task 8.
+
+Decided 2026-11-20, not yet applied: TAA v2 is the default upscaler for
+now; DLSS 4.5 support is mandatory, with DLAA preset M (2.36 ms at
+1440p, passes every quality gate) as an option, not the default. Record
+it in the motion-clarity plan and decisions.md when merging `motion-dlss`.
+
+## In progress (WIP branches on origin)
+
+- **Motion clarity** (plan `docs/superpowers/plans/2026-11-20-motion-clarity.md`,
+  spec `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`; its
+  Status line has the next steps). On main: gate tools, grading (CPU
+  reference + GPU LUT bake), render/display split, transparency mask,
+  Upscaler interface, TAA v2 (forward 5 m/s 0.94, 0.17 ms at 1440p).
+  `motion-dlss` at 29d1383: DLSS module (Task 1.3), review-approved, two
+  of three fixes done (the third becomes a backlog row); finish, squash,
+  merge. Then 1.4 -> 1.5 and 3.2a -> 3.2b, docs sweep, final review.
+  The clouds branch must follow the plan's clouds rebase checklist
+  (cloud targets sized from `renderExtent`, transparency mask, white
+  noise under Ray Reconstruction). Ledger:
+  `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/`.
+- **M2a Task 8** (`wip/m2a-task8` at 156e3fc, worktree
+  `../meridian-forests`, ledger in its
+  `.superpowers/sdd/2026-11-19-forests/`, numbers in `task-8d-report.md`):
+  voxel far-field prototype, task-reviewed, builds. Gates at 1440p
+  Release so far fail: VRAM resident 659 MiB / 500, load peak 3.68 GB /
+  2.5; far pass 2.4 ms ridge, 6.1-8.5 ms overview / 1.0; voxel far
+  shadows 1.5-2.4x the TLAS path. Shadow and coverage gates unmeasured
+  (their helper scripts may be lost). Next: measure them, then stop for
+  decision 1; afterwards docs, squash, merge or switch to B.
+- **Clouds** (`clouds` at 2399906, worktree `../meridian-clouds`, plan
+  `docs/superpowers/plans/2026-11-19-clouds-weather.md`). Tasks 1-6 done
+  and reviewed. Task 7 (look development) fix round is WIP 2399906:
+  unbuilt, uncaptured, unreviewed. Next steps are in the branch ledger
+  `docs/superpowers/wip-ledgers/clouds/progress.md`: refit the cloud
+  shadow fallback, write up the motion-sharpness trade-off for the user,
+  regenerate the comparisons, regression checks, re-review, fold into
+  782dd03, then stop for the user before Task 8. Comparisons made before
+  the fixes: `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/final/`.
+  Before merging: copy the ledger back into `.superpowers/` and delete
+  `docs/superpowers/wip-ledgers/`; then set the clouds plan's Status line.
 
 ## Done on main
 
-- M1 (15 km Napf terrain) complete.
-- M2a forests: Task 1 (static TLAS), 2 (Megaplants import), 3 (placement
-  rules), 4 (GPU placement at load, 2.9M instances), 5 (cell cull,
-  prototype BLAS + TLAS fill, placed trees and rocks drawn), 6
-  (cluster-group BVH), 7 (GPU BVH traversal; every tree drawn as
-  clusters, ~11.5 ms of raster at the forest edge until the far field)
-  done, reviewed, pushed.
-- Quality pass step 1: sky dithering, summer haze default (AOD 0.10,
-  scale height 0.5 km), terrain march lifted above its own cell (contour
-  bands at grazing sun).
-- Quality pass AO: multi-bounce AO + specular occlusion, per-layer terrain
-  AO strength (needle layer 0.5); shadowed needle ground ~11% of sunlit.
-- `docs/backlog.md`: everything deferred.
-
-## In progress (WIP branches on origin, not reviewed)
-
-- `wip/m2a-task8` (M2a Task 8, voxel far-field prototype; worktree
-  `../meridian-forests`, SDD ledger in its `.superpowers/sdd/2026-11-19-forests/`):
-  four WIP commits (phases A bake+splat, B far raster, C far shadows, review
-  fixes), task-reviewed, build and tests pass. Known so far: VRAM over
-  both gates (resident 659 MiB / 500, load peak 3.68 GB / 2.5); far field
-  pass ~2.4 ms ridge, ~6.1 ms overview at 1440p (gate 1.0); voxel far
-  shadows cost 1.5-2.4x the TLAS path. Next: Phase D (Task 8 Step 6-7):
-  measure all gates at 1440p Release, write decisions.md/CLAUDE.md/backlog,
-  squash into one commit, then stop for the user's gate decision (tune C,
-  a lever, or option B). Not merged.
-- `clouds`: M4 clouds, see below.
-
-## Where clouds stopped
-
-Branch `clouds` on origin (worktree `../meridian-clouds`), not merged.
-Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
-
-- Tasks 1-4 done and reviewed: weather state + global wind, noise and
-  weather map, cloud march, temporal resolve + composite + cloud motion
-  vectors.
-- Task 5 (cloud shadow map): 0f7e4c1 reviewed as needs-fixes (shadow
-  lines unbounded to receivers, ~3.4 ms at a 2 degree sun; pop and ring
-  near a horizon sun; beyond-map term uncalibrated). Fix round is
-  69066dd, a labeled WIP commit: builds, tests pass, captures unfinished,
-  not reviewed, fix report not written. Next: a fresh implementer redoes
-  the captures and writes the fix report, scoped re-review, then fold
-  into 0f7e4c1 as one commit.
-- Then Task 6 (sky + cloud capture, ambient, time-lapse), Task 7 (cloud
-  look development against `assets/reference/clouds/`; show the user the
-  comparisons before Task 8), Task 8 (Release measurement, budget levers
-  to the user before any cut). Task 7's text is in main's plan (b9a19a1),
-  not yet on the branch: rebase `clouds` onto main first.
-- Merge: rebase onto main, final whole-branch review, fast-forward main;
-  move unresolved minors into `docs/backlog.md`.
-- Ledger: a copy of the clouds SDD ledger (rulings, deferred minors,
-  briefs, reports, Task 7 look-dev notes) is committed on the branch in
-  `docs/superpowers/wip-ledgers/clouds/` (5a64f4d). Copy it back into
-  `.superpowers/sdd/2026-11-19-clouds-weather/` and delete the folder
-  before merging. Capture artifacts (477 MB) stayed local.
-- Task 7 needs the reference photos in `assets/reference/clouds/`
-  (git-ignored; copy them across with `assets/`).
+- M1 (15 km Napf terrain).
+- M2a Tasks 1-7: static TLAS, Megaplants import, placement rules, GPU
+  placement (2.9M instances), placed trees and rocks drawn (cell cull,
+  TLAS fill), cluster-group BVH and its GPU traversal (0 drops; ~11.5 ms
+  of raster at the forest edge at 1080p until the far field lands).
+  Geometry pools sized from the loaded content.
+- Quality pass: sky dithering, summer haze, terrain march fix, multi-
+  bounce AO + specular occlusion, per-layer terrain AO (shadowed ground
+  ~11% of sunlit). `--capture x.pfm` + `tools/region-luminance.py`.
+- Far-field spec (`docs/superpowers/specs/2026-11-20-far-field-design.md`).
+- Repo hygiene: CLAUDE.md trimmed, docs map at its top, known gaps in
+  `docs/backlog.md`, asset notes in `docs/assets.md`.
 
 ## Next after that
 
-M2a Tasks 8 (voxel far-field prototype: stop and
-show the user its gates; option B is the fallback), 9 (far-field
-completion), 10-11 (mid-range impostors), 12 (gate: forest views
-<= 16.7 ms with shadows). Far field decided 2026-11-20
-(`docs/superpowers/specs/2026-11-20-far-field-design.md`). Quality pass step 2 (shadow denoiser + TAA
-sharpness) needs a spec first. Then M2b (forest lighting), M3 (meadow).
+M2a Tasks 9 (far-field completion), 10-11 (mid-range impostors), 12
+(gate: forest views <= 16.7 ms with shadows). M2b (forest lighting), M3
+(meadow). Backlog highlights: HDR output (mandatory), violet distant
+haze, procedural rivers/paths, character animation. The user's look
+target is the Chlorophyll Engine video (frames in
+`assets/reference/chlorophyll/`).
