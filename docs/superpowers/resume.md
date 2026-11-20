@@ -132,17 +132,21 @@ assets themselves. Order:
   decision 1; afterwards docs, squash, merge or switch to B.
 - **Clouds** (`clouds`, worktree `../meridian-clouds`, plan
   `docs/superpowers/plans/2026-11-19-clouds-weather.md`). Rebased onto
-  main 1a7ef7d (2026-11-20) with the motion-clarity clouds checklist done
-  (transparency mask, white noise under RR, render-size targets).
-  Tasks 1-7 done and reviewed; Task 7 (look development against the
-  Chlorophyll frames) waits for the user's look approval. Sheets:
-  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/look/sheet.jpg`
-  (fair, fair with `--haze summer-hazy`, cirrus, stratocumulus, overcast,
-  sunset). Release 1440p: clouds 0.91 ms fair, 1.16 broken; fast-turn
-  sky ratio 0.881 (clouds off 0.935). Next steps in the branch ledger
+  main 0eade40 (2026-11-20: green ground, DLSS RR). Tasks 1-7 done and
+  reviewed; after the user's "blurry, lacks detail" review, a sharpness
+  round (decisions.md "Sharp cloud detail": billows across the body,
+  in-cloud ambient occlusion, gain 6, softer base ramp fixing the
+  stair-stepped underside). Sheets (user screenshots / before / after,
+  DLSS DLAA + RR):
+  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/sharp/sheet.jpg`.
+  Release 1440p clouds 1.2-1.5 ms fair, 1.2-1.3 broken; fast-turn sky
+  ratio 0.878 (was 0.916, clouds off 0.978) under RR: user decision.
+  Open: horizon field of similar small cells, shadow fallback refit
+  (stale after the cut/gain change), RR sky smudge above the layer
+  (backlog). Next steps in the branch ledger
   `docs/superpowers/wip-ledgers/clouds/progress.md` (NEXT): on the user's
-  OK, Task 8 (measurement), rebase, final review, merge. Before merging:
-  copy the ledger back into `.superpowers/` and delete
+  OK, Task 8 (measurement, fallback refit), rebase, final review, merge.
+  Before merging: copy the ledger back into `.superpowers/` and delete
   `docs/superpowers/wip-ledgers/`; then set the clouds plan's Status line.
 
 ## Done on main

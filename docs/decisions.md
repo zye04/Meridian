@@ -2183,6 +2183,7 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   inner structure up close at no measurable cost. Density gain 3 (eroded
   density scaled and saturated, Nubis' remap): 6 gave hard silhouettes
   and cost motion sharpness (see the trade below). Cumulus cut 0.6.
+  Superseded by "Sharp cloud detail" below (billows, gain 6, cut 0.3).
 - **Flat bases:** the cumulus base ramp multiplies after the shape cut,
   so every cloud starts at the layer bottom. Extruding the shape below
   10-25% of the layer gave straight-walled boxes, dropped (twice).
@@ -2212,6 +2213,7 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   3: 0.869, 1.5: 0.890; clouds off 0.935. A higher gain sharpens edges
   in a still frame that the temporal resolve then cannot keep in motion.
   Gain 3 is the middle; with the finer detail noise the ratio is 0.880.
+  Superseded by "Sharp cloud detail" below (gain 6, measured under RR).
 - **Cloud shadow fallback refit:** the Task 5 procedure (top-down
   captures at 9 km, mean map vs fallback T where the map weight is 1, 3
   positions per sun elevation): `k = 1 - 0.72 type^2.6`, L = 5.5 km.
@@ -2240,3 +2242,61 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   - Patapom, Real-time Volumetric Rendering course notes (Revision 2013): https://patapom.com/topics/Revision2013/Revision%202013%20-%20Real-time%20Volumetric%20Rendering%20Course%20Notes.pdf
   - GameDev.net, Horizon: Zero Dawn cloud system thread (coverage vs density, height gradients): https://gamedev.net/forums/topic/680832-horizonzero-dawn-cloud-system/
   - Hess, Koepke, Schult, Optical Properties of Aerosols and Clouds (1998): https://lweb.cfa.harvard.edu/hitran/HITRAN2012/Aerosols/papers/hess_opac_1998.pdf
+
+## Sharp cloud detail (M4 clouds, 2026-11-20)
+
+User review of the look: clouds blurry and lacking detail next to the
+Chlorophyll frames; smooth grey interiors, detail only at the rim, a
+stair-stepped underside on a large backlit cloud, many identical small
+cells toward the horizon. Views recreated from the user's screenshots
+(the default start, `--weather fair` and `broken`, looking toward the
+sun); sheets in the clouds worktree's
+`.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/sharp/`.
+
+- **Cause of the blur:** the noise spectrum, not the march resolution.
+  The base shape (Perlin-Worley, 8 km period) has nothing finer than
+  ~500 m and the detail volume (256 m period) nothing coarser than
+  ~128 m, and the detail only erodes where the shape is already thin:
+  the gain saturates the rest, so bodies were smooth isosurfaces with
+  smooth, height-only ambient. Half-resolution march on the same view:
+  no added detail (less speckle) for +0.9-1.3 ms, so it stays quarter.
+- **Billows:** the detail volume sampled again at 4x its period (lobes of
+  ~100-500 m, vertically squashed with the base shape) erodes the base
+  shape across the whole body (`kBillowErosion` 0.8, cumulus only:
+  scaled by type), fading out over march lods 1-3 (coarse mips would
+  only thin far clouds). It removes volume, so the cumulus shape cut
+  drops 0.6 -> 0.3 (fair sky cloud fraction 0.224 -> 0.252 on the fair
+  view; broken 0.759 -> 0.693).
+- **In-cloud ambient occlusion:** one density tap 100 m above each
+  lit sample scales its sky ambient by exp(-0.5 x optical depth over the
+  probe), so crevices between billows and undersides darken instead of
+  following the height gradient alone. This is the cloud's own ambient,
+  not the scene's (backlog "Cloud occlusion of ambient" stays). Under
+  overcast it stacks with `kAmbientBottom`'s darker bases.
+- **Density gain 3 -> 6:** with billows to show, the higher gain gives
+  crisp lobe surfaces and visible sunlit-vs-shadowed contrast. It trades
+  motion: fast turn (1 rad/s, view `1119 1355.9 -431 -1.55 0.15`, DLSS
+  DLAA + RR) sky-crop moving/still Laplacian ratio 0.916 -> 0.878
+  (clouds off 0.978), band crop 0.936 -> 0.932 (off 0.944). Gain 4 was
+  visibly softer inside. User decision, like the earlier gain trade-off.
+- **Stair-stepped underside:** the cumulus base ramp (7% of the layer)
+  times the gain was a hard plane, and the wispy (uneroded Worley)
+  erosion near the base cut its rim into stacked ridges; finer march
+  steps (30 m, 256 steps) left them unchanged. The ramp now spans 20% of
+  the layer and cumulus erode billowy (inverted Worley) at every height.
+- **Cost** (Release 2560x1440, DLSS DLAA + RR, `clouds` pass, single
+  runs, spread between runs ~0.2 ms): fair from 1500 m 0.91 -> 1.28-1.54,
+  broken 1.38 -> 1.15-1.21, start view toward the sun fair 1.06 ->
+  1.22-1.49, broken 1.54 -> 1.26-1.33, overcast 0.65 -> 0.70, sunset from
+  above 0.96 -> 1.07. The billow fetch and the ambient tap (a full
+  density sample) cost; the higher gain ends rays sooner.
+- **Cloud size variety:** the weather noise blends in a second Worley
+  field with cells 2x larger where a coarse gradient mask (8 weather
+  cells across) is high (smoothstep 0.5-0.7), rescaled about the mean
+  0.46 by 1 / |(1 - m, m)| so the blend keeps one field's deviation and
+  the coverage threshold stays calibrated. Each field is computed only
+  where its weight is nonzero. The horizon now mixes regions of larger
+  cumulus with fields of small ones instead of one cell size.
+- A grey smudge in the sunset-from-above sky under DLSS RR only (absent
+  with TAA, and before this change with RR) is RR reconstructing the
+  cloud-free sky (backlog).

@@ -127,3 +127,13 @@ Look round 2 (against the Chlorophyll frames): diffuse multiple-scattering term 
 Scoped review (opus): docs-only Needs fixes (stale calibration numbers, comments, cloud-compare dead grep, metrics docstring) fixed; deferred to backlog: mask over solid cloud (DLSS), cirrus fringe at silhouettes from in/above the layer.
 Task 7: complete pending user look approval. Folded: 6f7ef2e "Develop the cloud look against reference photos" + 26f9c05 mask/white-noise commit; prefold tag clouds-t7-prefold. Sheets: .superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/look/sheet.jpg (+ sheet-<view>.png, make-sheets.sh).
 NEXT: user reviews the look sheets (fair, fair-hazy, cirrus, stratocumulus, overcast, sunset) and the I3 trade-off (decisions.md "Cloud look development"). On OK: Task 8 (measurement), rebase onto main, final review (check renderExtent sizing, transparency mask, backlog rows), copy ledger back to .superpowers, drop docs/superpowers/wip-ledgers, ff merge.
+
+## Lane C2 "sharp, detailed clouds" (2026-11-20)
+User feedback: blurry, lacks detail vs Chlorophyll; smooth grey interiors, stair-stepped underside, many identical small horizon cells.
+Rebase 6 onto main 0eade40 (green ground, RR); pre tag clouds-pre-rebase-6=67a369a. Conflicts: decisions/backlog/CLAUDE.md text, mesh.frag includes, SceneData size asserts (+720 B from main, every commit rechecked). Release build OK.
+Root cause: noise spectrum (base >~500 m, detail <~128 m and only at the rim; gain saturates bodies; ambient height-only). Half-res march: less speckle, no detail, +0.9-1.3 ms -> stays quarter. Stair-step: 7% base ramp x gain = hard plane, wispy erosion ridges (finer steps no change).
+Changes: billows (detail volume at 4x period, cumulus, fade lod 1-3), cut 0.6->0.3, in-cloud AO tap 100 m up, gain 3->6, base ramp 0.2, billowy erosion at all heights.
+Clouds ms (Release 1440p, DLAA+RR): fair 0.91->1.28-1.54, broken 1.38->1.15-1.21, overcast 0.65->0.70, sunset 0.96->1.07. Fast-turn sky ratio 0.916->0.878 (off 0.978): user decision.
+Deferred (backlog): horizon cell-size distribution, shadow fallback refit (Task 8), RR sky smudge above layer (TAA clean).
+Sheets: .superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/sharp/sheet.jpg (+ sheet-1..7.jpg, cap.sh, motion.sh).
+NEXT: user look review of the sharp sheets; then Task 8 (incl. fallback refit), rebase, final review, merge.
