@@ -337,8 +337,12 @@ struct SceneData {
   // Every mesh's cluster group BVH nodes and DAG levels.
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
+  float parallaxDepthScale = 1.0f;
+  float parallaxSelfShadow = 1.0f;
+  float microShadowStrength = 1.0f;
+  float contactLengthScale = 1.0f;
 };
-static_assert(sizeof(SceneData) == 1840);
+static_assert(sizeof(SceneData) == 1856);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

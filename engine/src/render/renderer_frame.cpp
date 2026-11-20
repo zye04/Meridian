@@ -471,6 +471,13 @@ void Renderer::setBloom(const Bloom &bloom) {
                   std::clamp(bloom.scatter, 0.0f, 1.0f)};
 }
 
+void Renderer::setEffects(const Effects &effects) {
+  impl_->effects = effects;
+  impl_->effects.parallaxDepth = std::clamp(effects.parallaxDepth, 0.0f, 4.0f);
+  impl_->effects.microShadowStrength = std::clamp(effects.microShadowStrength, 0.0f, 1.0f);
+  impl_->effects.contactLength = std::clamp(effects.contactLength, 0.0f, 3.0f);
+}
+
 void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
@@ -698,6 +705,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.clusterTriangles = impl_->clusterTrianglePool.address;
   scene.clusterNodes = impl_->clusterNodePool.address;
   scene.clusterLevels = impl_->clusterLevelPool.address;
+  const Effects &effects = impl_->effects;
+  scene.parallaxDepthScale = effects.parallax ? effects.parallaxDepth : 0.0f;
+  scene.parallaxSelfShadow = effects.parallaxSelfShadow ? 1.0f : 0.0f;
+  scene.microShadowStrength = effects.microShadows ? effects.microShadowStrength : 0.0f;
+  scene.contactLengthScale = effects.contactLength;
   scene.drawLists = impl_->drawLists.address;
   scene.placedInstances = impl_->placedInstances.address;
   scene.cells = impl_->cells.address;
@@ -1050,16 +1062,18 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
-  ContactShadowConstants contactPush;
-  contactPush.sceneBuffer = scenePush.sceneBuffer;
-  contactPush.size[0] = static_cast<int32_t>(renderExtent.width);
-  contactPush.size[1] = static_cast<int32_t>(renderExtent.height);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactPipeline);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactLayout,
-                          0, 1, &impl_->contactSet, 0, nullptr);
-  vkCmdPushConstants(cmd, impl_->contactLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                     sizeof(contactPush), &contactPush);
-  vkCmdDispatch(cmd, (renderExtent.width + 7) / 8, (renderExtent.height + 7) / 8, 1);
+  if (impl_->effects.contactShadows) {
+    ContactShadowConstants contactPush;
+    contactPush.sceneBuffer = scenePush.sceneBuffer;
+    contactPush.size[0] = static_cast<int32_t>(renderExtent.width);
+    contactPush.size[1] = static_cast<int32_t>(renderExtent.height);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactLayout,
+                            0, 1, &impl_->contactSet, 0, nullptr);
+    vkCmdPushConstants(cmd, impl_->contactLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(contactPush), &contactPush);
+    vkCmdDispatch(cmd, (renderExtent.width + 7) / 8, (renderExtent.height + 7) / 8, 1);
+  }
   transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
                         VK_IMAGE_LAYOUT_GENERAL,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1134,7 +1148,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // --- Glare: blends a heavy-tailed blur of the output back into it, before
   // the exposure meter, which should see the glare as the eye does.
-  if (impl_->bloom.intensity > 0.0f) {
+  if (impl_->effects.bloom && impl_->bloom.intensity > 0.0f) {
     const BloomConstants bloomConstants{impl_->bloom.scatter,
                                         impl_->bloom.intensity};
     auto bloomPass = [&](VkPipeline pipeline, VkDescriptorSet set,

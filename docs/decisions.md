@@ -1906,3 +1906,15 @@ What it does (`parallaxHit`, `terrainSurface` in mesh.frag):
   stats refresh 4x per second. F4 / `--benchmark` write per-frame CSV
   (`frame,frame_ms,cpu_ms,gpu_ms,<passes>`; GPU columns are the newest
   finished frame, 2 behind); a benchmark skips 60 warm-up frames.
+
+## Live effect toggles (2026-11-20)
+
+Parallax, its self-shadow, micro shadows, contact shadows and bloom are
+subtle enough that "is it doing anything" needs a live A/B, so `Effects`
+(renderer.h) sets them per frame through four floats at the end of
+`SceneData` (parallax depth multiplier, 0 = POM off; self-shadow flag; micro
+shadow strength, `mix(1, microShadow, s)`; contact ray length multiplier).
+Contact shadows and bloom off skip their dispatches so F3 shows the cost
+saved. Defaults reproduce the previous image exactly (TAA capture diff 0).
+The grade file stores them as `effect*` numbers; the panel's A/B box and
+Reset cover them; `--effects` is the CLI twin.

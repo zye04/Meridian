@@ -741,15 +741,16 @@ Surface terrainSurface(vec3 normal) {
         // fades out below ~1 pixel (3 cm of depth at ~40 m, 1 cm at ~10 m)
         // and needs a step per ~2 pixels (the secant refines between them).
         float NoV = max(dot(normal, normalize(-inRelativePosition)), kParallaxMinNoV);
-        float pixels = layer.heightScale * sqrt(max(1.0 - NoV * NoV, 0.0)) / NoV /
+        float depthMax = layer.heightScale * pc.scene.parallaxDepthScale;
+        float pixels = depthMax * sqrt(max(1.0 - NoV * NoV, 0.0)) / NoV /
                        max(max(length(dpdx), length(dpdy)), 1e-6);
         float fade = smoothstep(0.5, 1.5, pixels) * (1.0 - clamp(w[8], 0.0, 1.0));
         if (fade > 0.0) {
             float shadow;
             int steps = clamp(int(ceil(0.5 * pixels * fade)), 2, 12);
-            terrainParallax = parallaxHit(layer, normal, dpdx, dpdy, layer.heightScale * fade,
+            terrainParallax = parallaxHit(layer, normal, dpdx, dpdy, depthMax * fade,
                                           steps, shadow);
-            sunShadow = mix(1.0, shadow, fade);
+            sunShadow = pc.scene.parallaxSelfShadow != 0.0 ? mix(1.0, shadow, fade) : 1.0;
         }
     }
 
@@ -963,7 +964,8 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 sunLight = sunAtSurface * (NoL * visibility * microShadow(NoL, s.microOcclusion) *
+        vec3 sunLight = sunAtSurface * (NoL * visibility * mix(1.0, microShadow(NoL, s.microOcclusion),
+                                                         pc.scene.microShadowStrength) *
                                         s.sunShadow);
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;

@@ -163,6 +163,19 @@ struct Bloom {
   float scatter = 0.7f;
 };
 
+// Live toggles for the effects whose look is subtle, for A/B in the grading
+// panel. The defaults are the normal rendering.
+struct Effects {
+  bool parallax = true;           // terrain parallax occlusion mapping
+  float parallaxDepth = 1.0f;     // multiplier on each layer's physical depth, 0..4
+  bool parallaxSelfShadow = true; // the sun's shadow inside the parallax relief
+  bool microShadows = true;
+  float microShadowStrength = 1.0f; // 0..1
+  bool contactShadows = true;       // off skips the pass
+  float contactLength = 1.0f;       // multiplier on the ray length, 0..3
+  bool bloom = true;                // off skips the pass
+};
+
 // GPU time of one named frame pass.
 struct PassTime {
   const char *name;
@@ -274,6 +287,7 @@ public:
   void setGrade(const Grade &grade);
 
   void setBloom(const Bloom &bloom);
+  void setEffects(const Effects &effects);
 
   // Recreates the render-sized images and the upscaler and resets the
   // temporal history. DLSS falls back to TAA when the provider doesn't

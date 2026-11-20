@@ -51,11 +51,20 @@ std::string lookToJson(const Look &look) {
     char text[32];
     return std::string(text, std::to_chars(text, text + sizeof(text), value).ptr);
   };
+  const meridian::Effects &e = look.effects;
   const std::string tail = ",\n  \"sunAzimuthDegrees\": " + number(look.sunAzimuthDegrees) +
                            ",\n  \"sunElevationDegrees\": " + number(look.sunElevationDegrees) +
                            ",\n  \"haze\": \"" + kHazeNames[static_cast<int>(look.haze)] +
                            "\",\n  \"bloomIntensity\": " + number(look.bloom.intensity) +
-                           ",\n  \"bloomScatter\": " + number(look.bloom.scatter) + "\n}\n";
+                           ",\n  \"bloomScatter\": " + number(look.bloom.scatter) +
+                           ",\n  \"effectParallax\": " + number(e.parallax) +
+                           ",\n  \"effectParallaxDepth\": " + number(e.parallaxDepth) +
+                           ",\n  \"effectParallaxSelfShadow\": " + number(e.parallaxSelfShadow) +
+                           ",\n  \"effectMicroShadows\": " + number(e.microShadows) +
+                           ",\n  \"effectMicroShadowStrength\": " + number(e.microShadowStrength) +
+                           ",\n  \"effectContactShadows\": " + number(e.contactShadows) +
+                           ",\n  \"effectContactLength\": " + number(e.contactLength) +
+                           ",\n  \"effectBloom\": " + number(e.bloom) + "\n}\n";
   return json + tail;
 }
 
@@ -69,6 +78,20 @@ Look lookFromJson(std::string_view json, const Look &base) {
   look.bloom.intensity =
       meridian::jsonNumber(json, "bloomIntensity").value_or(base.bloom.intensity);
   look.bloom.scatter = meridian::jsonNumber(json, "bloomScatter").value_or(base.bloom.scatter);
+  auto flag = [&](const char *key, bool fallback) {
+    return meridian::jsonNumber(json, key).value_or(fallback ? 1.0f : 0.0f) != 0.0f;
+  };
+  meridian::Effects &e = look.effects;
+  const meridian::Effects &b = base.effects;
+  e.parallax = flag("effectParallax", b.parallax);
+  e.parallaxDepth = meridian::jsonNumber(json, "effectParallaxDepth").value_or(b.parallaxDepth);
+  e.parallaxSelfShadow = flag("effectParallaxSelfShadow", b.parallaxSelfShadow);
+  e.microShadows = flag("effectMicroShadows", b.microShadows);
+  e.microShadowStrength =
+      meridian::jsonNumber(json, "effectMicroShadowStrength").value_or(b.microShadowStrength);
+  e.contactShadows = flag("effectContactShadows", b.contactShadows);
+  e.contactLength = meridian::jsonNumber(json, "effectContactLength").value_or(b.contactLength);
+  e.bloom = flag("effectBloom", b.bloom);
   if (auto haze = meridian::jsonString(json, "haze")) {
     for (int i = 0; i < 3; ++i) {
       if (*haze == kHazeNames[i]) {
@@ -158,9 +181,29 @@ GradePanel::Changes GradePanel::draw() {
   ImGui::SeparatorText("Bloom");
   slider("bloom intensity", look_.bloom.intensity, 0.0f, 0.1f, changes.bloom);
   slider("bloom scatter", look_.bloom.scatter, 0.0f, 1.0f, changes.bloom);
+  changes.effects |= ImGui::Checkbox("bloom on", &look_.effects.bloom);
+
+  ImGui::SeparatorText("Effects");
+  meridian::Effects &fx = look_.effects;
+  auto effect = [&](const char *name, bool &on, float *value, float max, const char *label) {
+    ImGui::PushID(name);
+    changes.effects |= ImGui::Checkbox(name, &on);
+    if (value) {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(160.0f);
+      slider(label, *value, 0.0f, max, changes.effects);
+    }
+    ImGui::PopID();
+  };
+  effect("parallax", fx.parallax, &fx.parallaxDepth, 4.0f, "depth x");
+  effect("parallax self-shadow", fx.parallaxSelfShadow, nullptr, 0.0f, "");
+  effect("micro shadows", fx.microShadows, &fx.microShadowStrength, 1.0f, "strength");
+  effect("contact shadows", fx.contactShadows, &fx.contactLength, 3.0f, "length x");
 
   ImGui::Separator();
-  changes.grade |= ImGui::Checkbox("show built-in grade", &showBuiltIn_);
+  if (ImGui::Checkbox("show built-in grade", &showBuiltIn_)) {
+    changes.grade = changes.effects = true;
+  }
   if (ImGui::Button("Save")) {
     std::error_code error;
     std::filesystem::create_directories(path_.parent_path(), error);
@@ -179,7 +222,7 @@ GradePanel::Changes GradePanel::draw() {
       if (reset) {
         showBuiltIn_ = false;
       }
-      changes.grade = changes.lighting = changes.bloom = true;
+      changes.grade = changes.lighting = changes.bloom = changes.effects = true;
     }
     status_ = !next ? "load failed" : reset ? "reset" : "loaded";
   }

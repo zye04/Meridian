@@ -21,6 +21,7 @@ struct Look {
   float sunElevationDegrees = 0.0f;
   Haze haze = Haze::Summer;
   meridian::Bloom bloom;
+  meridian::Effects effects;
 };
 
 meridian::Vec3 sunDirection(float azimuthDegrees, float elevationDegrees);
@@ -52,11 +53,16 @@ public:
     bool grade = false;    // the grade() to render changed
     bool lighting = false; // the sun or the haze changed
     bool bloom = false;    // look().bloom changed
+    bool effects = false;  // effects() changed
   };
   // Issues the widgets (after Renderer::beginOverlay).
   Changes draw();
 
   const Look &look() const { return look_; }
+  // The effects to render: the edited ones, or the defaults with A/B on.
+  const meridian::Effects &effects() const {
+    return showBuiltIn_ ? builtIn_.effects : look_.effects;
+  }
   // The grade to render: the edited one, or the built-in with A/B on.
   const meridian::Grade &grade() const {
     return showBuiltIn_ ? builtIn_.grade : look_.grade;

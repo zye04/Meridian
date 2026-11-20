@@ -358,6 +358,36 @@ meridian::Atmosphere atmosphereFor(Haze haze) {
   return {};
 }
 
+// "pom=0,micro=0,contact=0": comma-separated name=value over the defaults.
+// Names: pom, pom-depth, pom-shadow, micro, micro-strength, contact,
+// contact-length, bloom (on/off are 0/1).
+meridian::Effects parseEffects(const std::string &text) {
+  meridian::Effects e;
+  size_t begin = 0;
+  while (begin < text.size()) {
+    size_t end = text.find(',', begin);
+    end = end == std::string::npos ? text.size() : end;
+    const std::string item = text.substr(begin, end - begin);
+    begin = end + 1;
+    const size_t eq = item.find('=');
+    if (eq == std::string::npos) {
+      throw std::runtime_error("--effects takes name=value,... (got " + item + ")");
+    }
+    const std::string name = item.substr(0, eq);
+    const float value = std::stof(item.substr(eq + 1));
+    if (name == "pom") e.parallax = value != 0.0f;
+    else if (name == "pom-depth") e.parallaxDepth = value;
+    else if (name == "pom-shadow") e.parallaxSelfShadow = value != 0.0f;
+    else if (name == "micro") e.microShadows = value != 0.0f;
+    else if (name == "micro-strength") e.microShadowStrength = value;
+    else if (name == "contact") e.contactShadows = value != 0.0f;
+    else if (name == "contact-length") e.contactLength = value;
+    else if (name == "bloom") e.bloom = value != 0.0f;
+    else throw std::runtime_error("--effects: unknown effect " + name);
+  }
+  return e;
+}
+
 // Command-line options for deterministic, automated runs, e.g.
 //   game --camera 1119 4354 -431 -1.55 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
@@ -384,6 +414,7 @@ struct Options {
   bool trees = false;
   bool occlusion = true;
   std::optional<meridian::Bloom> bloom;
+  std::optional<meridian::Effects> effects;
   // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
   std::optional<Haze> haze;
   // Largest simplification error on screen in pixels (0: full detail).
@@ -462,6 +493,8 @@ Options parseOptions(int argc, char **argv) {
       }
     } else if (arg == "--bloom") {
       options.bloom = meridian::Bloom{number(i), number(i)};
+    } else if (arg == "--effects" && i + 1 < argc) {
+      options.effects = parseEffects(argv[++i]);
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -591,6 +624,7 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
+  renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
 
@@ -695,6 +729,7 @@ int main(int argc, char **argv) {
   Look builtIn = lookWithSun(lighting.sunDirection, options.haze.value_or(Haze::Summer));
   builtIn.grade = kStartingGrade;
   builtIn.bloom = options.bloom.value_or(meridian::Bloom{});
+  builtIn.effects = options.effects.value_or(meridian::Effects{});
   Look look = builtIn;
   const std::filesystem::path gradePath = options.gradePath.value_or(defaultLookPath());
   if (options.gradePath || interactive) {
@@ -715,6 +750,11 @@ int main(int argc, char **argv) {
         look.bloom = *options.bloom;
       } else {
         renderer.setBloom(look.bloom);
+      }
+      if (options.effects) {
+        look.effects = *options.effects;
+      } else {
+        renderer.setEffects(look.effects);
       }
       renderer.setGrade(look.grade);
     } else if (options.gradePath) {
@@ -829,6 +869,9 @@ int main(int argc, char **argv) {
           lighting.sunDirection = sunDirection(gradePanel.look().sunAzimuthDegrees,
                                                gradePanel.look().sunElevationDegrees);
           lighting.atmosphere = atmosphereFor(gradePanel.look().haze);
+        }
+        if (changes.effects) {
+          renderer.setEffects(gradePanel.effects());
         }
         if (changes.bloom) {
           renderer.setBloom(gradePanel.look().bloom);

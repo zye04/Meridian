@@ -411,6 +411,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint pad3;
     ClusterNodeBuffer clusterNodes;
     ClusterLevelBuffer clusterLevels;
+    // Effects (renderer.h): parallax depth multiplier (0 = off), parallax
+    // self-shadow on/off, micro shadow strength, contact shadow length multiplier.
+    float parallaxDepthScale;
+    float parallaxSelfShadow;
+    float microShadowStrength;
+    float contactLengthScale;
 };
 
 // Largest axis scale of a transform: a conservative bound under

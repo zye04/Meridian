@@ -297,6 +297,7 @@ struct Renderer::Impl {
   Grade grade;
   bool gradeDirty = true;
   Bloom bloom;
+  Effects effects;
   VkDescriptorSetLayout bloomSetLayout = VK_NULL_HANDLE;
   VkPipelineLayout bloomLayout = VK_NULL_HANDLE;
   VkPipeline bloomDownPipeline = VK_NULL_HANDLE;

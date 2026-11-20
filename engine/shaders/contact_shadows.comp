@@ -71,7 +71,8 @@ void main() {
         jitter = interleavedGradientNoise(vec2(pixel) + vec2(47.0, 13.0), pc.scene.frameIndex);
     }
 
-    float rayLength = clamp(kRayLengthPerMeter * distance, kMinRayLength, kMaxRayLength);
+    float rayLength = clamp(kRayLengthPerMeter * distance, kMinRayLength, kMaxRayLength) *
+                      pc.scene.contactLengthScale;
     // A grazing surface changes depth by more than the bias across one
     // pixel; the march compares against texel centres, so add that slope.
     float slope = max(abs(viewDistance(texelFetch(depthImage, min(pixel + ivec2(1, 0), pc.size - 1), 0).r) - distance),

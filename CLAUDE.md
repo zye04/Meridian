@@ -58,13 +58,16 @@ only for the run, never for builds. Examples below omit the prefix.
 Controls: WASD, mouse, Esc. Fly mode: Space/Ctrl up/down, 30 m/s,
 Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 1.4 m/s (Shift 5 m/s), no vertical keys.
 `G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
-sun azimuth/elevation, haze and bloom (intensity, scatter), with Save, Load, Reset and a "show built-in
+sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
+section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
+parallax self-shadow, micro shadows on/off + strength, contact shadows on/off
+(off skips the dispatch) + length x0..3, bloom on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
 `~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
 names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
-`haze`, `bloomIntensity`, `bloomScatter`), which **interactive runs load at
+`haze`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
 startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
 `--grade FILE` loads a grade file in any run (A/B captures of a tuned
 look); `--overlay grade|perf` opens a panel at startup (it is in captures;
@@ -127,7 +130,8 @@ DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--no-occlusion` draws everything in the frustum
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0`
+sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
