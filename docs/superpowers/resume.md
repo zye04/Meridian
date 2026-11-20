@@ -99,8 +99,9 @@ assets themselves. Order:
 1. M2a Task 8 gates (see below): tune the voxel far field (C) with the
    spec's levers, or fall back to option B (2.5D canopy). Measure the
    shadow and coverage gates first.
-2. Clouds: the motion-sharpness trade-off the clouds lane will write up,
-   then the Task 7 comparisons before Task 8.
+2. Clouds: the look (Task 7 sheets) and the motion-sharpness vs
+   density-gain trade-off (decisions.md, "Cloud look development"),
+   before Task 8.
 
 ## In progress (WIP branches on origin)
 
@@ -129,16 +130,19 @@ assets themselves. Order:
   shadows 1.5-2.4x the TLAS path. Shadow and coverage gates unmeasured
   (their helper scripts may be lost). Next: measure them, then stop for
   decision 1; afterwards docs, squash, merge or switch to B.
-- **Clouds** (`clouds` at 2399906, worktree `../meridian-clouds`, plan
-  `docs/superpowers/plans/2026-11-19-clouds-weather.md`). Tasks 1-6 done
-  and reviewed. Task 7 (look development) fix round is WIP 2399906:
-  unbuilt, uncaptured, unreviewed. Next steps are in the branch ledger
-  `docs/superpowers/wip-ledgers/clouds/progress.md`: refit the cloud
-  shadow fallback, write up the motion-sharpness trade-off for the user,
-  regenerate the comparisons, regression checks, re-review, fold into
-  782dd03, then stop for the user before Task 8. Comparisons made before
-  the fixes: `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/final/`.
-  Before merging: copy the ledger back into `.superpowers/` and delete
+- **Clouds** (`clouds`, worktree `../meridian-clouds`, plan
+  `docs/superpowers/plans/2026-11-19-clouds-weather.md`). Rebased onto
+  main 1a7ef7d (2026-11-20) with the motion-clarity clouds checklist done
+  (transparency mask, white noise under RR, render-size targets).
+  Tasks 1-7 done and reviewed; Task 7 (look development against the
+  Chlorophyll frames) waits for the user's look approval. Sheets:
+  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/look/sheet.jpg`
+  (fair, fair with `--haze summer-hazy`, cirrus, stratocumulus, overcast,
+  sunset). Release 1440p: clouds 0.91 ms fair, 1.16 broken; fast-turn
+  sky ratio 0.881 (clouds off 0.935). Next steps in the branch ledger
+  `docs/superpowers/wip-ledgers/clouds/progress.md` (NEXT): on the user's
+  OK, Task 8 (measurement), rebase, final review, merge. Before merging:
+  copy the ledger back into `.superpowers/` and delete
   `docs/superpowers/wip-ledgers/`; then set the clouds plan's Status line.
 
 ## Done on main
