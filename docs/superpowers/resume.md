@@ -9,7 +9,8 @@ The two lanes (A: forests and quality on main; B: clouds on `clouds`) end
 here. One orchestrator session owns all open work. It talks with the
 user and, per branch, delegates to sub-orchestrators that run
 subagent-driven development (implementer, task reviewer, fixer, final
-reviewer). The orchestrator:
+reviewer; push after a clean review). `/tmp` is wiped on reboot: keep
+artifacts under `.superpowers/sdd/<plan>/artifacts/`. The orchestrator:
 
 - tells the user concisely what is being worked on, why, which technique,
   and what it changes in the engine and the game;
@@ -88,10 +89,3 @@ completion), 10-11 (mid-range impostors), 12 (gate: forest views
 <= 16.7 ms with shadows). Far field decided 2026-11-20
 (`docs/superpowers/specs/2026-11-20-far-field-design.md`). Quality pass step 2 (shadow denoiser + TAA
 sharpness) needs a spec first. Then M2b (forest lighting), M3 (meadow).
-
-## Process
-
-Subagent-driven development per plan task: brief from the plan, fresh
-implementer, task review, push after a clean review. Every game run goes
-through `flock /tmp/meridian-gpu.lock`. `/tmp` is wiped on reboot: keep
-artifacts under `.superpowers/sdd/<plan>/artifacts/`.
