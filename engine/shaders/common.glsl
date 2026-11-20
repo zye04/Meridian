@@ -580,6 +580,8 @@ struct LoadedInstance {
     // A mesh index, or a prototype index when placed.
     uint meshOrPrototype;
     bool placed;
+    // Streamed instances: the shrink factor (streamFade), 1 otherwise.
+    float fade;
 };
 
 // A streamed instance (a ring id) thins out with distance and shrinks to
@@ -598,6 +600,7 @@ void applyStreaming(SceneBuffer scene, uint ring, inout LoadedInstance loaded) {
     loaded.transform[1].xyz *= factor;
     loaded.transform[2].xyz *= factor;
     loaded.scale *= factor;
+    loaded.fade = factor;
     float weight = factor > 0.0 ? terrainDetailWeight(scene.terrain, distanceToCamera) : 0.0;
     if (weight > 0.0) {
         loaded.transform[3].y += weight * terrainDetail(position.xz).x;
@@ -613,6 +616,7 @@ LoadedInstance loadInstance(SceneBuffer scene, uint id) {
         loaded.scale = placedScale(placed);
         loaded.meshOrPrototype = placed.prototype;
         loaded.placed = true;
+        loaded.fade = 1.0;
         if (index >= scene.placedCount) {
             applyStreaming(scene, index - scene.placedCount, loaded);
         }
@@ -623,6 +627,7 @@ LoadedInstance loadInstance(SceneBuffer scene, uint id) {
     loaded.scale = maxScale(instance.transform);
     loaded.meshOrPrototype = instance.meshIndex;
     loaded.placed = false;
+    loaded.fade = 1.0;
     return loaded;
 }
 

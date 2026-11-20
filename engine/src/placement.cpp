@@ -530,11 +530,11 @@ float streamKeepFraction(float distance, float fullDensity, float maxDistance) {
   }
   const float ratio = distance <= fullDensity ? 1.0f : fullDensity / distance;
   const float thin = distance <= fullDensity ? 1.0f : ratio * ratio;
-  return thin * (1.0f - smoothstep01(0.8f * maxDistance, maxDistance, distance));
+  return thin * (1.0f - smoothstep01(0.5f * maxDistance, maxDistance, distance));
 }
 
 float streamFade(float keepFraction, float threshold) {
-  return smoothstep01(0.0f, 0.15f, keepFraction - threshold);
+  return smoothstep01(0.0f, 0.3f, keepFraction - threshold);
 }
 
 uint32_t streamWindowCells(float radius) {

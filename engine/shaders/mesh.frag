@@ -25,6 +25,9 @@ layout(location = 7) flat in float inLodError;
 layout(location = 8) in float inHeight;
 // Placed instances' prototype tint (Prototype::tint), 1 otherwise.
 layout(location = 9) flat in vec3 inTint;
+// A streamed plant's shrink factor (1 = full size): it shades like the
+// terrain it turns into as this goes to 0.
+layout(location = 10) flat in float inStreamFade;
 #endif
 
 layout(location = 0) out vec4 outColor;
@@ -91,14 +94,6 @@ vec4 sampleTexture(uint index, vec2 uv) {
     return texture(textures[nonuniformEXT(index)], uv, pc.scene.mipBias);
 }
 
-#ifdef TERRAIN
-// Flat ground above the snow line, fading in over 40 m.
-float snowCover(vec3 normal) {
-    float snowLine = pc.scene.terrain.snowLine;
-    return smoothstep(snowLine, snowLine + 40.0, worldPosition.y) *
-           smoothstep(0.6, 0.8, normal.y);
-}
-
 // The heightfield's normal from the normal map, filtered (trilinear,
 // anisotropic) so distant ground doesn't alias; per pixel, because vertex
 // normals would change with the LOD. Near the camera the detail
@@ -117,6 +112,14 @@ vec3 terrainNormal() {
         slope += weight * terrainDetail(worldPosition.xz).yz;
     }
     return normalize(vec3(-slope.x, 1.0, -slope.y));
+}
+
+#ifdef TERRAIN
+// Flat ground above the snow line, fading in over 40 m.
+float snowCover(vec3 normal) {
+    float snowLine = pc.scene.terrain.snowLine;
+    return smoothstep(snowLine, snowLine + 40.0, worldPosition.y) *
+           smoothstep(0.6, 0.8, normal.y);
 }
 
 // Grass, rock and snow chosen by slope and height: the terrain's fallback
@@ -830,7 +833,7 @@ float plantOcclusion(Material m) {
     if (m.diffuseTransmission <= 0.0) {
         return 1.0;
     }
-    return mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, inHeight),
+    return mix(1.0, mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, inHeight), inStreamFade),
                pc.scene.microShadowStrength);
 }
 #endif
@@ -896,6 +899,9 @@ void main() {
         normal = -normal;
     }
     Surface s = materialSurface(material, normal);
+    if (inStreamFade < 1.0) {
+        s.normal = normalize(mix(terrainNormal(), s.normal, inStreamFade));
+    }
 #endif
 #ifdef ALPHA_MASK
     if (s.alpha < material.alphaCutoff) {
@@ -921,7 +927,9 @@ void main() {
     // light per triangle.
     bool facesSun = true;
 #else
-    bool facesSun = dot(geometricNormal, sh.L) > 0.0;
+    // A fading plant's normal is blended toward the terrain's (up), which
+    // turns off its back faces' transmission; let them take the sun.
+    bool facesSun = dot(geometricNormal, sh.L) > 0.0 || inStreamFade < 1.0;
 #endif
     if (sh.NoL > 0.0 && facesSun) {
 #ifdef TERRAIN

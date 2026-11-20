@@ -2716,6 +2716,25 @@ sun shadows, but cast only screen-space contact shadows. Whether they
 should be in the TLAS is open (plan task 4). Plan:
 `docs/superpowers/plans/2026-11-20-streamed-placement.md`.
 
+- **Seamless thinning (2026-11-20):** the mat must leave no edge, ring
+  or pop. The keep fraction is full density, then (fullDensity/d)^2,
+  faded to 0 over the last 50% of maxDistance (was 20%), and an
+  instance's scale is `smoothstep(0, 0.3, keep - threshold)` (was 0.15),
+  so tufts shrink toward their base pivot over a wide band before they
+  drop. Per instance and continuous in camera distance, no per-cell term
+  (CPU reference, GLSL mirror and tests changed together). The fade
+  factor goes from `loadInstance` (`LoadedInstance.fade`, 1 for
+  non-streamed) through mesh.mesh / mesh.vert (flat varying, location 9)
+  to mesh.frag, whose plant path blends the shading normal toward the
+  terrain's (`terrainNormal()`, now outside the TERRAIN block) and the
+  micro occlusion toward 1 as it goes to 0, so the last tufts shade like
+  the ground. No prefetch margin: the slot update runs in the frame that
+  draws it, before the cull, so a window of maxDrawDistance + bounds
+  margin already holds every cell in reach at any speed (unit test along
+  a 2.5 m/frame diagonal path); a 32 m margin tried first only grew the
+  window to 7x7 (ring 4.21M -> 8.25M slots, ~230 MB) for nothing. Fading
+  leaves keep direct sun on their back faces, since the blended normal
+  turned off their transmission and they went dark.
 - **Ground following:** near the camera the raster terrain adds up to
   0.3 m of detail noise that placement (on the bilinear heightfield)
   doesn't see. Short plants sank under it, and only their TLAS shadow
@@ -2736,7 +2755,7 @@ should be in the TLAS is open (plan task 4). Plan:
     above the mat)
   - sparse clover
 
-  Window 5x5, ring 4.21M slots, ~1.1M live, ~41k drawn instances, 3.3M
+  Window 5x5 (7x7 since the prefetch margin), ring 4.21M slots, ~1.1M live, ~41k drawn instances, 3.3M
   triangles. Scene early 5.2-5.5 ms against 2.0 ms without the meadow,
   so the meadow costs ~3.3 ms. The stream pass is 0.00 ms when no cell
   changes.

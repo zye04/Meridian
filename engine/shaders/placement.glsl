@@ -173,11 +173,11 @@ float streamKeepFraction(float distance, float fullDensity, float maxDistance) {
     return 0.0;
   }
   float thin = distance <= fullDensity ? 1.0 : (fullDensity / distance) * (fullDensity / distance);
-  return thin * (1.0 - smoothstep(0.8 * maxDistance, maxDistance, distance));
+  return thin * (1.0 - smoothstep(0.5 * maxDistance, maxDistance, distance));
 }
 
 float streamFade(float keepFraction, float threshold) {
-  return smoothstep(0.0, 0.15, keepFraction - threshold);
+  return smoothstep(0.0, 0.3, keepFraction - threshold);
 }
 
 #endif

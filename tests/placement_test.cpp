@@ -282,8 +282,25 @@ TEST_CASE("streamKeepFraction thins by distance squared and fades out") {
   CHECK(streamKeepFraction(80.0f, 40.0f, 200.0f) == doctest::Approx(0.25f));
   CHECK(streamKeepFraction(200.0f, 40.0f, 200.0f) == 0.0f);
   CHECK(streamKeepFraction(500.0f, 40.0f, 200.0f) == 0.0f);
-  const float inFade = streamKeepFraction(180.0f, 40.0f, 200.0f);
-  CHECK(inFade == doctest::Approx((40.0f / 180.0f) * (40.0f / 180.0f) * 0.5f));
+  CHECK(streamKeepFraction(100.0f, 40.0f, 200.0f) == doctest::Approx(0.16f));
+  const float inFade = streamKeepFraction(150.0f, 40.0f, 200.0f);
+  CHECK(inFade == doctest::Approx((40.0f / 150.0f) * (40.0f / 150.0f) * 0.5f));
+}
+
+TEST_CASE("the keep fraction is continuous and never rises with distance") {
+  float last = 1.0f;
+  for (int i = 0; i <= 4000; ++i) {
+    const float k = streamKeepFraction(0.05f * i, 40.0f, 200.0f);
+    CHECK(k <= last);
+    CHECK(last - k < 0.004f);
+    last = k;
+  }
+}
+
+TEST_CASE("a kept point shrinks over a keep margin of 0.3") {
+  CHECK(streamFade(0.8f, 0.5f) == 1.0f);
+  CHECK(streamFade(0.65f, 0.5f) == doctest::Approx(0.5f));
+  CHECK(streamFade(0.55f, 0.5f) < 0.2f);
 }
 
 TEST_CASE("streamFade is zero at the threshold and monotonic") {
@@ -304,6 +321,30 @@ TEST_CASE("streamWindowCells") {
   CHECK(streamWindowCells(64.0f) == 3);
   CHECK(streamWindowCells(65.0f) == 5);
   CHECK(streamWindowCells(200.0f) == 9);
+}
+
+TEST_CASE("every cell within reach is held while the camera moves") {
+  // The update runs in the frame that uses it, so the window must hold
+  // every cell within the reach of the camera, whatever its position.
+  const float radius = 121.0f;
+  const uint32_t window = streamWindowCells(radius);
+  for (int step = 0; step < 400; ++step) {
+    const float x = -500.0f + 2.5f * static_cast<float>(step);
+    const float z = 37.0f - 1.7f * static_cast<float>(step);
+    const auto cameraX = static_cast<int32_t>(std::floor(x / kCellSize));
+    const auto cameraZ = static_cast<int32_t>(std::floor(z / kCellSize));
+    for (int32_t cz = cameraZ - 4; cz <= cameraZ + 4; ++cz) {
+      for (int32_t cx = cameraX - 4; cx <= cameraX + 4; ++cx) {
+        const float nx = std::clamp(x, cx * kCellSize, (cx + 1) * kCellSize);
+        const float nz = std::clamp(z, cz * kCellSize, (cz + 1) * kCellSize);
+        if (std::hypot(nx - x, nz - z) > radius) {
+          continue;
+        }
+        const auto [sx, sz] = streamSlot(cx, cz, window);
+        CHECK(streamSlotCell(sx, sz, cameraX, cameraZ, window) == std::pair<int32_t, int32_t>{cx, cz});
+      }
+    }
+  }
 }
 
 TEST_CASE("streamSlot is a floor mod") {

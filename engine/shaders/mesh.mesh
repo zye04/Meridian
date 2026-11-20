@@ -21,6 +21,7 @@ layout(location = 6) flat out uint outMaterialIndex[];
 layout(location = 7) flat out float outLodError[];
 layout(location = 8) out float outHeight[];
 layout(location = 9) flat out vec3 outTint[];
+layout(location = 10) flat out float outStreamFade[];
 
 void main() {
     // Entries past the list's capacity were dropped by the cull.
@@ -58,6 +59,7 @@ void main() {
         outMaterialIndex[i] = mesh.materialIndex;
         outLodError[i] = lodError;
         outTint[i] = tint;
+        outStreamFade[i] = instance.fade;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
         // Static geometry for now: only the camera moves between frames.
