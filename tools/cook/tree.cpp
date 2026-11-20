@@ -19,14 +19,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace meridian::cook {
@@ -44,6 +48,8 @@ struct Vertex {
 struct Prototype {
   size_t material = 0;
   bool leaf = false;
+  // The material has a base color texture: the source UVs are kept.
+  bool textured = false;
   std::vector<Vertex> vertices;
   // Leaves: triangles grouped by piece; pieces[i]..pieces[i + 1] is piece
   // i's index range.
@@ -63,6 +69,11 @@ struct Instance {
 // silhouettes and leaf outlines move by at most a centimeter.
 constexpr float kSimplifyError = 0.01f;
 constexpr float kNormalWeight = 0.5f;
+// Textured meshes also weigh UVs, scaled by the piece's texel density (surface
+// length per UV unit): a UV error costs as much as the position error of the
+// same length on the surface, so the texture slides no further across the
+// surface than the outline moves.
+constexpr float kUvWeight = 1.0f;
 // Thin leaves transmit about as much light as they reflect diffusely; kept
 // below that so reflectance + transmittance stays under 1.
 constexpr float kLeafDiffuseTransmission = 0.35f;
@@ -127,12 +138,14 @@ void computeNormals(Prototype &p) {
   }
 }
 
-// Leaves keep no UVs (the cook assigns palette UVs), so welding them drops
-// UV seams that would stop simplification; then triangles are grouped into
-// position-connected pieces.
+// Untextured leaves keep no UVs (the cook assigns palette UVs), so welding
+// them drops UV seams that would stop simplification; then triangles are
+// grouped into position-connected pieces.
 void splitLeafPieces(Prototype &p) {
-  for (Vertex &v : p.vertices) {
-    v.uv[0] = v.uv[1] = 0.0f;
+  if (!p.textured) {
+    for (Vertex &v : p.vertices) {
+      v.uv[0] = v.uv[1] = 0.0f;
+    }
   }
   std::vector<uint32_t> remap(p.vertices.size());
   const size_t unique =
@@ -183,6 +196,25 @@ void splitLeafPieces(Prototype &p) {
   p.indices = std::move(sorted);
 }
 
+} // namespace
+
+bool isLeafMaterial(const fastgltf::Material &material) {
+  if (material.doubleSided || material.alphaMode == fastgltf::AlphaMode::Mask) {
+    return true;
+  }
+  std::string name(material.name);
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  for (const char *word : {"leaf", "leaves", "foliage", "needle", "twosided", "two_sided"}) {
+    if (name.find(word) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+
 Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive &primitive) {
   const auto position = primitive.findAttribute("POSITION");
   if (position == primitive.attributes.cend()) {
@@ -193,7 +225,8 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
   if (p.material >= asset.materials.size()) {
     throw std::runtime_error("tree primitive without a material");
   }
-  p.leaf = asset.materials[p.material].doubleSided;
+  p.leaf = isLeafMaterial(asset.materials[p.material]);
+  p.textured = asset.materials[p.material].pbrData.baseColorTexture.has_value();
   const auto &positions = asset.accessors[position->accessorIndex];
   p.vertices.resize(positions.count, Vertex{});
   fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
@@ -207,7 +240,13 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
           p.vertices[i].normal = {v.x(), v.y(), v.z()};
         });
   }
-  if (const auto uv = primitive.findAttribute("TEXCOORD_0"); uv != primitive.attributes.cend()) {
+  const auto uv = primitive.findAttribute("TEXCOORD_0");
+  if (p.textured && uv == primitive.attributes.cend()) {
+    throw std::runtime_error("a primitive of textured material " +
+                             std::string(asset.materials[p.material].name) +
+                             " has no TEXCOORD_0");
+  }
+  if (uv != primitive.attributes.cend()) {
     fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
         asset, asset.accessors[uv->accessorIndex], [&](fastgltf::math::fvec2 v, size_t i) {
           p.vertices[i].uv[0] = v.x();
@@ -239,7 +278,8 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
 void simplify(Prototype &p, double ratio) {
   p.cooked.clear();
   p.cookedPieces.clear();
-  const float weights[3] = {kNormalWeight, kNormalWeight, kNormalWeight};
+  float weights[5] = {kNormalWeight, kNormalWeight, kNormalWeight, 0.0f, 0.0f};
+  const size_t attributes = p.textured ? 5 : 3;
   std::vector<uint32_t> local(p.vertices.size(), UINT32_MAX), global, indices, out;
   std::vector<Vertex> vertices;
   std::vector<uint8_t> locked;
@@ -269,11 +309,36 @@ void simplify(Prototype &p, double ratio) {
     for (auto it = begin; it != end; ++it) {
       indices.push_back(local[*it]);
     }
+    if (p.textured) {
+      // meshoptimizer normalizes positions by the buffer's largest extent.
+      Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
+      for (const Vertex &v : vertices) {
+        for (int c = 0; c < 3; ++c) {
+          low[c] = std::min(low[c], v.position[c]);
+          high[c] = std::max(high[c], v.position[c]);
+        }
+      }
+      const float extent = std::max({high[0] - low[0], high[1] - low[1], high[2] - low[2]});
+      double area = 0.0, uvArea = 0.0;
+      for (size_t t = 0; t < count; t += 3) {
+        const Vertex &a = vertices[indices[t]], &b = vertices[indices[t + 1]],
+                     &c = vertices[indices[t + 2]];
+        area += triangleArea(a.position, b.position, c.position);
+        uvArea += 0.5 * std::abs((b.uv[0] - a.uv[0]) * (c.uv[1] - a.uv[1]) -
+                                 (c.uv[0] - a.uv[0]) * (b.uv[1] - a.uv[1]));
+      }
+      // Degenerate UVs (one texel for the whole piece) have nothing to keep.
+      const bool mapped = uvArea > 1e-12 && extent > 0.0f;
+      weights[3] = weights[4] =
+          mapped ? kUvWeight * static_cast<float>(std::sqrt(area / uvArea)) / extent : 0.0f;
+    }
     out.resize(count);
+    // Normal and UV are adjacent in Vertex, so one attribute stream holds both.
+    static_assert(offsetof(Vertex, uv) == offsetof(Vertex, normal) + sizeof(Vec3));
     const size_t kept = meshopt_simplifyWithAttributes(
         out.data(), indices.data(), count, vertices[0].position.data(), vertices.size(),
-        sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, 3, locked.data(),
-        target, kSimplifyError, meshopt_SimplifyErrorAbsolute, nullptr);
+        sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, attributes,
+        locked.data(), target, kSimplifyError, meshopt_SimplifyErrorAbsolute, nullptr);
     // A piece is never simplified away; pruning decides which go.
     if (kept == 0) {
       p.cooked.insert(p.cooked.end(), begin, end);
@@ -435,6 +500,15 @@ public:
                     [](const fastgltf::Material &m) { return m.diffuseTransmission.has_value(); })) {
       asset.extensionsUsed.emplace_back("KHR_materials_diffuse_transmission");
     }
+    const auto transformed = [](const auto &info) { return info && info->transform; };
+    if (std::any_of(asset.materials.begin(), asset.materials.end(),
+                    [&](const fastgltf::Material &m) {
+                      return transformed(m.pbrData.baseColorTexture) ||
+                             transformed(m.pbrData.metallicRoughnessTexture) ||
+                             transformed(m.normalTexture) || transformed(m.occlusionTexture);
+                    })) {
+      asset.extensionsUsed.emplace_back("KHR_texture_transform");
+    }
     fastgltf::FileExporter exporter;
     exporter.setBufferPath("buffers");
     exporter.setImagePath("textures");
@@ -449,11 +523,86 @@ private:
   std::vector<std::byte> bytes_;
 };
 
+// A textured material's maps, re-encoded; a leaf base color with alpha is
+// alpha-tested (cookTexture's cutoff). Leaves
+// transmit by the source's diffuse transmission (its texture averaged over
+// the opaque texels, as the engine has no transmission map) or the default.
+template <typename SourceImage, typename CookTexture>
+void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::string &name,
+                          fastgltf::Material &material, SourceImage &&sourceImage,
+                          CookTexture &&cookTexture) {
+  const basisu::image &color = sourceImage(from.pbrData.baseColorTexture->textureIndex);
+  // An opaque source's alpha may hold something else (gloss, a packed mask).
+  const bool masked =
+      leaf && color.has_alpha() && from.alphaMode != fastgltf::AlphaMode::Opaque;
+  const float cutoff = from.alphaMode == fastgltf::AlphaMode::Mask ? from.alphaCutoff : 0.5f;
+  if (masked && !(cutoff > 0.0f && cutoff < 1.0f)) {
+    throw std::runtime_error(name + ": alpha cutoff outside (0, 1)");
+  }
+  material.pbrData.baseColorTexture = cookTexture(*from.pbrData.baseColorTexture, Usage::Color,
+                                                  masked ? cutoff : -1.0f, name + "_color");
+  if (from.pbrData.metallicRoughnessTexture) {
+    material.pbrData.metallicRoughnessTexture =
+        cookTexture(*from.pbrData.metallicRoughnessTexture, Usage::Data, -1.0f, name + "_orm");
+  }
+  if (from.occlusionTexture) {
+    fastgltf::OcclusionTextureInfo occlusion;
+    static_cast<fastgltf::TextureInfo &>(occlusion) =
+        cookTexture(*from.occlusionTexture, Usage::Data, -1.0f, name + "_occlusion");
+    occlusion.strength = from.occlusionTexture->strength;
+    material.occlusionTexture = std::move(occlusion);
+  }
+  if (from.normalTexture) {
+    fastgltf::NormalTextureInfo normal;
+    static_cast<fastgltf::TextureInfo &>(normal) =
+        cookTexture(*from.normalTexture, Usage::Normal, -1.0f, name + "_normal");
+    normal.scale = from.normalTexture->scale;
+    material.normalTexture = std::move(normal);
+  }
+  if (masked) {
+    material.alphaMode = fastgltf::AlphaMode::Mask;
+    material.alphaCutoff = 0.5f;
+  }
+  if (!leaf) {
+    std::printf("Textured wood material %s\n", name.c_str());
+    return;
+  }
+  float transmission = kLeafDiffuseTransmission;
+  if (from.diffuseTransmission) {
+    transmission = from.diffuseTransmission->diffuseTransmissionFactor;
+    if (const auto &texture = from.diffuseTransmission->diffuseTransmissionTexture) {
+      const basisu::image &map = sourceImage(texture->textureIndex);
+      const bool sameSize = map.get_width() == color.get_width() &&
+                            map.get_height() == color.get_height();
+      if (masked && !sameSize) {
+        std::printf("%s: transmission map and base color differ in size; averaging the whole "
+                    "map\n", name.c_str());
+      }
+      double sum = 0.0;
+      size_t opaque = 0;
+      for (uint32_t i = 0; i < map.get_total_pixels(); ++i) {
+        if (!masked || !sameSize || color.get_ptr()[i].a >= cutoff * 255.0f) {
+          sum += map.get_ptr()[i].a / 255.0;
+          ++opaque;
+        }
+      }
+      transmission *= opaque ? static_cast<float>(sum / opaque) : 0.0f;
+    }
+  }
+  material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
+  material.diffuseTransmission->diffuseTransmissionFactor = transmission;
+  std::printf("Textured leaf material %s: %s, diffuse transmission %.3f\n", name.c_str(),
+              masked ? "alpha-tested" : "opaque", transmission);
+}
+
 } // namespace
 
 TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::path &outDir,
                         size_t triangleBudget, const std::filesystem::path &barkTexture) {
-  fastgltf::Parser parser;
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_transform |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission |
+                          fastgltf::Extensions::KHR_materials_emissive_strength |
+                          fastgltf::Extensions::KHR_mesh_quantization);
   auto data = fastgltf::GltfDataBuffer::FromPath(in);
   if (data.error() != fastgltf::Error::None) {
     throw std::runtime_error("cannot read " + in.string());
@@ -716,19 +865,27 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
       const float uv[2] = {(static_cast<float>(texel % kLeafPaletteSize) + 0.5f) / kLeafPaletteSize,
                            (static_cast<float>(texel / kLeafPaletteSize) + 0.5f) / kLeafPaletteSize};
       emitTriangles(p.cookedPieces[leaf->piece], p.cookedPieces[leaf->piece + 1],
-                    leaf->centroid, leaf->scale, uv);
+                    leaf->centroid, leaf->scale, p.textured ? nullptr : uv);
     }
   }
 
-  // Materials: leaves sample the tint palette; bark gets the texture set,
-  // with its base color factor chosen so the texture averages to the
-  // species color.
+  // Materials. Textured ones keep their own textures, re-encoded (leaf base
+  // colors alpha-tested, with coverage-preserving mips). Untextured leaves
+  // sample the tint palette; untextured wood gets the bark texture set, with
+  // its base color factor chosen so the texture averages to the species
+  // color.
   basisu::basisu_encoder_init();
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));
   Writer writer;
+  std::vector<bool> leafMaterials(source.materials.size());
+  bool untexturedWood = false;
+  for (size_t m = 0; m < source.materials.size(); ++m) {
+    leafMaterials[m] = isLeafMaterial(source.materials[m]);
+    untexturedWood |= !leafMaterials[m] && !source.materials[m].pbrData.baseColorTexture;
+  }
   std::optional<size_t> barkColor, barkNormal, barkArm;
   float barkMean[3] = {1.0f, 1.0f, 1.0f};
-  if (!barkTexture.empty()) {
+  if (!barkTexture.empty() && untexturedWood) {
     const basisu::image color = decode(readFile(barkMap(barkTexture, "_Color.jpg")));
     double sums[3] = {};
     for (uint32_t y = 0; y < color.get_height(); ++y) {
@@ -760,23 +917,78 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     barkArm = writer.addTexture(encodeKtx2(arm, Usage::Data, jobPool), "bark_arm");
   }
 
+  std::map<size_t, basisu::image> images;
+  const auto sourceImage = [&](size_t texture) -> basisu::image & {
+    const auto index = source.textures.at(texture).imageIndex;
+    if (!index) {
+      throw std::runtime_error("texture " + std::to_string(texture) +
+                               " has no PNG or JPEG image");
+    }
+    auto it = images.find(*index);
+    if (it == images.end()) {
+      it = images
+               .emplace(*index, decode(sourceImageBytes(source, source.images[*index],
+                                                        in.parent_path())))
+               .first;
+    }
+    return it->second;
+  };
+  // cutoff >= 0: the alpha is an alpha-test mask. It is remapped so the
+  // cutoff lands on 0.5, where the coverage-preserving mips and the output
+  // material's cutoff test it.
+  std::map<std::tuple<size_t, Usage, float>, size_t> encoded;
+  const auto cookTexture = [&](const fastgltf::TextureInfo &info, Usage usage, float cutoff,
+                               const std::string &name) {
+    const size_t texCoord =
+        info.transform ? info.transform->texCoordIndex.value_or(info.texCoordIndex)
+                       : info.texCoordIndex;
+    if (texCoord != 0) {
+      throw std::runtime_error(name + " reads TEXCOORD_" + std::to_string(texCoord) +
+                               "; the tree cook keeps only TEXCOORD_0");
+    }
+    const basisu::image &image = sourceImage(info.textureIndex);
+    const auto [it, inserted] = encoded.emplace(
+        std::tuple{*source.textures[info.textureIndex].imageIndex, usage, cutoff}, 0);
+    if (inserted && cutoff < 0.0f) {
+      it->second = writer.addTexture(encodeKtx2(image, usage, jobPool), name);
+    } else if (inserted) {
+      basisu::image masked = image;
+      for (uint32_t i = 0; i < masked.get_total_pixels(); ++i) {
+        const float a = masked.get_ptr()[i].a / 255.0f;
+        const float remapped =
+            a < cutoff ? 0.5f * a / cutoff : 0.5f + 0.5f * (a - cutoff) / (1.0f - cutoff);
+        masked.get_ptr()[i].a = static_cast<uint8_t>(std::lround(remapped * 255.0f));
+      }
+      it->second = writer.addTexture(encodeKtx2(masked, usage, jobPool, 3), name);
+    }
+    fastgltf::TextureInfo out = info;
+    out.textureIndex = it->second;
+    return out;
+  };
+
   fastgltf::Asset &asset = writer.asset;
   fastgltf::Scene scene;
   for (size_t m = 0; m < source.materials.size(); ++m) {
     const fastgltf::Material &from = source.materials[m];
+    const bool leaf = leafMaterials[m];
     fastgltf::Material material;
     material.name = from.name;
-    material.doubleSided = from.doubleSided;
+    material.doubleSided = leaf;
     material.pbrData.baseColorFactor = from.pbrData.baseColorFactor;
     material.pbrData.metallicFactor = from.pbrData.metallicFactor;
     material.pbrData.roughnessFactor = from.pbrData.roughnessFactor;
-    if (from.doubleSided) {
+    const std::string name(from.name);
+    if (from.pbrData.baseColorTexture) {
+      if (!outputs[m].indices.empty()) {
+        cookTexturedMaterial(from, leaf, name, material, sourceImage, cookTexture);
+      }
+    } else if (leaf) {
       material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
       material.diffuseTransmission->diffuseTransmissionFactor = kLeafDiffuseTransmission;
       const float color[3] = {from.pbrData.baseColorFactor[0], from.pbrData.baseColorFactor[1],
                               from.pbrData.baseColorFactor[2]};
       const size_t palette = writer.addTexture(
-          encodeKtx2(leafPalette(color), Usage::Color, jobPool), std::string(from.name) + "_tint");
+          encodeKtx2(leafPalette(color), Usage::Color, jobPool), name + "_tint");
       material.pbrData.baseColorFactor = {1.0f, 1.0f, 1.0f, from.pbrData.baseColorFactor[3]};
       material.pbrData.baseColorTexture = fastgltf::TextureInfo{palette, 0, {}};
     } else if (barkColor) {

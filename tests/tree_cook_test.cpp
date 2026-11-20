@@ -2,7 +2,10 @@
 #include <fastgltf/core.hpp>
 #include <fastgltf/tools.hpp>
 
+#include "ktx2.h"
 #include "tree.h"
+
+#include <basisu_enc.h>
 
 #include <array>
 #include <cmath>
@@ -67,8 +70,13 @@ Mesh tube() {
   return mesh;
 }
 
-// 200 disjoint 10 x 6 cm quads scattered around a 1 m crown.
-Mesh leaves() {
+// 200 disjoint 10 x 6 cm leaves scattered around a 1 m crown, each a flat
+// grid x grid of quads. Leaf i maps to its own UV cell: 16 x 16 cells, the
+// leaf covering 90% of its cell.
+constexpr float kLeafUvCell = 1.0f / 16.0f;
+constexpr float kLeafUvSize = 0.9f * kLeafUvCell;
+
+Mesh leaves(int grid = 1) {
   Mesh mesh;
   std::mt19937 rng(7);
   std::uniform_real_distribution<float> unit(0.0f, 1.0f);
@@ -76,15 +84,22 @@ Mesh leaves() {
     const float cx = unit(rng) - 0.5f, cy = 1.5f + unit(rng), cz = unit(rng) - 0.5f;
     const float angle = 6.2831853f * unit(rng);
     const float ux = 0.05f * std::cos(angle), uz = 0.05f * std::sin(angle);
-    const float corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
     const uint32_t base = static_cast<uint32_t>(mesh.positions.size() / 3);
-    for (const auto &[u, v] : corners) {
-      mesh.positions.insert(mesh.positions.end(), {cx + u * ux, cy + v * 0.03f, cz + u * uz});
-      mesh.normals.insert(mesh.normals.end(), {-std::sin(angle), 0.0f, std::cos(angle)});
-      mesh.uvs.insert(mesh.uvs.end(), {(u + 1) / 2, (v + 1) / 2});
+    for (int j = 0; j <= grid; ++j) {
+      for (int i = 0; i <= grid; ++i) {
+        const float u = 2.0f * i / grid - 1.0f, v = 2.0f * j / grid - 1.0f;
+        mesh.positions.insert(mesh.positions.end(), {cx + u * ux, cy + v * 0.03f, cz + u * uz});
+        mesh.normals.insert(mesh.normals.end(), {-std::sin(angle), 0.0f, std::cos(angle)});
+        mesh.uvs.insert(mesh.uvs.end(), {(leaf % 16) * kLeafUvCell + (u + 1) / 2 * kLeafUvSize,
+                                         (leaf / 16) * kLeafUvCell + (v + 1) / 2 * kLeafUvSize});
+      }
     }
-    mesh.indices.insert(mesh.indices.end(),
-                        {base, base + 1, base + 2, base, base + 2, base + 3});
+    for (uint32_t j = 0; j < static_cast<uint32_t>(grid); ++j) {
+      for (uint32_t i = 0; i < static_cast<uint32_t>(grid); ++i) {
+        const uint32_t a = base + j * (grid + 1) + i, b = a + 1, c = a + grid + 1, d = c + 1;
+        mesh.indices.insert(mesh.indices.end(), {a, b, d, a, d, c});
+      }
+    }
   }
   return mesh;
 }
@@ -109,8 +124,11 @@ std::string floatList(const float *values, size_t count) {
 
 // Writes the two prototypes as an unflattened glTF like usd2gltf's: one mesh
 // each, one node per instance.
+// With `leafTexture`, the leaf material samples that image (beside the glTF),
+// alpha-masked at 0.3.
 void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
-                 const std::vector<std::pair<int, Matrix>> &nodes) {
+                 const std::vector<std::pair<int, Matrix>> &nodes,
+                 const std::string &leafTexture = {}) {
   std::vector<char> bin;
   std::string views, accessors, meshJson;
   int view = 0;
@@ -165,7 +183,15 @@ void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
          "0.031,1],\"metallicFactor\":0,\"roughnessFactor\":0.5}},"
          "{\"name\":\"Leaves\",\"doubleSided\":true,\"pbrMetallicRoughness\":{"
          "\"baseColorFactor\":[0.087,0.153,0.021,1],\"metallicFactor\":0,"
-         "\"roughnessFactor\":0.5}}],\"accessors\":["
+         "\"roughnessFactor\":0.5"
+      << (leafTexture.empty() ? "}"
+                              : ",\"baseColorTexture\":{\"index\":0}},\"alphaMode\":\"MASK\","
+                                "\"alphaCutoff\":0.3")
+      << "}],"
+      << (leafTexture.empty() ? ""
+                              : "\"images\":[{\"uri\":\"" + leafTexture +
+                                    "\"}],\"textures\":[{\"source\":0}],")
+      << "\"accessors\":["
       << accessors << "],\"bufferViews\":[" << views << "],\"buffers\":[{\"uri\":\""
       << binName << "\",\"byteLength\":" << bin.size() << "}]}";
 }
@@ -303,4 +329,169 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
     CHECK(std::abs(cookedBounds.max[c] - sourceBounds.max[c]) <= 1e-3f);
   }
   std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree keeps a textured leaf material's UVs through simplification and pruning") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_uv_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  // Leaves of 4 x 4 quads: flat, with affine UVs, so each simplifies to two
+  // triangles; the budget then forces pruning as well.
+  const Mesh meshes[2] = {tube(), leaves(4)};
+  std::vector<std::pair<int, Matrix>> nodes;
+  for (int i = 0; i < 10; ++i) {
+    nodes.emplace_back(0, placement(0.6f * i, 0.8f + 0.04f * i, 3.0f * i, 0.0f, 0.0f));
+  }
+  for (int i = 0; i < 50; ++i) {
+    nodes.emplace_back(1, placement(0.3f * i, 0.9f + 0.005f * i, 0.6f * i, 0.0f, 1.0f));
+  }
+  basisu::image texture(64, 64);
+  for (uint32_t y = 0; y < 64; ++y) {
+    for (uint32_t x = 0; x < 64; ++x) {
+      texture(x, y).set(60, 140, 30, (x / 4 + y / 4) % 2 ? 255 : 0);
+    }
+  }
+  REQUIRE(basisu::save_png((dir / "leaf.png").string(), texture));
+  writeSource(dir / "tree.gltf", meshes, nodes, "leaf.png");
+
+  const size_t budget = 15000;
+  const meridian::cook::TreeCookResult result =
+      meridian::cook::cookTree(dir / "tree.gltf", dir / "out", budget, {});
+  CHECK(result.sourceTriangles == 10 * 1024 + 50 * 200 * 32);
+  CHECK(result.triangles <= budget);
+  CHECK(std::abs(result.leafAreaAfter - result.leafAreaBefore) / result.leafAreaBefore <=
+        0.05);
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+
+  bool sawLeaves = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+    if (!material.doubleSided) {
+      continue;
+    }
+    sawLeaves = true;
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Mask);
+    CHECK(material.alphaCutoff == 0.5f);
+    REQUIRE(material.pbrData.baseColorTexture);
+    CHECK(material.diffuseTransmission);
+
+    const auto &positionAccessor =
+        asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+    std::vector<std::array<float, 3>> positions(positionAccessor.count);
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+        asset, positionAccessor,
+        [&](fastgltf::math::fvec3 p, size_t i) { positions[i] = {p.x(), p.y(), p.z()}; });
+    std::vector<std::array<float, 3>> uvs(positions.size());
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
+        asset, asset.accessors[primitive.findAttribute("TEXCOORD_0")->accessorIndex],
+        [&](fastgltf::math::fvec2 uv, size_t i) { uvs[i] = {uv.x(), uv.y(), 0.0f}; });
+    const auto &indexAccessor = asset.accessors[*primitive.indicesAccessor];
+    std::vector<uint32_t> indices(indexAccessor.count);
+    fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
+
+    std::vector<size_t> parent(positions.size());
+    std::iota(parent.begin(), parent.end(), size_t{0});
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      for (int k = 1; k < 3; ++k) {
+        parent[findRoot(parent, indices[i + k])] = findRoot(parent, indices[i]);
+      }
+    }
+    // Per leaf: triangles, the ratio of surface to UV area (one affine map
+    // per leaf: the same for every triangle), and the UV bounds.
+    struct Leaf {
+      size_t triangles = 0;
+      double ratio = 0.0;
+      Bounds uv;
+    };
+    std::map<size_t, Leaf> pieces;
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      Leaf &leaf = pieces[findRoot(parent, indices[i])];
+      ++leaf.triangles;
+      const double ratio = triangleArea(positions[indices[i]], positions[indices[i + 1]],
+                                        positions[indices[i + 2]]) /
+                           triangleArea(uvs[indices[i]], uvs[indices[i + 1]], uvs[indices[i + 2]]);
+      if (leaf.ratio == 0.0) {
+        leaf.ratio = ratio;
+      }
+      CHECK(ratio == doctest::Approx(leaf.ratio).epsilon(1e-3));
+      for (int k = 0; k < 3; ++k) {
+        leaf.uv.add(uvs[indices[i + k]]);
+      }
+    }
+    // Instances are scaled by 0.9 or more, kept pieces only grow.
+    const double sourceRatio = 0.1 * 0.06 / (kLeafUvSize * kLeafUvSize);
+    for (const auto &[root, leaf] : pieces) {
+      CHECK(leaf.triangles < 32);
+      CHECK(leaf.ratio >= sourceRatio * 0.9 * 0.9 * (1.0 - 1e-3));
+      // The leaf's outline corners survive, so its UVs span its whole cell.
+      const float cellU = std::floor(leaf.uv.min[0] / kLeafUvCell) * kLeafUvCell;
+      const float cellV = std::floor(leaf.uv.min[1] / kLeafUvCell) * kLeafUvCell;
+      CHECK(leaf.uv.min[0] == doctest::Approx(cellU).epsilon(1e-5));
+      CHECK(leaf.uv.min[1] == doctest::Approx(cellV).epsilon(1e-5));
+      CHECK(leaf.uv.max[0] == doctest::Approx(cellU + kLeafUvSize).epsilon(1e-5));
+      CHECK(leaf.uv.max[1] == doctest::Approx(cellV + kLeafUvSize).epsilon(1e-5));
+    }
+    CHECK(pieces.size() < 50 * 200);
+  }
+  CHECK(sawLeaves);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("isLeafMaterial: double-sided, alpha-masked or named like foliage") {
+  fastgltf::Material material;
+  material.name = "M_Bark";
+  CHECK(!meridian::cook::isLeafMaterial(material));
+  material.name = "MI_Beech_Leaves_01";
+  CHECK(meridian::cook::isLeafMaterial(material));
+  material.name = "M_Bark";
+  material.alphaMode = fastgltf::AlphaMode::Mask;
+  CHECK(meridian::cook::isLeafMaterial(material));
+  material.alphaMode = fastgltf::AlphaMode::Opaque;
+  material.doubleSided = true;
+  CHECK(meridian::cook::isLeafMaterial(material));
+}
+
+TEST_CASE("coverageMips keeps alpha-test coverage clear of the threshold") {
+  using meridian::cook::Usage;
+  // Uniform alpha 0.87: every mip must stay clear of 0.5, not land on it
+  // (compression error would then drop the whole mip), without saturating.
+  basisu::image uniform(64, 64);
+  for (uint32_t i = 0; i < uniform.get_total_pixels(); ++i) {
+    uniform.get_ptr()[i].set(50, 120, 30, 222);
+  }
+  for (const basisu::image &mip : meridian::cook::coverageMips(uniform, Usage::Color, 3)) {
+    for (uint32_t i = 0; i < mip.get_total_pixels(); ++i) {
+      CHECK(mip.get_ptr()[i].a >= 148);
+      CHECK(mip.get_ptr()[i].a <= 158);
+    }
+  }
+  // Holes of a quarter of the area: each mip keeps about 3/4 of its texels
+  // above 0.5 while the holes are resolved (16 x 16).
+  basisu::image holes(64, 64);
+  for (uint32_t y = 0; y < 64; ++y) {
+    for (uint32_t x = 0; x < 64; ++x) {
+      holes(x, y).set(50, 120, 30, (x % 8 < 4 && y % 8 < 4) ? 0 : 255);
+    }
+  }
+  for (const basisu::image &mip : meridian::cook::coverageMips(holes, Usage::Color, 3)) {
+    if (mip.get_width() < 16) {
+      break;
+    }
+    size_t above = 0;
+    for (uint32_t i = 0; i < mip.get_total_pixels(); ++i) {
+      above += mip.get_ptr()[i].a >= 128;
+    }
+    CHECK(static_cast<double>(above) / mip.get_total_pixels() ==
+          doctest::Approx(0.75).epsilon(0.1));
+  }
 }

@@ -34,30 +34,6 @@ namespace {
 
 using namespace meridian::cook;
 
-std::vector<uint8_t> sourceImageBytes(const fastgltf::Asset &asset,
-                                      const fastgltf::Image &image,
-                                      const std::filesystem::path &directory) {
-  if (const auto *uri = std::get_if<fastgltf::sources::URI>(&image.data)) {
-    return readFile(directory / uri->uri->fspath());
-  }
-  if (const auto *view = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
-    const fastgltf::BufferView &bufferView = asset.bufferViews[view->bufferViewIndex];
-    const auto &data = asset.buffers[bufferView.bufferIndex].data;
-    const std::byte *bytes = nullptr;
-    if (const auto *array = std::get_if<fastgltf::sources::Array>(&data)) {
-      bytes = array->bytes.data();
-    } else if (const auto *vector = std::get_if<fastgltf::sources::Vector>(&data)) {
-      bytes = vector->bytes.data();
-    } else {
-      throw std::runtime_error("image buffer was not loaded");
-    }
-    const auto *begin =
-        reinterpret_cast<const uint8_t *>(bytes + bufferView.byteOffset);
-    return {begin, begin + bufferView.byteLength};
-  }
-  throw std::runtime_error("unsupported image source");
-}
-
 // glTF's ORM packing puts occlusion in R, so an _arm pack bound only as
 // metallicRoughness serves as the occlusion map too (Poly Haven omits the binding).
 void bindArmOcclusion(fastgltf::Asset &asset) {

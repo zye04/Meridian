@@ -20,6 +20,28 @@ std::vector<uint8_t> readFile(const std::filesystem::path &path) {
   return bytes;
 }
 
+std::vector<uint8_t> sourceImageBytes(const fastgltf::Asset &asset, const fastgltf::Image &image,
+                                      const std::filesystem::path &directory) {
+  if (const auto *uri = std::get_if<fastgltf::sources::URI>(&image.data)) {
+    return readFile(directory / uri->uri->fspath());
+  }
+  if (const auto *view = std::get_if<fastgltf::sources::BufferView>(&image.data)) {
+    const fastgltf::BufferView &bufferView = asset.bufferViews[view->bufferViewIndex];
+    const auto &data = asset.buffers[bufferView.bufferIndex].data;
+    const std::byte *bytes = nullptr;
+    if (const auto *array = std::get_if<fastgltf::sources::Array>(&data)) {
+      bytes = array->bytes.data();
+    } else if (const auto *vector = std::get_if<fastgltf::sources::Vector>(&data)) {
+      bytes = vector->bytes.data();
+    } else {
+      throw std::runtime_error("image buffer was not loaded");
+    }
+    const auto *begin = reinterpret_cast<const uint8_t *>(bytes + bufferView.byteOffset);
+    return {begin, begin + bufferView.byteLength};
+  }
+  throw std::runtime_error("unsupported image source");
+}
+
 basisu::image decode(const std::vector<uint8_t> &bytes) {
   basisu::image image;
   const bool isPng = bytes.size() > 4 && bytes[0] == 0x89 && bytes[1] == 'P';
@@ -80,12 +102,24 @@ basisu::image coverageMip(const basisu::image &src, Usage usage, int channel, do
       }
     }
   }
+  // The smallest scale that reaches the target coverage puts the texels it
+  // just lifts at the threshold, where compression error and filtering flip
+  // them back (a uniform mip would vanish). Every scale up to the next
+  // coverage step keeps the same texels above it: take the middle of that
+  // range, at most 20% above the smallest (the lifted texels at ~0.6), so
+  // the mask's contour between texels stays where it was.
   double lo = 0.0, hi = 8.0;
   for (int i = 0; i < 24; ++i) {
     const double mid = (lo + hi) / 2;
     (coverage(dst, channel, mid) < target ? lo : hi) = mid;
   }
-  const double scale = (lo + hi) / 2;
+  const double reached = coverage(dst, channel, hi);
+  double low = hi, high = 8.0;
+  for (int i = 0; i < 24; ++i) {
+    const double mid = (low + high) / 2;
+    (coverage(dst, channel, mid) > reached ? high : low) = mid;
+  }
+  const double scale = std::min((hi + low) / 2, hi * 1.2);
   for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) {
     uint8_t &v = dst.get_ptr()[i][channel];
     v = static_cast<uint8_t>(std::min(255.0, v * scale + 0.5));
@@ -94,6 +128,17 @@ basisu::image coverageMip(const basisu::image &src, Usage usage, int channel, do
 }
 
 } // namespace
+
+std::vector<basisu::image> coverageMips(const basisu::image &image, Usage usage, int channel) {
+  const double target = coverage(image, channel, 1.0);
+  std::vector<basisu::image> mips;
+  basisu::image previous = image;
+  while (previous.get_width() > 1 || previous.get_height() > 1) {
+    previous = coverageMip(previous, usage, channel, target);
+    mips.push_back(previous);
+  }
+  return mips;
+}
 
 std::vector<uint8_t> encodeKtx2(const basisu::image &image, Usage usage,
                                 basisu::job_pool &jobPool, int coverageChannel) {
@@ -105,12 +150,9 @@ std::vector<uint8_t> encodeKtx2(const basisu::image &image, Usage usage,
   params.m_ktx2_uastc_supercompression = basist::KTX2_SS_ZSTANDARD;
   params.m_mip_gen = coverageChannel < 0;
   if (coverageChannel >= 0) {
-    const double target = coverage(image, coverageChannel, 1.0);
     basisu::vector<basisu::image> mips;
-    basisu::image previous = image;
-    while (previous.get_width() > 1 || previous.get_height() > 1) {
-      previous = coverageMip(previous, usage, coverageChannel, target);
-      mips.push_back(previous);
+    for (basisu::image &mip : coverageMips(image, usage, coverageChannel)) {
+      mips.push_back(std::move(mip));
     }
     params.m_source_mipmap_images.push_back(std::move(mips));
   }

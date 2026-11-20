@@ -3089,3 +3089,104 @@ Spec `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`.
   frame 11.6 / 10.2 ms at the ground view, 14.5 / 12.6 at low sun, 10.1 /
   10.4 at sunset; a full re-render of the 5 cascades on the first frame.
 
+
+## Alpha-test coverage mips keep clear of the threshold (2026-11-20)
+
+`coverageMip` (tools/cook/ktx2.cpp, every alpha-tested texture the cook
+encodes) rescales each mip's alpha so the fraction of texels above 0.5
+matches mip 0 (Castano). It took the smallest scale that reached the
+target, which leaves the texels it just lifted at alpha 128: UASTC/BC7
+error and bilinear filtering flip them back below the cutoff. A uniform
+mip (a leaf atlas region coarser than its detail) then vanished entirely:
+the textured test rowan's leaves disappeared beyond ~5 m, at every
+geometry LOD (`--lod-error 0` too).
+
+- **Choice:** every scale up to the next coverage step keeps the same
+  texels above 0.5, so take the middle of that plateau (a second binary
+  search for its upper end), capped at 1.2x the smallest scale (the
+  lifted texels land at ~0.6, not saturated, so bilinear filtering
+  doesn't grow the mask between texels). Coverage is unchanged by
+  construction.
+- Unit test: uniform alpha 0.87 lands at 148-158 in every mip (was 128);
+  a holes pattern keeps 75% coverage while the holes are resolved.
+- Already-cooked plants keep their files until they are re-cooked; their
+  atlases have large transparent regions, so few of their mips were
+  uniform.
+
+## Textured tree import: Unreal glTF export, UVs kept (tree-import, 2026-11-20)
+
+The Megaplants USD on Fab has no textures (flat colours, hence the tint
+palette and Bark012 above); the textures live only in the Unreal asset.
+The user opens the Megaplants in Unreal 5.7+ (Procedural Vegetation
+Editor plugin, "Nanite Foliage (Experimental)") and exports them with
+`tools/unreal/export_trees.py`.
+
+- **Format: glTF.** Unreal's built-in exporter (`unreal.GLTFExporter`,
+  `GLTFExportOptions`: PNG textures, material inputs baked to glTF PBR)
+  carries materials and textures and needs no new dependency; the cook
+  already reads glTF. USD with textures also works: usd2gltf now carries
+  UsdPreviewSurface inputs connected to `UsdUVTexture` files (diffuse
+  colour, its alpha as opacity with `opacityThreshold` as MASK cutoff,
+  normal, roughness/metallic when they read G/B of one file, occlusion
+  from R) as glTF textures that reference the files where they are.
+  FBX only as a fallback if both fail: assimp via FetchContent would be
+  the route; not added.
+- **What a Megaplants asset is in Unreal is unknown until the first
+  run:** the PVE docs say its Export node bakes Nanite Foliage (a skeletal
+  mesh with micro-instanced assembly parts, Dynamic Wind compatible) or a
+  plain static mesh; no Python API for assembly parts was found. So the
+  script's first run is diagnostic (inventory.json: every asset in the
+  pack folder, class, LODs, Nanite settings, material instance parameters
+  and their textures, any level actors placing the pack's meshes), then
+  exports each mesh (`export_source_model` first, since the render data
+  of a Nanite mesh is the fallback mesh) plus every referenced texture as
+  PNG with a role guessed from the parameter name. Placements of placed
+  instanced meshes go to placements.json in glTF axes. Wind (bones,
+  weights) is listed, not exported.
+- **Cook: a material with a base color texture keeps its UVs.** Leaves are
+  still simplified per piece and pruned with area compensation (pruning
+  and scaling about the centroid never touch UVs); simplification adds UV
+  as two attributes weighted by the piece's texel density, sqrt(surface
+  area / UV area) / its largest extent: a UV error costs as much as the
+  position error of the same length on the surface (meshoptimizer
+  normalises positions by the extent and applies attribute weights as
+  given). Robust to tiling bark UVs and atlas islands, unlike the UV
+  span; degenerate UVs get weight 0. Rejected: simplify only the wood and prune whole leaf
+  pieces, which keeps UVs exactly but would prune ~90% of the beech's
+  pieces (46M source triangles for a 4M budget). Measured on the
+  textured test rowan: the same 0.289 ratio and 0.94M leaf triangles as
+  without UVs (Megaplants leaf UVs are near-affine over flat leaves).
+- **Maps:** each textured material's maps are re-encoded to KTX2 (base
+  colour, normal, metallicRoughness, occlusion; one texture per source
+  image and use). A leaf base colour with alpha becomes alpha MASK at
+  0.5, its alpha remapped piecewise-linearly so the source cutoff lands on
+  0.5 (Unreal's default opacity mask clip is 0.333), with coverage mips;
+  only when the source isn't OPAQUE (an opaque leaf's alpha may hold
+  something else). A textured material without TEXCOORD_0, or reading
+  another UV set (also through a texture transform), is an error.
+  Leaves transmit by the source's `KHR_materials_diffuse_transmission`
+  (its texture averaged over the opaque texels: the engine has no
+  transmission map) or 0.35. Bark: the asset's own textures when the
+  wood material has them; Bark012 (`--bark-texture`) only for untextured
+  wood. Leaf detection: double-sided, alpha MASK, or a foliage-like name
+  (leaf, foliage, needle, two-sided) when an exporter drops both flags.
+  The tree parser accepts KHR_texture_transform (carried through),
+  KHR_mesh_quantization and the material extensions the engine reads.
+- **Untextured path unchanged:** the rowan sapling, beech saplings and
+  beech cook byte-identically to the committed cooks (glTF, buffers,
+  textures).
+- **Test:** the rowan sapling USD with a layer adding UsdUVTexture inputs
+  (a checker leaf atlas with alpha holes and a 0.3 cutoff; Bark012
+  colour, normal and a packed ORM), through usd2gltf and the cook at 1M
+  triangles: the checker keeps square cells on every leaf, holes cut
+  through, and against a full-detail cook (3.46M) of the same input the
+  tree's crop scores SSIM 0.9926 at 6 m and 0.9920 at 2.7 m (Debug,
+  DLSS RR). Unit test: leaves of 4x4 quads with one UV cell each,
+  simplified and pruned: each leaf keeps one affine UV map (equal
+  surface/UV area ratio on every triangle) and its full UV cell.
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/GLTFExporter
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/GLTFExportOptions
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-vegetation-editor-in-unreal-engine
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-assemblies
+  - https://openusd.org/release/spec_usdpreviewsurface.html
+  - https://meshoptimizer.org/#simplification
