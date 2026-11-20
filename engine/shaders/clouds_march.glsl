@@ -7,18 +7,16 @@
 #ifndef CLOUDS_MARCH_GLSL
 #define CLOUDS_MARCH_GLSL
 
-// Single-scattering albedo, and the albedo factor at the thinnest edges
-// (edge darkening, instead of the powder term).
-const float kAlbedo = 0.98;
-const float kEdgeAlbedo = 0.5;
-const float kEdgeDensity = 0.15;
+// Single-scattering albedo.
+const float kAlbedo = 0.99;
 // Dual-lobe Henyey-Greenstein: forward, backward, backward weight.
-const vec3 kPhase = vec3(0.8, -0.5, 0.3);
+const vec3 kPhase = vec3(0.8, -0.3, 0.3);
 // Wrenninge multiple-scattering octaves: per octave, extinction x a,
 // contribution x b, eccentricity x c.
-const int kOctaves = 3;
-const vec3 kOctaveScale = vec3(0.25, 0.7, 0.5);
-// Ambient (sky irradiance) at the layer's bottom relative to its top.
+const int kOctaves = 4;
+const vec3 kOctaveScale = vec3(0.5, 0.5, 0.5);
+// Ambient at the far side of the layer relative to the near side: the sky
+// at the bottom, the ground bounce at the top.
 const float kAmbientBottom = 0.35;
 const float kMaxDistance = 300000.0;
 const float kOpaque = 0.01;
@@ -141,8 +139,15 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
         phases[k] = dualLobePhase(cosTheta, eccentricity);
         eccentricity *= kOctaveScale.z;
     }
-    ambient /= 2.0 * kPi;
     float bottomKm = pc.scene.atmosphere.bottomRadius;
+    // Ground bounce: the ground (the atmosphere's albedo, Lambertian) lit
+    // by the sun through the local coverage's gaps and by the sky.
+    float coverage = weatherAt(pc.scene, pc.scene.cameraPosition).coverage;
+    vec3 groundSun = transmittanceToSun(bottomKm + kPlanetRadiusOffset, sun.y) * max(sun.y, 0.0);
+    vec3 ground = pc.scene.atmosphere.groundAlbedo * (groundSun * (1.0 - coverage) + ambient);
+    // Isotropic in-scattering of a uniform hemisphere of irradiance E: E / 2 pi.
+    ambient /= 2.0 * kPi;
+    ground /= 2.0 * kPi;
 
     float depthSum = 0.0;
     float weightSum = 0.0;
@@ -168,8 +173,9 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
 
             // Sun: optical depth toward it through the layer (none to
             // march without sun; stops once above the layer), and from
-            // where the short march ends to the sun, the shadow map's
-            // (none beyond the map).
+            // where the short march ends to the sun, the shadow map's,
+            // blended into the fallback's mean where the map fades (far
+            // away, low sun).
             float opticalDepth = 0.0;
             if (any(greaterThan(sunLight, vec3(0.0)))) {
                 float s = 0.0;
@@ -186,10 +192,8 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                     ds *= 2.0;
                 }
                 opticalDepth *= kCloudExtinction;
-                if (!exited && c.shadowSize > 0.0) {
-                    float weight;
-                    float beyond = cloudShadowMap(cloudPoint(rel + sun * s, radius), weight);
-                    opticalDepth -= weight * log(max(beyond, 1e-6));
+                if (!exited) {
+                    opticalDepth -= log(max(cloudShadow(cloudPoint(rel + sun * s, radius)), 1e-6));
                 }
             }
 
@@ -202,9 +206,9 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                 b *= kOctaveScale.y;
             }
 
-            float albedo = kAlbedo * mix(kEdgeAlbedo, 1.0, smoothstep(0.0, kEdgeDensity, density));
-            vec3 source = albedo * (sunLight * scattered +
-                                    ambient * mix(kAmbientBottom, 1.0, heightFraction));
+            vec3 source = kAlbedo * (sunLight * scattered +
+                                    ambient * mix(kAmbientBottom, 1.0, heightFraction) +
+                                    ground * mix(1.0, kAmbientBottom, heightFraction));
             // Energy-conserving integration over the step (Hillaire 2016).
             float sigma = density * kCloudExtinction;
             float stepTransmittance = exp(-sigma * dt);

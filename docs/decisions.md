@@ -1340,8 +1340,9 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   worley, 1)`), GBA Worley fBm at 4, 8, 16 cells per tile; detail 32^3
   RGBA8: Worley fBm at 2, 4, 8 cells; curl 128^2 RGBA16F: the curl of 2D
   Perlin fBm (divergence-free, so the detail lookup swirls without
-  bunching). World tiles: base 8192 m (64 m texels, ~2 km cells), detail
-  1024 m (32 m texels), curl 4096 m. Every lattice wraps, so all of them
+  bunching). World tiles: base 4096 m (32 m texels, ~1 km cells, sampled
+  at twice the vertical frequency), detail 512 m (16 m texels), curl
+  4096 m (sizes: "Cloud look development" below). Every lattice wraps, so all of them
   tile seamlessly.
   - Schneider, Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
   - Hillaire, TileableVolumeNoise (Perlin-Worley construction): https://github.com/sebh/TileableVolumeNoise
@@ -1354,11 +1355,14 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   it would punch holes in overcast (R spread over [0, 1] at coverage 1)
   and shrink fair well below its coverage, so coverage stays out of the
   cut. Erosion depends on type like the
-  profile: cumulus wispy at the base and billowy above, carving up to
-  0.35; stratus wispy throughout, carving up to 0.5. Output is in [0, 1]; the march scales it to extinction.
+  profile: cumulus wispy at the base and billowy above, stratus wispy
+  throughout, both carving up to 0.5. The eroded density is scaled by 6
+  and saturated at 1 (crisp edges, full cores). Output is in [0, 1]; the
+  march scales it to extinction.
   `world.y` is the altitude on the curved shell, so the caller decides
   the curvature. Profiles are analytic smoothsteps by normalized height
-  (stratus a soft slab, cumulus a flat base thinning upward) instead of
+  (stratus a soft slab, cumulus a flat base thinning upward; the base
+  ramp multiplies after the shape cut, the thinning before it) instead of
   the spec's small type texture: two curves don't need a texture, and
   the type axis stays continuous. Layer per type: stratus 1.8-3.0 km,
   cumulus base 2.5 km with tops from 3.3 km rising to 4.5 km with
@@ -1432,18 +1436,17 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   noise texture in the engine yet; IGN is the engine's existing
   low-discrepancy per-pixel sequence); the march stops at the scene
   depth, the sea-level sphere, 300 km, or transmittance 0.01.
-- **Lighting:** extinction 0.06/m at density 1, albedo 0.98 lowered
-  toward 0.5 below density 0.15 (edge darkening by albedo, the spec's
-  choice over the powder term); sun transmittance by a 5-step light
+- **Lighting:** extinction 0.06/m at density 1, albedo 0.99 (no edge
+  darkening; "Cloud look development" below); sun transmittance by a 5-step light
   march (40 m doubling, 1.2 km); sun color from the transmittance LUT at
   the sample, zero in the planet's shadow (the LUT alone returns the
   transmittance to the ground there, which made clouds glow after
   sunset; the light march is skipped there and stops once it leaves the
-  layer); dual-lobe Henyey-Greenstein (0.8 and -0.5, 30% backward);
-  Wrenninge octaves, 3, extinction x0.25, contribution x0.7, eccentricity
-  x0.5 (a <= b keeps it energy-conserving; b = 0.5 left sunlit tops
-  grey); ambient = clear-sky irradiance / 2 pi (isotropic in-scattering from
-  a uniform upper hemisphere) times a 0.35-to-1 bottom-to-top gradient;
+  layer); dual-lobe Henyey-Greenstein (0.8 and -0.3, 30% backward);
+  Wrenninge octaves, 4, extinction, contribution and eccentricity each
+  x0.5; ambient = clear-sky irradiance / 2 pi (isotropic in-scattering from
+  a uniform upper hemisphere) times a 0.35-to-1 bottom-to-top gradient,
+  plus the ground bounce / 2 pi times the mirrored gradient;
   Frostbite's energy-conserving integration per step. Mean depth
   weights each step by its opacity contribution; 0 = no cloud.
 - **Haze:** at the mean depth d, `L = L_haze(0..d) (1 - T) + T_haze L_cloud`
@@ -1458,10 +1461,10 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   product coverage x profile x shape gave flat-topped, vertical-walled
   slabs. The shape is stretched over that range, lifted toward 1 for
   stratus (`shape = mix(shape, 1, 0.6 (1 - type))`; overcast had holes
-  without it), and profile x shape is cut at 0.35 for cumulus (gaps,
+  without it), and thinning x shape is cut at 0.6 for cumulus (gaps,
   domed tops where the profile thins) and 0.1 for stratus, interpolated
-  by type: `density = coverage x saturate(remap(profile x shape, cut,
-  1))`, then eroded. Coverage stays a plain multiplier (the Task 2
+  by type: `density = coverage x baseRamp x saturate(remap(thinning x
+  shape, cut, 1))`, then eroded. Coverage stays a plain multiplier (the Task 2
   ruling: thresholded once, in the map).
 - **Composite:** replaced by the temporal resolve and depth-aware
   composite below.
@@ -1556,9 +1559,9 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   max-min / mean: 0.38 -> 0.16, flat sky 0.02-0.07). Cost (Debug, median
   of 3, `clouds` ms): ground 0.91 -> 1.08, above 0.85 -> 1.05, inside
   1.49 -> 1.67 (about half each: the exact last step and the 16-tap
-  upsample). What remains: thin dark ribbons on the cloud's underside,
-  also in the converged reference and unchanged by jittering the light
-  march, i.e. the density field (shape cut / profile), not sampling.
+  upsample). The thin dark ribbons that remained on the undersides came
+  from the density field (base ramp inside the shape cut); they are gone
+  with Task 7's shape (flat-base profile, finer noise).
   With per-step jitter the single-frame noise alternates between
   neighbouring columns (IGN), so a restarted texel's 3x3 box mean showed
   vertical stripes behind a strafed silhouette; restarts use a 1-2-1
@@ -1660,17 +1663,16 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   (6500 m, pitch -0.25) swept from 0 to 20 degrees of sun, the mean
   applied transmittance 11.5-13.8 km and 15.4-17.5 km from the camera
   differs with the cloud pattern either way, except at 4-5.5 degrees,
-  where the near band was consistently brighter (by 0.03-0.22 in fair,
-  looking toward and away from the sun); the view's mean changes by at
-  most 0.10 per half degree.
+  where in the one view measured per side (fair, looking toward and
+  away from the sun) the near band was brighter by 0.03-0.22; the view's
+  mean changes by at most 0.10 per half degree.
   Only the sun is dimmed: no local occlusion of ambient (spec). The
-  cloud march's 1.2 km sun march adds the map's optical depth from
-  where it ends (unless it left the layer), weighted by the map's fade,
-  so cloud self-shadowing reaches through the whole layer near the
-  camera; beyond ~15 km horizontally from the camera and below 6
-  degrees of sun that weight falls to 0 and the march adds no optical
-  depth past its 1.2 km (far and dusk clouds too bright; deferred to
-  Task 7). `--clouds
+  cloud march's 1.2 km sun march adds the optical depth from where it
+  ends (unless it left the layer) of `cloudShadow`'s blend: the map's
+  near the camera, the fallback's mean beyond ~15 km horizontally and
+  below 6 degrees of sun, so far and dusk clouds keep their
+  self-shadowing (with the map's term alone they rendered too bright:
+  sunlit tops in the sunset-from-above view 3.1k -> 2.1k cd/m^2). `--clouds
   off` turns the shadows off too (shadow size 0).
 - Verified: shadows sit against the sun (top-down broken view, shadow
   mask with the sun 45 degrees east vs west: shifted 54 px each way,
@@ -1741,3 +1743,79 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016; clouds and sky captured into a low-resolution cubemap, updated over frames, for the scene's ambient): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
   - UE Sky Light, Real Time Capture (sky atmosphere and volumetric clouds captured and time-sliced over frames into the sky light): https://dev.epicgames.com/documentation/en-us/unreal-engine/sky-lights-in-unreal-engine
   - Cigolle et al., A Survey of Efficient Representations for Independent Unit Vectors (JCGT 2014, octahedral mapping): https://jcgt.org/published/0003/02/01/
+
+## Cloud look development (M4 clouds, 2026-11-20)
+
+Matched against reference photos (`assets/reference/clouds/`, git-ignored)
+with `tools/cloud-compare.sh`: midday from the ground looking up (cloud1,
+cloud5) and toward the horizon (cloud3, cloud4), sunset from above a
+broken layer (cloud2). It prints, from `.pfm` captures with clouds on and
+off (exposure divided out), sunlit tops (95th percentile) and bases (just
+inside each cloud's bottom edge) over the clear sky behind them, cover,
+base spread and shading contrast (median / tops), and the same measured
+by color segmentation on the photos and on the capture's image
+(display-referred; photo whites clip, so they bound from below).
+
+- **Material:** albedo 0.99 (Frostbite: rho = 1, sigma_s = sigma_t;
+  Hess 1998 cumulus sigma_t 0.05-0.12 /m) with no edge darkening (the
+  lowered albedo at thin edges was a non-physical stand-in for HZD's
+  powder term; the octaves replace both). Dual-lobe HG 0.8 / -0.3, 30% backward (Frostbite eq. 18;
+  the back lobe lights sun-behind views). Octaves: 4, extinction,
+  contribution and eccentricity each x0.5 (Wrenninge's defaults);
+  Frostbite's energy rule is contribution factor <= extinction factor,
+  which the earlier x0.7 contribution over x0.25 extinction broke. With
+  b = 0.75 the tops measured 7.1x the sky instead of 4.7x and the
+  display barely changed (auto-exposure absorbs it), so the energy-
+  conserving value stays.
+- **Ground bounce (`marchClouds`):** the atmosphere's ground albedo
+  (Lambertian) under the sun through the local coverage's gaps plus the
+  clear sky, in-scattered as E / 2 pi, weighted 1 at the base to 0.35 at
+  the top (the sky term mirrored). It turned grey undersides light grey,
+  as in the photos (HZD: ambient rises with height; Frostbite biases its
+  height gradient for ground bounce; Revision 2013's slab has a bottom
+  term with ground light).
+- **Edges:** the eroded density is scaled by 6 and saturated at 1
+  (Nubis: remap rather than multiply keeps core density); edges sharpen
+  from a few hundred metres of soft ramp to tens, and cauliflower lobes
+  read in the shading.
+- **Scale:** base noise 4096 m (cells ~1 km) sampled at twice the
+  vertical frequency, detail 512 m, cumulus cut 0.6, erosion 0.5 for
+  cumulus too (HZD: billowy detail toward the top). At 8192 m the
+  clouds were 2-3 km isotropic blobs; at 4096 m isotropic they were
+  heaps; squashed they spread into flat-based loaves 0.3-1.5 km wide, as
+  in cloud3/cloud4. The cut brings fair cover to the photos' range
+  (0.34-0.42 of the sky vs 0.23-0.44).
+- **Flat bases:** the cumulus base ramp multiplies after the shape cut
+  (the thinning toward the top stays before it), so every cloud starts
+  at the layer bottom instead of where its shape first exceeds the cut
+  (rounded undersides; the forum's "modify the coverage, not the
+  density"). Freezing the shape's vertical variation below 10-25% of the
+  layer gave straight-walled columns and was dropped.
+- **Far and dusk self-shadowing:** see "Cloud shadow map" (the march adds
+  the fallback's optical depth where the map fades). The fallback's fit
+  predates this shape and is not refitted yet (backlog).
+- **Measured (2560x1440, Debug):** fair, ground looking up / toward the
+  horizon: tops 4.3x / 3.2x the clear sky behind them (10.7k cd/m^2;
+  user target 1.5-3x; photos 4.7-11x display-referred, whites clipped),
+  bases 1.24x / 1.22x (target < 1; photos 2.0-2.8x: lit by the ground,
+  they are brighter than the deep sky above), base spread 0.42 (photos
+  0.29-0.39), cover 0.34 / 0.42 (photos 0.23-0.44). `clouds` ms (same
+  clock state, median of 3): ground 1.08 -> 0.89, horizon 1.05 -> 0.81,
+  sunset from above (fair) 1.31 -> 0.86 (fewer, smaller clouds).
+- **Contour bands at full render scale** (Task 5 note): the stacked
+  shelves came from the old profile x shape product under the steep
+  shape stretch, not from sampling: forcing noise mip 0 changed nothing,
+  and `--render-scale 0.5` only blurred them (cloud targets at 1/8 of
+  the display). The flat-base profile and the finer noise removed them;
+  what remains is the quarter-resolution march's texel stair-step on
+  small distant clouds (backlog).
+- **Catmull-Rom upsample overshoot:** clamping to the central 2x2 range
+  changed the sunset-from-above view by MAE 1.4e-4 with no visible ring
+  removed, so the composite is unchanged.
+  - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016, §5): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
+  - Wrenninge, Kulla, Lundqvist, Oz: The Great and Volumetric (2013, multiple-scattering octaves): https://fpsunflower.github.io/ckulla/data/oz_volumes.pdf
+  - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
+  - Schneider, Nubis: Authoring Real-Time Volumetric Cloudscapes with the Decima Engine (2017): https://advances.realtimerendering.com/s2017/Nubis%20-%20Authoring%20Realtime%20Volumetric%20Cloudscapes%20with%20the%20Decima%20Engine%20-%20Final%20.pdf
+  - Patapom, Real-time Volumetric Rendering course notes (Revision 2013): https://patapom.com/topics/Revision2013/Revision%202013%20-%20Real-time%20Volumetric%20Rendering%20Course%20Notes.pdf
+  - GameDev.net, Horizon: Zero Dawn cloud system thread (coverage vs density, height gradients): https://gamedev.net/forums/topic/680832-horizonzero-dawn-cloud-system/
+  - Hess, Koepke, Schult, Optical Properties of Aerosols and Clouds (1998): https://lweb.cfa.harvard.edu/hitran/HITRAN2012/Aerosols/papers/hess_opac_1998.pdf
