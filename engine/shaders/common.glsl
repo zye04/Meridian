@@ -404,7 +404,8 @@ struct Clouds {
     vec3 shadowForward;
     uint shadowMap;
     vec2 shadowCamera;
-    vec2 pad1;
+    float groundCoverage;
+    float pad1;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

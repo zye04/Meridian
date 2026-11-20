@@ -294,50 +294,62 @@ float cloudShadowMap(vec3 world, out float weight) {
     return exp(-min(texel.b, texel.g * max(0.0, depth - texel.r * 1000.0)));
 }
 
-// Beyond the shadow map: the mean transmittance under the coarse weather.
-// One crossing of coverage R passes 1 - k R, read where the sun ray
-// crosses the middle of the layer (the weather map inside its window, its
-// analytic fallback beyond); sky with coverage R is cloudy over only part
-// of its area (the shape cut and erosion carve gaps), so k = 1 - a type^p,
-// fitted to the shadow map's mean transmittance (decisions.md). A low sun's
-// ray runs S = layer height / tan(elevation) through the layer and crosses
-// about S / L independent clouds: the rest pass the regional mean, the
-// local state's mean coverage (weatherFromNoise's soft threshold over an
-// about uniform noise), so the fallback darkens with the map toward the
-// horizon. 1 above the layer.
+// Beyond the shadow map: the mean transmittance under the coarse weather,
+// through the local layer (cloudLayer of the local state). One crossing of
+// coverage R passes 1 - k R, read where the sun ray crosses the middle of
+// the layer (the weather map inside its window, its analytic fallback
+// beyond); sky with coverage R is cloudy over only part of its area (the
+// shape cut and erosion carve gaps), so k = 1 - a type^p, fitted to the
+// shadow map's mean transmittance (decisions.md). A low sun's ray runs S =
+// layer height / tan(elevation) through the layer and crosses about S / L
+// independent clouds: the rest pass the regional mean, the local state's
+// mean coverage (weatherFromNoise's soft threshold over an about uniform
+// noise), so the fallback darkens with the map toward the horizon.
+// marched: world is a cloud sample whose own cloud the march's sun steps
+// already crossed, so only the regional mean over the rest of the path
+// applies. 1 above the layer.
 const vec2 kCloudShadowFallbackFit = vec2(0.53, 3.5); // a, p
 const float kCloudShadowCrossingLength = 5500.0;
 
-float cloudShadowFallback(vec3 world) {
-    Clouds c = pc.scene.clouds;
-    float top = max(c.stratusTop, c.cumulusTop);
-    if (world.y >= top) {
+float cloudShadowFallback(vec3 world, bool marched) {
+    WeatherSample here = weatherAt(pc.scene, vec3(world.x, 0.0, world.z));
+    vec2 layer = cloudLayer(here.type, here.coverage);
+    if (world.y >= layer.y) {
         return 1.0;
     }
     vec3 sun = pc.scene.sunDirection;
-    float bottom = max(min(c.stratusBottom, c.cumulusBottom), world.y);
+    float bottom = max(layer.x, world.y);
     float sunHeight = max(sun.y, kCloudShadowSunFade.x);
-    float middle = 0.5 * (bottom + top);
+    float middle = 0.5 * (bottom + layer.y);
     vec2 xz = world.xz + sun.xz * ((middle - world.y) / sunHeight);
-    vec4 weather = weatherMapAt(vec3(xz.x, middle, xz.y));
-    float k = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(weather.g, 0.0, 1.0), kCloudShadowFallbackFit.y);
-    float crossings = (top - bottom) * length(sun.xz) / (sunHeight * kCloudShadowCrossingLength);
+    float crossings = (layer.y - bottom) * length(sun.xz) / (sunHeight * kCloudShadowCrossingLength);
     WeatherSample local = weatherAt(pc.scene, vec3(xz.x, 0.0, xz.y));
     float meanCoverage = clamp(local.coverage * (1.0 + kCoverageEdge) - 0.5 * kCoverageEdge, 0.0, 1.0);
     float meanK = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(local.type, 0.0, 1.0), kCloudShadowFallbackFit.y);
     // pow is undefined for 0^0 (overcast at a high sun).
-    return (1.0 - k * weather.r) * pow(max(1.0 - meanK * meanCoverage, 1e-6), max(0.0, crossings - 1.0));
+    float regional = max(1.0 - meanK * meanCoverage, 1e-6);
+    if (marched) {
+        return pow(regional, crossings);
+    }
+    vec4 weather = weatherMapAt(vec3(xz.x, middle, xz.y));
+    float k = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(weather.g, 0.0, 1.0), kCloudShadowFallbackFit.y);
+    return (1.0 - k * weather.r) * pow(regional, max(0.0, crossings - 1.0));
 }
 
 // Sun transmittance through the clouds at world (flat, m): the shadow map
 // near the camera, blended into the fallback beyond it; 1 with clouds off.
-float cloudShadow(vec3 world) {
+// marched: as cloudShadowFallback's.
+float cloudShadow(vec3 world, bool marched) {
     if (pc.scene.clouds.shadowSize <= 0.0) {
         return 1.0;
     }
     float weight;
     float shadow = cloudShadowMap(world, weight);
-    return weight >= 1.0 ? shadow : mix(cloudShadowFallback(world), shadow, weight);
+    return weight >= 1.0 ? shadow : mix(cloudShadowFallback(world, marched), shadow, weight);
+}
+
+float cloudShadow(vec3 world) {
+    return cloudShadow(world, false);
 }
 
 // Octahedral map of the unit sphere (y up): the upper hemisphere fills the

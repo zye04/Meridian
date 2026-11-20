@@ -10,6 +10,9 @@ extra=("$@")
 here=$(cd "$(dirname "$0")" && pwd)
 refs=$here/../assets/reference/clouds
 metrics="python3 -I $here/cloud-metrics.py"
+for photo in cloud1 cloud2 cloud3 cloud4 cloud5; do
+  [ -f "$refs/$photo.jpg" ] || { echo "missing reference photo $refs/$photo.jpg" >&2; exit 1; }
+done
 mkdir -p "$out"
 
 # name | camera and sun (game args) | photos
@@ -23,7 +26,7 @@ run() { # file view-args [args...]
   local file=$1 view=$2; shift 2
   # shellcheck disable=SC2086
   flock /tmp/meridian-gpu.lock "$build/game/game" --placement off $view "$@" "${extra[@]}" \
-    --capture "$file" > "${file%.*}.log" 2>&1
+    --capture "$file" > "${file%.*}.log" 2>&1 || { echo "game failed: $file (see ${file%.*}.log)" >&2; exit 1; }
   grep -o "[0-9]* validation errors" "${file%.*}.log" | grep -v "^0 " && echo "VALIDATION: $file"
   grep "GPU passes" "${file%.*}.log" | grep -o "clouds [0-9.]*" | sed "s|^|$(basename "$file") |"
 }
@@ -34,6 +37,7 @@ for view in "${views[@]}"; do
   IFS='|' read -r name args photos <<< "$view"
   run "$out/$name.png" "$args"
   run "$out/$name.pfm" "$args"
+
   run "$out/$name-off.pfm" "$args" --clouds off
   echo "== $name (capture)"
   $metrics capture "$out/$name.pfm" "$(ev "$out/$name.log")" "$out/$name-off.pfm" \
