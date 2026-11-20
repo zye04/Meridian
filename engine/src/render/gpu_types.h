@@ -313,10 +313,10 @@ static_assert(sizeof(GpuWeather) == 32);
 
 // Clouds (clouds.glsl). Layer heights above sea level (m). The weather map:
 // 512^2 texels over a 60 km window around the camera, texel-snapped.
-constexpr float kCumulusBottom = 2500.0f;
-constexpr float kCumulusTop = 4500.0f;
-constexpr float kStratusBottom = 1800.0f;
-constexpr float kStratusTop = 3000.0f;
+constexpr float kCumulusBottom = 2800.0f;
+constexpr float kCumulusTop = 4800.0f;
+constexpr float kStratusBottom = 1700.0f;
+constexpr float kStratusTop = 2800.0f;
 constexpr uint32_t kWeatherMapResolution = 512;
 constexpr double kWeatherMapSize = 60000.0;
 // The weather map and the noise volumes move with the wind at this altitude.

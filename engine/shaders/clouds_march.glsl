@@ -33,6 +33,12 @@ const float kOpaque = 0.01;
 // Sun march: steps doubling from kLightStep (6 steps cover 1.26 km).
 const int kLightSteps = 6;
 const float kLightStep = 20.0;
+// The first sun steps erode with the detail noise (crisp self-shadow at
+// the surface); the longer ones use the coarse density.
+const int kLightFineSteps = 2;
+// Behind this much cloud (transmittance), samples add little: their sun
+// march is all coarse and they skip the ambient probe.
+const float kCheapLighting = 0.25;
 
 // Roots (near, far) of a ray from the camera (altitude h, direction with
 // vertical component dy) against the sphere at altitude a, in m. Written to
@@ -170,7 +176,7 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
         vec3 world = cloudPoint(rel, radius);
         float lod = max(0.0, log2(dt / 100.0));
         float heightFraction;
-        float density = cloudDensity(world, lod, heightFraction);
+        float density = cloudDensity(world, lod, true, heightFraction);
         if (density > 0.0) {
             // Sun color from the atmosphere at the sample, zero in the
             // planet's shadow.
@@ -197,7 +203,10 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
                         exited = true;
                         break;
                     }
-                    opticalDepth += cloudDensity(q, lod + float(j) * 0.5) * ds;
+                    float lightLod = lod + float(j) * 0.5;
+                    bool fine = j < kLightFineSteps && result.transmittance > kCheapLighting;
+                    opticalDepth += (fine ? cloudDensity(q, lightLod)
+                                                         : cloudDensityCoarse(q, lightLod)) * ds;
                     s += ds;
                     ds *= 2.0;
                 }
@@ -209,8 +218,11 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
 
             // The cloud above shades crevices between billows and the
             // undersides, which the height gradient alone leaves smooth.
-            float above = cloudDensity(cloudPoint(rel + up * kAmbientProbe, radius), lod);
-            float ambientVisibility = exp(-above * kCloudExtinction * kAmbientProbe * kAmbientOcclusion);
+            float ambientVisibility = 1.0;
+            if (result.transmittance > kCheapLighting) {
+                float above = cloudDensityCoarse(cloudPoint(rel + up * kAmbientProbe, radius), lod);
+                ambientVisibility = exp(-above * kCloudExtinction * kAmbientProbe * kAmbientOcclusion);
+            }
 
             float scattered = 0.0;
             float a = 1.0;

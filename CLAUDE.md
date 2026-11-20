@@ -156,7 +156,7 @@ Laplacian with the still's). Placed forests (seed 1): forest edge
 canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
 placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
 the summit ridge at ~1.5 km: the open view toward the summit.
-Clouds (layer 1.8-4.5 km above sea level, cirrus sheet at 9 km): beside
+Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast
 `1119 1356 -431 -1.55 0.25 --weather overcast`; fair cumulus from the
@@ -179,7 +179,7 @@ clouds `1119 1355.9 -431 -1.55 0.15 --sun -0.7 0.035 0.7` (sun 2 deg up;
 the still, and vs `--clouds off`): fast turn, the fair view with
 `--camera-yaw-rate 1`; toward the layer `1119 1900 -431 -1.55 0.1
 --camera-velocity -60 20 0`; across the base (quarter -> half switch at
-2250 m, base 2500 m) `1119 2650 -431 -1.55 0.1 --camera-velocity -30 250
+2550 m, base 2800 m) `1119 2950 -431 -1.55 0.1 --camera-velocity -30 250
 0` (with `--capture-sequence 2` for the sequence); summit silhouette
 with clouds drifting across the view `1119 1356 -431 2.5 0.12
 --time-scale 1.5` (~10 m/s, 80% lateral; still: `--time-scale 0`;

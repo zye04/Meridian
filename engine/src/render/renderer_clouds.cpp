@@ -308,10 +308,15 @@ void Renderer::Impl::drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame
                           nullptr);
   PushConstants push;
   push.sceneBuffer = frame.sceneBuffer.address;
+  // Half the rows per frame once a full map exists (cloud_shadow.comp).
+  push.drawList = historyValid ? 1 : 0;
   vkCmdPushConstants(cmd, cloudLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
   for (VkPipeline pipeline : {cloudShadowPipeline, cloudShadowBlurPipeline}) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-    vkCmdDispatch(cmd, kCloudShadowResolution / 8, kCloudShadowResolution / 8, 1);
+    const uint32_t rows = pipeline == cloudShadowPipeline && historyValid
+                              ? kCloudShadowResolution / 2
+                              : kCloudShadowResolution;
+    vkCmdDispatch(cmd, kCloudShadowResolution / 8, rows / 8, 1);
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
