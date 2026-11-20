@@ -99,7 +99,7 @@ void main() {
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
         addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart, true,
-                                           s.normal),
+                                           relative, s.normal),
                     1.0);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }

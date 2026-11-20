@@ -32,8 +32,10 @@ void seedTraversal(uint id, LoadedInstance instance, MeshInfo mesh) {
         vec3 center = (instance.transform * vec4(root.lodCenter, 1.0)).xyz;
         float farthest = length(center - scene.cameraPosition) +
                          (root.lodRadius - level.minGroupRadius) * instance.scale;
-        float finest = level.minError * instance.scale / max(farthest, scene.nearPlane) *
-                       pixelsPerError;
+        float finest = scene.orthoPixelsPerMeter > 0.0
+                           ? level.minError * instance.scale * scene.orthoPixelsPerMeter
+                           : level.minError * instance.scale / max(farthest, scene.nearPlane) *
+                                 pixelsPerError;
         if (finest <= scene.lodErrorPixels &&
             projectedError(center, root.lodRadius * instance.scale,
                            level.maxError * instance.scale) > scene.lodErrorPixels) {
@@ -57,7 +59,7 @@ void main() {
     LoadedInstance instance = loadInstance(scene, id);
     if (instance.placed && instance.scale <= 0.0) {
         // Thinned out (streamed): not visible, and not kept visible.
-        if (cull.phase == 1u) {
+        if (cull.phase == 1u && scene.shadowView == 0u) {
             cull.visibility.visible[id] = 0u;
         }
         return;
@@ -84,19 +86,22 @@ void main() {
     vec4 sphere = displayedSphere(relative, radius * instance.scale);
     bool visibleInFrustum = inFrustum(sphere.xyz, sphere.w) &&
                             (maxDistance == 0.0 ||
-                             length(relative) - radius * instance.scale <= maxDistance);
+                             length(relative) - radius * instance.scale <=
+                                 maxDistance + scene.shadowDrawMargin);
 
-    bool wasVisible = cull.visibility.visible[id] != 0u;
+    bool occlusion = occlusionEnabled();
+    bool wasVisible = occlusion && cull.visibility.visible[id] != 0u;
     if (cull.phase == 0u) {
-        if (cull.occlusion == 0u || !wasVisible || !visibleInFrustum) {
+        if (!occlusion || !wasVisible || !visibleInFrustum) {
             return;
         }
     } else {
-        bool visible = visibleInFrustum &&
-                       (cull.occlusion == 0u || !occluded(sphere, scene.view));
-        cull.visibility.visible[id] = visible ? 1u : 0u;
+        bool visible = visibleInFrustum && (!occlusion || !occluded(sphere, scene.view));
+        if (scene.shadowView == 0u) {
+            cull.visibility.visible[id] = visible ? 1u : 0u;
+        }
         // Instances processed in phase 0 aren't processed again.
-        bool processed = cull.occlusion != 0u && wasVisible &&
+        bool processed = occlusion && wasVisible &&
                          (chunk.y & kChunkCellWasVisible) != 0u;
         if (!visible || processed) {
             return;

@@ -140,6 +140,9 @@ bool pushNode(uint phase, uint depth, uvec2 entry) {
 // (clusterlod's estimate; must match meridian::projectedErrorPixels).
 float projectedError(vec3 center, float radius, float error) {
     SceneBuffer scene = cull.scene;
+    if (scene.orthoPixelsPerMeter > 0.0) {
+        return error * scene.orthoPixelsPerMeter;
+    }
     float distance = max(length(center - scene.cameraPosition) - radius,
                          scene.nearPlane);
     return error / distance * abs(scene.projectionScale.y) * 0.5 /
@@ -155,6 +158,11 @@ vec4 displayedSphere(vec3 center, float radius) {
     float nearDrop = curvatureDrop(cull.scene, vec3(max(d - radius, 0.0), 0.0, 0.0));
     float farDrop = curvatureDrop(cull.scene, vec3(d + radius, 0.0, 0.0));
     return vec4(center.x, center.y - nearDrop, center.z, radius + farDrop - nearDrop);
+}
+
+// Occlusion culling needs the main view's pyramid; a shadow cascade has none.
+bool occlusionEnabled() {
+    return cull.occlusion != 0u && cull.scene.shadowView == 0u;
 }
 
 bool inFrustum(vec3 center, float radius) {

@@ -5,6 +5,7 @@
 #include <meridian/farfield.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
+#include <meridian/shadow_cascades.h>
 #include <meridian/weather.h>
 
 #include <vk_mem_alloc.h>
@@ -305,6 +306,34 @@ static_assert(sizeof(GpuWind) == 48);
 // Must match WeatherHistorySample in common.glsl.
 static_assert(sizeof(WeatherHistorySample) == 16);
 
+// Must match SunShadowCascade in common.glsl. `origin` is the cascade's
+// center relative to the camera; the light basis is shared (GpuSunShadows).
+struct alignas(16) GpuSunShadowCascade {
+  float origin[3] = {};
+  float halfSize = 0.0f;
+  float texel = 0.0f;
+  float depthNear = 0.0f;
+  float depthFar = 0.0f;
+  uint32_t texture = 0;
+  float radius = 0.0f;
+  uint32_t valid = 0;
+  uint32_t pad[2] = {};
+};
+static_assert(sizeof(GpuSunShadowCascade) == 48);
+
+// Must match SunShadows in common.glsl: the light basis (u, v across the
+// map, d away from the sun) and one cascade per kShadowCascades.
+struct alignas(16) GpuSunShadows {
+  GpuSunShadowCascade cascades[kShadowCascades];
+  float u[3] = {};
+  float pad0 = 0.0f;
+  float v[3] = {};
+  float pad1 = 0.0f;
+  float d[3] = {};
+  float pad2 = 0.0f;
+};
+static_assert(sizeof(GpuSunShadows) == 288);
+
 // Must match Weather in common.glsl (see weather.glsl). History samples are
 // oldest first, their travel relative to the current travel (<= 0) so it
 // stays precise however far the air has moved.
@@ -503,6 +532,17 @@ struct SceneData {
   uint32_t farShadowWidth = 0, farShadowHeight = 0;
   uint32_t farShadowMode = 0;
   uint32_t pad7 = 0;
+  // Raster sun shadows: 1 in a cascade's own copy (orthographic view: no
+  // curvature, no occlusion culling), the copy's pixels per meter (0 =
+  // perspective), the sun shadow mode (0 raster, 1 rt) and the cascades.
+  uint32_t shadowView = 0;
+  float orthoPixelsPerMeter = 0.0f;
+  uint32_t shadowMode = 0;
+  // A shadow view's draw distances grow by the camera's largest drift
+  // before the cascade re-centres, so its casters cover what the main view
+  // draws until then.
+  float shadowDrawMargin = 0.0f;
+  GpuSunShadows sunShadows;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -515,7 +555,9 @@ static_assert(offsetof(SceneData, farField) == 2192);
 static_assert(offsetof(SceneData, gi) == 2216);
 static_assert(offsetof(SceneData, farShadowTexels) == 2224);
 static_assert(offsetof(SceneData, farShadowMode) == 2296);
-static_assert(sizeof(SceneData) == 2304);
+static_assert(offsetof(SceneData, shadowView) == 2304);
+static_assert(offsetof(SceneData, sunShadows) == 2320);
+static_assert(sizeof(SceneData) == 2608);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

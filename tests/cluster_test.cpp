@@ -403,3 +403,29 @@ TEST_CASE("the BVH traversal selects exactly the flat cut") {
   checkTraversal(single, {});
   checkTraversal(buildClusterLod(bumpyGrid(100)), {});
 }
+
+TEST_CASE("selectClustersBvh orthographic equals lodVisible") {
+  const auto check = [](const ClusterLod &lod, Vec3 camera) {
+    for (float pixelsPerMeter : {2048.0f / 50.0f, 2048.0f / 12800.0f}) {
+      for (float threshold : {0.5f, 1.0f, 4.0f}) {
+        for (float scale : {1.0f, 2.5f}) {
+          std::vector<uint32_t> bvh = selectClustersBvh(lod, camera, scale, 1.0f, 0.1f, 1.0f,
+                                                        threshold, pixelsPerMeter);
+          std::sort(bvh.begin(), bvh.end());
+          std::vector<uint32_t> flat;
+          for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
+            if (lodVisible(lod.clusters[i], camera, scale, 1.0f, 0.1f, 1.0f, threshold,
+                           pixelsPerMeter)) {
+              flat.push_back(i);
+            }
+          }
+          CHECK(!flat.empty());
+          CHECK(bvh == flat);
+        }
+      }
+    }
+  };
+  check(cachedTree(), {0.0f, 8.0f, 50.0f});
+  check(buildClusterLod(bumpyGrid(1)), {});
+  check(buildClusterLod(bumpyGrid(100)), {0.0f, 5.0f, 500.0f});
+}

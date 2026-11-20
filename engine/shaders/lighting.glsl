@@ -95,6 +95,73 @@ float farShadowVisibility(vec3 world, vec3 normal, float start) {
     return lit;
 }
 
+// Raster shadow cascades: the normal offset (in texels) fights acne on
+// receivers facing away from the sun, the depth bias (in texels of depth)
+// covers the filter footprint's slope; both scale with the cascade's texel.
+const float kShadowNormalOffset = 1.5;
+const float kShadowDepthBias = 1.0;
+const float kCascadeBlendFraction = 0.15;
+
+// Receiver in cascade i's light space: xy = map uv, z = receiver depth.
+bool cascadeCoords(SunShadowCascade c, vec3 relative, vec3 normal, out vec3 coords) {
+    SunShadows sh = pc.scene.sunShadows;
+    vec3 p = relative + normal * (kShadowNormalOffset * c.texel) - c.origin;
+    vec2 lightUv = vec2(dot(p, sh.u), dot(p, sh.v));
+    coords = vec3(lightUv / c.halfSize * 0.5 + 0.5,
+                  (c.depthFar - dot(p, sh.d)) / (c.depthNear + c.depthFar));
+    return all(lessThanEqual(abs(lightUv), vec2(c.halfSize - 2.0 * c.texel)));
+}
+
+// Lit fraction of a bilinear 2x2 compare at uv.
+float bilinearLit(uint map, vec2 uv, vec2 size, float receiverDepth) {
+    vec2 st = uv * size - 0.5;
+    vec2 f = fract(st);
+    vec4 g = textureGather(textures[nonuniformEXT(map)], (floor(st) + 1.0) / size, 0);
+    vec4 lit = vec4(lessThanEqual(g, vec4(receiverDepth)));
+    // gather order: x (i0,j1), y (i1,j1), z (i1,j0), w (i0,j0)
+    return mix(mix(lit.w, lit.z, f.x), mix(lit.x, lit.y, f.x), f.y);
+}
+
+float cascadeFiltered(SunShadowCascade c, vec3 coords) {
+    vec2 size = vec2(textureSize(textures[nonuniformEXT(c.texture)], 0));
+    float receiverDepth = coords.z + kShadowDepthBias * c.texel / (c.depthNear + c.depthFar);
+    float sum = 0.0;
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            float w = float((2 - abs(i)) * (2 - abs(j)));
+            sum += w * bilinearLit(c.texture, coords.xy + vec2(i, j) / size, size, receiverDepth);
+        }
+    }
+    return sum / 16.0;
+}
+
+// Sun visibility from the raster cascades for a receiver at relative (to the
+// camera) with geometric normal; 1 where no cascade covers it.
+float cascadeVisibility(vec3 relative, vec3 normal) {
+    SunShadows sh = pc.scene.sunShadows;
+    float distanceToCamera = length(relative);
+    for (uint i = 0u; i < kShadowCascades; ++i) {
+        SunShadowCascade c = sh.cascades[i];
+        vec3 coords;
+        if (c.valid == 0u || distanceToCamera >= c.radius ||
+            !cascadeCoords(c, relative, normal, coords)) {
+            continue;
+        }
+        float visibility = cascadeFiltered(c, coords);
+        float blend = smoothstep(c.radius * (1.0 - kCascadeBlendFraction), c.radius,
+                                 distanceToCamera);
+        if (blend > 0.0 && i + 1u < kShadowCascades) {
+            SunShadowCascade next = sh.cascades[i + 1u];
+            vec3 nextCoords;
+            if (next.valid != 0u && cascadeCoords(next, relative, normal, nextCoords)) {
+                visibility = mix(visibility, cascadeFiltered(next, nextCoords), blend);
+            }
+        }
+        return visibility;
+    }
+    return 1.0;
+}
+
 // Traces one ray toward the sun: the fraction of sunlight that arrives. 0 if
 // an object (the TLAS, from origin + start direction) or the terrain (its
 // heightfield, marched from marchOrigin) blocks it. The TLAS goes first:
@@ -103,31 +170,42 @@ float farShadowVisibility(vec3 world, vec3 normal, float start) {
 // the TLAS without the far-field trees, then the far field's transmittance
 // from the same start. Without marchTerrain the caller accounts for the
 // terrain itself (cluster_cull.comp's per-cluster visibility).
+// In raster shadow mode (shadowMode 0) objects come from the cascades at
+// relative (camera-relative position) and normal instead of the ray query,
+// except beyond kFarShadowDistance, which keeps its TLAS query.
 float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start,
-                         bool marchTerrain, vec3 normal) {
+                         bool marchTerrain, vec3 relative, vec3 normal) {
     bool far = pc.scene.voxelFarShadows != 0u &&
                distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
-                          gl_RayFlagsTerminateOnFirstHitEXT,
-                          far ? kShadowCasterMask : kShadowCasterMask | kFarFieldCasterMask,
-                          origin, start, direction, kShadowRayLength);
-    while (rayQueryProceedEXT(query)) {
-        if (rayQueryGetIntersectionTypeEXT(query, false) ==
-                gl_RayQueryCandidateIntersectionTriangleEXT &&
-            alphaTestCandidate(query)) {
-            rayQueryConfirmIntersectionEXT(query);
+    float objects = 1.0;
+    if (pc.scene.shadowMode == 0u && !far) {
+        objects = cascadeVisibility(relative, normal);
+        if (objects <= 0.0) {
+            return 0.0;
         }
-    }
-    if (rayQueryGetIntersectionTypeEXT(query, true) !=
-        gl_RayQueryCommittedIntersectionNoneEXT) {
-        return 0.0;
+    } else {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
+                              gl_RayFlagsTerminateOnFirstHitEXT,
+                              far ? kShadowCasterMask : kShadowCasterMask | kFarFieldCasterMask,
+                              origin, start, direction, kShadowRayLength);
+        while (rayQueryProceedEXT(query)) {
+            if (rayQueryGetIntersectionTypeEXT(query, false) ==
+                    gl_RayQueryCandidateIntersectionTriangleEXT &&
+                alphaTestCandidate(query)) {
+                rayQueryConfirmIntersectionEXT(query);
+            }
+        }
+        if (rayQueryGetIntersectionTypeEXT(query, true) !=
+            gl_RayQueryCommittedIntersectionNoneEXT) {
+            return 0.0;
+        }
     }
     if (marchTerrain && terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
         return 0.0;
     }
     if (!far) {
-        return 1.0;
+        return objects;
     }
     if (pc.scene.farShadowMode != 0u) {
         return farShadowVisibility(origin, normal, start);

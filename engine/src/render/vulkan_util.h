@@ -50,6 +50,7 @@ struct PipelineDesc {
   // shader, no vertex input).
   const char *vertexShader = nullptr;
   const char *meshShader = nullptr;
+  // Null: depth only.
   const char *fragmentShader = nullptr;
   VkPipelineLayout layout = VK_NULL_HANDLE;
   // Scene pipelines: 0 HDR, 1 motion, 2 transparency mask (alphaBlend
@@ -63,6 +64,8 @@ struct PipelineDesc {
   // Premultiplied-alpha blending into the first attachment, no depth or
   // motion writes: the surface behind keeps its depth and motion.
   bool alphaBlend = false;
+  // Depth bias set per draw (vkCmdSetDepthBias).
+  bool dynamicDepthBias = false;
 };
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc);

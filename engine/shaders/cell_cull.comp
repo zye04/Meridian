@@ -67,20 +67,29 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
 
 void main() {
     SceneBuffer scene = cull.scene;
+    // A shadow cascade runs phase 1 only, without occlusion, visibility
+    // bits, the far switch or streamed cells.
+    bool shadow = scene.shadowView != 0u;
+    if (shadow && cull.phase == 0u) {
+        return;
+    }
     uint index = gl_GlobalInvocationID.x;
     uint gridCells = scene.cellGridSize.x * scene.cellGridSize.y;
     uint cellCount = gridCells + scene.streamRecordCount;
     if (index >= cellCount) {
         uint first = (index - cellCount) * 64u;
         // Phase 0 is skipped without occlusion culling (see cull.comp).
-        if (first < scene.instanceCount && (cull.phase == 1u || cull.occlusion != 0u)) {
+        if (first < scene.instanceCount && (cull.phase == 1u || occlusionEnabled())) {
             emitChunks(first, min(64u, scene.instanceCount - first), true);
         }
         return;
     }
+    if (shadow && index >= gridCells) {
+        return;
+    }
     Cell cell = scene.cells.cells[index];
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    uint skipped = scene.farFieldEnabled != 0u && index < gridCells
+    uint skipped = !shadow && scene.farFieldEnabled != 0u && index < gridCells
                        ? farSwitch(scene, index, gridIndex)
                        : 0u;
     // Cell bits follow the instance ids' (static and ring) in the visibility
@@ -88,7 +97,7 @@ void main() {
     uint visibilityIndex = kPlacedBase + scene.placedCount + scene.ringCount + index;
     if (cell.instanceCount <= skipped) {
         // Drawn as voxels only: none of its instances were visible.
-        if (cull.phase == 1u) {
+        if (cull.phase == 1u && !shadow) {
             cull.visibility.visible[visibilityIndex] = 0u;
         }
         return;
@@ -108,25 +117,29 @@ void main() {
     vec3 boxHi = vec3(hi.x, cell.maxY + lift, hi.y) - scene.cameraPosition;
     bool visible = displayedBoxInFrustum(scene, boxLo, boxHi) &&
                    (scene.cellDrawDistance == 0.0 ||
-                    length(max(max(boxLo, -boxHi), vec3(0.0))) <= scene.cellDrawDistance);
+                    length(max(max(boxLo, -boxHi), vec3(0.0))) <=
+                        scene.cellDrawDistance + scene.shadowDrawMargin);
 
-    bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
+    bool occlusion = occlusionEnabled();
+    bool wasVisible = occlusion && cull.visibility.visible[visibilityIndex] != 0u;
     if (cull.phase == 0u) {
-        if (cull.occlusion != 0u && wasVisible && visible) {
+        if (occlusion && wasVisible && visible) {
             emitChunks(kPlacedBase + cell.firstInstance + skipped, cell.instanceCount - skipped,
                        true);
         }
         return;
     }
-    if (visible && cull.occlusion != 0u) {
+    if (visible && occlusion) {
         vec3 center = (boxLo + boxHi) * 0.5;
         visible = !occluded(displayedSphere(center, length(boxHi - boxLo) * 0.5), scene.view);
     }
-    cull.visibility.visible[visibilityIndex] = visible ? 1u : 0u;
+    if (!shadow) {
+        cull.visibility.visible[visibilityIndex] = visible ? 1u : 0u;
+    }
     if (!visible) {
         return;
     }
     atomicAdd(cull.counters.counters[kCounterCells], 1u);
     emitChunks(kPlacedBase + cell.firstInstance + skipped, cell.instanceCount - skipped,
-               cull.occlusion != 0u && wasVisible);
+               occlusion && wasVisible);
 }

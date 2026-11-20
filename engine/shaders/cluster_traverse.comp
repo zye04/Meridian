@@ -49,13 +49,13 @@ void main() {
     // Last frame's pyramid holds last frame's warp. When phase 1's queue is
     // full, the node goes on now instead: dropping it could hide something
     // visible.
-    if (cull.occlusion != 0u && phase == 0u && cull.previousPyramid != 0u &&
+    if (occlusionEnabled() && phase == 0u && cull.previousPyramid != 0u &&
         occluded(displayedSphere(world - scene.previousCameraPosition, radius),
                  scene.previousView) &&
         pushNode(1u, 0u, entry)) {
         return;
     }
-    if (cull.occlusion != 0u && phase == 1u && occluded(sphere, scene.view)) {
+    if (occlusionEnabled() && phase == 1u && occluded(sphere, scene.view)) {
         return;
     }
 

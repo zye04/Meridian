@@ -110,6 +110,8 @@ add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
+add_shader(shadow.mesh shadow.mesh)
+add_shader(shadow_masked.frag shadow_masked.frag)
 add_shader(voxel.frag voxel.frag ${MARCH_DEFINES})
 add_shader(gi_probes.comp gi_probes.comp ${MARCH_DEFINES})
 add_shader(cluster_cull.comp cluster_cull.comp ${MARCH_DEFINES})
@@ -138,8 +140,10 @@ add_library(meridian STATIC
     src/grade.cpp
     src/model.cpp
     src/placement.cpp
+    src/shadow_cascades.cpp
     src/render/renderer_clouds.cpp
     src/render/renderer_gi.cpp
+    src/render/renderer_shadows.cpp
     src/render/renderer_farfield.cpp
     src/render/renderer_farshadow.cpp
     src/render/renderer_frame.cpp

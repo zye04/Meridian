@@ -383,9 +383,13 @@ bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
-                           float projY, float nearPlane, float screenHeight) {
+                           float projY, float nearPlane, float screenHeight,
+                           float orthoPixelsPerMeter) {
   if (bounds.error == FLT_MAX) {
     return FLT_MAX;
+  }
+  if (orthoPixelsPerMeter > 0.0f) {
+    return bounds.error * scale * orthoPixelsPerMeter;
   }
   const float distance = std::max(
       length(bounds.center - camera) - bounds.radius * scale, nearPlane);
@@ -393,9 +397,11 @@ float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
 }
 
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
-                float nearPlane, float screenHeight, float thresholdPixels) {
+                float nearPlane, float screenHeight, float thresholdPixels,
+                float orthoPixelsPerMeter) {
   const auto project = [&](const LodBounds &b) {
-    return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight);
+    return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight,
+                                orthoPixelsPerMeter);
   };
   return project(cluster.self) > thresholdPixels &&
          (cluster.refined.error < 0.0f || project(cluster.refined) <= thresholdPixels);
@@ -404,9 +410,11 @@ bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,
-                                        float thresholdPixels) {
+                                        float thresholdPixels,
+                                        float orthoPixelsPerMeter) {
   const auto project = [&](const LodBounds &b) {
-    return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight);
+    return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight,
+                                orthoPixelsPerMeter);
   };
   std::vector<uint32_t> queue;
   for (const ClusterLevelInfo &level : lod.levels) {
@@ -416,8 +424,11 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
     // refined error projects over the threshold from there.
     const float farthest =
         length(root.lod.center - camera) + (root.lod.radius - level.minGroupRadius) * scale;
-    const float finest = level.minError * scale / std::max(farthest, nearPlane) * projY *
-                         0.5f * screenHeight;
+    const float finest =
+        orthoPixelsPerMeter > 0.0f
+            ? level.minError * scale * orthoPixelsPerMeter
+            : level.minError * scale / std::max(farthest, nearPlane) * projY * 0.5f *
+                  screenHeight;
     if (finest <= thresholdPixels &&
         project({root.lod.center, root.lod.radius, level.maxError}) > thresholdPixels) {
       queue.push_back(level.rootNode);
@@ -433,7 +444,7 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
       if (!node.leaf) {
         queue.push_back(i);
       } else if (lodVisible(lod.clusters[i], camera, scale, projY, nearPlane, screenHeight,
-                            thresholdPixels)) {
+                            thresholdPixels, orthoPixelsPerMeter)) {
         cut.push_back(i);
       }
     }

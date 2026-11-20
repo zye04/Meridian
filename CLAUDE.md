@@ -2,7 +2,9 @@
 
 C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
-world, grand scale. Hardware ray tracing is required. The setting is open,
+world, grand scale. Hardware ray tracing is required (sun shadows default
+to a TLAS ray; `--shadows raster`, cached cascaded shadow maps, is the
+raster path being brought up to replace it). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:
@@ -171,7 +173,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 voxels), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -275,6 +277,14 @@ terrain under each column), traced in compute against the heightfield
 pyramid (`terrainRayDistance`) and, with `--trees`, the far-field voxels;
 ground hits are a fixed meadow albedo lit by the sun (terrain, tree and
 cloud shadow), misses the sky-view LUT + sky capture. No ray tracing.
+`--shadows raster|rt` (default rt until raster passes the shimmer gates,
+decisions.md): the sun's visibility of objects
+(trees, rocks, plants, models) from the cascaded shadow maps (lighting.glsl
+`cascadeVisibility`: 3x3 tent PCF, finest cascade within its radius,
+blended into the next over the outer 15%), or `rt` from one TLAS ray per
+pixel toward a point on the sun disk. Either way the terrain march,
+cloud shadow, contact shadows and the far path stay. Capture runs print
+`sun shadows: N cascade renders`.
 
 ## Testing policy (usage matters)
 
@@ -323,7 +333,9 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            cloudShadowBasis, Beer shadow texel), gi.h
                            (GI clipmap constants, slice mapping, SH L1:
                            the CPU reference of gi.glsl), window.h,
-                           math/{vec3,mat4}.h
+                           shadow_cascades.h (sun shadow cascades: light
+                           basis, snapped windows, ortho projection and
+                           planes, re-centre test), math/{vec3,mat4}.h
 engine/dlss/               meridian_dlss (MERIDIAN_DLSS, default ON):
                            dlss.h (createProvider, attribution),
                            dlss.cpp (NGX SR/DLAA as an UpscalerProvider),
@@ -352,6 +364,9 @@ engine/src/render/         renderer internals:
                            splat of the placed table into world bricks
                            (farfield_splat.comp), column map, Debug checks
                            against the CPU replica (farfield.h/.cpp)
+  renderer_shadows.cpp     sun shadow cascades: which re-render, their
+                           SceneData copies (shadowView), the shadow-mode
+                           cull chain and the depth-only mesh pass
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
@@ -437,6 +452,16 @@ Instance table upload + TLAS build over all instances (only on the first
 frame and after instances change; one TLAS shared by both frames; its
 records are the placed instances', written once at setPlacement by
 tlas_fill.comp, then the hand-placed ones', copied in before each build) ->
+sun shadows (only with `--shadows raster`; renderer_shadows.cpp: 5 cascades, 20 * 4^i m
+around the camera, 2048^2 D32 each, texel-snapped on a fixed light-space
+grid; a cascade re-renders only when the camera's offset from its centre
+passes half its margin, or on the first frame, a sun change or an
+instance change; each re-render runs the cell cull -> cull -> traverse ->
+cluster cull chain on a copy of SceneData with `shadowView` set (light
+box planes, no curvature, orthographic LOD of 1 texel, no occlusion, no
+visibility writes, no streamed layers, no far switch) into its own
+counters and draw lists, then shadow.mesh (+ shadow_masked.frag for
+alpha-masked) draws all four buckets, cull none, slope-scaled bias) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the

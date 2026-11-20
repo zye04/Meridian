@@ -3054,3 +3054,38 @@ off|probes|hybrid` (default off until the look is accepted).
   sunset; scene early +0.1-0.3 ms; low-sun shadow/sunlit ground
   luminance 0.118 -> 0.143. With `--trees` (forest interior, RR) 2.96 ms
   and the forest turns blue (backlog).
+
+## Raster sun shadows: cached cascades (2026-11-20)
+
+User direction: raster rendering, no ray tracing. Replaces the per-pixel
+TLAS shadow ray for objects (see "Shadows" at the top, which chose RT);
+the terrain march, cloud shadow, contact shadows and the far path stay.
+Spec `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`.
+
+- **Choice:** cached, camera-centred cascaded shadow maps (a coarse
+  clipmap), not virtual shadow maps. VSMs cache per page and match screen
+  resolution, but page marking, allocation and per-page culling are a
+  large system, and Epic's docs name foliage and alpha-masked geometry as
+  their expensive case. Shipped open worlds cache sun cascades: Insomniac's
+  CSM scrolling (SIGGRAPH 2012), Crytek (Kasyan 2013) and Cyberpunk 2077
+  (Dybisz 2021) refresh distant cascades periodically.
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-shadow-maps-in-unreal-engine
+  - https://advances.realtimerendering.com/s2012/insomniac/Acton-CSM_Scrolling(Siggraph2012).pdf
+  - https://history.siggraph.org/learning/shadows-optimizations-in-cyberpunk-2077-by-dybisz-and-witanowski
+- **Design:** 5 cascades, radius 20 * 4^i m, 2048^2 D32, windows snapped
+  to whole texels of a fixed light-space grid (double precision), LOD cut
+  at 1 texel (orthographic, view independent). The casters are static (no
+  vertex wind), so a cascade re-renders only when the camera leaves half
+  its margin (along u, v or depth) or on a sun or instance change: same
+  texels, same LOD, so a re-render reproduces the overlap and the map
+  doesn't swim. Rendering reuses the GPU cull chain on a SceneData copy
+  (`shadowView`); the lookup is a 3x3 tent PCF from 9 gathers.
+- **Default stays rt** for now: at the motion gates (2560x1440, SR DLAA,
+  same build) raster vs rt: Laplacian fwd5 ground 0.116 / 0.116, side5
+  0.119 / 0.119, fwd5 beech 0.198 (fails 0.20) / 0.214, pitch 0.113 /
+  0.113; shimmer crown 1.71 / 1.73, shadow 0.42 / 0.36. Not better on
+  shimmer yet, so `--shadows raster` is opt-in until tuned (bias, filter,
+  resolution; backlog). GPU (one run each, Release, default placement):
+  frame 11.6 / 10.2 ms at the ground view, 14.5 / 12.6 at low sun, 10.1 /
+  10.4 at sunset; a full re-render of the 5 cascades on the first frame.
+

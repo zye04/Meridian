@@ -137,6 +137,23 @@ struct Renderer::Impl {
   uint32_t visitedBvhNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
+  ShadowMode shadowMode = ShadowMode::Rt;
+  // Each cascade's rendered window, the sun it was rendered for and what
+  // plan chose for this frame. shadowStale: instances or placement changed.
+  std::array<Image, kShadowCascades> shadowMaps;
+  std::array<uint32_t, kShadowCascades> shadowTextures = {};
+  std::array<CascadeWindow, kShadowCascades> shadowWindows;
+  std::array<bool, kShadowCascades> shadowRendered = {};
+  std::array<bool, kShadowCascades> shadowPlanned = {};
+  std::array<std::array<Buffer, kShadowCascades>, kFramesInFlight> shadowScenes;
+  LightBasis shadowBasis;
+  Vec3 shadowSun;
+  bool shadowStale = true;
+  Buffer shadowCounters;
+  Buffer shadowDrawLists;
+  VkPipeline shadowPipeline = VK_NULL_HANDLE;
+  VkPipeline shadowMaskedPipeline = VK_NULL_HANDLE;
+  uint32_t shadowRenderCount = 0;
   bool voxelFarShadows = true;
   GiMode giMode = GiMode::Off;
   // The GI probe table (gi.glsl), created on the first frame with GI on.
@@ -527,12 +544,28 @@ struct Renderer::Impl {
   void checkStreamUpdate(const FrameData &frame, uint32_t updates);
   void destroyStreamBuffers(Stream &stream);
   void destroyStream();
-  void resetDrawCounters(VkCommandBuffer cmd);
-  CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;
-  void cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
-  void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
-  void traverseClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
-  void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
+  void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
+  // A cascade's cull: its own scene copy and counters (null: the main view).
+  struct ShadowCull {
+    VkDeviceAddress scene;
+    const Buffer *counters;
+  };
+  CullConstants cullConstants(const FrameData &frame, uint32_t phase,
+                              const ShadowCull *shadow = nullptr) const;
+  void cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                 const ShadowCull *shadow = nullptr);
+  void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                     const ShadowCull *shadow = nullptr);
+  void traverseClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                        const ShadowCull *shadow = nullptr);
+  void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                    const ShadowCull *shadow = nullptr);
+  // Raster sun shadows (renderer_shadows.cpp). plan runs on the CPU before
+  // the scene upload and fills scene.sunShadows; record renders what plan chose.
+  void createSunShadows();
+  void destroySunShadows();
+  void planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 camera, Vec3 sunDirection);
+  void recordSunShadows(VkCommandBuffer cmd, const FrameData &frame);
   void selectTerrain(VkCommandBuffer cmd, const FrameData &frame);
   void drawTerrain(VkCommandBuffer cmd);
   void buildDepthPyramid(VkCommandBuffer cmd);

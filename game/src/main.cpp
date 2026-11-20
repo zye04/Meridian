@@ -520,6 +520,8 @@ struct Options {
   bool voxelFarShadows = true;
   bool gi = false;
   bool occlusion = true;
+  // Rt until the raster shadows pass the shimmer gates (decisions.md).
+  meridian::ShadowMode shadows = meridian::ShadowMode::Rt;
   std::optional<meridian::Bloom> bloom;
   std::optional<meridian::Effects> effects;
   // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
@@ -620,6 +622,15 @@ Options parseOptions(int argc, char **argv) {
       options.bloom = meridian::Bloom{number(i), number(i)};
     } else if (arg == "--effects" && i + 1 < argc) {
       options.effects = parseEffects(argv[++i]);
+    } else if (arg == "--shadows") {
+      const std::string mode = argv[++i];
+      if (mode == "raster") {
+        options.shadows = meridian::ShadowMode::Raster;
+      } else if (mode == "rt") {
+        options.shadows = meridian::ShadowMode::Rt;
+      } else {
+        throw std::runtime_error("--shadows takes raster or rt");
+      }
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -787,6 +798,7 @@ int main(int argc, char **argv) {
 #endif
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
+  renderer.setShadowMode(options.shadows);
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
@@ -1091,6 +1103,7 @@ int main(int argc, char **argv) {
   }
   if (!interactive) {
     renderer.printAmbient();
+    std::printf("sun shadows: %u cascade renders\n", renderer.sunShadowRenderCount());
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, cells %u, far cells %u, bvh nodes %u, "

@@ -40,6 +40,8 @@ struct InstanceId {
 };
 
 // How a material's alpha (base color alpha) is used, as in glTF.
+enum class ShadowMode { Raster, Rt };
+
 enum class AlphaMode {
   Opaque,
   // Cut out where alpha < alphaCutoff (foliage, fences). Casts shadows.
@@ -300,6 +302,13 @@ public:
   // Level of detail: the largest simplification error allowed on screen, in
   // pixels (default 1; 0 draws full detail).
   void setLodErrorPixels(float pixels);
+
+  // Raster (default): the sun's shadows come from cached cascaded shadow
+  // maps of the placed and hand-placed geometry; Rt traces them in the TLAS
+  // (for A/B comparisons).
+  void setShadowMode(ShadowMode mode);
+  // Cascade renders so far (a frame can render several).
+  uint32_t sunShadowRenderCount() const;
 
   // On by default; off draws everything in the view frustum (for A/B
   // comparisons).

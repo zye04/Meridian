@@ -32,6 +32,9 @@ const float kClusterTerrainSunRadius = 1.0;
 
 uint terrainSunCode(MeshInfo mesh, vec3 world, float radius, uint clusterIndex,
                     uint instanceIndex) {
+    if (cull.scene.shadowView != 0u) {
+        return 0u;
+    }
     if (mesh.drawBucket < 2u || mesh.drawBucket > 3u || radius > kClusterTerrainSunRadius) {
         return kTerrainSunPerFragment;
     }
@@ -52,7 +55,8 @@ void draw(uint instanceIndex, uint clusterIndex, ClusterInfo cluster, vec3 world
           float radius) {
     MeshInfo mesh = cull.scene.meshes.meshes[cluster.mesh];
     // Retested clusters are drawn in the late pass.
-    uint list = min(cull.phase, 1u) * kDrawBuckets + mesh.drawBucket;
+    uint list = (cull.scene.shadowView != 0u ? 0u : min(cull.phase, 1u)) * kDrawBuckets +
+                mesh.drawBucket;
     uint slot = atomicAdd(cull.counters.counters[kCounterMeshTasks + list * 3u], 1u);
     if (slot >= kMaxDrawnClusters) {
         // The count is the mesh task count: keep it at the capacity.
@@ -126,7 +130,7 @@ void main() {
     }
 
     // Last frame's pyramid holds last frame's warp.
-    if (cull.occlusion != 0u && cull.phase == 0u && cull.previousPyramid != 0u &&
+    if (occlusionEnabled() && cull.phase == 0u && cull.previousPyramid != 0u &&
         occluded(displayedSphere(world - cull.scene.previousCameraPosition, radius),
                  cull.scene.previousView)) {
         uint slot = atomicAdd(cull.counters.counters[kCounterRetest], 1u);
@@ -142,7 +146,7 @@ void main() {
         cull.retest.entries[slot] = uvec2(instanceIndex, clusterIndex);
         return;
     }
-    if (cull.occlusion != 0u && cull.phase == 1u &&
+    if (occlusionEnabled() && cull.phase == 1u &&
         occluded(sphere, cull.scene.view)) {
         return;
     }

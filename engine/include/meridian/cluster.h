@@ -79,15 +79,20 @@ ClusterLod buildClusterLod(const MeshData &mesh);
 // Simplification error in pixels on a screen `screenHeight` pixels tall,
 // for bounds already placed in world space and uniformly scaled by `scale`
 // (projY: projection[1][1]). Ignores perspective distortion (clusterlod's
-// estimate). Must match projectedError in cull.glsl.
+// estimate). Must match projectedError in cull.glsl. With
+// orthoPixelsPerMeter > 0 (an orthographic view) the error is
+// error * scale * orthoPixelsPerMeter and the camera, projY and
+// screenHeight are ignored.
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
-                           float projY, float nearPlane, float screenHeight);
+                           float projY, float nearPlane, float screenHeight,
+                           float orthoPixelsPerMeter = 0.0f);
 
 // Nanite's cut: draw a cluster when its coarser replacement is too coarse
 // and it is itself fine enough. Errors grow monotonically up the DAG, so the
 // drawn clusters cover the surface once, without cracks.
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
-                float nearPlane, float screenHeight, float thresholdPixels);
+                float nearPlane, float screenHeight, float thresholdPixels,
+                float orthoPixelsPerMeter = 0.0f);
 
 // CPU replica of the GPU traversal: the levels whose band can hold the cut,
 // then their BVHs breadth-first, skipping nodes whose bounds rule every
@@ -96,7 +101,8 @@ bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,
-                                        float thresholdPixels);
+                                        float thresholdPixels,
+                                        float orthoPixelsPerMeter = 0.0f);
 
 // Derived-data cache of every primitive's hierarchy in one file. sourceKey
 // identifies the source it was built from; any other key, version or a

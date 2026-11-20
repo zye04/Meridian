@@ -144,7 +144,7 @@ void Renderer::Impl::uploadInstances(VkCommandBuffer cmd, FrameData &frame) {
 // phases count into them. The counters, work items and draw lists (the
 // terrain's too) are shared by both frames in flight, so this first waits
 // for the previous frame's use of them.
-void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
+void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters) {
   memoryBarrier(cmd,
                 VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
                     VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
@@ -169,19 +169,20 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
   }
   initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
   initial.farTasks[1] = initial.farTasks[2] = 1;
-  vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
+  vkCmdUpdateBuffer(cmd, counters.buffer, 0, sizeof(initial), &initial);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t phase) const {
+CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t phase,
+                                            const ShadowCull *shadow) const {
   CullConstants constants;
-  constants.sceneBuffer = frame.sceneBuffer.address;
+  constants.sceneBuffer = shadow ? shadow->scene : frame.sceneBuffer.address;
   constants.workItems =
       workItems.address + VkDeviceSize{phase} * kMaxWorkItems * 2 * sizeof(uint32_t);
-  constants.counters = drawCounters.address;
+  constants.counters = shadow ? shadow->counters->address : drawCounters.address;
   constants.visibility = visibility.address;
   constants.phase = phase;
   constants.occlusion = occlusionCulling ? 1 : 0;
@@ -198,8 +199,9 @@ CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t pha
 // One phase of the cell cull: placement cells (and the hand-placed
 // instances) become chunks of instances for cullInstances. Phase 1 also
 // waits on phase 0's visibility reads before writing.
-void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase) {
-  const CullConstants constants = cullConstants(frame, phase);
+void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                               const ShadowCull *shadow) {
+  const CullConstants constants = cullConstants(frame, phase, shadow);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline);
   const VkDescriptorSet sets[] = {cullSet, materialSet};
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 2, sets, 0,
@@ -224,15 +226,16 @@ void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint
 // cullCells' chunks and seeds the cluster BVH traversal, whose leaves emit
 // work items the cluster cull LOD-selects and culls.
 void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
-                                   uint32_t phase) {
-  CullConstants constants = cullConstants(frame, phase);
+                                   uint32_t phase, const ShadowCull *shadow) {
+  CullConstants constants = cullConstants(frame, phase, shadow);
+  const Buffer &counters = shadow ? *shadow->counters : drawCounters;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
   const VkDescriptorSet sets[] = {cullSet, materialSet};
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullLayout, 0, 2, sets, 0,
                           nullptr);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
-  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+  vkCmdDispatchIndirect(cmd, counters.buffer,
                         offsetof(DrawCounters, chunkDispatch) +
                             phase * sizeof(DrawCounters::chunkDispatch[0]));
 
@@ -247,14 +250,15 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
 
 // One dispatch per BVH depth, each over the nodes the previous one pushed.
 void Renderer::Impl::traverseClusters(VkCommandBuffer cmd, const FrameData &frame,
-                                      uint32_t phase) {
-  CullConstants constants = cullConstants(frame, phase);
+                                      uint32_t phase, const ShadowCull *shadow) {
+  CullConstants constants = cullConstants(frame, phase, shadow);
+  const Buffer &counters = shadow ? *shadow->counters : drawCounters;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, clusterTraversePipeline);
   for (uint32_t depth = 0; depth < traversalDepths; ++depth) {
     constants.depth = depth;
     vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(constants), &constants);
-    vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+    vkCmdDispatchIndirect(cmd, counters.buffer,
                           offsetof(DrawCounters, traverseDispatch) +
                               (phase * kBvhDepths + depth) *
                                   sizeof(DrawCounters::traverseDispatch[0][0]));
@@ -268,21 +272,22 @@ void Renderer::Impl::traverseClusters(VkCommandBuffer cmd, const FrameData &fram
 }
 
 void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
-                                  uint32_t phase) {
-  CullConstants constants = cullConstants(frame, phase);
+                                  uint32_t phase, const ShadowCull *shadow) {
+  CullConstants constants = cullConstants(frame, phase, shadow);
+  const Buffer &counters = shadow ? *shadow->counters : drawCounters;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, clusterCullPipeline);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
-  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+  vkCmdDispatchIndirect(cmd, counters.buffer,
                         offsetof(DrawCounters, workDispatch) +
                             phase * sizeof(DrawCounters::workDispatch[0]));
-  if (phase == 1) {
+  if (phase == 1 && !shadow) {
     // Retest what phase 0 found occluded by last frame's pyramid; draws into
     // phase 1's lists like the newly visible instances.
     constants.phase = kCullRetest;
     vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(constants), &constants);
-    vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+    vkCmdDispatchIndirect(cmd, counters.buffer,
                           offsetof(DrawCounters, retestDispatch));
   }
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -293,7 +298,7 @@ void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  if (phase == 1) {
+  if (phase == 1 && !shadow) {
     const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
     vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
     // A fence wait alone doesn't make device writes visible to the host.
@@ -815,6 +820,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->placeWeatherMap(camera.position);
   impl_->placeCloudShadow(camera.position, lighting.sunDirection);
   scene.clouds = impl_->clouds;
+  impl_->planSunShadows(scene, frameSlot, camera.position, lighting.sunDirection);
   std::memcpy(frame.weatherHistory.mapped, impl_->weatherHistory.data(),
               impl_->weather.historyCount * sizeof(WeatherHistorySample));
   check(vmaFlushAllocation(impl_->allocator, frame.weatherHistory.allocation, 0,
@@ -870,7 +876,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->instancesDirty = false;
   }
   endPass("upload + tlas");
-  impl_->resetDrawCounters(cmd);
+  // Before the main view's counters reset: the cascades' culls use the same
+  // scratch buffers.
+  impl_->recordSunShadows(cmd, frame);
+  endPass("sun shadows");
+  impl_->resetDrawCounters(cmd, impl_->drawCounters);
   impl_->selectTerrain(cmd, frame);
   endPass("terrain select");
   if (impl_->stream.active()) {

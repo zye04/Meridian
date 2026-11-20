@@ -103,7 +103,8 @@ VkShaderModule loadShader(VkDevice device, const std::string &name) {
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   VkShaderModule vertModule = loadShader(
       device, desc.meshShader ? desc.meshShader : desc.vertexShader);
-  VkShaderModule fragModule = loadShader(device, desc.fragmentShader);
+  VkShaderModule fragModule =
+      desc.fragmentShader ? loadShader(device, desc.fragmentShader) : VK_NULL_HANDLE;
 
   VkPipelineShaderStageCreateInfo stages[2]{};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -137,6 +138,7 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   rasterizer.cullMode = VK_CULL_MODE_NONE;
   rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   rasterizer.lineWidth = 1.0f;
+  rasterizer.depthBiasEnable = desc.dynamicDepthBias;
 
   VkPipelineMultisampleStateCreateInfo multisample{};
   multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -209,10 +211,14 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   // pipeline.
   VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                     VK_DYNAMIC_STATE_SCISSOR,
-                                    VK_DYNAMIC_STATE_CULL_MODE};
+                                    VK_DYNAMIC_STATE_CULL_MODE,
+                                    VK_DYNAMIC_STATE_DEPTH_BIAS};
   VkPipelineDynamicStateCreateInfo dynamicState{};
   dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  dynamicState.dynamicStateCount = desc.dynamicCullMode ? 3 : 2;
+  dynamicState.dynamicStateCount = 2 + (desc.dynamicCullMode ? 1 : 0);
+  if (desc.dynamicDepthBias) {
+    dynamicStates[dynamicState.dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+  }
   dynamicState.pDynamicStates = dynamicStates;
 
   VkPipelineRenderingCreateInfo renderingInfo{};
@@ -225,7 +231,7 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   VkGraphicsPipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipelineInfo.pNext = &renderingInfo;
-  pipelineInfo.stageCount = 2;
+  pipelineInfo.stageCount = desc.fragmentShader ? 2 : 1;
   pipelineInfo.pStages = stages;
   // Mesh pipelines have no vertex input or input assembly.
   pipelineInfo.pVertexInputState = desc.meshShader ? nullptr : &vertexInput;
@@ -242,7 +248,9 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
                                               &pipelineInfo, nullptr, &pipeline);
   vkDestroyShaderModule(device, vertModule, nullptr);
-  vkDestroyShaderModule(device, fragModule, nullptr);
+  if (fragModule) {
+    vkDestroyShaderModule(device, fragModule, nullptr);
+  }
   check(result, "vkCreateGraphicsPipelines");
   return pipeline;
 }

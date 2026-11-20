@@ -727,6 +727,7 @@ InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
   instance.meshIndex = mesh.index;
   impl_->instances.push_back(instance);
   impl_->instancesDirty = true;
+  impl_->shadowStale = true;
   return {static_cast<uint32_t>(impl_->instances.size() - 1)};
 }
 

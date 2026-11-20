@@ -452,6 +452,29 @@ layout(buffer_reference, std430) readonly buffer StreamCoordBuffer {
     ivec2 coords[];
 };
 
+const uint kShadowCascades = 5u;
+
+// Must match GpuSunShadowCascade / GpuSunShadows in gpu_types.h. origin is
+// the cascade's center relative to the camera; u, v span the map, d points
+// away from the sun.
+struct SunShadowCascade {
+    vec3 origin;
+    float halfSize;
+    float texel;
+    float depthNear;
+    float depthFar;
+    uint texture;
+    float radius;
+    uint valid;
+};
+
+struct SunShadows {
+    SunShadowCascade cascades[kShadowCascades];
+    vec3 u;
+    vec3 v;
+    vec3 d;
+};
+
 // Declared here, defined in farfield.glsl by the shaders that read it.
 layout(buffer_reference) buffer FarFieldBuffer;
 // Defined in gi.glsl.
@@ -582,6 +605,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint farShadowWidth, farShadowHeight;
     uint farShadowMode;
     uint pad7;
+    // Raster sun shadows (SceneData in gpu_types.h).
+    uint shadowView;
+    float orthoPixelsPerMeter;
+    uint shadowMode;
+    float shadowDrawMargin;
+    SunShadows sunShadows;
 };
 
 // Largest axis scale of a transform: a conservative bound under
@@ -670,6 +699,9 @@ uint instanceMesh(SceneBuffer scene, uint id, uint geometry) {
 // horizontal plane, so far ground sinks under the horizon and meets the
 // spherical atmosphere. `relative` is relative to the camera it is seen from.
 float curvatureDrop(SceneBuffer scene, vec3 relative) {
+    if (scene.shadowView != 0u) {
+        return 0.0;
+    }
     return dot(relative.xz, relative.xz) / (2000.0 * scene.atmosphere.bottomRadius);
 }
 

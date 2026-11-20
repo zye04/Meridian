@@ -1310,6 +1310,7 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   impl_->createGrade();
   impl_->createAtmosphere();
   impl_->createClouds();
+  impl_->createSunShadows();
   impl_->createScene();
 
   ImGui::CreateContext();
@@ -1375,6 +1376,7 @@ Renderer::~Renderer() {
     impl_->destroyBuffer(*buffer);
   }
 
+  impl_->destroySunShadows();
   impl_->destroyClouds();
   impl_->destroyGi();
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);

@@ -1,0 +1,42 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+// A shadow cascade's cluster draw: mesh.mesh's vertex path through the
+// cascade's orthographic scene copy, depth only (no curvature).
+
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 128, max_primitives = 128) out;
+
+layout(location = 0) out vec2 outUv[];
+layout(location = 1) flat out uint outMaterialIndex[];
+
+void main() {
+    if (gl_WorkGroupID.x >= kMaxDrawnClusters) {
+        SetMeshOutputsEXT(0, 0);
+        return;
+    }
+    SceneBuffer scene = pc.scene;
+    uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
+                                          gl_WorkGroupID.x];
+    LoadedInstance instance = loadInstance(scene, entry.x & 0xFFFFFFu);
+    ClusterInfo cluster = scene.clusters.clusters[entry.y];
+    MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
+    SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
+
+    for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
+        uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
+                     uint(mesh.vertexOffset);
+        Vertex vertex = scene.vertices.vertices[index];
+        vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
+        gl_MeshVerticesEXT[i].gl_Position =
+            scene.viewProjection * vec4(world - scene.cameraPosition, 1.0);
+        outUv[i] = vec2(vertex.uvX, vertex.uvY);
+        outMaterialIndex[i] = mesh.materialIndex;
+    }
+    for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {
+        uint t = scene.clusterTriangles.triangles[cluster.firstTriangle + i];
+        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, t >> 16);
+    }
+}
