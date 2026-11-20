@@ -1721,3 +1721,19 @@ restores the previous behaviour exactly (2645325 instances, hash
   constructor, so the swapchain, render targets and upscaler are built
   once: one `Swapchain: ... 2560x1440` line. `--windowed` keeps the
   framebuffer size.
+
+## Micro and contact shadows (2026-11-20)
+
+- **Micro shadows**: the material AO also darkens the direct sun light
+  (`microShadow` in mesh.frag, every surface including the terrain; not
+  the leaf transmission, not ambient). The AO is read as the aperture of
+  the cone the cavity leaves open around the normal; the sun is hidden as
+  N.L drops below that aperture, `clamp(N.L * aperture)^2` (Chan,
+  "Material Advances in Call of Duty: WWII", SIGGRAPH 2018, as in
+  Filament). Uncharted 4 used the cruder `saturate(N.L + 2 ao^2 - 1)`
+  (Brinck and Maximov, SIGGRAPH 2016). Why: texture-only cavities (AO
+  baked into the maps, no geometry for the shadow rays) otherwise get the
+  full sun. Per fragment, cheap and deterministic, so Ray Reconstruction
+  sees no extra noise. Sources:
+  https://google.github.io/filament/Filament.html ("Micro-shadowing"),
+  https://www.activision.com/cdn/research/MaterialAdvancesInWWII.pdf

@@ -742,6 +742,16 @@ vec3 multiBounceOcclusion(float visibility, vec3 albedo) {
     return max(vec3(visibility), ((visibility * a + b) * visibility + c) * visibility);
 }
 
+// Micro shadows: the AO says how much of the hemisphere the cavity leaves
+// open; a cone of that aperture around the normal hides the sun once N.L
+// drops below it. Chan, "Material Advances in Call of Duty: WWII" (2018),
+// as in Filament.
+float microShadow(float NoL, float visibility) {
+    float aperture = inversesqrt(1.0 - min(visibility, 0.9999));
+    float shadow = clamp(NoL * aperture, 0.0, 1.0);
+    return shadow * shadow;
+}
+
 // Diffuse AO applied to a reflection lobe (Lagarde and de Rousiers 2014):
 // a narrow lobe seen head-on escapes most cavities; at grazing angles or
 // with rough lobes it approaches the diffuse AO.
@@ -829,7 +839,7 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 sunLight = sunAtSurface * (NoL * visibility);
+        vec3 sunLight = sunAtSurface * (NoL * visibility * microShadow(NoL, s.occlusion));
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;
     }
