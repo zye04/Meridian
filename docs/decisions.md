@@ -1421,6 +1421,45 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
 - Clouds, when they exist, write this mask too.
 - Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).
 
+**Ray Reconstruction guide buffers and white noise (Task 1.4).**
+- The scene pass writes three more attachments (layout: CLAUDE.md,
+  Conventions): diffuse albedo = `diffuseColor` (base colour x (1 - metallic)),
+  specular albedo = `mix(dfg.xxx, dfg.yyy, f0)` (the pre-integrated specular
+  reflectance already computed for shading, without the multi-scatter
+  compensation), normal + roughness = world-space shading normal and
+  perceptual roughness (the clamped value the BRDF uses). Sky: diffuse 0.5,
+  specular 0, normal 0. Blended surfaces write no guides (the surface behind
+  keeps its values), as for depth and motion.
+- RR wants these at render size: diffuse and specular albedo, normals with
+  roughness packed in alpha (integration guide, "Specular Albedo",
+  "Normals", "Roughness"). Source: DLSS RR Integration Guide in the SDK doc/
+  directory (DLSS SDK 310.9.16).
+- Guide images are only created when `Upscaler::wantsGuides()`; otherwise the
+  attachments get null views. Dynamic rendering allows a null view only
+  with the `dynamicRenderingUnusedAttachments` feature
+  (VK_EXT_dynamic_rendering_unused_attachments; VUID-08912 otherwise), so
+  it is a required device extension (supported on the RTX 4080 / driver
+  620.70). Without it validation reports VUID-08912 and the driver
+  crashed in draw.
+- `SceneData.whiteNoise == 1` replaces the interleaved gradient noise of the
+  sun-disk sample by a PCG3D hash of (pixel, frameIndex). The guide's
+  "Sampling and Noise" section: RR assumes independent samples with minimal
+  spatial and temporal correlation and recommends high quality hash
+  functions and white noise (PCG: Jarzynski and Olano 2020, JCGT 9(3)).
+  IGN is a deliberately structured spatial pattern, which TAA integrates
+  but RR does not expect. AO is not stochastic, so only the sun sample
+  changes. `whiteNoise` is 0 today and nothing sets it; 0 leaves TAA
+  output unchanged.
+- Measured (Release, 2560x1440, TAA, `--scatter 100` beech, frames
+  120/121, island_tree_01.old assets because the recooked island_tree_01
+  fails to load, see backlog): shimmer crown/shadow 1.71/1.51 with IGN,
+  1.71/1.67 with whiteNoise forced on; mean diff IGN vs white noise
+  0.19/255. Informational.
+- Scene-pass cost with guides forced on (Release, 2560x1440, scene early
+  median): ground +0.14 ms (1.39 vs 1.25), beech +0.14 ms (2 runs). With
+  null views (TAA): ground 1.22 vs 1.25, beech 2.47 vs 2.44 (first set
+  2.50), diff 0.0000/255.
+
 ## Visible quality pass (2026-11-20)
 
 Fixes from the asset-fidelity diagnosis (Cycles references of the same

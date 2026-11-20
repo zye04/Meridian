@@ -92,6 +92,16 @@ void Renderer::Impl::createSwapchain() {
   if (!dlss) {
     upscaler = std::make_unique<TaaUpscaler>(*this, display);
   }
+  if (upscaler->wantsGuides()) {
+    constexpr VkImageUsageFlags kGuideUsage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    diffuseAlbedo = createRenderImage(kAlbedoFormat, kGuideUsage,
+                                      VK_IMAGE_ASPECT_COLOR_BIT);
+    specularAlbedo = createRenderImage(kAlbedoFormat, kGuideUsage,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
+    normalRoughness = createRenderImage(kNormalRoughnessFormat, kGuideUsage,
+                                        VK_IMAGE_ASPECT_COLOR_BIT);
+  }
   historyValid = false;
 
   // Safe because the device is idle whenever the swapchain is (re)created.
@@ -184,6 +194,9 @@ void Renderer::Impl::createDepthPyramid() {
 
 void Renderer::Impl::destroySwapchain() {
   upscaler.reset();
+  destroyImage(normalRoughness);
+  destroyImage(specularAlbedo);
+  destroyImage(diffuseAlbedo);
   destroyImage(output);
   destroyImage(transparencyMask);
   destroyImage(motion);
@@ -780,8 +793,9 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &sceneLayoutInfo, nullptr, &sceneLayout),
         "vkCreatePipelineLayout");
 
-  const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat,
-                                   kTransparencyMaskFormat};
+  const VkFormat sceneFormats[] = {kHdrFormat,    kMotionFormat,
+                                   kTransparencyMaskFormat, kAlbedoFormat,
+                                   kAlbedoFormat, kNormalRoughnessFormat};
   // Opaque and masked geometry is drawn as culled clusters (mesh shader),
   // blended geometry as whole meshes from the CPU (vertex shader).
   PipelineDesc meshDesc{.meshShader = "mesh.mesh",
@@ -970,6 +984,13 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider)
   rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
   rayQueryFeatures.rayQuery = VK_TRUE;
 
+  // The scene pass binds null views for the guide attachments when the
+  // upscaler wants no guides; their writes are discarded.
+  VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT unusedFeatures{};
+  unusedFeatures.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT;
+  unusedFeatures.dynamicRenderingUnusedAttachments = VK_TRUE;
+
   auto physical =
       vkb::PhysicalDeviceSelector{impl_->instance}
           .set_minimum_version(1, 3)
@@ -982,6 +1003,9 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider)
               VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
           .add_required_extension_features(accelerationFeatures)
           .add_required_extension_features(rayQueryFeatures)
+          .add_required_extension(
+              VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)
+          .add_required_extension_features(unusedFeatures)
           .add_required_extension(VK_EXT_MESH_SHADER_EXTENSION_NAME)
           .add_required_extension_features(meshShaderFeatures)
           .set_surface(impl_->surface)

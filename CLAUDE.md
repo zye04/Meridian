@@ -266,7 +266,9 @@ for a retest; fills 4 cluster draw lists: opaque/masked x
 single/double-sided) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
-pass into HDR RGBA16F + RG16F motion + R8 transparency mask + D32 depth
+pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
+Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
+world normal + roughness; null views unless the upscaler wants them) + D32 depth
 (sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
@@ -280,8 +282,8 @@ retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
-`UpscalerFrame`: colour, depth, motion, transparency mask in
-SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
+`UpscalerFrame`: colour, depth, motion, transparency mask (and the guides
+when `wantsGuides()`) in SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
 `NGX_VULKAN_EVALUATE_DLSS_EXT`) or `TaaUpscaler`: taa.comp, which writes
 its resolve to its own history (pre-exposed, so rescaled by
@@ -321,6 +323,17 @@ barriers account for that.
 - Transparency mask: scene attachment 2 (R8, render-sized, cleared to 0
   in the early pass); only the blended pipeline writes it (coverage,
   blend op MAX), all others have write mask 0. Clouds will write it too.
+- Scene attachments: 0 HDR RGBA16F, 1 motion RG16F, 2 transparency mask
+  R8, 3 diffuse albedo RGBA8 (`diffuseColor`), 4 specular albedo RGBA8
+  (the DFG pre-integrated `mix(dfg.x, dfg.y, f0)`), 5 normal RGBA16F (world
+  `N`, facing the viewer on double-sided surfaces) with perceptual roughness
+  in alpha; 6-7 are reserved. Sky writes 0.5 / 0 / 0; the blended pipeline
+  masks 3-5 off. The guide images exist only when the upscaler
+  `wantsGuides()`; otherwise those views are null and the writes are
+  discarded (device extension `VK_EXT_dynamic_rendering_unused_attachments`).
+- `SceneData.whiteNoise` (`Renderer::Impl::whiteNoise`, 0 today, nothing
+  sets it): at 1 the sun-disk sample uses a PCG3D hash of (pixel,
+  frameIndex) instead of interleaved gradient noise.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the

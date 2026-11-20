@@ -26,6 +26,12 @@ layout(location = 1) out vec2 outMotion;
 #ifdef ALPHA_BLEND
 // Transparency mask for the upscaler: blended coverage, blended with MAX.
 layout(location = 2) out float outTransparency;
+#else
+// Ray Reconstruction guides: diffuse albedo, specular albedo (the DFG
+// pre-integrated reflectance), world normal and perceptual roughness.
+layout(location = 3) out vec4 outDiffuseAlbedo;
+layout(location = 4) out vec4 outSpecularAlbedo;
+layout(location = 5) out vec4 outNormalRoughness;
 #endif
 
 const float kShadowRayBias = 0.05;
@@ -49,6 +55,18 @@ float interleavedGradientNoise(vec2 pixel, uint frame) {
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
 }
 
+uvec3 pcg3d(uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
 // Picks a direction inside the sun's disk. One ray per pixel per frame;
 // accumulated over frames this gives penumbrae that widen with distance from
 // the occluder, like real sun shadows.
@@ -58,11 +76,19 @@ vec3 sampleSunDirection(vec2 pixel) {
                                                       : vec3(1, 0, 0), sun));
     vec3 bitangent = cross(sun, tangent);
 
-    float radius = tan(pc.scene.sunAngularRadius) *
-                   sqrt(interleavedGradientNoise(pixel, pc.scene.frameIndex));
-    float angle = 2.0 * kPi *
-                  interleavedGradientNoise(pixel + vec2(17.0, 31.0),
-                                           pc.scene.frameIndex);
+    float noiseRadius;
+    float noiseAngle;
+    if (pc.scene.whiteNoise != 0u) {
+        uvec3 h = pcg3d(uvec3(uvec2(pixel), pc.scene.frameIndex));
+        noiseRadius = float(h.x >> 8u) * (1.0 / 16777216.0);
+        noiseAngle = float(h.y >> 8u) * (1.0 / 16777216.0);
+    } else {
+        noiseRadius = interleavedGradientNoise(pixel, pc.scene.frameIndex);
+        noiseAngle = interleavedGradientNoise(pixel + vec2(17.0, 31.0),
+                                              pc.scene.frameIndex);
+    }
+    float radius = tan(pc.scene.sunAngularRadius) * sqrt(noiseRadius);
+    float angle = 2.0 * kPi * noiseAngle;
     return normalize(sun + radius * (cos(angle) * tangent +
                                      sin(angle) * bitangent));
 }
@@ -744,5 +770,9 @@ void main() {
     outMotion = previousUv - currentUv;
 #ifdef ALPHA_BLEND
     outTransparency = coverage;
+#else
+    outDiffuseAlbedo = vec4(diffuseColor, 1.0);
+    outSpecularAlbedo = vec4(mix(dfg.xxx, dfg.yyy, f0), 1.0);
+    outNormalRoughness = vec4(N, perceptualRoughness);
 #endif
 }

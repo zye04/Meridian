@@ -33,6 +33,10 @@ constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 // Screen-space motion vectors for temporal anti-aliasing (and later DLSS).
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 constexpr VkFormat kTransparencyMaskFormat = VK_FORMAT_R8_UNORM;
+// Ray Reconstruction guides: diffuse and specular albedo, world normal +
+// perceptual roughness.
+constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM;
+constexpr VkFormat kNormalRoughnessFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 // Exposure for the very first frame, before any histogram exists: a sunny day.
 constexpr float kInitialEv100 = 15.0f;
 // Capacities of the bindless material and texture tables.
@@ -265,7 +269,7 @@ struct SceneData {
   Vec3 cameraPosition;
   float sunAngularRadius = 0.0f;
   Vec3 previousCameraPosition;
-  float pad2 = 0.0f;
+  uint32_t whiteNoise = 0;
   VkDeviceAddress tlas = 0;
   VkDeviceAddress exposure = 0;
   VkDeviceAddress skyIrradiance = 0;

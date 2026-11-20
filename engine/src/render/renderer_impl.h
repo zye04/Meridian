@@ -59,6 +59,11 @@ struct Renderer::Impl {
   Image hdr;
   Image motion;
   Image transparencyMask;
+  // Only created when the upscaler wants guides (Ray Reconstruction).
+  Image diffuseAlbedo;
+  Image specularAlbedo;
+  Image normalRoughness;
+  uint32_t whiteNoise = 0;
   // Display-sized: the upscaler's output, read by the exposure histogram,
   // the tonemap and .pfm captures. Always in VK_IMAGE_LAYOUT_GENERAL.
   Image output;

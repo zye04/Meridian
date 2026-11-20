@@ -1,9 +1,9 @@
 # Motion Clarity Implementation Plan
 
-**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 3.1. Next steps:
-- Track 1: 1.3 done on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). Next 1.4 -> 1.5.
+**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 1.4, 3.1. Next steps:
+- Track 1: 1.3 done on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). 1.4 done (guide buffers, `whiteNoise` field). Next 1.5.
 - Track 2: done.
-- Track 3: 3.1 done; 3.2a waits for 1.4, then 3.2b.
+- Track 3: 3.1 done; 3.2a unblocked (1.4 done), then 3.2b.
 - After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

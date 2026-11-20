@@ -7,6 +7,9 @@ layout(location = 0) in vec3 inViewRay;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outMotion;
+layout(location = 3) out vec4 outDiffuseAlbedo;
+layout(location = 4) out vec4 outSpecularAlbedo;
+layout(location = 5) out vec4 outNormalRoughness;
 
 // Keeps the sun disk inside FP16 range after pre-exposure.
 const float kMaxExposedLuminance = 60000.0;
@@ -39,5 +42,8 @@ void main() {
     // The sky is infinitely far, so only camera rotation moves it.
     vec4 currentClip = pc.scene.currentViewProjection * vec4(direction, 0.0);
     vec4 previousClip = pc.scene.previousViewProjection * vec4(direction, 0.0);
+    outDiffuseAlbedo = vec4(0.5, 0.5, 0.5, 1.0);
+    outSpecularAlbedo = vec4(0.0);
+    outNormalRoughness = vec4(0.0);
     outMotion = (previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5;
 }

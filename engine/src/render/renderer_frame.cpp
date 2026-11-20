@@ -3,10 +3,13 @@
 #include <basisu_enc.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <span>
 #include <stdexcept>
 
 namespace meridian {
@@ -599,6 +602,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->previousView = view;
   impl_->previousCameraPosition = camera.position;
   scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
+  scene.whiteNoise = impl_->whiteNoise;
   scene.sunDirection = lighting.sunDirection;
   scene.exposure = impl_->exposureBuffer.address;
   scene.sunIlluminance = lighting.sunIlluminance;
@@ -768,8 +772,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // The HDR and depth images are shared by both frames in flight, so each
   // barrier also waits for the previous frame's use of the image.
-  for (VkImage target : {impl_->hdr.image, impl_->motion.image,
-                          impl_->transparencyMask.image}) {
+  const bool guides = impl_->diffuseAlbedo.image != VK_NULL_HANDLE;
+  std::array<VkImage, 6> colorTargets = {
+      impl_->hdr.image,           impl_->motion.image,
+      impl_->transparencyMask.image, impl_->diffuseAlbedo.image,
+      impl_->specularAlbedo.image, impl_->normalRoughness.image};
+  const size_t colorTargetCount = guides ? colorTargets.size() : 3;
+  for (VkImage target : std::span(colorTargets.data(), colorTargetCount)) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -826,9 +835,24 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   maskAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   maskAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
+  // A null view discards the writes when the upscaler wants no guides.
+  auto guideAttachment = [&](const Image &image) {
+    VkRenderingAttachmentInfo attachment{};
+    attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = image.view;
+    attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    return attachment;
+  };
   const VkRenderingAttachmentInfo sceneAttachments[] = {
-      hdrAttachment, motionAttachment, maskAttachment};
-  sceneRendering.colorAttachmentCount = 3;
+      hdrAttachment,
+      motionAttachment,
+      maskAttachment,
+      guideAttachment(impl_->diffuseAlbedo),
+      guideAttachment(impl_->specularAlbedo),
+      guideAttachment(impl_->normalRoughness)};
+  sceneRendering.colorAttachmentCount = std::size(sceneAttachments);
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
@@ -896,8 +920,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-  VkRenderingAttachmentInfo lateAttachments[] = {hdrAttachment, motionAttachment,
-                                                 maskAttachment};
+  VkRenderingAttachmentInfo lateAttachments[std::size(sceneAttachments)];
+  std::copy(std::begin(sceneAttachments), std::end(sceneAttachments),
+            lateAttachments);
   for (VkRenderingAttachmentInfo &attachment : lateAttachments) {
     attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   }
@@ -934,8 +959,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // --- Upscaler: render-sized scene -> display-sized output.
 
-  for (VkImage target : {impl_->hdr.image, impl_->motion.image,
-                          impl_->transparencyMask.image}) {
+  for (VkImage target : std::span(colorTargets.data(), colorTargetCount)) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -978,6 +1002,14 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   upscale.motion = upscalerImage(impl_->motion, kMotionFormat, renderExtent);
   upscale.transparencyMask =
       upscalerImage(impl_->transparencyMask, kTransparencyMaskFormat, renderExtent);
+  if (guides) {
+    upscale.diffuseAlbedo =
+        upscalerImage(impl_->diffuseAlbedo, kAlbedoFormat, renderExtent);
+    upscale.specularAlbedo =
+        upscalerImage(impl_->specularAlbedo, kAlbedoFormat, renderExtent);
+    upscale.normalRoughness = upscalerImage(
+        impl_->normalRoughness, kNormalRoughnessFormat, renderExtent);
+  }
   upscale.output = upscalerImage(impl_->output, kHdrFormat, extent);
   upscale.jitter[0] = jitterX;
   upscale.jitter[1] = jitterY;

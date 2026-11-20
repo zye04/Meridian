@@ -345,7 +345,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     vec3 cameraPosition;
     float sunAngularRadius;
     vec3 previousCameraPosition;
-    float pad2;
+    // 1: the sun sample uses a per-pixel, per-frame hash (Ray Reconstruction
+    // needs uncorrelated noise); 0: interleaved gradient noise.
+    uint whiteNoise;
     // Device address of the scene's top-level acceleration structure.
     uvec2 tlas;
     // Written by last frame's exposure pass; the scene is shaded with it
