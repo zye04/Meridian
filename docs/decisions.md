@@ -989,6 +989,28 @@ foliage that survives simplification).
   over frames into a second map when the sun turns (no stall; the per-ray
   brick march covers a fast sun drag until the swap). Every ray uses
   exactly one tree representation.
+- **Far shadow map, measured** (Task 9 step 3, 1440p Release, `--trees
+  --rr off`, 3.74M placed): 8 m texels, 16-bit depth of the first
+  0.5-opacity point of the L1 bricks along the sun (`farfield_shadow.comp`,
+  the cell DDA of `farFieldTransmittance` at one level), 2x2 bilinear depth
+  compare in `farShadowVisibility` (no sun-disk jitter: a texel is about the
+  penumbra at 1 km). The receiver moves one texel along its normal and the
+  bias is 2 m + texel x min(tan(angle to the sun), 4) (normal offset plus
+  slope-scaled bias: a fixed bias either lit the forest floor or
+  self-shadowed voxel surfaces). Far field pass vs the per-ray brick march
+  (median of 3): forest overview 7.45 -> 1.97 ms, high overview 10.87 ->
+  2.70, sunset 10.28 -> 2.91, ridge 2.95 -> 0.94; the frame drops 26.2 ->
+  18.1, 36.9 -> 15.3, 32.1 -> 18.5 ms (scene early falls too: far
+  receivers there stop marching). Maps: 15 MiB each, 30 MiB both
+  (2655x1827 texels used at the default sun); the first builds in 2-7 ms
+  on frame 1. A rebuild runs 131072 texels per frame (~0.3 ms); it restarts only
+  when the sun is more than the stale angle (1 degree) from the direction
+  being built, because the spec's 0.1 degrees starved under even a slow
+  drag. While a map is up to 1 degree stale a km-long shadow edge can sit
+  up to ~17 m off and steps at the swap; past ~0.01 degrees per frame the
+  finished map is already stale and receivers fall back to the per-ray
+  march. Shadowing no longer needs the TLAS for far casters (`--far-shadows
+  tlas` is the legacy A/B).
 - **Gates** (spec): far field resident <= 500 MB and load peak <= 2.5 GB;
   far pass <= 1.0 ms and mid pass <= 1.5 ms at the forest and overview
   views; far shadows cost no more than the TLAS path; shadow pairs for

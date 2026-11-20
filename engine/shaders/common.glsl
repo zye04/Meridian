@@ -457,6 +457,11 @@ layout(buffer_reference) buffer FarFieldBuffer;
 // Defined in gi.glsl.
 layout(buffer_reference) buffer GiBuffer;
 
+// The far shadow map: two 16-bit depths per word (farfield.h).
+layout(buffer_reference, std430) readonly buffer FarShadowTexelBuffer {
+    uint words[];
+};
+
 layout(buffer_reference, std430) buffer FarCellListBuffer {
     uint entries[];
 };
@@ -566,6 +571,17 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // GI (gi.glsl): 0 off, 1 probes.
     uint giMode;
     GiBuffer gi;
+    // The far shadow map receivers read (must match SceneData): texels, the
+    // frame (axes, minima, texel and depth in m, size), whether it serves.
+    FarShadowTexelBuffer farShadowTexels;
+    float farShadowU[3];
+    float farShadowV[3];
+    float farShadowD[3];
+    float farShadowMinU, farShadowMinV, farShadowMinD;
+    float farShadowTexel, farShadowDepth;
+    uint farShadowWidth, farShadowHeight;
+    uint farShadowMode;
+    uint pad7;
 };
 
 // Largest axis scale of a transform: a conservative bound under

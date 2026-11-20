@@ -805,6 +805,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
   scene.giMode = impl_->giMode == GiMode::Off ? 0 : 1;
   scene.gi = impl_->giBuffer.address;
+  impl_->updateFarShadow(lighting.sunDirection, scene);
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -886,6 +887,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("traverse");
   impl_->cullClusters(cmd, frame, 0);
   endPass("cull clusters");
+  impl_->recordFarShadow(cmd);
+  endPass("far shadow");
 
   // --- Atmosphere: LUTs for the sky, sun color and haze.
 

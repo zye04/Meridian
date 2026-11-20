@@ -292,6 +292,19 @@ struct Renderer::Impl {
   Buffer farFieldInfo;
   // The far cells the cell cull appends each frame (one uint per cell).
   Buffer farCellList;
+  // The far shadow map (renderer_farshadow.cpp): two maps of 16-bit depths,
+  // the built one (index farShadowBuilt) and the one under rebuild, each
+  // with the grid it was built for; farShadowState is farShadowStep's.
+  FarShadowBox farShadowBox;
+  uint32_t farShadowCapacity = 0;
+  std::array<Buffer, 2> farShadowMaps;
+  std::array<FarShadowGrid, 2> farShadowGrids;
+  uint32_t farShadowBuilt = 0;
+  FarShadowState farShadowState;
+  FarShadowStep farShadowPending;
+  bool farShadowReady = false;
+  VkPipelineLayout farShadowLayout = VK_NULL_HANDLE;
+  VkPipeline farShadowPipeline = VK_NULL_HANDLE;
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
@@ -495,6 +508,13 @@ struct Renderer::Impl {
                      std::span<const PlacementLayer> layers,
                      const std::vector<uint32_t> &offsets);
   void destroyFarField();
+  // Returns the maps' bytes (0: no forest).
+  VkDeviceSize createFarShadow(const FarFieldGrid &grid, const std::vector<FarCell> &farCells);
+  void destroyFarShadow();
+  void dispatchFarShadow(VkCommandBuffer cmd, uint32_t index, uint32_t first, uint32_t count);
+  void updateFarShadow(Vec3 sun, SceneData &scene);
+  void recordFarShadow(VkCommandBuffer cmd);
+  void checkFarShadow(const FarFieldCpu &cpu);
   // Far cells as their voxels (voxel.mesh/frag), in the early scene pass.
   void drawFarField(VkCommandBuffer cmd);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);

@@ -491,6 +491,18 @@ struct SceneData {
   // GI (gi.glsl): 0 off, 1 probes; the probe buffer (GpuGiHeader + probes).
   uint32_t giMode = 0;
   VkDeviceAddress gi = 0;
+  // The far shadow map receivers read (farfield.h): its texels (two 16-bit
+  // depths per word), the frame (u, v, d axes, minima, texel and depth
+  // meters, size) and whether it serves this frame.
+  VkDeviceAddress farShadowTexels = 0;
+  float farShadowU[3] = {};
+  float farShadowV[3] = {};
+  float farShadowD[3] = {};
+  float farShadowMinU = 0.0f, farShadowMinV = 0.0f, farShadowMinD = 0.0f;
+  float farShadowTexel = 0.0f, farShadowDepth = 0.0f;
+  uint32_t farShadowWidth = 0, farShadowHeight = 0;
+  uint32_t farShadowMode = 0;
+  uint32_t pad7 = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -501,7 +513,9 @@ static_assert(offsetof(SceneData, weather) == 1992);
 static_assert(offsetof(SceneData, clouds) == 2032);
 static_assert(offsetof(SceneData, farField) == 2192);
 static_assert(offsetof(SceneData, gi) == 2216);
-static_assert(sizeof(SceneData) == 2224);
+static_assert(offsetof(SceneData, farShadowTexels) == 2224);
+static_assert(offsetof(SceneData, farShadowMode) == 2296);
+static_assert(sizeof(SceneData) == 2304);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -822,6 +836,24 @@ struct FarSplatConstants {
   uint32_t rowEnd = 0;
 };
 static_assert(sizeof(FarSplatConstants) == 120);
+
+// Must match the push constants in farfield_shadow.comp: builds texels
+// [2 firstWord, 2 (firstWord + wordCount)) of the map, two per word.
+struct FarShadowConstants {
+  VkDeviceAddress field = 0; // GpuFarField
+  VkDeviceAddress texels = 0;
+  float origin[3] = {}; // the map's (minU, minV, minD) corner in world space
+  float u[3] = {};
+  float v[3] = {};
+  float d[3] = {};
+  float texel = 0.0f;
+  float depth = 0.0f;
+  uint32_t width = 0;
+  uint32_t firstWord = 0;
+  uint32_t wordCount = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarShadowConstants) == 88);
 
 // Must match the push constants in farfield_check.comp (Debug).
 struct FarCheckConstants {

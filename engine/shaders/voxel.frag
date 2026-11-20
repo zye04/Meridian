@@ -98,7 +98,8 @@ void main() {
         vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
-        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart, true),
+        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart, true,
+                                           s.normal),
                     1.0);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }

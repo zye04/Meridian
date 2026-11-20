@@ -426,3 +426,157 @@ TEST_CASE("Slice rows keep each slice within the brick budget") {
   // A row over the budget is its own slice.
   CHECK(farSliceRows(columns, 2, 3, 4, 4) == std::vector<uint32_t>{0, 1, 2, 3, 4});
 }
+
+TEST_CASE("farFieldShadowDistanceCpu matches a brute-force march") {
+  const FarTemplates tree = filterFarTemplate(treeGrid());
+  const FarFieldGrid grid{0.0f, 0.0f, 90.0f, 20, 20};
+  std::vector<DecodedInstance> instances;
+  for (uint32_t i = 0; i < 4000; ++i) {
+    const float x = 1280.0f * hash01(4 * i), z = 1280.0f * hash01(4 * i + 1);
+    instances.push_back(instanceAt({x, 100.0f + 0.02f * x, z}, {0, 1, 0},
+                                   2.0f * kPi * hash01(4 * i + 2), 0.8f + 0.5f * hash01(4 * i + 3)));
+  }
+  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f};
+  const FarFieldCpu field = splatFarField(grid, {&tree, 1}, kPalette, instances, scale);
+  uint32_t hit = 0, miss = 0;
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    for (uint32_t i = 0; i < 24; ++i) {
+      // From above the forest toward a low sun's far side, in any direction.
+      const float azimuth = 2.0f * kPi * hash01(100 + i), elevation = 0.1f + 1.2f * hash01(200 + i);
+      const Vec3 direction{-std::cos(elevation) * std::cos(azimuth), -std::sin(elevation),
+                           -std::cos(elevation) * std::sin(azimuth)};
+      const Vec3 origin = Vec3{1280.0f * hash01(300 + i), 0.0f, 1280.0f * hash01(400 + i)} -
+                          direction * 400.0f + Vec3{0.0f, 112.0f, 0.0f};
+      constexpr float kMax = 2000.0f;
+      constexpr double kStep = 2.5e-3;
+      double depth = 0.0, expected = -1.0;
+      for (double t = 0.5 * kStep; t < kMax; t += kStep) {
+        depth += farFieldExtinction(field, level, origin + direction * static_cast<float>(t)) * kStep;
+        if (depth >= kFarShadowOpticalDepth) {
+          expected = t;
+          break;
+        }
+      }
+      const float actual = farFieldShadowDistanceCpu(field, level, origin, direction, kMax);
+      CAPTURE(level);
+      CAPTURE(i);
+      if (expected < 0.0) {
+        CHECK(actual < 0.0f);
+        ++miss;
+      } else {
+        CHECK(std::abs(actual - expected) < field.voxelSize[level] / 32.0f);
+        ++hit;
+      }
+    }
+  }
+  CHECK(hit > 10);
+  CHECK(miss > 0);
+}
+
+TEST_CASE("The shadow map grid covers the box, every texel along the sun") {
+  const FarShadowBox box{{0.0f, 900.0f, 0.0f}, {15000.0f, 1700.0f, 15000.0f}};
+  const Vec3 sun = normalize({0.9f, 0.05f, -0.4f});
+  const FarShadowGrid grid = farShadowGrid(box, sun, UINT32_MAX);
+  CHECK(std::abs(dot(grid.u, grid.v)) < 1e-5f);
+  CHECK(std::abs(dot(grid.u, grid.d)) < 1e-5f);
+  CHECK(dot(grid.d, sun) == doctest::Approx(-1.0f));
+  for (uint32_t corner = 0; corner < 8; ++corner) {
+    const Vec3 p{corner & 1 ? box.hi.x : box.lo.x, corner & 2 ? box.hi.y : box.lo.y,
+                 corner & 4 ? box.hi.z : box.lo.z};
+    const float u = (dot(p, grid.u) - grid.minU) / grid.texel;
+    const float v = (dot(p, grid.v) - grid.minV) / grid.texel;
+    const float d = dot(p, grid.d) - grid.minD;
+    CHECK(u >= 0.0f);
+    CHECK(u <= static_cast<float>(grid.width));
+    CHECK(v >= 0.0f);
+    CHECK(v <= static_cast<float>(grid.height));
+    CHECK(d >= -1e-2f);
+    CHECK(d <= grid.depth + 1e-2f);
+  }
+  const FarShadowGrid coarse = farShadowGrid(box, sun, farShadowTexelCount(grid) / 2);
+  CHECK(coarse.texel == 2.0f * kFarShadowTexel);
+  CHECK(farShadowTexelCount(coarse) <= farShadowTexelCount(grid) / 2);
+  CHECK(farShadowMaxTexels(box) >= farShadowTexelCount(grid));
+  // Quantization round-trips within one step.
+  for (float t : {0.0f, 1.0f, 777.7f, grid.depth}) {
+    CHECK(std::abs(dequantizeFarShadow(quantizeFarShadow(t, grid.depth), grid.depth) - t) <=
+          1.5f * grid.depth / 65534.0f);
+  }
+}
+
+TEST_CASE("The shadow map rebuild never stalls and follows the sun") {
+  const auto sunAt = [](float degrees) {
+    const float a = degrees * kPi / 180.0f;
+    return Vec3{std::cos(a), std::sin(a), 0.0f};
+  };
+  constexpr uint32_t kTotal = 1000, kBudget = 400;
+  FarShadowState state;
+  // The first map: built from nothing in one go (a budget of everything).
+  FarShadowStep step = farShadowStep(state, sunAt(30), kTotal, kTotal);
+  CHECK_FALSE(step.useMap);
+  CHECK(step.count == kTotal);
+  CHECK(step.completes);
+  state = step.state;
+  CHECK(state.hasBuilt);
+  CHECK_FALSE(state.building);
+
+  // Still: no work, the map serves.
+  step = farShadowStep(state, sunAt(30.05f), kTotal, kBudget);
+  CHECK(step.useMap);
+  CHECK(step.count == 0);
+
+  // Past the rebuild angle: slices of the budget, then a swap; the old map
+  // serves throughout.
+  state = step.state;
+  uint32_t built = 0, frames = 0;
+  while (true) {
+    step = farShadowStep(state, sunAt(30.5f), kTotal, kBudget);
+    ++frames;
+    CHECK(step.useMap);
+    CHECK(step.first == built);
+    CHECK(step.count > 0);
+    built += step.count;
+    state = step.state;
+    if (step.completes) {
+      break;
+    }
+    REQUIRE(frames < 10);
+  }
+  CHECK(frames == 3);
+  CHECK(built == kTotal);
+  CHECK(state.builtDir.y == doctest::Approx(sunAt(30.5f).y));
+  CHECK_FALSE(state.building);
+
+  // A sun that moves mid-rebuild restarts toward the newest direction, once
+  // it is past the stale angle from the one being built; closer, it finishes.
+  step = farShadowStep(state, sunAt(32), kTotal, kBudget);
+  state = step.state;
+  CHECK(step.first == 0);
+  CHECK(state.building);
+  step = farShadowStep(state, sunAt(32.5f), kTotal, kBudget);
+  CHECK(step.first == kBudget);
+  CHECK(step.state.buildingDir.y == doctest::Approx(sunAt(32).y));
+  step = farShadowStep(state, sunAt(34), kTotal, kBudget);
+  CHECK(step.first == 0);
+  CHECK(step.count == kBudget);
+  CHECK(step.state.buildingDir.y == doctest::Approx(sunAt(34).y));
+  // Past the stale angle from the built map: the per-ray march.
+  CHECK_FALSE(step.useMap);
+  // A drag that changes the texel count at every restart never overruns the
+  // budget or the map being built.
+  FarShadowState drag = state;
+  for (uint32_t frame = 0; frame < 40; ++frame) {
+    const uint32_t texels = 200 + 2 * ((frame * 37) % 900);
+    const FarShadowStep next = farShadowStep(drag, sunAt(34 + 1.3f * frame), texels, kBudget);
+    CHECK(next.count <= kBudget);
+    CHECK(next.first + next.count <= next.state.buildingTotal);
+    drag = next.state;
+  }
+  state = step.state;
+
+  // Back near the built direction while rebuilding: the build is dropped.
+  step = farShadowStep(state, sunAt(30.52f), kTotal, kBudget);
+  CHECK(step.useMap);
+  CHECK(step.count == 0);
+  CHECK_FALSE(step.state.building);
+}

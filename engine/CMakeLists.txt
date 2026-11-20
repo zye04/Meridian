@@ -125,6 +125,7 @@ add_shader(farfield_splat.comp farfield_accumulate.comp FARFIELD_ACCUMULATE)
 add_shader(farfield_splat.comp farfield_mask.comp FARFIELD_MASK)
 add_shader(farfield_splat.comp farfield_pack.comp FARFIELD_PACK)
 add_shader(farfield_check.comp farfield_check.comp)
+add_shader(farfield_shadow.comp farfield_shadow.comp)
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
@@ -140,6 +141,7 @@ add_library(meridian STATIC
     src/render/renderer_clouds.cpp
     src/render/renderer_gi.cpp
     src/render/renderer_farfield.cpp
+    src/render/renderer_farshadow.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_placement.cpp
     src/render/renderer_resources.cpp

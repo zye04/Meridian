@@ -171,7 +171,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 voxels), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -258,8 +258,15 @@ before and after compaction, cell margin). `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
-in the TLAS and march the far field's voxels instead; `tlas` traces every
-tree for every receiver (A/B; also what `--far-field off` does).
+in the TLAS and read the far shadow map of the bricks instead
+(`farfield_shadow.comp`, farfield.h: 8 m texels, 16-bit depth of the first
+0.5-opacity point along the sun, read with a normal offset and a
+slope-scaled bias, built on frame 1 and rebuilt a slice per
+frame into a second map when the sun turns more than 0.1 degrees; a sun more
+than 1 degree off the built map falls back to the per-ray brick march);
+`tlas` traces every tree for every receiver (legacy A/B, to go with the
+TLAS; also what `--far-field off` does). Debug prints `far shadow map check:` (GPU map vs the CPU
+replica) and the first build's ms.
 `--gi off|probes` (default off, until the look is accepted): `probes`
 lights the ambient term from global-illumination probes (spec
 `docs/superpowers/specs/2026-11-20-gi-design.md`): a camera-centred

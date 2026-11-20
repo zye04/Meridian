@@ -397,4 +397,101 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
     return exp(-opticalDepth);
 }
 
+// ------------------------------------------------------------ Sun shadow map
+// Must match farfield.h.
+const uint kFarShadowLevel = 1u;
+const float kFarShadowOpticalDepth = 0.6931472;
+const uint kFarShadowEmpty = 0xFFFFu;
+const uint kFarShadowStepCap = 0xFFFEu;
+
+// Where the opacity of the kFarShadowLevel voxels along worldOrigin + t
+// direction (unit) reaches kFarShadowOpticalDepth, t in [0, maxDistance], or
+// -1; the CPU twin is farFieldShadowDistanceCpu. farFieldTransmittance's
+// cell DDA and canopy pyramid at one level, which builds the map
+// (farfield_shadow.comp).
+float farFieldShadowDistance(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                             float maxDistance) {
+    float heightBase = farField.field.heightBase;
+    uint levels = farField.field.pyramidLevels;
+    vec3 origin = worldOrigin - vec3(farField.field.originX, heightBase, farField.field.originZ);
+    float top = (levels > 0u ? farField.field.pyramid.tops[farField.field.pyramidOffsets[levels]]
+                             : farField.field.cells.cells[0].top) -
+                heightBase;
+    float pad = farCanopyPad(kFarShadowLevel);
+    float tEnd = maxDistance;
+    if (direction.y > 0.0) {
+        tEnd = min(tEnd, (top + pad - origin.y) / direction.y);
+    }
+    vec2 inverseXZ = 1.0 / vec2(abs(direction.x) > 1e-12 ? direction.x : 1e-12,
+                              abs(direction.z) > 1e-12 ? direction.z : 1e-12);
+    ivec2 cellCount = ivec2(farField.field.cellsX, farField.field.cellsZ);
+    vec2 gridT0 = -origin.xz * inverseXZ;
+    vec2 gridT1 = (vec2(cellCount) * kCellSize - origin.xz) * inverseXZ;
+    vec2 enter = min(gridT0, gridT1), leave = max(gridT0, gridT1);
+    float t = max(0.0, max(enter.x, enter.y));
+    tEnd = min(tEnd, min(leave.x, leave.y));
+    if (t >= tEnd) {
+        return -1.0;
+    }
+    ivec2 stepXZ = ivec2(direction.x >= 0.0 ? 1 : -1, direction.z >= 0.0 ? 1 : -1);
+    ivec2 cell = clamp(ivec2(floor((origin.xz + direction.xz * t) / kCellSize)), ivec2(0),
+                       cellCount - 1);
+    float opticalDepth = 0.0;
+    uint k = 0u;
+    uint i = 0u;
+    for (; i < kFarMaxRaySteps && t < tEnd; ++i) {
+        ivec2 block = cell >> k;
+        float blockTop;
+        FarCell far;
+        if (k == 0u) {
+            far = farField.field.cells.cells[cell.y * cellCount.x + cell.x];
+            blockTop = far.top - heightBase;
+        } else {
+            int width = (cellCount.x + (1 << k) - 1) >> k;
+            blockTop = farField.field.pyramid.tops[farField.field.pyramidOffsets[k] +
+                                                   uint(block.y * width + block.x)] -
+                       heightBase;
+        }
+        ivec2 lo = block << k;
+        ivec2 hi = ((block + 1) << k) - 1;
+        vec2 axisExit = (vec2(mix(lo, hi + 1, greaterThan(stepXZ, ivec2(0)))) * kCellSize -
+                         origin.xz) * inverseXZ;
+        float tExit = min(min(axisExit.x, axisExit.y), tEnd);
+        float y0 = origin.y + direction.y * t;
+        float y1 = origin.y + direction.y * tExit;
+        bool below = blockTop + pad <= min(y0, y1);
+        if (!below) {
+            if (k > 0u) {
+                --k;
+                continue;
+            }
+            if (far.bottom - heightBase - pad < max(y0, y1)) {
+                uint voxel;
+                float hit = farMarchCell(farField, uvec2(cell), kFarShadowLevel, origin, direction,
+                                         t, tExit, kFarShadowOpticalDepth, opticalDepth, voxel);
+                if (hit >= 0.0) {
+                    return hit;
+                }
+            }
+        }
+        ivec2 next = clamp(ivec2(floor((origin.xz + direction.xz * tExit) / kCellSize)), lo, hi);
+        if (axisExit.x <= axisExit.y) {
+            next.x = stepXZ.x > 0 ? hi.x + 1 : lo.x - 1;
+        }
+        if (axisExit.y <= axisExit.x) {
+            next.y = stepXZ.y > 0 ? hi.y + 1 : lo.y - 1;
+        }
+        if (any(lessThan(next, ivec2(0))) || any(greaterThanEqual(next, cellCount))) {
+            break;
+        }
+        if (below && k < levels) {
+            ++k;
+        }
+        cell = next;
+        t = tExit;
+    }
+    // -2: out of steps before the end of the ray.
+    return i >= kFarMaxRaySteps && t < tEnd ? -2.0 : -1.0;
+}
+
 #endif

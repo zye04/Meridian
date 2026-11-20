@@ -566,4 +566,110 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
   return static_cast<float>(std::exp(-depth));
 }
 
+// ------------------------------------------------------------ Sun shadow map
+
+FarShadowGrid farShadowGrid(const FarShadowBox &box, Vec3 toSun, uint32_t maxTexels) {
+  FarShadowGrid grid;
+  grid.d = toSun * -1.0f;
+  const Vec3 up = std::abs(grid.d.y) < 0.999f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+  grid.u = normalize(cross(up, grid.d));
+  grid.v = cross(grid.d, grid.u);
+  float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+  for (uint32_t corner = 0; corner < 8; ++corner) {
+    const Vec3 p{corner & 1 ? box.hi.x : box.lo.x, corner & 2 ? box.hi.y : box.lo.y,
+                 corner & 4 ? box.hi.z : box.lo.z};
+    const float c[3] = {dot(p, grid.u), dot(p, grid.v), dot(p, grid.d)};
+    for (int i = 0; i < 3; ++i) {
+      lo[i] = std::min(lo[i], c[i]);
+      hi[i] = std::max(hi[i], c[i]);
+    }
+  }
+  grid.texel = kFarShadowTexel;
+  const auto count = [&] {
+    grid.width = static_cast<uint32_t>(std::ceil((hi[0] - lo[0]) / grid.texel)) + 1;
+    grid.height = static_cast<uint32_t>(std::ceil((hi[1] - lo[1]) / grid.texel)) + 1;
+    return uint64_t{grid.width} * grid.height;
+  };
+  while (count() > maxTexels) {
+    grid.texel *= 2.0f;
+  }
+  // Centered, so the one extra texel is half on each side.
+  grid.minU = lo[0] - 0.5f * (grid.width * grid.texel - (hi[0] - lo[0]));
+  grid.minV = lo[1] - 0.5f * (grid.height * grid.texel - (hi[1] - lo[1]));
+  grid.minD = lo[2];
+  grid.depth = hi[2] - lo[2];
+  return grid;
+}
+
+uint32_t farShadowMaxTexels(const FarShadowBox &box) {
+  uint32_t most = 0;
+  for (int azimuth = 0; azimuth < 360; azimuth += 5) {
+    for (int elevation = 1; elevation <= 90; elevation += 5) {
+      const float a = azimuth * 3.14159265f / 180.0f, e = elevation * 3.14159265f / 180.0f;
+      const Vec3 sun{std::cos(e) * std::cos(a), std::sin(e), std::cos(e) * std::sin(a)};
+      most = std::max(most, farShadowTexelCount(farShadowGrid(box, sun, UINT32_MAX)));
+    }
+  }
+  // The sky is sampled coarsely: a margin, so no direction needs coarser texels.
+  return static_cast<uint32_t>(static_cast<double>(most) * 1.1);
+}
+
+uint32_t quantizeFarShadow(float distance, float depth) {
+  const float q = std::floor(distance / depth * 65534.0f + 0.5f);
+  return static_cast<uint32_t>(std::clamp(q, 0.0f, 65533.0f));
+}
+
+float dequantizeFarShadow(uint32_t value, float depth) {
+  return static_cast<float>(value) * (1.0f / 65534.0f) * depth;
+}
+
+float farFieldShadowDistanceCpu(const FarFieldCpu &field, uint32_t level, Vec3 origin,
+                                Vec3 direction, float max) {
+  const auto depthTo = [&](double t) {
+    return levelDepth(field, level, origin, direction, 0.0, t, nullptr);
+  };
+  if (field.columns[level].empty() || depthTo(max) < kFarShadowOpticalDepth) {
+    return -1.0f;
+  }
+  double lo = 0.0, hi = max;
+  for (int i = 0; i < 44; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    (depthTo(mid) < kFarShadowOpticalDepth ? lo : hi) = mid;
+  }
+  return static_cast<float>(hi);
+}
+
+namespace {
+float angleBetween(Vec3 a, Vec3 b) { return std::acos(std::clamp(dot(a, b), -1.0f, 1.0f)); }
+} // namespace
+
+FarShadowStep farShadowStep(const FarShadowState &state, Vec3 sun, uint32_t sunTexels,
+                            uint32_t budget) {
+  FarShadowStep step;
+  FarShadowState &s = step.state = state;
+  step.useMap = state.hasBuilt && angleBetween(sun, state.builtDir) <= kShadowMapStaleAngle;
+  if (s.building && angleBetween(sun, s.buildingDir) > kShadowMapRestartAngle) {
+    s.building = false;
+  }
+  if (!s.building && (!s.hasBuilt || angleBetween(sun, s.builtDir) > kShadowMapRebuildAngle)) {
+    s.building = true;
+    s.buildingDir = sun;
+    s.progress = 0;
+    s.buildingTotal = sunTexels;
+  }
+  if (s.building) {
+    step.first = s.progress;
+    step.count = std::min(budget, s.buildingTotal - s.progress);
+    s.progress += step.count;
+    if (s.progress >= s.buildingTotal) {
+      step.completes = true;
+      s.hasBuilt = true;
+      s.builtDir = s.buildingDir;
+      s.building = false;
+      s.progress = 0;
+    }
+  }
+  return step;
+}
+
 } // namespace meridian

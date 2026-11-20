@@ -91,7 +91,7 @@ float sunVisibility(vec3 position, vec3 normal) {
     }
     if (inTerrainSun > 0.0) {
         return traceSunVisibility(origin, origin, sampleSunDirection(pc.scene, gl_FragCoord.xy),
-                                  0.0, false);
+                                  0.0, false, normal);
     }
 #endif
     // An object's base can sit below the bilinear heightfield (detail
@@ -100,7 +100,7 @@ float sunVisibility(vec3 position, vec3 normal) {
     marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
     return traceSunVisibility(origin, marchOrigin, sampleSunDirection(pc.scene, gl_FragCoord.xy),
-                              0.0, true);
+                              0.0, true, normal);
 }
 
 // ---------------------------------------------------------------- Surface

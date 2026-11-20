@@ -183,6 +183,7 @@ void Renderer::Impl::destroyFarField() {
   for (Buffer *buffer : {&farCells, &farPyramid, &farPalette, &farFieldInfo, &farCellList}) {
     destroyBuffer(*buffer);
   }
+  destroyFarShadow();
 }
 
 // After the early clusters, so the terrain and near geometry reject hidden
@@ -834,7 +835,8 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                              0);
 
-  VkDeviceSize resident = farCells.size + farPyramid.size + farPalette.size + farFieldInfo.size;
+  VkDeviceSize resident = farCells.size + farPyramid.size + farPalette.size + farFieldInfo.size +
+                          createFarShadow(grid, farCellData);
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     resident += farColumns[level].size + farVoxels[level].size;
   }
@@ -933,6 +935,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       cpu.brickCount[level] = brickCounts[level];
     }
     destroyBuffer(check);
+    checkFarShadow(cpu);
     const std::vector<std::array<float, 8>> rays = farCheckRays(grid, farCellData);
     const auto rayCount = static_cast<uint32_t>(rays.size());
     Buffer rayBuffer = uploadStorage(rays.data(), rays.size() * sizeof(rays[0]));

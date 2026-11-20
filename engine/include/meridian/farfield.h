@@ -185,4 +185,82 @@ float farFieldExtinction(const FarFieldCpu &field, uint32_t level, Vec3 position
 float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direction, float start,
                                float max, const std::vector<uint8_t> *cellInTlas);
 
+// ------------------------------------------------------------ Sun shadow map
+// An orthographic depth map along the sun over the forest bounds, replacing
+// the per-pixel farFieldTransmittance march of far receivers: per texel the
+// distance (from the map's near plane) of the first point where the opacity
+// of the bricks along the sun reaches 0.5, 16-bit (kFarShadowEmpty: none).
+// Must match farfield.glsl.
+constexpr uint32_t kFarShadowLevel = 1;
+constexpr float kFarShadowOpticalDepth = 0.6931472f; // -ln(1 - 0.5)
+constexpr float kFarShadowTexel = 8.0f;
+constexpr uint32_t kFarShadowEmpty = 0xFFFF;
+// A texel whose march ran out of steps (a bug if any; treated as lit).
+constexpr uint32_t kFarShadowStepCap = 0xFFFE;
+// The map is rebuilt in a second buffer when the sun turned more than the
+// first angle from the build direction; until the swap it serves while the
+// sun stays within the second, else receivers march the bricks per ray.
+constexpr float kShadowMapRebuildAngle = 0.1f * 3.14159265f / 180.0f;
+constexpr float kShadowMapStaleAngle = 1.0f * 3.14159265f / 180.0f;
+// A build under way restarts toward the newest sun only once the sun is this
+// far from the direction it builds; closer, it finishes (the spec's 0.1
+// degrees starves under a slow drag: a rebuild takes ~80 frames) and the
+// next one starts toward the then-current sun.
+constexpr float kShadowMapRestartAngle = kShadowMapStaleAngle;
+// Texels built per frame during a rebuild (even: two texels per word), about
+// 0.3 ms at 1440p Release.
+constexpr uint32_t kFarShadowTexelBudget = 131072;
+
+struct FarShadowBox {
+  Vec3 lo, hi; // world
+};
+// The map's frame: u, v, d orthonormal, d the direction light travels (away
+// from the sun). A texel (x, y) is the ray from (minU + (x + 0.5) texel) u +
+// (minV + (y + 0.5) texel) v + minD d along d, for `depth` meters.
+struct FarShadowGrid {
+  Vec3 u, v, d;
+  float minU = 0.0f, minV = 0.0f, minD = 0.0f, texel = 0.0f, depth = 0.0f;
+  uint32_t width = 0, height = 0;
+};
+// The grid of `box` for the sun at unit `toSun`, texels doubled from
+// kFarShadowTexel until at most maxTexels.
+FarShadowGrid farShadowGrid(const FarShadowBox &box, Vec3 toSun, uint32_t maxTexels);
+// width * height rounded up to even.
+constexpr uint32_t farShadowTexelCount(const FarShadowGrid &grid) {
+  return (grid.width * grid.height + 1) & ~1u;
+}
+// The most texels farShadowGrid(box, any sun) needs (sampled over the sky).
+uint32_t farShadowMaxTexels(const FarShadowBox &box);
+uint32_t quantizeFarShadow(float distance, float depth);
+float dequantizeFarShadow(uint32_t value, float depth);
+
+// Where the opacity of the level's voxels along origin + t direction
+// reaches kFarShadowOpticalDepth (t in [0, max]), or -1 (CPU twin of
+// farFieldShadowDistance in farfield.glsl).
+float farFieldShadowDistanceCpu(const FarFieldCpu &field, uint32_t level, Vec3 origin,
+                                Vec3 direction, float max);
+
+// What the renderer does each frame about the map (pure, for tests).
+struct FarShadowState {
+  bool hasBuilt = false;
+  Vec3 builtDir; // toward the sun
+  bool building = false;
+  Vec3 buildingDir;
+  uint32_t progress = 0, buildingTotal = 0; // texels
+};
+struct FarShadowStep {
+  FarShadowState state;
+  // Whether receivers read the built map this frame (else the per-ray march).
+  bool useMap = false;
+  // The texels [first, first + count) to build this frame into the second
+  // map (count 0: none).
+  uint32_t first = 0, count = 0;
+  // The slice ends the build: the maps swap after this frame.
+  bool completes = false;
+};
+// sunTexels: the texel count of the map for `sun` (used when a build starts
+// or restarts). budget: texels per frame (even).
+FarShadowStep farShadowStep(const FarShadowState &state, Vec3 sun, uint32_t sunTexels,
+                            uint32_t budget);
+
 } // namespace meridian

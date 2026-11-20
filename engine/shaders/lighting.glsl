@@ -52,6 +52,49 @@ bool alphaTestCandidate(rayQueryEXT query) {
     return alpha >= m.alphaCutoff;
 }
 
+// Sun visibility of a far receiver from the far shadow map: a bilinear 2x2
+// depth compare. The map holds the distance along the sun of the first
+// 0.5-opacity point of the bricks, so a receiver deeper than that is
+// shadowed. On a surface facing the sun, neighbouring texels differ in depth
+// by about texel * cot(elevation), so the receiver moves one texel off its
+// surface along the normal and takes a depth bias that grows with the
+// surface's slope to the sun (clamped). Texels outside the map are lit.
+const float kFarShadowBias = 2.0;
+const float kFarShadowMaxSlope = 4.0;
+
+float farShadowVisibility(vec3 world, vec3 normal, float start) {
+    SceneBuffer scene = pc.scene;
+    float NoL = clamp(dot(normal, scene.sunDirection), 0.05, 1.0);
+    float slope = min(sqrt(1.0 - NoL * NoL) / NoL, kFarShadowMaxSlope);
+    float bias = start + kFarShadowBias + scene.farShadowTexel * slope;
+    world += normal * scene.farShadowTexel;
+    vec3 u = vec3(scene.farShadowU[0], scene.farShadowU[1], scene.farShadowU[2]);
+    vec3 v = vec3(scene.farShadowV[0], scene.farShadowV[1], scene.farShadowV[2]);
+    vec3 d = vec3(scene.farShadowD[0], scene.farShadowD[1], scene.farShadowD[2]);
+    vec2 position = (vec2(dot(world, u), dot(world, v)) -
+                     vec2(scene.farShadowMinU, scene.farShadowMinV)) / scene.farShadowTexel - 0.5;
+    float receiver = dot(world, d) - scene.farShadowMinD - bias;
+    ivec2 base = ivec2(floor(position));
+    vec2 weight = position - vec2(base);
+    float lit = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        ivec2 texel = base + ivec2(i & 1, i >> 1);
+        float visible = 1.0;
+        if (all(greaterThanEqual(texel, ivec2(0))) &&
+            all(lessThan(texel, ivec2(scene.farShadowWidth, scene.farShadowHeight)))) {
+            uint index = uint(texel.y) * scene.farShadowWidth + uint(texel.x);
+            uint word = scene.farShadowTexels.words[index >> 1u];
+            uint q = (word >> ((index & 1u) * 16u)) & 0xFFFFu;
+            visible = q >= kFarShadowStepCap ? 1.0
+                      : receiver <= float(q) * (1.0 / 65534.0) * scene.farShadowDepth ? 1.0
+                                                                                      : 0.0;
+        }
+        lit += visible * ((i & 1) != 0 ? weight.x : 1.0 - weight.x) *
+               ((i >> 1) != 0 ? weight.y : 1.0 - weight.y);
+    }
+    return lit;
+}
+
 // Traces one ray toward the sun: the fraction of sunlight that arrives. 0 if
 // an object (the TLAS, from origin + start direction) or the terrain (its
 // heightfield, marched from marchOrigin) blocks it. The TLAS goes first:
@@ -61,7 +104,7 @@ bool alphaTestCandidate(rayQueryEXT query) {
 // from the same start. Without marchTerrain the caller accounts for the
 // terrain itself (cluster_cull.comp's per-cluster visibility).
 float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start,
-                         bool marchTerrain) {
+                         bool marchTerrain, vec3 normal) {
     bool far = pc.scene.voxelFarShadows != 0u &&
                distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
     rayQueryEXT query;
@@ -85,6 +128,9 @@ float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float st
     }
     if (!far) {
         return 1.0;
+    }
+    if (pc.scene.farShadowMode != 0u) {
+        return farShadowVisibility(origin, normal, start);
     }
     FarFieldBuffer farField = pc.scene.farField;
     return farFieldTransmittance(farField, origin, direction, start, kShadowRayLength, false);

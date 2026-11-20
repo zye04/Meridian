@@ -1,0 +1,54 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "farfield.glsl"
+
+// One slice of the far shadow map (farfield.h): per texel the ray along the
+// sun from the map's near plane, and the distance where the far field's
+// opacity reaches 0.5. One thread per word, two adjacent texels (a word is
+// written whole, so slices need no atomics).
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430) writeonly buffer FarShadowOutBuffer {
+    uint words[];
+};
+
+// Must match FarShadowConstants in gpu_types.h.
+layout(push_constant) uniform FarShadowConstants {
+    FarFieldBuffer field;
+    FarShadowOutBuffer texels;
+    float originX, originY, originZ;
+    float uX, uY, uZ;
+    float vX, vY, vZ;
+    float dX, dY, dZ;
+    float texel;
+    float depth;
+    uint width;
+    uint firstWord;
+    uint wordCount;
+    uint pad;
+} build;
+
+uint shadowTexel(uint index) {
+    uint x = index % build.width;
+    uint y = index / build.width;
+    vec3 origin = vec3(build.originX, build.originY, build.originZ) +
+                  (float(x) + 0.5) * build.texel * vec3(build.uX, build.uY, build.uZ) +
+                  (float(y) + 0.5) * build.texel * vec3(build.vX, build.vY, build.vZ);
+    float hit = farFieldShadowDistance(build.field, origin, vec3(build.dX, build.dY, build.dZ),
+                                       build.depth);
+    return hit == -2.0 ? kFarShadowStepCap
+           : hit < 0.0 ? kFarShadowEmpty
+                       : min(uint(floor(hit / build.depth * 65534.0 + 0.5)), 65533u);
+}
+
+void main() {
+    uint word = gl_GlobalInvocationID.x;
+    if (word >= build.wordCount) {
+        return;
+    }
+    uint first = 2u * (build.firstWord + word);
+    build.texels.words[build.firstWord + word] = shadowTexel(first) | shadowTexel(first + 1u) << 16u;
+}
