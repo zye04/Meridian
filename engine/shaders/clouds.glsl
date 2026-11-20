@@ -25,6 +25,8 @@ const float kWorleyMean = 0.46;
 // much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
 const vec2 kDetailErosion = vec2(0.5, 0.6);
+// Mean of the detail noise's weighted Worley octaves.
+const float kDetailMean = 0.5;
 // Cauliflower billows: the detail volume again at kBillowScale x its
 // period (lobes of about 100-500 m), carving the base shape across the
 // whole body, not only at its rim, so cumulus read as heaped lobes that
@@ -236,7 +238,7 @@ vec2 cloudProfile(float type, float h) {
 // eroded by curl-distorted detail Worley noise (Schneider 2015).
 // heightFraction: the normalized height in the local layer (lighting's
 // ambient gradient).
-float cloudDensity(vec3 world, float lod, out float heightFraction) {
+float cloudDensity(vec3 world, float lod, bool fine, out float heightFraction) {
     heightFraction = 0.0;
     vec4 weather = weatherMapAt(world);
     float coverage = weather.r;
@@ -257,6 +259,13 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
     shape = clamp(remap(shape, kShapeRange.x, kShapeRange.y, 0.0, 1.0), 0.0, 1.0);
     float type = clamp(weather.g, 0.0, 1.0);
+    float cut = mix(kShapeCut.x, kShapeCut.y, type);
+    vec2 profile = cloudProfile(weather.g, h);
+    // Billows only erode: clear air before them stays clear (skips the fetch
+    // between clouds).
+    if (profile.y * mix(shape, 1.0, kStratusShapeFloor * (1.0 - type)) <= cut) {
+        return 0.0;
+    }
     // Billows fade out with distance: the coarse mips average to a uniform
     // erosion that would only thin far clouds.
     float billowErosion = kBillowErosion * type * (1.0 - smoothstep(kBillowFadeLod.x, kBillowFadeLod.y, lod));
@@ -268,16 +277,17 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
         shape = clamp(remap(shape, billows * billowErosion, 1.0, 0.0, 1.0), 0.0, 1.0);
     }
     shape = mix(shape, 1.0, kStratusShapeFloor * (1.0 - type));
-    float cut = mix(kShapeCut.x, kShapeCut.y, type);
-    vec2 profile = cloudProfile(weather.g, h);
     float cloud = coverage * profile.x * clamp(remap(profile.y * shape, cut, 1.0, 0.0, 1.0), 0.0, 1.0);
     if (cloud <= 0.0) {
         return 0.0;
     }
-    vec2 curl = textureLod(textures[c.curlNoise], p.xz / c.curlNoisePeriod, 0.0).xy;
-    vec3 q = p + vec3(curl.x, 0.0, curl.y) * (kCurlDistortion * (1.0 - h));
-    float detail = dot(textureLod(textures3D[c.detailNoise], q / c.detailNoisePeriod, lod).rgb,
-                       vec3(0.625, 0.25, 0.125));
+    float detail = kDetailMean;
+    if (fine) {
+        vec2 curl = textureLod(textures[c.curlNoise], p.xz / c.curlNoisePeriod, 0.0).xy;
+        vec3 q = p + vec3(curl.x, 0.0, curl.y) * (kCurlDistortion * (1.0 - h));
+        detail = dot(textureLod(textures3D[c.detailNoise], q / c.detailNoisePeriod, lod).rgb,
+                     vec3(0.625, 0.25, 0.125));
+    }
     // Cumulus billowy (inverted Worley) throughout: wispy bases cut by the
     // detail's cell ridges read as stacked steps along the underside.
     // Stratus wispy and eroded more.
@@ -287,7 +297,15 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
 
 float cloudDensity(vec3 world, float lod) {
     float heightFraction;
-    return cloudDensity(world, lod, heightFraction);
+    return cloudDensity(world, lod, true, heightFraction);
+}
+
+// Without the detail erosion (its mean instead): for the sun march's far
+// steps and the ambient probe, where the detail's few tens of meters
+// average out.
+float cloudDensityCoarse(vec3 world, float lod) {
+    float heightFraction;
+    return cloudDensity(world, lod, false, heightFraction);
 }
 
 // The cloud shadow map fades into the fallback over this fraction of its

@@ -4,14 +4,15 @@
 #include "weather.glsl"
 #include "clouds.glsl"
 
-// The cloud shadow map, every frame: a Beer shadow map (Hillaire, UE4
+// The cloud shadow map: a Beer shadow map (Hillaire, UE4
 // volumetric clouds) orthographic along the light, one line per texel
 // marched across the layer envelope. Per texel: R front depth along the
 // light (km from the camera's plane; the first cloudy step), G mean
 // extinction (1/m) from the front to the last cloudy step, B total optical
 // depth (meridian::beerShadowTexel mirrors this), A 1 (all 0: not
 // marched). cloud_shadow_blur.comp smooths it into the map cloudShadow
-// reads.
+// reads. pc.drawList 1: only every other row, alternating by frame (the
+// map changes slowly; the blur runs over all of it every frame).
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -26,6 +27,9 @@ void main() {
     Clouds c = pc.scene.clouds;
     int resolution = int(c.shadowResolution);
     ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (pc.drawList != 0u) {
+        id.y = id.y * 2 + int(pc.scene.frameIndex & 1u);
+    }
     if (any(greaterThanEqual(id, ivec2(resolution)))) {
         return;
     }
