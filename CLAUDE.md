@@ -66,7 +66,8 @@ haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, gre
 clean = Bruneton's very clean defaults, for A/B).
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
-detail, for A/B). Capture runs print drawn instances, clusters,
+detail, for A/B); `--no-occlusion` draws everything in the frustum
+(occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
