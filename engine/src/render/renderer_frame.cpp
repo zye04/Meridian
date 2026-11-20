@@ -456,6 +456,8 @@ void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
 
+void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
+
 void Renderer::setAntiAliasing(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
@@ -656,6 +658,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.farFieldEnabled = impl_->farFieldInfo.buffer != VK_NULL_HANDLE ? 1 : 0;
   scene.farField = impl_->farFieldInfo.address;
   scene.farCellList = impl_->farCellList.address;
+  scene.voxelFarShadows = scene.farFieldEnabled != 0 && impl_->voxelFarShadows ? 1 : 0;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,

@@ -135,6 +135,10 @@ the CPU reference, must be 0 mismatches) and `placement hash 0x...`
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
+`--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
+beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
+in the TLAS and march the far field's voxels instead; `tlas` traces every
+tree for every receiver (A/B; also what `--far-field off` does).
 
 ## Testing policy (usage matters)
 

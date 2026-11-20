@@ -132,6 +132,40 @@ void checkFarField(const FarFieldGrid &grid, uint32_t ring,
   }
 }
 
+// Debug: sample shadow-like rays for the GPU farFieldTransmittance vs
+// farFieldTransmittanceCpu check. Per ray: origin + start distance,
+// direction + max distance. They start inside sample cells' canopy and leave
+// at elevations from grazing to steep, or come down into it from above.
+std::vector<std::array<float, 8>> farCheckRays(const FarFieldGrid &grid,
+                                               const std::vector<FarCell> &farCells) {
+  const uint32_t cellCount = grid.cellsX * grid.cellsZ;
+  constexpr float kElevations[] = {0.035f, 0.09f, 0.21f, 0.52f, -0.05f};
+  std::vector<std::array<float, 8>> rays;
+  for (uint32_t s = 0; s < 1u << 20 && rays.size() < 256; ++s) {
+    const uint32_t cell = placementHash(s, 0x7261, 0) % cellCount;
+    if (farCells[cell].treeCount == 0) {
+      continue;
+    }
+    const FarCell &far = farCells[cell];
+    const float elevation = kElevations[rays.size() % std::size(kElevations)];
+    const float azimuth =
+        static_cast<float>(placementHash(s, 0x7261, 1) % 4096) * (6.2831853f / 4096.0f);
+    const Vec3 direction{std::cos(elevation) * std::cos(azimuth), std::sin(elevation),
+                         std::cos(elevation) * std::sin(azimuth)};
+    Vec3 origin{grid.originX + (static_cast<float>(cell % grid.cellsX) + 0.5f) * kCellSize,
+                far.bottom + 0.3f * (far.top - far.bottom),
+                grid.originZ + (static_cast<float>(cell / grid.cellsX) + 0.5f) * kCellSize};
+    if (elevation < 0.0f) {
+      // From 2 km back along the ray, so it enters the canopy from above.
+      origin = origin - direction * 2000.0f;
+    }
+    const float start = rays.size() % 2 == 0 ? 0.0f : 4.0f;
+    rays.push_back({origin.x, origin.y, origin.z, start, direction.x, direction.y, direction.z,
+                    elevation < 0.0f ? 2500.0f : 20000.0f});
+  }
+  return rays;
+}
+
 } // namespace
 
 void Renderer::Impl::destroyFarField() {
@@ -739,7 +773,63 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     checkFarField(grid, ring, templates, palette, scales, columns, voxels,
                   reinterpret_cast<const PlacedInstance *>(bytes),
                   reinterpret_cast<const Cell *>(bytes + instanceBytes), farCellData);
+
+    // farFieldTransmittance (farfield.glsl) against the CPU replica on the
+    // same bricks.
+    FarFieldCpu cpu;
+    cpu.origin = {grid.originX, grid.heightBase, grid.originZ};
+    cpu.cellsX = grid.cellsX;
+    cpu.cellsZ = grid.cellsZ;
+    cpu.heightBase = grid.heightBase;
+    for (uint32_t level = 0; level < kFarLevels; ++level) {
+      cpu.columns[level] = columns[level];
+      cpu.voxels[level].assign(voxels[level],
+                               voxels[level] + size_t{brickCounts[level]} * kBrickVoxels);
+    }
     destroyBuffer(check);
+    const std::vector<std::array<float, 8>> rays = farCheckRays(grid, farCellData);
+    const auto rayCount = static_cast<uint32_t>(rays.size());
+    Buffer rayBuffer = uploadStorage(rays.data(), rays.size() * sizeof(rays[0]));
+    Buffer results = createBuffer(rayCount * sizeof(float),
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                  VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                                      VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    VkPipelineLayout checkLayout = makeLayout(sizeof(FarCheckConstants), false);
+    VkPipeline checkPipeline = createComputePipeline(dev, "farfield_check.comp", checkLayout);
+    const FarCheckConstants constants{farFieldInfo.address, rayBuffer.address, results.address,
+                                      rayCount, 0};
+    submitNow([&](VkCommandBuffer cmd) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, checkPipeline);
+      vkCmdPushConstants(cmd, checkLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
+                         &constants);
+      vkCmdDispatch(cmd, (rayCount + 63) / 64, 1, 1);
+      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                    VK_ACCESS_2_HOST_READ_BIT);
+    });
+    vmaInvalidateAllocation(allocator, results.allocation, 0, VK_WHOLE_SIZE);
+    const auto *gpu = static_cast<const float *>(results.mapped);
+    float largest = 0.0f;
+    uint32_t partial = 0;
+    for (uint32_t i = 0; i < rayCount; ++i) {
+      const std::array<float, 8> &ray = rays[i];
+      const float expected = farFieldTransmittanceCpu(cpu, {ray[0], ray[1], ray[2]},
+                                                      {ray[4], ray[5], ray[6]}, ray[3], ray[7],
+                                                      nullptr);
+      largest = std::max(largest, std::abs(gpu[i] - expected));
+      partial += expected > 1e-3f && expected < 0.999f ? 1 : 0;
+    }
+    std::printf("far field ray check: %u rays (%u partly transmitted) compared with the CPU "
+                "replica, max difference %.2g\n",
+                rayCount, partial, largest);
+    vkDestroyPipeline(dev, checkPipeline, nullptr);
+    vkDestroyPipelineLayout(dev, checkLayout, nullptr);
+    destroyBuffer(results);
+    destroyBuffer(rayBuffer);
+    if (largest > 1e-3f) {
+      throw std::runtime_error("GPU far field transmittance differs from the CPU replica");
+    }
   }
 }
 

@@ -161,4 +161,214 @@ uint voxelAlbedo(uint voxel) {
     return voxel >> 24u;
 }
 
+// ---------------------------------------------------------------- Marching
+// In field coordinates: world minus (originX, heightBase, originZ).
+
+const uint kFarMaxCellSteps = 512u;
+
+// Marches a cell's brick columns at `level` along origin + t direction over
+// [tStart, tEnd], voxels constant inside, adding to opticalDepth: a DDA over
+// the cell's voxel columns in x/z, and in each column over its layers (the
+// column's own vertical lattice), one voxel segment per step in one loop
+// (nested loops cost registers in the shaders that inline this). Returns
+// where the optical depth reaches `limit` (hitVoxel: the voxel there), or
+// -1 if it doesn't.
+float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin, vec3 direction,
+                   float tStart, float tEnd, float limit, inout float opticalDepth,
+                   out uint hitVoxel) {
+    float v = farVoxelSize(level);
+    int n = int(kBrickEdge * farColumnsPerCell(level));
+    ivec2 lo = ivec2(cell) * n;
+    ivec2 voxel = clamp(ivec2(floor((origin.xz + direction.xz * tStart) / v)), lo, lo + n - 1);
+    ivec2 stepXZ = ivec2(direction.x >= 0.0 ? 1 : -1, direction.z >= 0.0 ? 1 : -1);
+    vec2 inverseXZ = 1.0 / vec2(abs(direction.x) > 1e-12 ? direction.x : 1e-12,
+                              abs(direction.z) > 1e-12 ? direction.z : 1e-12);
+    vec2 tMax = (vec2(voxel + max(stepXZ, ivec2(0))) * v - origin.xz) * inverseXZ;
+    float inverseY = 1.0 / (abs(direction.y) > 1e-12 ? direction.y : 1e-12);
+    int stepY = direction.y >= 0.0 ? 1 : -1;
+
+    // t: where the ray enters the current voxel column; [a, b]: the rest of
+    // the column's segment inside its layers.
+    float t = tStart;
+    float a = 0.0;
+    float b = -1.0;
+    bool newColumn = true;
+    uint firstBrick = 0u;
+    int layers = 0;
+    float base = 0.0;
+    int k = 0;
+    for (uint steps = 0u; steps < kFarMaxCellSteps && t < tEnd; ++steps) {
+        float columnEnd = min(min(tMax.x, tMax.y), tEnd);
+        if (newColumn) {
+            uvec2 column = farField.field.columns[level].columns[farColumnIndex(
+                farField.field.cellsX, level, uint(voxel.x) / kBrickEdge,
+                uint(voxel.y) / kBrickEdge)];
+            firstBrick = column.x;
+            layers = int(columnBrickCount(column) * kBrickEdge);
+            base = float(columnBaseHeight(column)) * kFarHeightUnit;
+            vec2 slab = (vec2(base, base + float(layers) * v) - origin.y) * inverseY;
+            a = max(t, min(slab.x, slab.y));
+            b = min(columnEnd, max(slab.x, slab.y));
+            k = clamp(int(floor((origin.y + direction.y * a - base) / v)), 0, max(layers - 1, 0));
+            newColumn = false;
+        }
+        if (a < b) {
+            float layerEnd = (base + float(k + max(stepY, 0)) * v - origin.y) * inverseY;
+            float end = min(layerEnd, b);
+            uint packed = farField.field.voxels[level].voxels[
+                (firstBrick + uint(k) / kBrickEdge) * kBrickVoxels +
+                brickVoxelIndex(uint(voxel.x), uint(k), uint(voxel.y))];
+            float extinction = voxelExtinction(packed);
+            float segment = extinction * max(end - a, 0.0);
+            if (opticalDepth + segment >= limit) {
+                hitVoxel = packed;
+                return a + (limit - opticalDepth) / extinction;
+            }
+            opticalDepth += segment;
+            a = end;
+            k += stepY;
+            if (a < b && k >= 0 && k < layers) {
+                continue;
+            }
+        }
+        // To the next voxel column.
+        if (columnEnd >= tEnd) {
+            break;
+        }
+        if (tMax.x < tMax.y) {
+            voxel.x += stepXZ.x;
+            tMax.x += abs(v * inverseXZ.x);
+        } else {
+            voxel.y += stepXZ.y;
+            tMax.y += abs(v * inverseXZ.y);
+        }
+        if (any(lessThan(voxel, lo)) || any(greaterThanEqual(voxel, lo + n))) {
+            break;
+        }
+        t = columnEnd;
+        newColumn = true;
+    }
+    return -1.0;
+}
+
+// Rays march L0 for their first 256 m, L1 to 1 km, L2 beyond. Must match
+// kFarRayLevelEnd in farfield.h.
+const float kFarRayLevelEnd0 = 256.0;
+const float kFarRayLevelEnd1 = 1000.0;
+// Past this optical depth (transmittance 1e-6) a ray counts as blocked.
+const float kFarOpaqueDepth = 13.815511;
+const uint kFarMaxRaySteps = 1024u;
+
+// Transmittance through the far field along worldOrigin + t direction (unit),
+// t in [startDistance, maxDistance] (startDistance one L0 voxel for rays
+// from voxel surfaces, so they don't shadow themselves); the CPU replica is
+// farFieldTransmittanceCpu. A DDA over the 64 m cells with the canopy top
+// pyramid (Tevs 2008, as terrainOccludes): a block of 2^k cells whose
+// canopy stays below the ray is skipped and the next tried one level
+// coarser; otherwise it descends, and a cell the ray passes through at
+// canopy height marches its bricks at the ray's level (by distance).
+// skipTlasCells: M2b skips the cells its TLAS holds; in M2a no far ray
+// traces trees in the TLAS, so there is nothing to skip.
+float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                            float startDistance, float maxDistance, bool skipTlasCells) {
+    // Heights (canopy extents included) relative to heightBase from here on.
+    float heightBase = farField.field.heightBase;
+    uint levels = farField.field.pyramidLevels;
+    vec3 origin = worldOrigin - vec3(farField.field.originX, heightBase, farField.field.originZ);
+    float top = (levels > 0u ? farField.field.pyramid.tops[farField.field.pyramidOffsets[levels]]
+                             : farField.field.cells.cells[0].top) -
+                heightBase;
+    float tEnd = maxDistance;
+    if (direction.y > 0.0) {
+        tEnd = min(tEnd, (top + farVoxelSize(kFarLevels - 1u) - origin.y) / direction.y);
+    }
+    vec2 inverseXZ = 1.0 / vec2(abs(direction.x) > 1e-12 ? direction.x : 1e-12,
+                              abs(direction.z) > 1e-12 ? direction.z : 1e-12);
+    ivec2 cellCount = ivec2(farField.field.cellsX, farField.field.cellsZ);
+    vec2 gridT0 = -origin.xz * inverseXZ;
+    vec2 gridT1 = (vec2(cellCount) * kCellSize - origin.xz) * inverseXZ;
+    vec2 enter = min(gridT0, gridT1), leave = max(gridT0, gridT1);
+    float t = max(startDistance, max(enter.x, enter.y));
+    tEnd = min(tEnd, min(leave.x, leave.y));
+    if (t >= tEnd) {
+        return 1.0;
+    }
+    ivec2 stepXZ = ivec2(direction.x >= 0.0 ? 1 : -1, direction.z >= 0.0 ? 1 : -1);
+    ivec2 cell = clamp(ivec2(floor((origin.xz + direction.xz * t) / kCellSize)), ivec2(0),
+                       cellCount - 1);
+    float opticalDepth = 0.0;
+    uint k = 0u;
+    for (uint i = 0u; i < kFarMaxRaySteps && t < tEnd; ++i) {
+        ivec2 block = cell >> k;
+        float blockTop;
+        FarCell far;
+        if (k == 0u) {
+            far = farField.field.cells.cells[cell.y * cellCount.x + cell.x];
+            blockTop = far.top - heightBase;
+        } else {
+            int width = (cellCount.x + (1 << k) - 1) >> k;
+            blockTop = farField.field.pyramid.tops[farField.field.pyramidOffsets[k] +
+                                                   uint(block.y * width + block.x)] -
+                       heightBase;
+        }
+        ivec2 lo = block << k;
+        ivec2 hi = ((block + 1) << k) - 1;
+        vec2 axisExit = (vec2(mix(lo, hi + 1, greaterThan(stepXZ, ivec2(0)))) * kCellSize -
+                         origin.xz) * inverseXZ;
+        float tExit = min(min(axisExit.x, axisExit.y), tEnd);
+        float y0 = origin.y + direction.y * t;
+        float y1 = origin.y + direction.y * tExit;
+        // Voxels hold deposits up to a voxel past the canopy extent (whose
+        // bound is the deposits' height plus half a voxel).
+        float pad = farVoxelSize(tExit < kFarRayLevelEnd0 ? 0u
+                                 : tExit < kFarRayLevelEnd1 ? 1u
+                                                            : 2u);
+        bool below = blockTop + pad <= min(y0, y1);
+        if (!below) {
+            if (k > 0u) {
+                --k;
+                continue;
+            }
+            if (far.bottom - heightBase - pad < max(y0, y1)) {
+                // One level per march (a single call site, as the march is
+                // inlined); a cell the level changes in is revisited from
+                // the change on.
+                uint level = t < kFarRayLevelEnd0 ? 0u : t < kFarRayLevelEnd1 ? 1u : 2u;
+                float levelEnd = level == 0u ? kFarRayLevelEnd0
+                                 : level == 1u ? kFarRayLevelEnd1
+                                               : tExit;
+                float b = min(tExit, levelEnd);
+                uint voxel;
+                if (farMarchCell(farField, uvec2(cell), level, origin, direction, t, b,
+                                 kFarOpaqueDepth, opticalDepth, voxel) >= 0.0) {
+                    return 0.0;
+                }
+                if (b < tExit) {
+                    t = b;
+                    continue;
+                }
+            }
+        }
+        // To the next block: across the side the ray leaves through (both
+        // on a tie), the other axis from the exit point kept inside the
+        // block, so rounding can't step backwards.
+        ivec2 next = clamp(ivec2(floor((origin.xz + direction.xz * tExit) / kCellSize)), lo, hi);
+        if (axisExit.x <= axisExit.y) {
+            next.x = stepXZ.x > 0 ? hi.x + 1 : lo.x - 1;
+        }
+        if (axisExit.y <= axisExit.x) {
+            next.y = stepXZ.y > 0 ? hi.y + 1 : lo.y - 1;
+        }
+        if (any(lessThan(next, ivec2(0))) || any(greaterThanEqual(next, cellCount))) {
+            break;
+        }
+        if (below && k < levels) {
+            ++k;
+        }
+        cell = next;
+        t = tExit;
+    }
+    return exp(-opticalDepth);
+}
+
 #endif

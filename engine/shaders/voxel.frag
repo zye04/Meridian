@@ -30,89 +30,11 @@ const float kHitOpticalDepth = 0.69314718;
 // shadow the surface with its own crown.
 const float kVoxelRayStart = 4.0;
 const float kVoxelPerceptualRoughness = 0.8;
-const uint kMaxMarchSteps = 512u;
-
-// Where along the ray (field coordinates: world minus (originX, heightBase,
-// originZ)) the optical depth reaches kHitOpticalDepth between tStart and
-// tEnd inside the cell, and the voxel there; -1 if it doesn't.
-float marchCell(FarField field, uvec2 cell, uint level, vec3 origin, vec3 direction,
-                float tStart, float tEnd, out uint hitVoxel) {
-    float v = farVoxelSize(level);
-    int n = int(kBrickEdge * farColumnsPerCell(level));
-    ivec2 lo = ivec2(cell) * n;
-    vec3 p = origin + direction * tStart;
-    ivec2 voxel = clamp(ivec2(floor(p.xz / v)), lo, lo + n - 1);
-    ivec2 stepXZ = ivec2(direction.x >= 0.0 ? 1 : -1, direction.z >= 0.0 ? 1 : -1);
-    vec2 inverseXZ = 1.0 / vec2(abs(direction.x) > 1e-12 ? direction.x : 1e-12,
-                              abs(direction.z) > 1e-12 ? direction.z : 1e-12);
-    vec2 tMax = (vec2(voxel + max(stepXZ, ivec2(0))) * v - origin.xz) * inverseXZ;
-    vec2 tDelta = abs(v * inverseXZ);
-    float inverseY = 1.0 / (abs(direction.y) > 1e-12 ? direction.y : 1e-12);
-    int stepY = direction.y >= 0.0 ? 1 : -1;
-
-    float t = tStart;
-    float opticalDepth = 0.0;
-    uint steps = 0u;
-    while (t < tEnd && steps < kMaxMarchSteps) {
-        float tNext = min(min(tMax.x, tMax.y), tEnd);
-        uvec2 column = field.columns[level].columns[farColumnIndex(
-            field.cellsX, level, uint(voxel.x) / kBrickEdge, uint(voxel.y) / kBrickEdge)];
-        uint layers = columnBrickCount(column) * kBrickEdge;
-        if (layers > 0u) {
-            // The part of this voxel column's segment inside the column's
-            // layers, then layer by layer.
-            float base = float(columnBaseHeight(column)) * kFarHeightUnit;
-            vec2 slab = (vec2(base, base + float(layers) * v) - origin.y) * inverseY;
-            float a = max(t, min(slab.x, slab.y));
-            float b = min(tNext, max(slab.x, slab.y));
-            if (a < b) {
-                int k = clamp(int(floor((origin.y + direction.y * a - base) / v)), 0,
-                              int(layers) - 1);
-                uint firstBrick = column.x;
-                while (a < b && steps < kMaxMarchSteps) {
-                    ++steps;
-                    float boundary = base + float(k + max(stepY, 0)) * v;
-                    float end = min((boundary - origin.y) * inverseY, b);
-                    uint packed = field.voxels[level].voxels[
-                        (firstBrick + uint(k) / kBrickEdge) * kBrickVoxels +
-                        brickVoxelIndex(uint(voxel.x), uint(k), uint(voxel.y))];
-                    float extinction = voxelExtinction(packed);
-                    float segment = extinction * max(end - a, 0.0);
-                    if (opticalDepth + segment >= kHitOpticalDepth) {
-                        hitVoxel = packed;
-                        return a + (kHitOpticalDepth - opticalDepth) / extinction;
-                    }
-                    opticalDepth += segment;
-                    a = end;
-                    k += stepY;
-                    if (k < 0 || k >= int(layers)) {
-                        break;
-                    }
-                }
-            }
-        }
-        ++steps;
-        if (tNext >= tEnd) {
-            break;
-        }
-        if (tMax.x < tMax.y) {
-            voxel.x += stepXZ.x;
-            tMax.x += tDelta.x;
-        } else {
-            voxel.y += stepXZ.y;
-            tMax.y += tDelta.y;
-        }
-        if (any(lessThan(voxel, lo)) || any(greaterThanEqual(voxel, lo + n))) {
-            break;
-        }
-        t = tNext;
-    }
-    return -1.0;
-}
 
 void main() {
     SceneBuffer scene = pc.scene;
-    FarField field = scene.farField.field;
+    FarFieldBuffer farField = scene.farField;
+    FarField field = farField.field;
     uint index = inEntry & 0x3FFFFFFFu;
     uint level = inEntry >> 30u;
     uvec2 cell = uvec2(index % field.cellsX, index / field.cellsX);
@@ -132,7 +54,9 @@ void main() {
     float tEnd = min(min(tFar.x, tFar.y), tFar.z);
 
     uint voxel;
-    float t = marchCell(field, cell, level, origin, direction, length(inDisplayed), tEnd, voxel);
+    float opticalDepth = 0.0;
+    float t = farMarchCell(farField, cell, level, origin, direction, length(inDisplayed), tEnd,
+                           kHitOpticalDepth, opticalDepth, voxel);
     if (t < 0.0) {
         discard;
     }
@@ -161,11 +85,10 @@ void main() {
     Shading sh = beginShading(s, relative);
     if (sh.NoL > 0.0) {
         vec3 rayDirection = sampleSunDirection(gl_FragCoord.xy);
-        vec3 rayOrigin = world + rayDirection * kVoxelRayStart;
-        vec3 marchOrigin = rayOrigin;
-        marchOrigin.y = max(rayOrigin.y,
-                            terrainHeight(scene.terrain, rayOrigin.xz) + kShadowRayBias);
-        addSunLight(sh, traceSunVisibility(rayOrigin, marchOrigin, rayDirection));
+        vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
+        marchOrigin.y = max(marchOrigin.y,
+                            terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
+        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart));
     }
     addAmbientLight(sh, s.occlusion);
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0);

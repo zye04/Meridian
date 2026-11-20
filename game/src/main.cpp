@@ -316,6 +316,7 @@ struct Options {
   bool placement = true;
   // Distant forest cells as voxels; off draws every tree (for A/B).
   bool farField = true;
+  bool voxelFarShadows = true;
   bool occlusion = true;
   // Clean: Bruneton's very clean defaults (for A/B).
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
@@ -389,6 +390,12 @@ Options parseOptions(int argc, char **argv) {
                std::string(argv[i + 1]) == "off") {
       options.farField = false;
       ++i;
+    } else if (arg == "--far-shadows" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "tlas" && mode != "voxel") {
+        throw std::runtime_error("--far-shadows takes tlas or voxel");
+      }
+      options.voxelFarShadows = mode == "voxel";
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else {
@@ -396,7 +403,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
-                               "--far-field off, "
+                               "--far-field off, --far-shadows tlas|voxel, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, --render-scale s, "
@@ -428,6 +435,7 @@ int main(int argc, char **argv) {
   meridian::Renderer renderer(window);
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
+  renderer.setVoxelFarShadows(options.voxelFarShadows);
   renderer.setLodErrorPixels(options.lodError);
   if (options.renderScale) {
     renderer.setAntiAliasing({.renderScale = *options.renderScale});

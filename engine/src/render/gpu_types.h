@@ -318,8 +318,12 @@ struct SceneData {
   // appends for voxel.mesh (cell | level << 30, one per cell).
   VkDeviceAddress farField = 0;
   VkDeviceAddress farCellList = 0;
+  // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
+  // far field instead of the TLAS's far-field trees (needs farField).
+  uint32_t voxelFarShadows = 0;
+  uint32_t pad4 = 0;
 };
-static_assert(sizeof(SceneData) == 1072);
+static_assert(sizeof(SceneData) == 1080);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -388,12 +392,14 @@ static_assert(sizeof(ClusterLevelGpu) == 16);
 // Must match PrototypeInfo in common.glsl. A placed prototype: its meshes
 // (prototypeMeshes[firstMesh..]; a ray hit's geometry index counts from
 // firstMesh), their combined bounding sphere and the BLAS holding them.
-// transitionSize: projected size below which it is drawn as an impostor
-// (0: never). maxDrawDistance: the largest of its layers' (0: none).
+// tlasMask: its TLAS records' instance mask (kShadowCasterMask, or
+// kFarFieldCasterMask in a far-field layer). transitionSize: projected size
+// below which it is drawn as an impostor (0: never). maxDrawDistance: the largest of its layers' (0: none).
 struct PrototypeInfo {
   uint32_t firstMesh = 0;
   uint32_t meshCount = 0;
-  uint32_t pad[2] = {}; // std430 aligns the vec3 to 16 bytes
+  uint32_t tlasMask = 0;
+  uint32_t pad = 0; // std430 aligns the vec3 to 16 bytes
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
   VkDeviceAddress blasAddress = 0;
@@ -603,6 +609,16 @@ struct FarSplatConstants {
 };
 static_assert(sizeof(FarSplatConstants) == 104);
 
+// Must match the push constants in farfield_check.comp (Debug).
+struct FarCheckConstants {
+  VkDeviceAddress field = 0; // GpuFarField
+  VkDeviceAddress rays = 0;
+  VkDeviceAddress results = 0;
+  uint32_t count = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarCheckConstants) == 32);
+
 // The prototype bake: rays per axis and voxel face, and mesh slots per
 // prototype (its meshes; more share the last slot's hit counts).
 constexpr uint32_t kFarBakeRays = 8;
@@ -709,9 +725,12 @@ struct TerrainSelectConstants {
 };
 static_assert(sizeof(TerrainSelectConstants) == 48);
 
-// TLAS instance masks: shadow rays only test shadow casters.
+// TLAS instance masks: shadow rays only test shadow casters. The placed
+// trees of far-field layers cast shadows only on receivers nearer than
+// kFarShadowDistance (lighting.glsl); the far field stands in beyond.
 constexpr uint8_t kShadowCasterMask = 0x01;
 constexpr uint8_t kNonCasterMask = 0x02;
+constexpr uint8_t kFarFieldCasterMask = 0x04;
 
 // Must match ExposureBuffer in exposure.glsl.
 struct ExposureState {

@@ -96,6 +96,7 @@ struct Renderer::Impl {
   uint32_t visitedBvhNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
+  bool voxelFarShadows = true;
 
   VkCommandPool uploadPool = VK_NULL_HANDLE;
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;

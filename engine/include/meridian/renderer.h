@@ -222,6 +222,11 @@ public:
   // comparisons).
   void setOcclusionCulling(bool enabled);
 
+  // On by default: sun shadow rays from receivers beyond 4 km see distant
+  // forests as the far field's voxels; off traces every tree in the TLAS
+  // (for A/B comparisons). Needs a far field (setPlacement).
+  void setVoxelFarShadows(bool enabled);
+
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.
   void setGrade(const Grade &grade);

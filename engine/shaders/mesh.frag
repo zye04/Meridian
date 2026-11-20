@@ -64,7 +64,7 @@ float sunVisibility(vec3 position, vec3 normal) {
     vec3 marchOrigin = origin;
     marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
-    return traceSunVisibility(origin, marchOrigin, sampleSunDirection(gl_FragCoord.xy));
+    return traceSunVisibility(origin, marchOrigin, sampleSunDirection(gl_FragCoord.xy), 0.0);
 }
 
 // ---------------------------------------------------------------- Surface

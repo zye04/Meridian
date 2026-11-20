@@ -5,6 +5,8 @@
 #ifndef LIGHTING_GLSL
 #define LIGHTING_GLSL
 
+#include "farfield.glsl"
+
 const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
 const float kGroundAlbedo = 0.1;
@@ -37,8 +39,16 @@ vec3 sampleSunDirection(vec2 pixel) {
                                      sin(angle) * bitangent));
 }
 
-// Only opaque and alpha-masked instances cast shadows (see buildTlas).
+// Only opaque and alpha-masked instances cast shadows (see buildTlas); the
+// placed trees of far-field layers have their own bit. Must match
+// gpu_types.h.
 const uint kShadowCasterMask = 0x01u;
+const uint kFarFieldCasterMask = 0x04u;
+// Receivers farther from the camera than this see the far field's voxels
+// instead of the trees in the TLAS (when SceneData.voxelFarShadows is set):
+// the far switch's distance for a 25 m tree at 1440p. One representation
+// per ray, so no tree occludes twice.
+const float kFarShadowDistance = 4000.0;
 
 // Alpha-masked geometry is non-opaque in the acceleration structure, so the
 // ray query reports each candidate hit; we accept it only where the base
@@ -66,17 +76,22 @@ bool alphaTestCandidate(rayQueryEXT query) {
     return alpha >= m.alphaCutoff;
 }
 
-// Traces one ray toward the sun: 1 if it escapes, 0 if the terrain (its
-// heightfield, marched from marchOrigin) or an object (the TLAS, from
-// origin) blocks it.
-float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction) {
+// Traces one ray toward the sun: the fraction of sunlight that arrives. 0 if
+// the terrain (its heightfield, marched from marchOrigin) or an object (the
+// TLAS, from origin + start direction) blocks it. A receiver beyond
+// kFarShadowDistance traces the TLAS without the far-field trees, then the
+// far field's transmittance from the same start.
+float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start) {
     if (terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength)) {
         return 0.0;
     }
+    bool far = pc.scene.voxelFarShadows != 0u &&
+               distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
     rayQueryEXT query;
     rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
-                          gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
-                          origin, 0.0, direction, kShadowRayLength);
+                          gl_RayFlagsTerminateOnFirstHitEXT,
+                          far ? kShadowCasterMask : kShadowCasterMask | kFarFieldCasterMask,
+                          origin, start, direction, kShadowRayLength);
     while (rayQueryProceedEXT(query)) {
         if (rayQueryGetIntersectionTypeEXT(query, false) ==
                 gl_RayQueryCandidateIntersectionTriangleEXT &&
@@ -84,10 +99,15 @@ float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction) {
             rayQueryConfirmIntersectionEXT(query);
         }
     }
-    return rayQueryGetIntersectionTypeEXT(query, true) ==
-                   gl_RayQueryCommittedIntersectionNoneEXT
-               ? 1.0
-               : 0.0;
+    if (rayQueryGetIntersectionTypeEXT(query, true) !=
+        gl_RayQueryCommittedIntersectionNoneEXT) {
+        return 0.0;
+    }
+    if (!far) {
+        return 1.0;
+    }
+    FarFieldBuffer farField = pc.scene.farField;
+    return farFieldTransmittance(farField, origin, direction, start, kShadowRayLength, false);
 }
 
 // ---------------------------------------------------------------- Surface

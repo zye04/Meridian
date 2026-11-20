@@ -415,11 +415,14 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
     builtBytes += built;
     blasBytes += r.prototypeBlas.back().size;
     info.blasAddress = r.prototypeBlas.back().address;
-    // The largest draw distance of its layers; 0 if any has none.
+    // The largest draw distance of its layers; 0 if any has none. A
+    // far-field layer's prototype is in no other layer (setPlacement).
     bool unlimited = false;
+    info.tlasMask = kShadowCasterMask;
     for (const PlacementLayer &layer : layers) {
       for (const auto &[prototype, weight] : layer.prototypes) {
         if (prototype == p) {
+          info.tlasMask = layer.farField ? kFarFieldCasterMask : kShadowCasterMask;
           unlimited = unlimited || layer.maxDrawDistance <= 0.0f;
           info.maxDrawDistance = std::max(info.maxDrawDistance, layer.maxDrawDistance);
         }

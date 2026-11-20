@@ -208,6 +208,8 @@ const float kCellSize = 64.0;
 struct PrototypeInfo {
     uint firstMesh;
     uint meshCount;
+    // Its TLAS records' instance mask (gpu_types.h).
+    uint tlasMask;
     vec3 boundsCenter;
     float boundsRadius;
     uvec2 blasAddress;
@@ -407,6 +409,10 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // for voxel.mesh: cell | level << 30, one entry per cell.
     FarFieldBuffer farField;
     FarCellListBuffer farCellList;
+    // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
+    // far field instead of the TLAS's far-field trees.
+    uint voxelFarShadows;
+    uint pad4;
 };
 
 // Largest axis scale of a transform: a conservative bound under
