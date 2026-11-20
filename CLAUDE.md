@@ -62,7 +62,7 @@ Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):
 
 ```bash
-./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--lod-error PX] --capture out.png [--frames N]
+./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--trees] [--lod-error PX] --capture out.png [--frames N]
 ```
 
 A `.pfm` capture path writes the linear HDR image the tonemap reads
@@ -122,12 +122,16 @@ sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 --sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
 0`; float precision far out, at the crop's corner (ground 1286.5 m),
 `7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
-Laplacian with the still's). Placed forests (seed 1): forest edge
+Laplacian with the still's). Placed forests (seed 1, all of these need `--trees`): forest edge
 `600 1205.6 -400 -1.55 0.02`; forest interior `85 1158.6 -53 -1.55
 0.25`; forest overview `700 1450 -400 -1.55 -0.5`;
 canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
 placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
 the summit ridge at ~1.5 km: the open view toward the summit.
+`--trees` brings the trees back; by default they are hidden (no tree
+prototypes loaded, no forest or lone-tree layers, no forest floor in the
+terrain material, no tree models in `--scatter`), until they are textured
+and keep their coverage (`docs/backlog.md`).
 `--scatter N` places N random Poly Haven models and imported Megaplants
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
@@ -135,15 +139,17 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 `1115.47 1366.85 -429.72 1.223 0`. Missing models drop out of the pick,
 so without the Megaplants trees the same seed places different content
 and these views differ.
-The game places forests, lone trees and rocks over the whole Napf at load
-(`placeScenery` in main.cpp; ~2.6M instances),
-which loads the Megaplants trees and rocks as prototypes: Debug startup
+The game places rocks over the whole Napf at load (`placeScenery` in
+main.cpp; 21281 instances), plus forests and lone trees with `--trees`
+(~2.65M instances), which loads the rocks (and with `--trees` the
+Megaplants trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
 textures, ~8.7 s of it); use it for captures that
 don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches) and `placement hash 0x...`
-(0x8322bae25df9e142 for seed 1 with every asset present). Loading
+(0x7e391ac57b8792dd for seed 1 without trees, 0x8322bae25df9e142 with
+`--trees`, every asset present). Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin).
 

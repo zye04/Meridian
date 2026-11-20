@@ -1673,3 +1673,18 @@ floor under trees, rock only on cliffs.
 - Triplanar on steep slopes (the Whiteout blend) was already in place
   since the first terrain material; with rock from 48 degrees only,
   every planar layer is under ~50 degrees, stretched at most 1.5x.
+
+## Trees hidden by default (2026-11-20)
+
+The Megaplants trees look bad (untextured leaves and bark, thin crowns),
+so the game neither places nor loads them unless run with `--trees`. The
+engine capabilities they exercise (cluster LOD and BVH, placement, TLAS,
+the voxel far field plan) stay; no engine code, cook tool, asset or shader
+was removed. Without `--trees`: no tree prototypes are loaded (startup
+and memory drop), the forest and lone-tree layers are skipped (rocks stay,
+21281 instances, placement hash 0x7e391ac57b8792dd), the terrain
+material's `ForestMask` frequency stays 0 so the forest floor and path
+mask is off and that ground gets the meadow layers, and `--scatter`
+excludes the saplings, `island_tree_01` and the Megaplants. `--trees`
+restores the previous behaviour exactly (2645325 instances, hash
+0x8322bae25df9e142).

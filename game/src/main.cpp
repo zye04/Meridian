@@ -142,7 +142,7 @@ void addModel(meridian::Renderer &renderer, const meridian::Model &model,
 // Places models at random on the ground within `radius` of `center`, with a
 // fixed seed so runs repeat. Returns how many were placed.
 int scatterModels(meridian::Renderer &renderer, const meridian::Heightfield &terrain,
-                  meridian::Vec3 center, float radius, int count) {
+                  meridian::Vec3 center, float radius, int count, bool trees) {
   const char *ids[] = {"rock_moss_set_01", "rock_moss_set_02", "boulder_01",
                        "namaqualand_boulder_04", "tree_stump_01", "tree_stump_02",
                        "dead_tree_trunk_02", "dry_branches_medium_01", "pine_roots",
@@ -150,13 +150,19 @@ int scatterModels(meridian::Renderer &renderer, const meridian::Heightfield &ter
                        "fir_sapling", "pine_sapling_small", "island_tree_01"};
   std::vector<std::string> paths;
   for (const char *id : ids) {
-    paths.push_back(std::string(id) + "/" + id + "_2k.gltf");
+    const std::string name = id;
+    if (trees || (name != "fir_sapling" && name != "pine_sapling_small" &&
+                  name != "island_tree_01")) {
+      paths.push_back(name + "/" + name + "_2k.gltf");
+    }
   }
   // Megascans Megaplants, imported by tools/fetch-sample-assets.sh.
-  for (const char *tree : {"tree_european_beech_01_a", "tree_english_oak_forest_01_a",
-                           "tree_norway_maple_01_a", "tree_european_beech_saplings_01_a",
-                           "tree_rowan_sapling_a"}) {
-    paths.push_back(std::string("source/megascans/") + tree + "/" + tree + ".gltf");
+  if (trees) {
+    for (const char *tree : {"tree_european_beech_01_a", "tree_english_oak_forest_01_a",
+                             "tree_norway_maple_01_a", "tree_european_beech_saplings_01_a",
+                             "tree_rowan_sapling_a"}) {
+      paths.push_back(std::string("source/megascans/") + tree + "/" + tree + ".gltf");
+    }
   }
   std::vector<meridian::Model> models;
   for (const std::string &path : paths) {
@@ -227,7 +233,7 @@ constexpr uint32_t kPlacementSeed = 1;
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h).
-void placeScenery(meridian::Renderer &renderer) {
+void placeScenery(meridian::Renderer &renderer, bool trees) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -237,9 +243,13 @@ void placeScenery(meridian::Renderer &renderer) {
   // 4 m wide pole and the maple 8 m wide, so they stay a minority, and the
   // oak never stands alone. Saplings would take canopy slots (3 m tall).
   std::vector<std::pair<uint32_t, float>> forest, lone;
-  for (const auto &[tree, forestWeight, loneWeight] :
-       {std::tuple{"tree_european_beech_01_a", 0.7f, 0.75f},
-        {"tree_norway_maple_01_a", 0.2f, 0.25f}, {"tree_english_oak_forest_01_a", 0.1f, 0.0f}}) {
+  const std::vector<std::tuple<const char *, float, float>> megaplants =
+      trees ? std::vector<std::tuple<const char *, float, float>>{
+                  {"tree_european_beech_01_a", 0.7f, 0.75f},
+                  {"tree_norway_maple_01_a", 0.2f, 0.25f},
+                  {"tree_english_oak_forest_01_a", 0.1f, 0.0f}}
+            : std::vector<std::tuple<const char *, float, float>>{};
+  for (const auto &[tree, forestWeight, loneWeight] : megaplants) {
     const std::string name = tree;
     for (uint32_t id : addPrototypes(renderer, prototypes,
                                      "source/megascans/" + name + "/" + name + ".gltf", false)) {
@@ -251,7 +261,7 @@ void placeScenery(meridian::Renderer &renderer) {
   }
   // Megaplants trees are 15-27 m tall; the Poly Haven stand-in is 5 m.
   float treeScale = 1.0f;
-  if (lone.empty()) {
+  if (trees && lone.empty()) {
     std::printf("Warning: no Megaplants trees (see tools/fetch-sample-assets.sh); placing "
                 "island_tree_01 scaled to canopy height instead\n");
     forest.clear();
@@ -334,6 +344,9 @@ struct Options {
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
   bool placement = true;
+  // Trees are hidden by default (--trees): no tree prototypes, no forest
+  // or lone-tree layers, no forest floor in the terrain material.
+  bool trees = false;
   bool occlusion = true;
   // Clean: Bruneton's very clean defaults (for A/B).
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
@@ -443,6 +456,8 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--rr takes on or off");
       }
       options.rayReconstruction = rr == "on";
+    } else if (arg == "--trees") {
+      options.trees = true;
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--placement" && i + 1 < argc &&
@@ -455,7 +470,7 @@ Options parseOptions(int argc, char **argv) {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
-                               "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
+                               "--camera-angular-velocity yaw pitch, --scatter n, --placement off, --trees, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -573,7 +588,9 @@ int main(int argc, char **argv) {
        {{"rock_cliff_tg1mcgbl", 2.0f}, {"layered_rock_vl0fdhdo", 3.0f}}},
   };
   meridian::TerrainMaterial material;
-  material.forest = {kMaskFrequency, kMaskThreshold, kMaskEdge, kPlacementSeed};
+  if (options.trees) {
+    material.forest = {kMaskFrequency, kMaskThreshold, kMaskEdge, kPlacementSeed};
+  }
   bool layersLoaded = true;
   for (const Role &role : roles) {
     for (const auto &[id, tileSize] : role.variants) {
@@ -608,10 +625,10 @@ int main(int argc, char **argv) {
     addModel(renderer, *alpha, meridian::translation(ground(7.0f, -3.0f)));
   }
   if (options.scatter > 0) {
-    scatterModels(renderer, terrain, start.position, 150.0f, options.scatter);
+    scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer);
+    placeScenery(renderer, options.trees);
   }
 
   meridian::Lighting lighting;
