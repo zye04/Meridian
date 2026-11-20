@@ -97,6 +97,23 @@ float terrainHeight(Terrain t, vec2 p) {
     return top + (bottom - top) * f.y;
 }
 
+// How far the bilinear cell under p rises above the plane through the
+// surface point (p, height) with this normal: the highest of its corners,
+// since the cell minus a plane is bilinear. 0 if it stays below.
+float terrainCellAbovePlane(Terrain t, vec2 p, float height, vec3 normal) {
+    vec2 g = p / t.spacing + 0.5 * vec2(float(t.width - 1u), float(t.height - 1u));
+    vec2 g0 = floor(g);
+    ivec2 i = ivec2(g0);
+    vec2 slope = -normal.xz / normal.y;
+    float above = 0.0;
+    for (int corner = 0; corner < 4; ++corner) {
+        ivec2 c = ivec2(corner & 1, corner >> 1);
+        vec2 offset = (g0 + vec2(c) - g) * t.spacing;
+        above = max(above, terrainSample(t, i.x + c.x, i.y + c.y) - (height + dot(slope, offset)));
+    }
+    return above;
+}
+
 // The samples the index range [lo, hi] maps to through the mirror, as one
 // conservative range in [0, n). A range shorter than n crosses at most one
 // mirror edge; the end of an even period half maps to n - 1, of an odd one

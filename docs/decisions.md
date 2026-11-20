@@ -485,6 +485,26 @@ foliage that survives simplification).
   and left a sunless band (the helmet plinth's lower edge in the ground
   view, high sun: mean luminance there 0.077 -> 0.101; whole-image mean
   difference 0.65/65535, `--scatter 16` from above 2e-8).
+- **Terminator lift (2026-11-20):** the terrain is shaded with the smooth
+  normal-map normal (central differences over two cells), but the march
+  traces the bilinear cells. Near the terminator (slopes whose angle away
+  from the sun nears its elevation) a cell can face away from the sun
+  while the smooth normal still faces it, so the cell shadowed itself in
+  jagged, cell-sized bands along the contours. The march now starts
+  above the plane of the shading normal by the fragment's cell's highest
+  corner over that plane (the cell minus a plane is bilinear, so its
+  corners bound it): a ray the shading normal lets through clears its own
+  cell. The shifted-origin idea of Chiang et al. for smooth-normal
+  triangles; the TLAS query keeps the unlifted origin, so object contact
+  shadows don't leak. Start-ridge view from 150 m up (`1119 1500 -431
+  1.57 -1.5 --scatter 300`): terrain-shadowed pixels with NoL > 0 whose
+  own cell faces away went from 36162 to 23227 (eye height on the ridge,
+  10520 -> 4402); what remains is relief in neighboring cells. The march
+  still matches the brute-force reference (0.0034/255 open, 0.032/255
+  sunset); scene early cost within noise (open view median 1.23 vs 1.24
+  ms, full-ground 1.28 vs 1.28).
+  - Chiang, Li, Burley, "Taming the Shadow Terminator", SIGGRAPH 2019
+    Talks: https://doi.org/10.1145/3306307.3328172
 - **Costs found on the way:** indexing `Terrain.pyramidOffsets` on a
   copied struct spilled it to local memory (one more dependent load per
   step, 0.3 ms); per-step tile math, 4 texel fetches and a start at

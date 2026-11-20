@@ -93,17 +93,27 @@ bool alphaTestCandidate(rayQueryEXT query) {
 }
 
 // Traces one ray toward the sun: 1 if it escapes, 0 if an object (the
-// TLAS) or the terrain (its heightfield) blocks it.
-float sunVisibility(vec3 position, vec3 geometricNormal) {
+// TLAS) or the terrain (its heightfield) blocks it. On terrain the normal is
+// the smooth shading normal, elsewhere the triangle's.
+float sunVisibility(vec3 position, vec3 normal) {
 #ifdef TERRAIN
     // Start on the heightfield the march tests, not on the raster: coarse
     // triangles can lie below it by more than their estimated error, and
     // can face away from the sun.
+    Terrain terrain = pc.scene.terrain;
+    float height = terrainHeight(terrain, position.xz);
     vec3 origin = position;
-    origin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz)) + kShadowRayBias;
+    origin.y = max(origin.y, height) + kShadowRayBias;
+    // Where the smooth normal faces the sun but the bilinear cell doesn't,
+    // the march would shadow the cell by itself, in jagged bands along the
+    // terminator: start above the cell's corners over the shading plane
+    // (Chiang et al. 2019).
     vec3 marchOrigin = origin;
+    marchOrigin.y = max(origin.y, height + kShadowRayBias +
+                                      terrainCellAbovePlane(terrain, position.xz, height,
+                                                            normal));
 #else
-    vec3 origin = position + geometricNormal * max(kShadowRayBias, inLodError);
+    vec3 origin = position + normal * max(kShadowRayBias, inLodError);
     // An object's base can sit below the bilinear heightfield (detail
     // displacement, coarse ridges), where the march would hit at once.
     vec3 marchOrigin = origin;
@@ -639,7 +649,11 @@ void main() {
     bool facesSun = dot(geometricNormal, L) > 0.0;
 #endif
     if (NoL > 0.0 && facesSun) {
+#ifdef TERRAIN
+        float visibility = sunVisibility(worldPosition, normal);
+#else
         float visibility = sunVisibility(worldPosition, geometricNormal);
+#endif
         vec3 H = normalize(V + L);
         float NoH = clamp(dot(N, H), 0.0, 1.0);
         float LoH = clamp(dot(L, H), 0.0, 1.0);

@@ -260,7 +260,10 @@ account for that.
   early-Z rejects hidden terrain. The terrain is not in the TLAS: sun
   shadows march its height pyramid (`terrainOccludes` in terrain.glsl,
   every surface) besides the TLAS query; terrain fragments start the ray
-  on the bilinear heightfield. Pyramid level 0 bounds each bilinear cell.
+  on the bilinear heightfield, the march also above their cell's corners
+  over the shading normal's plane (`terrainCellAbovePlane`, so a cell
+  never shadows itself where the smooth normal faces the sun). Pyramid
+  level 0 bounds each bilinear cell.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
@@ -324,7 +327,9 @@ account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; the terrain's detail
+  leaks partial Vulkan state if it throws; near the terrain's terminator,
+  neighboring 2 m cells can still cast jagged shadows onto slopes the smooth
+  shading normal lights dimly; the terrain's detail
   displacement (+-0.3 m, near the camera) casts no shadows (the march tests
   the bilinear heightfield); the sunset view (3 degree sun) makes the march
   cost ~1.15 ms; shadow rays are limited to 20 km; placed vegetation
