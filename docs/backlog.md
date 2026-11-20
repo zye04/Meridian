@@ -25,6 +25,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | RT reflections | No reflections beyond the specular from the sky | M2b spec non-goal | Later (with a denoiser) |
 | Sky occlusion | Forest interiors and under-canopy too bright from the sky | Roadmap | M2b sky visibility |
 | Haze pink cast at sunset | Slightly off color | Haze tuning | Revisit with clouds/look-dev |
+| Sky capture taken at the camera | Above the cloud layer the scene under an overcast deck gets the clear sky's ambient (and specular sky); hidden by the deck from above, visible through gaps | M4 clouds sky capture | Capture from below the layer for surfaces under it, or a second capture |
 | Cloud shadow map at a low sun | Below 6 degrees the map's 32 steps per line alias into faint blocky cloud self-shadow, so it hands over to the coverage fallback (soft, no cloud-shaped shadows) by 3 degrees; at 3-6 degrees the weather pass costs up to ~0.5 ms | M4 Task 5 review | Adaptive step count or amortized map updates |
 
 ## Image quality

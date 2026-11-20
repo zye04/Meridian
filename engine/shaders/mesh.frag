@@ -844,16 +844,19 @@ void main() {
     }
 #endif
 
-    // Ambient from the sky. Diffuse: sky irradiance from above, light bounced
-    // off the ground from below. Specular: the sky in the reflected
-    // direction, blurred toward the irradiance as roughness grows (until
-    // reflections are ray traced).
+    // Ambient from the sky (clouds included). Diffuse: sky irradiance from
+    // above, light bounced off the ground from below. Specular: the sky in
+    // the reflected direction with the sky capture's clouds over it, blurred
+    // toward the irradiance as roughness grows (until reflections are ray
+    // traced).
     vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
     vec3 groundIrradiance =
         kGroundAlbedo * (sunAtSurface * max(L.y, 0.0) + skyIrradiance);
     vec3 diffuseIrradiance = mix(groundIrradiance, skyIrradiance, N.y * 0.5 + 0.5);
     vec3 R = reflect(-V, N);
-    vec3 skyRadiance = mix(skyLuminance(position, R), skyIrradiance / kPi, a);
+    vec4 cloudsInR = skyCaptureAt(R);
+    vec3 skyRadiance =
+        mix(skyLuminance(position, R) * cloudsInR.a + cloudsInR.rgb, skyIrradiance / kPi, a);
     vec3 specularReflectance = mix(dfg.xxx, dfg.yyy, f0) * energyCompensation;
     float specularOcclusion = specularAmbientOcclusion(NoV, s.occlusion, a);
     diffuseLight += diffuseColor / kPi * diffuseIrradiance *

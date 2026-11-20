@@ -269,10 +269,12 @@ struct AtmosphereParameters {
     float absorption1Constant;
 };
 
-// Sky irradiance on an upward-facing surface, integrated each frame from the
-// sky-view LUT (sun illuminance 1).
+// Sky irradiance on an upward-facing surface (sun illuminance 1), integrated
+// each frame from the sky-view LUT with the sky capture's clouds over it,
+// and from the sky-view LUT alone (the clear sky that lights the clouds).
 layout(buffer_reference, std430) buffer SkyIrradianceBuffer {
     vec3 irradiance;
+    vec3 clearIrradiance;
 };
 
 // Must match GpuTerrainLayer in C++.
@@ -406,7 +408,7 @@ struct Clouds {
     uint baseNoise;
     uint detailNoise;
     uint curlNoise;
-    uint pad0;
+    uint skyCapture;
     vec2 windDisplacement;
     vec3 shadowRight;
     float shadowSize;

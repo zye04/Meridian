@@ -344,6 +344,9 @@ constexpr uint32_t kWeatherTimePeriod = 64;
 // sun, centered on the camera, texel-snapped in the sun's frame.
 constexpr uint32_t kCloudShadowResolution = 1024;
 constexpr double kCloudShadowSize = 30720.0;
+// The sky capture (sky_capture.comp): an octahedral map of the whole sphere
+// around the camera; each frame updates one texel of every 2x2 block.
+constexpr uint32_t kSkyCaptureResolution = 64;
 
 // Must match Clouds in common.glsl (see clouds.glsl).
 struct GpuClouds {
@@ -366,7 +369,7 @@ struct GpuClouds {
   uint32_t baseNoise = 0;
   uint32_t detailNoise = 0;
   uint32_t curlNoise = 0;
-  uint32_t pad = 0;
+  uint32_t skyCapture = 0;
   // How far the cloud air moved since last frame (xz, m), for reprojection
   // and motion vectors.
   float windDisplacement[2] = {};
@@ -737,6 +740,16 @@ static_assert(sizeof(TerrainSelectConstants) == 48);
 // TLAS instance masks: shadow rays only test shadow casters.
 constexpr uint8_t kShadowCasterMask = 0x01;
 constexpr uint8_t kNonCasterMask = 0x02;
+
+// Must match SkyIrradianceBuffer in common.glsl (std430: each vec3 takes 16
+// bytes).
+struct SkyIrradiance {
+  float irradiance[3];
+  float pad = 0.0f;
+  float clearIrradiance[3];
+  float pad1 = 0.0f;
+};
+static_assert(sizeof(SkyIrradiance) == 32);
 
 // Must match ExposureBuffer in exposure.glsl.
 struct ExposureState {
