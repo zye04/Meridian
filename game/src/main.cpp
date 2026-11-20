@@ -214,18 +214,20 @@ void placeScenery(meridian::Renderer &renderer) {
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
   std::vector<meridian::Prototype> prototypes;
-  // (prototype, weight) per tree; the saplings make the forest's understory.
+  // (prototype, forest weight, lone weight). Only the beech is a mature,
+  // broad-crowned tree (26.6 m, 13 m crown); the forest-grown oak is a
+  // 4 m wide pole and the maple 8 m wide, so they stay a minority, and the
+  // oak never stands alone. Saplings would take canopy slots (3 m tall).
   std::vector<std::pair<uint32_t, float>> forest, lone;
-  for (const auto &[tree, weight] :
-       {std::pair{"tree_european_beech_01_a", 0.4f}, {"tree_english_oak_forest_01_a", 0.25f},
-        {"tree_norway_maple_01_a", 0.2f}, {"tree_european_beech_saplings_01_a", 0.1f},
-        {"tree_rowan_sapling_a", 0.05f}}) {
+  for (const auto &[tree, forestWeight, loneWeight] :
+       {std::tuple{"tree_european_beech_01_a", 0.7f, 0.75f},
+        {"tree_norway_maple_01_a", 0.2f, 0.25f}, {"tree_english_oak_forest_01_a", 0.1f, 0.0f}}) {
     const std::string name = tree;
     for (uint32_t id : addPrototypes(renderer, prototypes,
                                      "source/megascans/" + name + "/" + name + ".gltf", false)) {
-      forest.emplace_back(id, weight);
-      if (name.find("sapling") == std::string::npos) {
-        lone.emplace_back(id, weight);
+      forest.emplace_back(id, forestWeight);
+      if (loneWeight > 0.0f) {
+        lone.emplace_back(id, loneWeight);
       }
     }
   }

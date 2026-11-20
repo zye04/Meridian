@@ -138,7 +138,7 @@ which loads the Megaplants trees and rocks as prototypes: Debug startup
 ~2.3 s; heightfield pyramid and normal map); use it for captures that
 don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches) and `placement hash 0x...`
-(0x1c6b673748ee8f8f for seed 1 with every asset present). Loading
+(0xd351c07523b05a0c for seed 1 with every asset present). Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin).
 

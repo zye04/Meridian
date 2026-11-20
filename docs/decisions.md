@@ -1438,3 +1438,25 @@ the engine default, which stays identity). AgX alone reads flat and
 desaturated for daylight foliage; these are moderate values pending an
 art-direction pass. Mean chroma (max-min)/max: start 0.37 -> 0.46,
 forest 0.25 -> 0.33.
+
+## Forest species mix favours the mature beech (2026-11-20)
+
+Trees read as skinny, sparse "baby trees". The cook is not the cause:
+it keeps 95% of the beech's leaf pieces and all of the oak's and maple's,
+with leaf area preserved exactly (table above). The imported variants
+are: beech A 26.6 m tall, 13 m crown, 533 m^2 of leaves (mature);
+English oak *forest* A 17.7 m, 4 m crown, 68 m^2 (a forest-grown pole);
+maple A 15.5 m, 8 m crown; saplings 3 m. Variant A is already the
+largest of each set (oak B-D 8.5-14.9 m, maple B-D 3.8-14.5 m, beech B
+23.6 m), so importing other variants would not help, except beech B
+for variety. The old mix (beech 0.4, oak 0.25, maple 0.2, saplings
+0.15 of the forest's slots) made 60% of forest stems poles or bushes.
+
+- Forest: beech 0.7, maple 0.2, oak 0.1; no saplings (they took canopy
+  slots; an understory would be its own layer). Lone trees: beech 0.75,
+  maple 0.25; the forest-grown oak never stands alone.
+- Forest edge view (`600 1205.6 -400 -1.55 0.02`, Release 1440p):
+  41.1M -> 47.2M triangles, GPU 19.9 -> 26.4 ms (scene early 18.9 ->
+  25.3); start view 18.2M -> 19.0M triangles, 5.63 -> 5.87 ms. The cost
+  is the beech's 4M triangles at near range; the leaf LOD work and the
+  far field address it.
