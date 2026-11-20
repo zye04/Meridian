@@ -6,12 +6,16 @@ Each mesh prim becomes one glTF mesh (one primitive per bound material) and
 each place it is drawn, directly or through nested PointInstancers, one node
 with the composed transform. Geometry is only converted (triangulated,
 face-varying data split into vertices); meridian-cook --tree simplifies and
-flattens it. Skinning primvars are ignored (no wind).
+flattens it. Skinning primvars are ignored (no wind). UsdPreviewSurface
+texture inputs (UsdUVTexture files) become glTF textures that reference the
+image files where they are.
 """
 
 import array
 import json
+import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 from pxr import Gf, Usd, UsdGeom, UsdShade
@@ -33,8 +37,9 @@ def floats(vt_array):
 
 
 class Converter:
-    def __init__(self, stage):
+    def __init__(self, stage, out_dir):
         self.stage = stage
+        self.out_dir = out_dir
         self.xforms = UsdGeom.XformCache(TIME)
         self.bin = bytearray()
         self.gltf = {
@@ -44,6 +49,7 @@ class Converter:
         }
         self.meshes = {}
         self.materials = {}
+        self.images = {}
         self.double_sided = set()
 
     def add_view(self, data, target):
@@ -73,10 +79,15 @@ class Converter:
             shader = material.ComputeSurfaceSource()[0] if material else None
             if shader:
                 pbr = entry["pbrMetallicRoughness"]
+                consumed = self.textures(shader, entry)
                 for name, key in (("diffuseColor", None), ("opacity", None),
                                   ("metallic", "metallicFactor"),
                                   ("roughness", "roughnessFactor")):
-                    value = shader.GetInput(name).Get() if shader.GetInput(name) else None
+                    surface_input = shader.GetInput(name)
+                    # A texture's input carries its fallback value only.
+                    if not surface_input or name in consumed:
+                        continue
+                    value = surface_input.Get()
                     if value is None:
                         continue
                     if name == "diffuseColor":
@@ -92,6 +103,107 @@ class Converter:
                 self.double_sided.add(self.materials[path])
             self.gltf["materials"].append(entry)
         return self.materials[path]
+
+    def texture_source(self, shader, name):
+        """The UsdUVTexture file and output channel connected to a
+        UsdPreviewSurface input, or None."""
+        surface_input = shader.GetInput(name)
+        if not surface_input or not surface_input.HasConnectedSource():
+            return None
+        connected = surface_input.GetConnectedSource()
+        if not connected:
+            print("warning: %s.%s has an invalid connection; ignored"
+                  % (shader.GetPath(), name), file=sys.stderr)
+            return None
+        source, output, _ = connected
+        texture = UsdShade.Shader(source.GetPrim())
+        if not texture or texture.GetIdAttr().Get() != "UsdUVTexture":
+            print("warning: %s.%s is connected to %s, not a UsdUVTexture; ignored"
+                  % (shader.GetPath(), name, texture.GetIdAttr().Get()), file=sys.stderr)
+            return None
+        file_input = texture.GetInput("file")
+        asset = file_input.Get(TIME) if file_input else None
+        path = asset.resolvedPath if asset else ""
+        if not path or "[" in path:
+            print("warning: %s.%s: texture file %s does not resolve to a plain file; ignored"
+                  % (shader.GetPath(), name, asset), file=sys.stderr)
+            return None
+        for setting, default in (("scale", Gf.Vec4f(1.0)), ("bias", Gf.Vec4f(0.0))):
+            value = texture.GetInput(setting).Get() if texture.GetInput(setting) else None
+            expected = (Gf.Vec4f(2, 2, 2, 1), Gf.Vec4f(-1, -1, -1, 0)) if name == "normal" else ()
+            if value is not None and value != default and value not in expected:
+                print("warning: %s.%s: texture %s %s is not applied"
+                      % (shader.GetPath(), name, setting, value), file=sys.stderr)
+        return Path(path).resolve(), output
+
+    def image_texture(self, path):
+        """A glTF texture index for an image file, referenced by its path
+        relative to the output glTF's directory."""
+        if path not in self.images:
+            relative = os.path.relpath(path, self.out_dir).replace(os.sep, "/")
+            self.gltf.setdefault("images", []).append({"uri": urllib.parse.quote(relative)})
+            self.gltf.setdefault("textures", []).append(
+                {"source": len(self.gltf["images"]) - 1})
+            self.images[path] = len(self.gltf["textures"]) - 1
+        return self.images[path]
+
+    def textures(self, shader, entry):
+        """Carries UsdPreviewSurface texture inputs into glTF slots: diffuse
+        color (with a cutout opacity from the same file's alpha), normal,
+        roughness and metallic from one ORM-packed file (G and B), occlusion
+        (R). Returns the inputs a texture now provides."""
+        pbr = entry["pbrMetallicRoughness"]
+        consumed = set()
+
+        def ignored(name, source, why):
+            print("warning: %s.%s from %s:%s %s; ignored"
+                  % (shader.GetPath(), name, source[0], source[1], why), file=sys.stderr)
+
+        color = self.texture_source(shader, "diffuseColor")
+        if color and color[1] == "rgb":
+            pbr["baseColorTexture"] = {"index": self.image_texture(color[0])}
+            pbr["baseColorFactor"] = [1.0, 1.0, 1.0, 1.0]
+            consumed.add("diffuseColor")
+        elif color:
+            ignored("diffuseColor", color, "is not RGB")
+        opacity = self.texture_source(shader, "opacity")
+        threshold_input = shader.GetInput("opacityThreshold")
+        threshold = threshold_input.Get() if threshold_input else None
+        if opacity and "diffuseColor" in consumed and opacity == (color[0], "a") and \
+                threshold and threshold > 0.0:
+            entry["alphaMode"] = "MASK"
+            entry["alphaCutoff"] = float(threshold)
+            consumed.add("opacity")
+        elif opacity:
+            ignored("opacity", opacity,
+                    "is not a cutout (opacityThreshold > 0) of the diffuse texture's alpha")
+        normal = self.texture_source(shader, "normal")
+        if normal and normal[1] == "rgb":
+            entry["normalTexture"] = {"index": self.image_texture(normal[0])}
+            consumed.add("normal")
+        elif normal:
+            ignored("normal", normal, "is not RGB")
+        roughness = self.texture_source(shader, "roughness")
+        metallic = self.texture_source(shader, "metallic")
+        metallic_input = shader.GetInput("metallic")
+        metallic_value = metallic_input.Get() if metallic_input and not metallic else None
+        if roughness and roughness[1] == "g" and (
+                metallic == (roughness[0], "b") or (not metallic and not metallic_value)):
+            pbr["metallicRoughnessTexture"] = {"index": self.image_texture(roughness[0])}
+            pbr["roughnessFactor"] = 1.0
+            pbr["metallicFactor"] = 1.0 if metallic else 0.0
+            consumed.update(("roughness", "metallic"))
+        else:
+            for name, source in (("roughness", roughness), ("metallic", metallic)):
+                if source:
+                    ignored(name, source, "is not one glTF-packed file (roughness G, "
+                            "metallic B or 0)")
+        occlusion = self.texture_source(shader, "occlusion")
+        if occlusion and occlusion[1] == "r":
+            entry["occlusionTexture"] = {"index": self.image_texture(occlusion[0])}
+        elif occlusion:
+            ignored("occlusion", occlusion, "is not R")
+        return consumed
 
     def primitive(self, corners, points, normals, normal_corner, st, st_corner, faces):
         """Splits face-varying data into glTF vertices for `faces` (corner lists)."""
@@ -271,7 +383,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     if UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
         sys.exit("only stages in meters are supported")
-    converter = Converter(stage)
+    converter = Converter(stage, out.parent.resolve())
     converter.write(out)
     print("Wrote %s: %d meshes, %d nodes" % (out, len(converter.gltf["meshes"]),
                                               len(converter.gltf["nodes"])))
