@@ -2300,3 +2300,29 @@ sun); sheets in the clouds worktree's
 - A grey smudge in the sunset-from-above sky under DLSS RR only (absent
   with TAA, and before this change with RR) is RR reconstructing the
   cloud-free sky (backlog).
+
+## Cloud altitudes and cost (M4 clouds, 2026-11-20)
+
+- **Altitudes:** the layer was 1.8-4.5 km above sea level, only ~450 m
+  over the Napf ridges (~1.35-1.4 km). Fair-weather cumulus bases sit at
+  the lifting condensation level, ~125 m above ground per degree C of
+  surface dew-point spread; a Swiss summer afternoon's 10-15 degrees
+  puts them 1.2-2 km above ground. Now cumulus (type 1) 2.8 km base, top
+  growing with coverage up to 4.8 km (fair: ~1.2 km thick); stratus
+  (type 0) 1.7-2.8 km, above the terrain's high points; broken
+  (type ~0.6) lands at ~2.4 km base. Types blend linearly as before
+  (`cloudLayer`). Cirrus stays at 9 km.
+- **Cost trims** (no visible change on the fair and broken views):
+  the sun march's steps after the first two and the ambient probe use a
+  coarse density (the detail erosion's mean instead of the curl + detail
+  fetches); behind transmittance 0.25 a sample's sun march is all coarse
+  and skips the probe; the billow fetch is skipped where the unbillowed
+  shape is already clear air (billows only erode); the cloud shadow map
+  marches half its rows per frame (alternating; the blur runs over all of
+  it); view-march step growth 0.012 -> 0.016 of the distance.
+- **Measured** (Release 2560x1440, DLSS DLAA + RR, one run each):
+  `clouds` + `weather` ms, fair from 1500 m 1.39 + 0.53, broken 1.44 +
+  0.78, start view toward the sun fair 1.60 + 0.47, broken 1.56 + 0.75,
+  overcast 0.80 + 0.50, sunset from above 1.37 + 0.42. Weather split on
+  the fair view: map 0.14, shadow map + blur 0.21, sky capture +
+  irradiance 0.16.

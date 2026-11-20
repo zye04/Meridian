@@ -26,7 +26,7 @@ layout(set = 2, binding = 2, r32f) uniform writeonly image2D cloudDepth;
 // footprint of a quarter-res pixel, at least kMinStep); at most kMaxSteps,
 // ends at kMaxDistance or when opaque.
 const float kMinStep = 60.0;
-const float kStepGrowth = 0.012;
+const float kStepGrowth = 0.016;
 const int kMaxSteps = 128;
 const float kMaxExposedLuminance = 60000.0;
 
