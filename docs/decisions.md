@@ -1420,3 +1420,21 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   blended surfaces write no depth.
 - Clouds, when they exist, write this mask too.
 - Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).
+
+## Visible quality pass (2026-11-20)
+
+Fixes from the asset-fidelity diagnosis (Cycles references of the same
+assets, `quality-q1` branch): the assets were fine, the frame was dark,
+flat and grey.
+
+**Exposure puts the mean at 18% grey.** The EV100 rule (K = 12.5, 1.2
+saturation factor) maps the histogram's mean log luminance to 0.104 of
+white, 0.8 EV under grey; `kMeanToGreyEv` in exposure.comp adds those
+0.8 EV. Start view display luminance mean 102 -> 125 of 255, p99 159 ->
+193; forest edge 103 -> 125.
+
+**The game starts with a grade of contrast 1.25, saturation 1.3** (not
+the engine default, which stays identity). AgX alone reads flat and
+desaturated for daylight foliage; these are moderate values pending an
+art-direction pass. Mean chroma (max-min)/max: start 0.37 -> 0.46,
+forest 0.25 -> 0.33.

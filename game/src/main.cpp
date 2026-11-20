@@ -469,6 +469,9 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setLodErrorPixels(options.lodError);
+  // A starting look until art direction picks one: AgX alone is flat and
+  // desaturated for daylight foliage.
+  renderer.setGrade({.contrast = 1.25f, .saturation = 1.3f});
   const meridian::AaSettings aa{.method = options.aa,
                                 .mode = options.dlssMode,
                                 .preset = options.dlssPreset,

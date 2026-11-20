@@ -15,6 +15,10 @@ const float kHighPercentile = 0.9;
 const float kMinEv100 = -6.0;
 const float kMaxEv100 = 18.0;
 const float kAdaptationSpeed = 1.5;
+// K = 12.5 and the 1.2 saturation factor put the mean log luminance at
+// 0.104 of the white point, 0.8 EV under 18% grey: photos and games read
+// as underexposed there, so the target is raised to put the mean at grey.
+const float kMeanToGreyEv = 0.8;
 
 void main() {
     uint total = 0u;
@@ -45,7 +49,7 @@ void main() {
     if (weightSum > 0.0) {
         // EV100 = log2(L * S / K) with ISO S = 100 and calibration K = 12.5.
         target = logSum / weightSum + log2(100.0 / 12.5) -
-                 post.exposureCompensation;
+                 kMeanToGreyEv - post.exposureCompensation;
         target = clamp(target, kMinEv100, kMaxEv100);
     }
 
