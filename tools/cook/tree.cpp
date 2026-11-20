@@ -231,32 +231,54 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
   return p;
 }
 
+// Each piece is simplified on its own compact vertex buffer: meshoptimizer's
+// cost scales with the buffer it is given, and a prototype holds many pieces.
 void simplify(Prototype &p, double ratio) {
   p.cooked.clear();
   p.cookedPieces.clear();
   const float weights[3] = {kNormalWeight, kNormalWeight, kNormalWeight};
-  std::vector<uint32_t> out;
+  std::vector<uint32_t> local(p.vertices.size(), UINT32_MAX), global, indices, out;
+  std::vector<Vertex> vertices;
+  std::vector<uint8_t> locked;
   for (size_t piece = 0; piece + 1 < p.pieces.size(); ++piece) {
     p.cookedPieces.push_back(static_cast<uint32_t>(p.cooked.size()));
-    const uint32_t *indices = &p.indices[p.pieces[piece]];
-    const size_t count = p.pieces[piece + 1] - p.pieces[piece];
+    const auto begin = p.indices.begin() + p.pieces[piece];
+    const auto end = p.indices.begin() + p.pieces[piece + 1];
+    const size_t count = static_cast<size_t>(end - begin);
     const size_t target = std::max<size_t>(1, std::lround(count / 3 * ratio)) * 3;
-    size_t kept = count;
-    if (target < count) {
-      out.resize(count);
-      kept = meshopt_simplifyWithAttributes(
-          out.data(), indices, count, p.vertices[0].position.data(), p.vertices.size(),
-          sizeof(Vertex), p.vertices[0].normal.data(), sizeof(Vertex), weights, 3,
-          p.locked.data(), target, kSimplifyError,
-          meshopt_SimplifyErrorAbsolute, nullptr);
-      // A piece is never simplified away; pruning decides which go.
-      if (kept > 0) {
-        indices = out.data();
-      } else {
-        kept = count;
-      }
+    if (target >= count) {
+      p.cooked.insert(p.cooked.end(), begin, end);
+      continue;
     }
-    p.cooked.insert(p.cooked.end(), indices, indices + kept);
+    // Local vertices keep the prototype's order, so results match a
+    // simplification against the whole buffer.
+    global.assign(begin, end);
+    std::sort(global.begin(), global.end());
+    global.erase(std::unique(global.begin(), global.end()), global.end());
+    vertices.clear();
+    locked.clear();
+    for (uint32_t i = 0; i < global.size(); ++i) {
+      local[global[i]] = i;
+      vertices.push_back(p.vertices[global[i]]);
+      locked.push_back(p.locked[global[i]]);
+    }
+    indices.clear();
+    for (auto it = begin; it != end; ++it) {
+      indices.push_back(local[*it]);
+    }
+    out.resize(count);
+    const size_t kept = meshopt_simplifyWithAttributes(
+        out.data(), indices.data(), count, vertices[0].position.data(), vertices.size(),
+        sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, 3, locked.data(),
+        target, kSimplifyError, meshopt_SimplifyErrorAbsolute, nullptr);
+    // A piece is never simplified away; pruning decides which go.
+    if (kept == 0) {
+      p.cooked.insert(p.cooked.end(), begin, end);
+      continue;
+    }
+    for (size_t k = 0; k < kept; ++k) {
+      p.cooked.push_back(global[out[k]]);
+    }
   }
   p.cookedPieces.push_back(static_cast<uint32_t>(p.cooked.size()));
 }
@@ -555,9 +577,19 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   });
   const size_t leafPieceCount = pieces.size();
   const size_t leafBudget = triangleBudget - woodTriangles;
+  size_t fixedTriangles = 0;
+  for (const LeafPiece &leaf : pieces) {
+    fixedTriangles += leaf.fixed ? leaf.triangles : 0;
+  }
+  if (fixedTriangles > leafBudget) {
+    throw std::runtime_error("the leaf pieces holding the tree's bounds alone exceed the "
+                             "triangle budget left after the wood");
+  }
   size_t leafTriangles = 0;
   size_t kept = 0;
-  for (; kept < pieces.size() && leafTriangles + pieces[kept].triangles <= leafBudget; ++kept) {
+  for (; kept < pieces.size() && (pieces[kept].fixed ||
+                                  leafTriangles + pieces[kept].triangles <= leafBudget);
+       ++kept) {
     leafTriangles += pieces[kept].triangles;
   }
   pieces.resize(kept);

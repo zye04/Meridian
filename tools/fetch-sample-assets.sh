@@ -191,14 +191,20 @@ else
       continue
     fi
     name="$(basename "${usd%.*}" | tr '[:upper:]' '[:lower:]')"
-    [[ -f "$megascans/$name/$name.gltf" ]] && continue
-    "$root/tools/usd2gltf/.venv/bin/python" -I "$root/tools/usd2gltf/usd2gltf.py" "$usd" \
-      "$megascans/_usd/$name.gltf"
     # Saplings are a few meters tall: a quarter of a canopy tree's budget.
     triangles=4000000
     [[ "$name" == *sapling* ]] && triangles=1000000
-    "$cook" --tree "$megascans/_usd/$name.gltf" "$megascans/$name" --triangles "$triangles" \
+    # The budget stamp is written last, so a partial cook or a new budget cooks again.
+    out="$megascans/$name"
+    [[ "$(cat "$out/budget" 2>/dev/null)" == "$triangles" ]] && continue
+    "$root/tools/usd2gltf/.venv/bin/python" -I "$root/tools/usd2gltf/usd2gltf.py" "$usd" \
+      "$megascans/_usd/$name.gltf"
+    rm -rf "$out.part"
+    "$cook" --tree "$megascans/_usd/$name.gltf" "$out.part" --triangles "$triangles" \
       --bark-texture "$bark"
+    echo "$triangles" > "$out.part/budget"
+    rm -rf "$out"
+    mv "$out.part" "$out"
   done
 fi
 

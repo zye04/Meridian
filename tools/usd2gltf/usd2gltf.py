@@ -226,6 +226,9 @@ class Converter:
                                                              UsdGeom.Tokens.proxy)):
                 prims.PruneChildren()
                 continue
+            if prim.IsInstance():
+                print("warning: %s uses native instancing, which is not traversed; its meshes "
+                      "are missing" % prim.GetPath(), file=sys.stderr)
             if relative_to is None:
                 local = self.xforms.GetLocalToWorldTransform(prim)
             else:

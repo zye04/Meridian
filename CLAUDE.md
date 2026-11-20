@@ -82,7 +82,9 @@ Laplacian with the still's).
 trees within 150 m of the start (fixed seed; loading 21 models, 14M
 triangles, makes Debug startup ~2.5 min); over the scatter:
 `1119 1362 -431 -1.55 -0.25`; a 27 m beech (with `--scatter 100`):
-`1115.47 1366.85 -429.72 1.223 0`. Debug
+`1115.47 1366.85 -429.72 1.223 0`. Missing models drop out of the pick,
+so without the Megaplants trees the same seed places different content
+and these views differ. Debug
 startup without scatter is ~12 s (heightfield pyramid and normal map).
 
 ## Testing policy (usage matters)

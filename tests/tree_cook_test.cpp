@@ -8,9 +8,11 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <numeric>
 #include <random>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -168,6 +170,19 @@ void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
       << binName << "\",\"byteLength\":" << bin.size() << "}]}";
 }
 
+// Every file under `dir`, keyed by relative path.
+std::map<std::string, std::string> readTree(const std::filesystem::path &dir) {
+  std::map<std::string, std::string> files;
+  for (const auto &entry : std::filesystem::recursive_directory_iterator(dir)) {
+    if (entry.is_regular_file()) {
+      std::ifstream stream(entry.path(), std::ios::binary);
+      files[std::filesystem::relative(entry.path(), dir).string()] =
+          std::string(std::istreambuf_iterator<char>(stream), {});
+    }
+  }
+  return files;
+}
+
 size_t findRoot(std::vector<size_t> &parent, size_t i) {
   while (parent[i] != i) {
     i = parent[i] = parent[parent[i]];
@@ -178,7 +193,8 @@ size_t findRoot(std::vector<size_t> &parent, size_t i) {
 } // namespace
 
 TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
-  const auto dir = std::filesystem::temp_directory_path() / "meridian_tree_cook_test";
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_test_" + std::to_string(getpid()));
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
 
@@ -215,6 +231,9 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
   CHECK(result.triangles <= budget);
   CHECK(result.triangles > budget * 9 / 10);
   CHECK(result.leafAreaBefore == doctest::Approx(sourceLeafArea).epsilon(1e-4));
+  // The cook is deterministic: a second run writes the same files.
+  meridian::cook::cookTree(dir / "tree.gltf", dir / "again", budget, {});
+  CHECK(readTree(dir / "out") == readTree(dir / "again"));
   CHECK(std::abs(result.leafAreaAfter - result.leafAreaBefore) / result.leafAreaBefore <=
         0.05);
 
@@ -226,7 +245,7 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
   const fastgltf::Asset &asset = loaded.get();
 
   Bounds cookedBounds;
-  size_t triangles = 0;
+  size_t triangles = 0, woodTriangles = 0;
   double leafArea = 0.0;
   bool sawLeaves = false;
   for (const fastgltf::Mesh &mesh : asset.meshes) {
@@ -245,6 +264,7 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
     fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
     triangles += indices.size() / 3;
     if (!asset.materials[*primitive.materialIndex].doubleSided) {
+      woodTriangles += indices.size() / 3;
       continue;
     }
     sawLeaves = true;
@@ -273,6 +293,9 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
     }
   }
   CHECK(sawLeaves);
+  // Over budget, wood is simplified too, not only the leaves pruned.
+  CHECK(woodTriangles > 0);
+  CHECK(woodTriangles < 10 * 1024);
   CHECK(triangles == result.triangles);
   CHECK(leafArea == doctest::Approx(result.leafAreaAfter).epsilon(1e-3));
   for (int c = 0; c < 3; ++c) {
