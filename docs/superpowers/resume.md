@@ -85,6 +85,11 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   `../meridian-meadow/.superpowers/sdd/meadow/next.md`, `grass-next.md`,
   and the accents `next.md`. Put the grass debugging on Opus. This is the
   biggest visible gap: the ground reads as a flat lawn.
+  Overlap with G2: M3 step 1 moves the terrain role weights into
+  `terrain_roles.glsl`, and G2 rewrites those weights (warped multi-scale
+  noise). Resume M3 now on the grass shaders and accent tuning (no shared
+  files); rebase step 1 onto G2's weights after G2 merges, and only then
+  merge M3.
 - **Queue after those** (in order, each when the user says go):
   1. Terrain detail: near-camera displacement from the material height
      maps (tessellated near nodes) + erosion-style procedural detail;
