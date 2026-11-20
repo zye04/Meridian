@@ -26,7 +26,7 @@ namespace meridian {
 // Two frames in flight: the CPU records frame N+1 while the GPU renders N.
 constexpr uint32_t kFramesInFlight = 2;
 // Named GPU timestamps per frame (renderer_frame.cpp); one more query starts the frame.
-constexpr uint32_t kMaxPassTimes = 16;
+constexpr uint32_t kMaxPassTimes = 32;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 // 16-bit float keeps smooth gradients across the full HDR range.
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
