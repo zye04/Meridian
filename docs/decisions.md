@@ -1949,3 +1949,35 @@ already per pixel (normal map), not the vertex grid.
   interleaved A/B): start 1.88 -> 1.96 ms, open view 1.68 -> 1.75, high
   overview 3.96 -> 4.09, ground from 30 m 2.87 -> 3.08 (wider blend bands
   sample two layers on more pixels).
+
+## Non-repeating cliffs (2026-11-20)
+
+The user saw clear repeated patterns on the cliff sides: the triplanar
+rock's 2-3 m tiles drew a grid from ~50 m out, which the 4x far sample
+("Rock anti-tiling at distance") only softened.
+
+- **Hex-tiled sides:** the two side projections (uv (z, y) and (x, y)) use
+  the planar layers' hex tiling (Mikkelsen 2022; `sampleHexSide`: the same
+  luminance-weighted blend, normals as rotated surface gradients) at every
+  distance. The top projection keeps plain tiles plus its 4x far sample:
+  its uv is (x, z), and the hex rows' period (256.3 tiles) can't match a
+  wrap on both axes. Rock layers therefore wrap the camera offset's y by
+  the hex row period and x, z by the column period (renderer_frame.cpp),
+  so the sides stay seamless when the offset wraps. Projections under 1%
+  of the blend are skipped. Heitz-Neyret histogram-preserving tiling was
+  the alternative: a per-texture Gaussianised copy and LUT in the cook for
+  the same visual result here.
+- **Two rocks mixed at large scale, with a scale break:** the variants
+  cross-fade over ~40 m noise instead of ~200 m regions, so one cliff shows
+  both, and the second is sampled at 2x the tile frequency (a whole
+  multiple keeps the hex wrap seamless), so their features never line up.
+- **Macro variation (`weatherRock`):** strata as +-10% brightness and a
+  slight warm/cool shift along a noise-warped height (value noise, not
+  sines: regular stripes read as paint), and moss (up to 60%) in the
+  texture's AO hollows and on ledges, in ~10 m patches.
+- **Trade-off:** distant cliffs read flatter than the old grid (the hex
+  blend averages the tile-sized contrast that drew it).
+- **Cost** (Release 2560x1440, `--placement off`, scene early, median of 5,
+  interleaved A/B, before the transitions change): start 1.87 -> 1.99 ms,
+  open view 1.68 -> 1.81 (both have cliffs in view); up to 2 side axes x
+  3 hex taps x 4 maps per rock variant, both variants on ~40% of the rock.

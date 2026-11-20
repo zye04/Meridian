@@ -193,9 +193,10 @@ static_assert(sizeof(GpuTerrainLayer) == 52);
 // Terrain texture coordinates (mesh.frag) are the camera-relative position
 // plus the camera position wrapped by a period, so they stay small and
 // precise anywhere on the map. Layers repeat every kTerrainWrapTiles tiles;
-// along z, the hex-tiled layers repeat every kTerrainHexWrapRows rows of
-// hex cells (sqrt(3)/4 tiles each, so 256.3 tiles), since no whole number
-// of tiles is a whole number of rows. The ground's mix noise repeats
+// along the hex rows (z for the planar layers, y for the rock's hex-tiled
+// sides) they repeat every kTerrainHexWrapRows rows of hex cells (sqrt(3)/4
+// tiles each, so 256.3 tiles), since no whole number of tiles is a whole
+// number of rows. The ground's mix noise repeats
 // every kTerrainNoiseWrap meters.
 // Must match kHexCellsPerRepeat, kHexWrapColumns, kHexWrapRows,
 // kNoiseCell and kNoiseWrapCells in mesh.frag.

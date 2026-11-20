@@ -71,7 +71,6 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Rock still shows a faint ~10 m pattern on cliffs seen from 100 m+ | Repetition, much weaker than the old grid | G1 rock anti-tiling | Hex-tiled triplanar if it shows in play |
 | Terrain textures add ~8.7 s to Release startup | 30 4K UASTC transcodes at load | G1 terrain material | Transcode in parallel or cache BC7 |
 | No parallax on the triplanar rock; no silhouettes or depth offset anywhere | POM marches one planar layer; rock relief (9-15 cm) would show most | Terrain POM | Mesh-shader displacement of near nodes if close-up cliffs need it |
 | Detail displacement (+-0.3 m) casts no shadows | Missing micro-shadows near the camera | M1 Task 5 | Later |
