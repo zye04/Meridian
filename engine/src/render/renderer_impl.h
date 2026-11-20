@@ -87,6 +87,8 @@ struct Renderer::Impl {
 
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
+  // Simulated seconds (the sum of draw()'s deltas), for wind.
+  double simulatedSeconds = 0.0;
 
   // Per frame in flight: a start timestamp, then one after each named pass.
   VkQueryPool timestampPool = VK_NULL_HANDLE;

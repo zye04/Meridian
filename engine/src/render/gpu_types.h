@@ -296,7 +296,8 @@ struct SceneData {
   VkDeviceAddress instances = 0;
   VkDeviceAddress materials = 0;
   uint32_t instanceCount = 0;
-  uint32_t pad1 = 0;
+  // The simulated clock (s) at this frame and the previous one, for wind.
+  float time = 0.0f;
   float frustumPlanes[6][4] = {};
   GpuAtmosphere atmosphere;
   GpuTerrain terrain;
@@ -328,7 +329,7 @@ struct SceneData {
   // far instances' bounds reach past their cell horizontally.
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
-  uint32_t pad3 = 0;
+  float previousTime = 0.0f;
   // Every mesh's cluster group BVH nodes and DAG levels.
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;

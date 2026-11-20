@@ -616,6 +616,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->previousView = view;
   impl_->previousCameraPosition = camera.position;
   scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
+  // Wrapped so the float keeps its precision in long sessions.
+  constexpr double kTimeWrap = 4096.0;
+  scene.previousTime = static_cast<float>(std::fmod(impl_->simulatedSeconds, kTimeWrap));
+  impl_->simulatedSeconds += deltaSeconds;
+  scene.time = static_cast<float>(std::fmod(impl_->simulatedSeconds, kTimeWrap));
   // Ray Reconstruction wants uncorrelated noise (its integration guide).
   scene.whiteNoise = impl_->aaSettings.rayReconstruction ? 1 : 0;
   scene.sunDirection = lighting.sunDirection;

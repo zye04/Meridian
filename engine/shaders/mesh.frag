@@ -7,6 +7,7 @@
 #include "terrain.glsl"
 #ifdef TERRAIN
 #include "placement.glsl"
+#include "terrain_roles.glsl"
 #endif
 
 layout(location = 0) in vec3 inRelativePosition;
@@ -290,11 +291,6 @@ const float kHexCellsPerRepeat = 2.0;
 const int kHexWrapColumns = 512;
 const int kHexWrapRows = 592;
 
-// Rounds toward minus infinity (b > 0); integer division truncates.
-int floorDiv(int a, int b) {
-    return (a >= 0 ? a : a - b + 1) / b;
-}
-
 // A cell's index wrapped to the period, centered on the origin (identity
 // within half a period), so every cell's rotation and offset repeat with
 // it. Moving one period along v is the lattice step (-296, 592).
@@ -504,68 +500,6 @@ float heightBlend(float heightA, float heightB, float t) {
     return b / (a + b);
 }
 
-// Repeats every `period` cells: lattice points are wrapped to the period,
-// centered on the origin, then hashed as integers (see hexHash).
-float periodicHash(ivec2 cell, int period, uint seed) {
-    ivec2 wrapped = ivec2(cell.x - period * floorDiv(cell.x + period / 2, period),
-                          cell.y - period * floorDiv(cell.y + period / 2, period));
-    return terrainHash(wrapped, seed);
-}
-
-float valueNoise(vec2 p, int period, uint seed) {
-    ivec2 cell = ivec2(floor(p));
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(periodicHash(cell, period, seed),
-                   periodicHash(cell + ivec2(1, 0), period, seed), f.x),
-               mix(periodicHash(cell + ivec2(0, 1), period, seed),
-                   periodicHash(cell + ivec2(1, 1), period, seed), f.x),
-               f.y);
-}
-
-// The ground's noise cell (m) and its wrap in cells; must match
-// gpu_types.h. Every octave's scale divides or multiplies the wrap evenly.
-const float kNoiseCell = 40.0;
-const int kNoiseWrapCells = 100;
-
-// Value noise in kNoiseCell units at `scale` cells per cell (scale * 100
-// must be a whole number).
-float groundNoise(vec2 p, float scale, uint seed) {
-    return valueNoise(p * scale, int(round(float(kNoiseWrapCells) * scale)), seed);
-}
-
-// The forest mask noise (placement.glsl, bit-exact with the trees') at this
-// pixel, 0..1; -1 without a forest or outside the heightfield's crop, where
-// nothing is placed.
-float forestMask(Terrain terrain) {
-    vec2 halfSize = 0.5 * (vec2(terrain.width, terrain.height) - 1.0) * terrain.spacing;
-    if (terrain.forestMaskPeriod == 0u || any(greaterThan(abs(worldPosition.xz), halfSize))) {
-        return -1.0;
-    }
-    ivec2 p = ivec2(round(worldPosition.xz * 65536.0));
-    return float(placementFbm16(uint(p.x) ^ 0x80000000u, uint(p.y) ^ 0x80000000u,
-                                terrain.forestMaskPeriod, kPlacementMaskOctaves,
-                                terrain.forestMaskSeed ^ kPlacementMaskSalt)) / 65535.0;
-}
-
-// Laplacian of the ground height (1/m) over ~24 m, from the normal map's
-// divergence: > 0 in hollows and valley bottoms, < 0 on ridges. On the
-// Napf's ground under 12 degrees the 10th/90th percentiles are about
-// -0.02/+0.017 (at 12 m steps from the 2 m data).
-float groundCurvature(Terrain terrain) {
-    const float kStep = 12.0;
-    vec2 size = vec2(float(terrain.width), float(terrain.height));
-    vec2 uv = (worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
-    vec2 d = kStep / terrain.spacing / size;
-    uint t = terrain.normalTexture;
-    float lod = log2(kStep / terrain.spacing);
-    float dx = textureLod(textures[t], uv + vec2(d.x, 0.0), lod).r -
-               textureLod(textures[t], uv - vec2(d.x, 0.0), lod).r;
-    float dz = textureLod(textures[t], uv + vec2(0.0, d.y), lod).g -
-               textureLod(textures[t], uv - vec2(0.0, d.y), lod).g;
-    return -(dx + dz) / (2.0 * kStep);
-}
-
 // b over a by height (heightBlend); a is skipped while hasA is false.
 TerrainTexel overlay(TerrainTexel a, bool hasA, TerrainTexel b, float t) {
     return hasA ? mixTexels(a, b, heightBlend(a.height, b.height, t)) : b;
@@ -686,32 +620,9 @@ Surface terrainSurface(vec3 normal) {
     vec3 dpdy = dFdy(inRelativePosition);
     Terrain terrain = pc.scene.terrain;
 
-    vec2 p = (inRelativePosition.xz + terrain.noiseOffset) / kNoiseCell;
-    float edge = (groundNoise(p, 8.0, 23u) - 0.5) * 0.5;
-    float patches = groundNoise(p, 2.0, 21u);
-    float curvature = groundCurvature(terrain);
-    float flatGround = smoothstep(0.93, 0.98, normal.y);
-    float belowRock = 1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.08,
-                                       normal.y);
-    float rock = 1.0 - smoothstep(terrain.rockNormalY.x, terrain.rockNormalY.y, normal.y);
-
+    vec2 p = terrainNoiseCoord(terrain, inRelativePosition.xz);
     float w[9];
-    w[0] = 1.0;
-    w[1] = flatGround * smoothstep(0.006, 0.015, curvature + edge * 0.01) * smoothstep(0.45, 0.6, patches);
-    w[2] = flatGround * smoothstep(0.02, 0.04, curvature + edge * 0.02);
-    w[3] = max(belowRock, smoothstep(0.03, 0.06, -curvature + edge * 0.02)) *
-           smoothstep(0.45, 0.6, patches + edge * 0.5);
-    float m = forestMask(terrain);
-    float lo = float(terrain.forestMaskLo) / 65535.0;
-    float d = float(terrain.forestMaskHi - terrain.forestMaskLo) / 65535.0;
-    // Path over the outer half of the trees' ramp (sparse outer trees),
-    // floor from its middle in, under the canopy.
-    w[4] = m < 0.0 ? 0.0 : smoothstep(lo - 0.25 * d, lo + 0.25 * d, m + edge * d);
-    w[5] = m < 0.0 ? 0.0 : smoothstep(lo + 0.4 * d, lo + d, m + edge * d);
-    w[6] = (1.0 - flatGround) * smoothstep(0.045, 0.08, curvature + edge * 0.03);
-    w[7] = (1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.04, normal.y)) *
-           smoothstep(0.3, 0.5, patches + edge);
-    w[8] = rock;
+    terrainRoleWeights(terrain, inRelativePosition.xz, normal, w);
 
     int start = 0;
     for (int r = 8; r > 0; --r) {
@@ -760,12 +671,7 @@ Surface terrainSurface(vec3 normal) {
             has = true;
         }
     }
-
-    // Large-scale brightness and hue variation (~400 m and ~160 m), so no
-    // stretch of one layer looks uniform.
-    float macro = 0.6 * groundNoise(p, 0.1, 24u) + 0.4 * groundNoise(p, 0.25, 25u);
-    float hue = groundNoise(p, 0.25, 26u) - 0.5;
-    ground.baseColor *= (0.85 + 0.3 * macro) * vec3(1.0 + 0.1 * hue, 1.0, 1.0 - 0.1 * hue);
+    ground.baseColor *= terrainMacroTint(p);
 
     Surface s;
     s.baseColor = ground.baseColor;

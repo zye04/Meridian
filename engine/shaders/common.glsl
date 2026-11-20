@@ -376,7 +376,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     InstanceBuffer instances;
     MaterialBuffer materials;
     uint instanceCount;
-    uint pad1;
+    // The simulated clock (s) at this frame and the previous one.
+    float time;
     // Camera-relative planes (xyz normal, w distance), inside where >= 0.
     vec4 frustumPlanes[6];
     AtmosphereParameters atmosphere;
@@ -408,7 +409,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // how far instances' bounds reach past their cell horizontally.
     float cellDrawDistance;
     float cellMargin;
-    uint pad3;
+    float previousTime;
     ClusterNodeBuffer clusterNodes;
     ClusterLevelBuffer clusterLevels;
 };
