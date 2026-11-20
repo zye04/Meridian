@@ -96,8 +96,9 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
 
 ## Decisions waiting for the user
 
-1. M2a Task 8: tune the voxel far field (C) or fall back to B (2.5D
-   canopy); trees are hidden for now, so this waits.
+1. (Resolved 2026-11-20: voxels, no impostors, three tiers; see the
+   far-field spec. Look target for trees:
+   `assets/reference/target-meadow.png`.)
 2. The default grade: the user tunes it in the G panel and saves; read
    `~/.config/meridian/grade.json` before changing `kStartingGrade`.
 
@@ -118,15 +119,31 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   review.
   Ledger:
   `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/`.
-- **M2a Task 8** (`wip/m2a-task8` at 156e3fc, worktree
-  `../meridian-forests`, ledger in its
-  `.superpowers/sdd/2026-11-19-forests/`, numbers in `task-8d-report.md`):
-  voxel far-field prototype, task-reviewed, builds. Gates at 1440p
-  Release so far fail: VRAM resident 659 MiB / 500, load peak 3.68 GB /
-  2.5; far pass 2.4 ms ridge, 6.1-8.5 ms overview / 1.0; voxel far
-  shadows 1.5-2.4x the TLAS path. Shadow and coverage gates unmeasured
-  (their helper scripts may be lost). Next: measure them, then stop for
-  decision 1; afterwards docs, squash, merge or switch to B.
+- **M2a far field, three voxel tiers** (spec
+  `docs/superpowers/specs/2026-11-20-far-field-design.md`, plan
+  `docs/superpowers/plans/2026-11-19-forests.md` Tasks 9-13, ledger in
+  `../meridian-forests/.superpowers/sdd/2026-11-19-forests/`). On main:
+  the far-field prototype (cddcd66; `--trees` only; gates failing as
+  prototyped). Paused 2026-11-20 on four pushed branches, each with a
+  `next.md` in its worktree's `.superpowers/` (state, gates, resume):
+  - `far-a` (`../meridian-farA`, e334b7c): compact bricks + sliced splat;
+    load line 394 MiB resident / 1257 MiB peak (gates 500 / 2500). Left:
+    re-measure on the real assets, one Debug run (3 validation errors
+    from a missing TRANSFER_SRC flag, fixed, unverified), merge first.
+  - `far-b` (`../meridian-farB`, 748520c): sun shadow map of the bricks,
+    double-buffered, amortised rebuild; Opus review fixes in code, GPU-
+    unverified. Left: gates + sunset check on the real assets, Debug.
+  - `far-c` (`../meridian-farC`, c8b84a8): far-cell two-phase culling,
+    column boxes, switch hysteresis. Far pass slower than main's far pass
+    on its runs (per-pixel shadow march dominates; B's map is the lever).
+  - `far-m` (`../meridian-farM`, 71b3ee9): mid tier, prototype voxels per
+    instance (bake, switch, draw work). The voxel pass costs more than the
+    clusters it replaces (forest overview 85 ms): needs a structural fix
+    or a user decision on switch distance / voxel pixel size.
+  Then plan Task 12 (measurement) and Task 13 (forest-edge placement
+  rules: size gradient, open crowns outside, sparse understory).
+  Worktree assets/ must be main's (`ln -s .../meridian/assets`): a partial
+  asset set changes the placement hash and every timing.
 ## Done on main
 
 - M1 (15 km Napf terrain).
