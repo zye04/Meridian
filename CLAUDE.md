@@ -48,6 +48,7 @@ tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate tabl
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
+tools/cloud-compare.sh build-release out-dir     # cloud look views beside the reference photos + measured targets (tools/cloud-metrics.py)
 ```
 
 Every run of the game binary (interactive, capture, perf; Debug or
@@ -155,7 +156,16 @@ Clouds (layer 1.8-4.5 km above sea level): fair cumulus from the
 ground `1119 1355.9 -431 -1.55 0.15`; above the layer `1119 6500 -431
 -1.55 -0.25` (pitch -0.1 looks across the weather map's 30 km edge);
 inside the layer (half-resolution march) `1119 3200 -431 -1.55 0`; the
-summit silhouette against clouds `1119 1356 -431 -1.55 0.03`; dusk
+summit silhouette against clouds `1119 1356 -431 -1.55 0.03`; look
+development (`tools/cloud-compare.sh`, each beside its photo in
+`assets/reference/clouds/`, git-ignored): midday from the ground looking
+up `1119 1356 -431 -1.55 0.5 --sun 0.45 0.85 0.25` (cloud1, cloud5), the
+same toward the horizon at pitch 0.1 (cloud3, cloud4), sunset from above
+the layer `1119 5500 -431 -1.55 -0.2 --sun -0.998 0.05 0.03` (cloud2);
+the script also captures `.pfm`s with clouds on and off and prints the
+sunlit tops and the bases over the clear sky behind them, the cover, the
+spread of the bases and the shading contrast, and the same measured on
+the photos (display-referred, so compare the capture's image line); dusk
 clouds `1119 1355.9 -431 -1.55 0.15 --sun -0.7 0.035 0.7` (sun 2 deg up;
 `-0.05` for just below the horizon). Cloud motion checks (Laplacian vs
 the still, and vs `--clouds off`): fast turn, the fair view with
