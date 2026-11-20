@@ -2829,3 +2829,20 @@ uses `MERIDIAN_ASSET_DIR`), empty = no cache. Alternative rejected: a
 cheaper algorithm, which would change every placed object's identity.
 Result: Placed 10.5 s -> 63 ms Release, 58.9 s -> 128 ms Debug; placement
 hash 0x341d51799d224d3c, placement and stream checks 0 mismatches.
+
+## Far-field match loop (M3, WIP 2026-11-20)
+
+Work in progress, not tuned to the 3-5% goal. `tools/placement-match.py`
+divides a rect's mean radiance by a sky rect's (cancels exposure) in a
+capture with and without placement and prints the with/without ratio per
+channel. Bands at 10/25-45/95 m, open view and a slope view, default and a
+low sun in front (`--sun -0.9 0.25 -0.4`). Baseline on 40a230d, mat/terrain
+(L): day near 1.29/1.11, mid 1.61/1.39, far 1.17/1.19; low sun near
+0.16/0.33, mid 0.34/0.64, far 0.92/1.17. The mat is darker than the bare
+terrain at a low sun (canopy shadow) and brighter at day mid range.
+Changes in mesh.frag (TERRAIN only): grass blade detail layer 35-110 m,
+a measured per-channel gain falling with distance, Beer-Lambert canopy
+sun shadow normalized at the default sun (`kCanopyOpacity`), and clover,
+mud and soil patches giving way to grass beyond the mat's reach
+(`meadow`). The grass target colour was raised. Ratios are unverified
+after the last two changes (see the lane report).

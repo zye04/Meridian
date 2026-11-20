@@ -48,6 +48,7 @@ tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate tabl
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
+python3 -I tools/placement-match.py with.pfm without.pfm SKYX0 SKYY0 SKYX1 SKYY1 X0 Y0 X1 Y1 [...]   # per-channel exposure-normalized radiance ratio of a capture with vs `--placement off`, per rect (first rect = sky)
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
 tools/cloud-compare.sh build-release out-dir     # cloud look views beside the reference photos + measured targets (tools/cloud-metrics.py)
 ```

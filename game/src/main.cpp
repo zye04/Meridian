@@ -817,7 +817,7 @@ int main(int argc, char **argv) {
       // Matched to the streamed grass mat's mean as rendered, so the mat
       // thins into a terrain of the same brightness (decisions.md).
       {TerrainRole::Grass,
-       {0.037f, 0.058f, 0.0104f},
+       {0.052f, 0.0773f, 0.0114f},
        {{"uncut_grass_oilpt20", 2.0f, 0.0177f},
         {"wild_grass_pjwgw0", 1.0f, 0.0219f},
         {"lawn_grass_sbykrmp0", 0.41f, 0.0107f}}},

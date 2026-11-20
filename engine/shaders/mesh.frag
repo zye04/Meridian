@@ -702,6 +702,65 @@ vec3 parallaxHit(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy, float de
     return hit;
 }
 
+// Where the streamed grass mat has thinned out (it is full to ~30 m and gone
+// by ~120 m: main.cpp), the ground keeps a blade-scale texture: the grass
+// layer's own maps again at kGrassDetailScale times the tile, hex-tiled so
+// the repeat doesn't show. It darkens/brightens the colour by the map's
+// luminance relative to its mean (no net brightness change) and adds the
+// map's normal, both faded in with distance and by the footprint (normalFade).
+const float kGrassDetailStart = 35.0;
+const float kGrassDetailEnd = 110.0;
+const float kGrassDetailScale = 6.0;
+const float kGrassDetailContrast = 1.0;
+// main.cpp's grass mat: full density to this distance (m).
+const float kGrassMatFull = 30.0;
+// Optical depth of the canopy at full density looking along the vertical,
+// and the sun elevation (sine) the grass colour is matched at.
+const float kCanopyOpacity = 0.95;
+const float kCanopyReferenceSun = 0.69;
+// Per-channel gain over the matched colour at distance d:
+// 1 + kMatGain * ((kMatGainRef / max(d, kMatGainMin))^0.87 - 1), 1 at kMatGainRef.
+const vec3 kMatGain = vec3(0.47, 0.35, -0.27);
+const float kMatGainRef = 95.0;
+const float kMatGainMin = 45.0;
+
+void grassDetail(inout TerrainTexel ground, TerrainLayer layer, vec3 normal, vec3 dpdx,
+                 vec3 dpdy, float weight) {
+    float scale = kGrassDetailScale / layer.tileSize;
+    vec3 position = layerPosition(layer);
+    HexTiles tiles = hexTiles(vec2(position.x, -position.z) * scale,
+                              vec2(dpdx.x, -dpdx.z) * scale, vec2(dpdy.x, -dpdy.z) * scale);
+    vec3 luminance;
+    for (int i = 0; i < 3; ++i) {
+        vec3 color = sampleGrad(layer.baseColor, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rgb;
+        luminance[i] = dot(color, vec3(0.299, 0.587, 0.114));
+    }
+    vec3 w = mix(vec3(1.0), luminance, kHexFallOffContrast) *
+             pow(tiles.barycentric, vec3(kHexExponent));
+    w /= w.x + w.y + w.z;
+    w *= step(0.02, w);
+    w /= w.x + w.y + w.z;
+
+    float mean = dot(textureLod(textures[nonuniformEXT(layer.baseColor)], vec2(0.5), 16.0).rgb,
+                     vec3(0.299, 0.587, 0.114));
+    float gain = dot(luminance, w) / max(mean, 1e-3);
+    ground.baseColor *= mix(1.0, clamp(gain, 0.4, 1.8), weight * kGrassDetailContrast);
+
+    vec2 derivative = vec2(0.0);
+    for (int i = 0; i < 3; ++i) {
+        if (w[i] == 0.0) {
+            continue;
+        }
+        vec3 n = sampleGrad(layer.normal, tiles.uv[i], tiles.dx[i], tiles.dy[i]).xyz * 2.0 - 1.0;
+        n.y = -n.y;
+        derivative += (normalToDerivative(n) * tiles.rotation[i]) * w[i];
+    }
+    derivative *= normalFade(tiles.dx[0], tiles.dy[0]) * weight;
+    vec3 n = normalize(vec3(-derivative, 1.0));
+    vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
+    ground.normal = normalize(ground.normal + (mat3(t, cross(normal, t), normal) * n - normal));
+}
+
 // Each role's weight from the ground's shape, the forest mask and noise,
 // stacked bottom to top in TerrainRole order (grass at the bottom, rock on
 // top) with height blends; ~5 m edge noise makes the borders irregular. A
@@ -740,6 +799,15 @@ Surface terrainSurface(vec3 normal) {
     w[7] = (1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.04, normal.y)) *
            smoothstep(0.3, 0.5, patches + edge);
     w[8] = rock;
+
+    // The grass mat covers every slope up to ~35 degrees (main.cpp), hiding
+    // the clover, mud and soil patches under it; where it thins out those
+    // patches would show as bare ground, so they give way to grass.
+    float meadow = smoothstep(0.78, 0.84, normal.y) *
+                   smoothstep(kGrassDetailStart, kGrassDetailEnd, length(inRelativePosition));
+    w[1] *= 1.0 - meadow;
+    w[2] *= 1.0 - meadow;
+    w[3] *= 1.0 - meadow;
 
     int start = 0;
     for (int r = 8; r > 0; --r) {
@@ -799,6 +867,35 @@ Surface terrainSurface(vec3 normal) {
             has = true;
         }
     }
+
+    float grassCover = 1.0 - clamp(max(max(w[2], w[3]), max(max(w[4], w[5]), max(max(w[6], w[7]), w[8]))),
+                                   0.0, 1.0);
+    float detail = grassCover * smoothstep(kGrassDetailStart, kGrassDetailEnd,
+                                           length(inRelativePosition));
+    if (detail > 0.0) {
+        float variantBlend;
+        uint index = roleVariant(0u, p, variantBlend) + (variantBlend >= 0.5 ? 1u : 0u);
+        TerrainLayer layer = pc.scene.terrain.layers[index];
+        grassDetail(ground, layer, normal, dpdx, dpdy, detail);
+    }
+
+    // The terrain stands in for the grass mat where it thins or is absent
+    // (decisions.md "Far field match loop"): the mat's mean radiance against
+    // the bare terrain's, measured, falls with distance (more flowers and
+    // lit blade faces where it is dense) and differs per channel...
+    float distance_ = length(inRelativePosition);
+    ground.baseColor *= mix(vec3(1.0),
+                            1.0 + kMatGain * (pow(kMatGainRef / max(distance_, kMatGainMin), 0.87) -
+                                              1.0),
+                            grassCover);
+    // ...and the mat's canopy blocks a low sun in proportion to the path
+    // through it, 1 / sun elevation (Beer-Lambert), at the mat's density (full
+    // to kGrassMatFull, then its 1/d^2 thinning). Normalized to 1 at the
+    // default sun, where the colour is matched.
+    float matDensity = min(1.0, kGrassMatFull * kGrassMatFull / max(distance_ * distance_, 1.0));
+    float canopy = exp(-kCanopyOpacity * matDensity *
+                       (1.0 / max(pc.scene.sunDirection.y, 0.05) - 1.0 / kCanopyReferenceSun));
+    sunShadow *= mix(1.0, min(canopy, 1.0), grassCover);
 
     // Large-scale brightness and hue variation (~400 m and ~160 m), so no
     // stretch of one layer looks uniform.
