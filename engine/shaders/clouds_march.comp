@@ -92,8 +92,9 @@ void main() {
         // step is covered evenly. (Jittering only the start shifted later
         // samples less and less where steps split the remaining segment,
         // leaving static bands after accumulation.)
-        float jitter = fract(52.9829189 * fract(dot(vec2(id) + 5.588238 * float(pc.scene.frameIndex % 64u),
-                                                     vec2(0.06711056, 0.00583715))));
+        float jitter = pc.scene.whiteNoise != 0u
+                           ? float(pcg3d(uvec3(id, pc.scene.frameIndex)).x >> 8u) * (1.0 / 16777216.0)
+                           : interleavedGradientNoise(vec2(id), pc.scene.frameIndex);
         march = marchClouds(direction, span.x, span.y, jitter, kMinStep, kStepGrowth, kMaxSteps,
                             pc.scene.skyIrradiance.clearIrradiance);
     }

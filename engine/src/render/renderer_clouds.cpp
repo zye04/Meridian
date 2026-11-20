@@ -29,7 +29,7 @@ void buildMips3d(VkCommandBuffer cmd, VkImage image, uint32_t size, uint32_t lev
   }
 }
 
-constexpr uint32_t kCloudMarchBindings = 10;
+constexpr uint32_t kCloudMarchBindings = 11;
 
 VkDescriptorType cloudMarchDescriptorType(uint32_t binding) {
   return binding == 0 || binding == 3 || binding == 4 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
@@ -382,7 +382,8 @@ void Renderer::Impl::createCloudTargets() {
           {VK_NULL_HANDLE, cloudHistoryDepth[r][i].view, VK_IMAGE_LAYOUT_GENERAL},
           {VK_NULL_HANDLE, hdr.view, VK_IMAGE_LAYOUT_GENERAL},
           {VK_NULL_HANDLE, motion.view, VK_IMAGE_LAYOUT_GENERAL},
-          {VK_NULL_HANDLE, skyCapture.view, VK_IMAGE_LAYOUT_GENERAL}};
+          {VK_NULL_HANDLE, skyCapture.view, VK_IMAGE_LAYOUT_GENERAL},
+          {VK_NULL_HANDLE, transparencyMask.view, VK_IMAGE_LAYOUT_GENERAL}};
       VkWriteDescriptorSet writes[kCloudMarchBindings]{};
       for (uint32_t b = 0; b < kCloudMarchBindings; ++b) {
         writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -421,8 +422,8 @@ bool Renderer::Impl::cameraInCloudLayer(Vec3 cameraPosition) const {
 
 // After the late scene pass, all compute: the march into this resolution's
 // targets, the temporal resolve into its history, then the composite into
-// HDR and motion. Leaves depth in SHADER_READ_ONLY_OPTIMAL and HDR and
-// motion in GENERAL.
+// HDR, motion and the transparency mask. Leaves depth in
+// SHADER_READ_ONLY_OPTIMAL and HDR, motion and the mask in GENERAL.
 void Renderer::Impl::drawClouds(VkCommandBuffer cmd, const FrameData &frame,
                                 Vec3 cameraPosition) {
   constexpr VkPipelineStageFlags2 kCompute = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -435,7 +436,7 @@ void Renderer::Impl::drawClouds(VkCommandBuffer cmd, const FrameData &frame,
                             VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, kCompute,
                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
-  for (VkImage target : {hdr.image, motion.image}) {
+  for (VkImage target : {hdr.image, motion.image, transparencyMask.image}) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,

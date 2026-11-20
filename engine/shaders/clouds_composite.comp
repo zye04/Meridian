@@ -20,6 +20,7 @@ layout(set = 2, binding = 5, rgba16f) uniform readonly image2D resolvedColor;
 layout(set = 2, binding = 6, r32f) uniform readonly image2D resolvedDepth;
 layout(set = 2, binding = 7, rgba16f) uniform image2D hdr;
 layout(set = 2, binding = 8, rg16f) uniform writeonly image2D motion;
+layout(set = 2, binding = 10, r8) uniform image2D transparencyMask;
 
 // Cloud opacity above which the motion target gets the clouds' motion.
 const float kMotionOpacity = 0.5;
@@ -132,6 +133,9 @@ void main() {
     cloud = vec4(max(cloud.rgb, 0.0), clamp(cloud.a, 0.0, 1.0));
     vec4 background = imageLoad(hdr, pixel);
     imageStore(hdr, pixel, vec4(cloud.rgb + background.rgb * cloud.a, background.a));
+    // Cloud coverage over the scene, for the upscaler (like blended surfaces).
+    float mask = imageLoad(transparencyMask, pixel).r;
+    imageStore(transparencyMask, pixel, vec4(max(mask, 1.0 - cloud.a)));
 
     if (1.0 - cloud.a > kMotionOpacity && depthWeight > 0.0) {
         vec3 direction = cloudRay(uv);
