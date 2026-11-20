@@ -332,9 +332,11 @@ account for that.
   history isn't rescaled on exposure change; TAA smears in motion (eye-height
   ground view at 5 m/s keeps only 48% of the still image's Laplacian
   sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; near the terrain's terminator,
-  neighboring 2 m cells can still cast jagged shadows onto slopes the smooth
-  shading normal lights dimly; the terrain's detail
+  leaks partial Vulkan state if it throws; shadowed needle ground gets ~9%
+  of the sunlit luminance (real sunny days 10-20%; leaf-litter AO, haze
+  profile, no bounce light; decisions.md "Material AO"); near the terrain's
+  terminator, neighboring 2 m cells can still cast jagged shadows onto
+  slopes the smooth shading normal lights dimly; the terrain's detail
   displacement (+-0.3 m, near the camera) casts no shadows (the march tests
   the bilinear heightfield); the sunset view (3 degree sun) makes the march
   cost ~1.15 ms; shadow rays are limited to 20 km; placed vegetation

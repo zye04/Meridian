@@ -161,6 +161,37 @@ sources. Check here before re-researching a topic.
   multiple-scattering energy compensation from a DFG LUT (Filament
   `DFV_Multiscatter`). Specular ambient comes from the sky-view LUT until RT
   reflections exist.
+- **Material AO on ambient light (2026-11-20)**, on every surface (glTF
+  materials and terrain layers):
+  - **Diffuse:** AO goes through the multi-bounce fit of Jimenez et al.
+    2016. Material AO is single-bounce visibility; light that bounces
+    inside the cavity brightens it, more so for bright albedo.
+  - **Specular:** the sky reflection uses Lagarde's specular occlusion,
+    derived from AO, NoV and roughness, then the same multi-bounce fit with
+    f0. This is the pairing Filament uses. It is chosen over plain AO
+    because a narrow lobe seen head-on escapes most cavities, and over a
+    cone/bent-normal method because there are no bent normals.
+  - **Scanned layers' AO** (Poly Haven, red channel of ARM, mean / p5 /
+    p95): forest_ground_04 0.86 / 0.69 / 0.98, rock_face_03 0.92 / 0.78 /
+    0.98, forest_leaves_04 0.60 / 0.29 / 0.89. The first two are plausible
+    cavity AO. The leaf litter is heavy, and it correlates with its albedo
+    (r = 0.55): the gaps are already dark in the base color, so that layer
+    counts its occlusion twice.
+  - **Measured** (pre-tonemap luminance, beech shadow umbra vs sunlit
+    needle ground, `--placement off --scatter 100 --camera 1115.47 1375
+    -429.72 1.223 -0.5`, default sun, summer haze): the effect is small at
+    these albedos (0.12-0.16; the fit turns AO 0.6 into 0.63), 9.0% ->
+    9.2% of the sunlit luminance. Real shadows are 10-20%; the rest of the
+    gap is the leaf-litter AO, the haze's height profile and missing bounce
+    light.
+  - Jimenez, Wu, Pesce, Jarabo, "Practical Real-Time Strategies for
+    Accurate Indirect Occlusion", SIGGRAPH 2016 course:
+    https://research.activision.com/publications/archives/practical-real-time-strategies-for-accurate-indirect-occlusion
+  - Lagarde, de Rousiers, "Moving Frostbite to Physically Based Rendering
+    3.0", SIGGRAPH 2014 course (specular occlusion):
+    https://seblagarde.wordpress.com/wp-content/uploads/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf
+  - Filament, "Ambient occlusion" (multi-bounce and specular occlusion):
+    https://google.github.io/filament/Filament.md.html
 - **Bindless textures** (descriptor indexing, update-after-bind, partially
   bound, 16384 slots) and a material table read by buffer address.
 - **KTX2 + Basis Universal UASTC** (`KHR_texture_basisu`), transcoded to BC7

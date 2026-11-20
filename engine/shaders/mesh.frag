@@ -582,6 +582,26 @@ vec3 fresnelSchlick(vec3 f0, float VoH) {
     return f + f0 * (1.0 - f);
 }
 
+// ---------------------------------------------------------------- Ambient occlusion
+
+// Material AO is single-bounce visibility; light also reaches a cavity
+// after bouncing inside it, more so the brighter its walls. Jimenez et al.
+// 2016 fit that multi-bounce visibility as a cubic in AO per albedo.
+vec3 multiBounceOcclusion(float visibility, vec3 albedo) {
+    vec3 a = 2.0404 * albedo - 0.3324;
+    vec3 b = -4.7951 * albedo + 0.6417;
+    vec3 c = 2.7552 * albedo + 0.6903;
+    return max(vec3(visibility), ((visibility * a + b) * visibility + c) * visibility);
+}
+
+// Diffuse AO applied to a reflection lobe (Lagarde and de Rousiers 2014):
+// a narrow lobe seen head-on escapes most cavities; at grazing angles or
+// with rough lobes it approaches the diffuse AO.
+float specularAmbientOcclusion(float NoV, float visibility, float roughness) {
+    return clamp(pow(NoV + visibility, exp2(-16.0 * roughness - 1.0)) - 1.0 + visibility,
+                 0.0, 1.0);
+}
+
 void main() {
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
 #ifdef TERRAIN
@@ -677,8 +697,11 @@ void main() {
     vec3 R = reflect(-V, N);
     vec3 skyRadiance = mix(skyLuminance(position, R), skyIrradiance / kPi, a);
     vec3 specularReflectance = mix(dfg.xxx, dfg.yyy, f0) * energyCompensation;
-    diffuseLight += diffuseColor / kPi * diffuseIrradiance * s.occlusion;
-    specularLight += specularReflectance * skyRadiance * s.occlusion;
+    float specularOcclusion = specularAmbientOcclusion(NoV, s.occlusion, a);
+    diffuseLight += diffuseColor / kPi * diffuseIrradiance *
+                    multiBounceOcclusion(s.occlusion, diffuseColor);
+    specularLight += specularReflectance * skyRadiance *
+                     multiBounceOcclusion(specularOcclusion, f0);
 
 #ifdef ALPHA_BLEND
     // Premultiplied alpha (blend: one, one-minus-source-alpha).
