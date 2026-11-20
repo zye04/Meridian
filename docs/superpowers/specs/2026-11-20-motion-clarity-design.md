@@ -249,17 +249,23 @@ When DLSS is active, RR is the default and replaces SR.
 
 ### 4. Fallback (non-NVIDIA, or `--aa taa`): TAA v2 plus an MIT shadow denoiser
 
-**TAA v2:**
+**TAA v2** (built in Task 3.1; values, sweep and measurements in the
+decisions.md "TAA v2" entry):
 - Current-frame weight adapts to speed and subpixel offset (0.1 still,
-  up to about 0.3 in motion).
-- Clip gamma 0.75 in motion.
-- History weight drops with local magnification: the divergence of the
-  motion vectors (root cause 2).
-- History is rescaled on exposure change (backlog row).
-- An output-only, CAS-style contrast-adaptive sharpen that never feeds
-  back into the history.
-- If the forward minimum is missed, try "supersampled history" (2x
-  history resolution, against root cause 1) as an A/B.
+  up to 0.3 in motion).
+- Clip gamma stays 1.0 in motion: 0.75 pulled the history toward the
+  blurry neighbourhood mean and measured softer in every view (sideways
+  0.89, below its 0.95 gate).
+- History weight drops with local magnification (root cause 2): the
+  Jacobian determinant of the reprojection, each derivative taken from
+  the smaller of the two one-sided motion differences so a depth edge on
+  one side doesn't read as magnification.
+- History is rescaled on exposure change.
+- An output-only FidelityFX CAS sharpen that never feeds back into the
+  history, present at strength 0 (a copy): any strength failed the SSIM
+  gate. Re-tuned after the shadow denoiser (3.2b).
+- The supersampled history (2x history resolution) was not needed: the
+  forward minimum passed without it.
 
 **Shadow denoiser:**
 - Approach: a port of AMD FidelityFX's shadow denoiser (MIT): tile

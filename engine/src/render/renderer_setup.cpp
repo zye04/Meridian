@@ -541,6 +541,7 @@ void Renderer::Impl::createExposureBuffers() {
   ExposureState initial;
   initial.ev100 = kInitialEv100;
   initial.exposure = 1.0f / (1.2f * std::exp2(kInitialEv100));
+  initial.previousExposure = initial.exposure;
   submitNow([&](VkCommandBuffer cmd) {
     vkCmdFillBuffer(cmd, histogramBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
     vkCmdUpdateBuffer(cmd, exposureBuffer.buffer, 0, sizeof(initial),

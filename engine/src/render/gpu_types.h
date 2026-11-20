@@ -604,7 +604,9 @@ constexpr uint8_t kNonCasterMask = 0x02;
 struct ExposureState {
   float exposure = 0.0f;
   float ev100 = 0.0f;
+  float previousExposure = 0.0f;
 };
+static_assert(sizeof(ExposureState) == 12);
 
 constexpr uint32_t kHistogramBins = 256;
 

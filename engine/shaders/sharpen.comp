@@ -1,0 +1,88 @@
+#version 460
+
+// Contrast-adaptive sharpening of the TAA resolve into the upscaler's
+// output; the history itself stays unsharpened, so this never feeds back.
+//
+// Ported from AMD FidelityFX CAS 1.20190610, sharpen-only path with
+// CAS_BETTER_DIAGONALS and exact math (CAS_GO_SLOWER):
+// https://github.com/GPUOpen-Effects/FidelityFX-CAS, ffx-cas/ffx_cas.h at
+// commit 9fabcc9a2c45f958aff55ddfda337e74ef894b7f.
+//
+// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
+// files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
+// modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+// Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+// WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Must match TaaUpscaler (taa_upscaler.cpp): the same set as taa.comp,
+// which leaves bindings 0-2 unused here.
+layout(set = 0, binding = 3, rgba16f) uniform readonly image2D history;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D outputColor;
+
+// 0 = none (a copy), else CAS's 0..1 (peak lobe -1/8 to -1/5). Off: even
+// the weakest CAS lowers the forward-motion SSIM gate below 0.98 and raises
+// still-camera shimmer by 0.6-0.9/255 (docs/decisions.md, TAA v2).
+const float kSharpness = 0.0;
+
+ivec2 size;
+
+// CAS wants its input within [0, 1], with 1 the display's peak; the colour
+// here is HDR (pre-exposed, so ~1 is bright but highlights go far above).
+// A reversible tonemap maps it there and back (Karis 2014).
+vec3 load(ivec2 p) {
+    vec3 c = imageLoad(history, clamp(p, ivec2(0), size - 1)).rgb;
+    return c / (1.0 + max(c.r, max(c.g, c.b)));
+}
+
+vec3 unload(vec3 c) {
+    return min(c / (1.0 - max(c.r, max(c.g, c.b))), vec3(65504.0));
+}
+
+void main() {
+    size = imageSize(outputColor);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    if (kSharpness == 0.0) {
+        imageStore(outputColor, pixel, imageLoad(history, pixel));
+        return;
+    }
+
+    // a b c
+    // d e f
+    // g h i
+    vec3 a = load(pixel + ivec2(-1, -1));
+    vec3 b = load(pixel + ivec2(0, -1));
+    vec3 c = load(pixel + ivec2(1, -1));
+    vec3 d = load(pixel + ivec2(-1, 0));
+    vec3 e = load(pixel);
+    vec3 f = load(pixel + ivec2(1, 0));
+    vec3 g = load(pixel + ivec2(-1, 1));
+    vec3 h = load(pixel + ivec2(0, 1));
+    vec3 i = load(pixel + ivec2(1, 1));
+
+    // Soft min and max: the cross plus the full 3x3, so 2x too big.
+    vec3 mn = min(min(min(d, e), min(f, b)), h);
+    mn += min(min(min(mn, a), min(c, g)), i);
+    vec3 mx = max(max(max(d, e), max(f, b)), h);
+    mx += max(max(max(mx, a), max(c, g)), i);
+
+    // Sharpen less where the neighbourhood is already near a signal limit.
+    vec3 amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, vec3(1e-6)), 0.0, 1.0));
+    float peak = -1.0 / mix(8.0, 5.0, kSharpness);
+    // Green's weight for all channels, as CAS does by default.
+    float w = amp.g * peak;
+    vec3 result = clamp((b * w + d * w + f * w + h * w + e) / (1.0 + 4.0 * w), 0.0, 1.0);
+    // Keep the result strictly below 1, where the inverse tonemap is finite.
+    result = min(result, vec3(1.0 - 1.0 / 65536.0));
+    imageStore(outputColor, pixel, vec4(unload(result), 1.0));
+}

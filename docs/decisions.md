@@ -1205,8 +1205,8 @@ separately linked module (`MERIDIAN_DLSS`).**
   `UpscalerProvider` passed to the `Renderer` constructor adds its
   instance extensions, the device extensions the GPU has, and backends.
 - TAA is the core's backend (`TaaUpscaler`). It keeps its own ping-pong
-  history and writes the resolve to both it and `output`, so an
-  output-only sharpen can't feed back into the history. No visual
+  history; taa.comp writes the resolve there and sharpen.comp writes
+  `output` from it, so the sharpen can't feed back into the history. No visual
   change: Release 1080p ground still and forward 5 m/s mean diff
   0.0000/255 vs the previous build; the `aa` pass median of 5 is 0.17 ms
   vs `taa` 0.17 ms (interleaved runs; re-measure at 1440p).
@@ -1222,6 +1222,66 @@ separately linked module (`MERIDIAN_DLSS`).**
 - Shortening the history alone doubles or triples shadow shimmer: current
   weight 0.2 gives 3.3/255, 0.3 gives 4.9.
 - Source: https://gpuopen.com/manuals/fidelityfx_sdk/techniques/denoiser/
+
+**TAA v2 (`taa.comp`, `sharpen.comp`): the history is kept shorter where
+it would blur, and rescaled when the exposure changes.**
+- Current weight `mix(0.1, 0.3, moving * max(subpixel))`: `moving` =
+  motion length / 0.25 render pixels (clamped to 1); `subpixel` =
+  4f(1-f) of the reprojected position's fraction (1 halfway between
+  texels, where Catmull-Rom blurs most). Root cause 1.
+- Magnification (root cause 2): J = det(I + d(motion px)/dpixel); where
+  J < 1, current weight >= 1 - 0.9 J^6. Each derivative is the smaller
+  of the two one-sided differences, not the central one: a depth edge on
+  one side (leaf against sky) otherwise reads as a huge magnification and
+  drops the AA there (beech 1.15, sparkling). This helps at edges with
+  one smooth side only: a 1-pixel twig with sky on both sides can still
+  read as magnified.
+- Clip gamma stays 1.0. The spec's 0.75 in motion pulls the history
+  toward the blurry neighbourhood mean: softer in every view (final
+  parameters, 1080p: forward 0.92 vs 0.95, sideways 0.89 vs 0.99, pitch
+  0.85 vs 0.91, beech 0.97 vs 1.02).
+- The history is pre-exposed by the previous frame's exposure:
+  `ExposureState.previousExposure` (written by exposure.comp before it
+  adapts) gives the factor exposure / previousExposure, applied before
+  the clip. Sunset view (`--sun 0.9 0.05 -0.4`) frame 30, while the
+  exposure still adapts: without it the image lags darker by 0.78/255
+  mean (0.49 while turning at 0.3 rad/s); no ghost trail either way.
+- Whatever writes `exposure` must also write `previousExposure`, or TAA
+  mis-scales the history for a frame.
+- Output sharpen: FidelityFX CAS (MIT, commit 9fabcc9), sharpen-only with
+  better diagonals, on a reversible tonemap c / (1 + max(c)) because CAS
+  wants [0, 1] input (Karis 2014). It reads the history and writes
+  `output`, so it never feeds back. It is off (a copy): CAS sharpness
+  0.25 / 0.5 drops the forward SSIM to 0.969 / 0.966 and raises still
+  shimmer to 2.9/2.5 and 3.0/2.7 (1080p); its weakest setting gives SSIM
+  0.972 and shimmer 2.3/2.4 at 1440p (1.7/1.5 off). The ratio gates pass
+  without it. Re-tune after the shadow denoiser (backlog).
+- Sweep (Release 1080p, sharpen off; forward / sideways / pitch / beech
+  motion-over-still Laplacian, then forward SSIM):
+
+  | config | fwd | side | pitch | beech | SSIM |
+  |---|---|---|---|---|---|
+  | central J^8, 1 px, gamma 0.75 | 1.01 | 0.90 | 0.79 | 1.15 | 0.977 |
+  | same, gamma 1 | 1.04 | 1.00 | 0.79 | 1.17 | 0.979 |
+  | no magnification term | 0.79 | | | 0.81 | 0.984 |
+  | central J^2 / J^4 | 0.80 / 0.89 | | | 0.96 / 1.06 | |
+  | one-sided J^4 / J^8 | 0.87 / 1.02 | | | 0.95 / 1.00 | 0.985 / 0.980 |
+  | one-sided J^6, 1 px | 0.95 | 0.99 | 0.79 | 0.98 | 0.983 |
+  | one-sided J^6, 0.25 px (final) | 0.95 | 0.99 | 0.91 | 1.02 | 0.983 |
+  | final, max weight 0.2 | 0.95 | 0.97 | 0.83 | 0.95 | 0.983 |
+
+- Gates, Release 2560x1440, `tools/motion-gates.sh`: forward 5 m/s
+  0.94, sideways 1.00, beech 1.00, pitch 0.88, SSIM 0.983, shimmer
+  crown/shadow 1.7/1.5 (a still camera keeps weight 0.1, so shimmer is
+  today's); `aa` median of 5 0.17 ms at 1440p, of which the sharpen's
+  copy is 0.03 ms (0.14 ms with its dispatch skipped). The beech's 1.00
+  is inflated by leaf sparkle: after a 1 px blur (or a 2x downsample)
+  the beech ratio is 0.94, and the ground's 0.99. At 1080p: 0.95, 0.99,
+  1.02, 0.91, 0.983, 2.1/1.5, `aa` 0.24 ms. The supersampled history
+  was not needed. The beech's leaves still sparkle in forward motion
+  (backlog).
+- Sources: https://github.com/GPUOpen-Effects/FidelityFX-CAS ;
+  Karis 2014, "High Quality Temporal Supersampling" (SIGGRAPH Advances).
 
 **The grade is scene-referred and parametric.**
 - White balance, CDL and per-hue OKLCh grading are baked with the DRT

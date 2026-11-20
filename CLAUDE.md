@@ -192,8 +192,9 @@ engine/src/render/         renderer internals:
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
-  taa_upscaler.*           the core Upscaler backend: taa.comp, its
-                           pipeline and ping-pong history
+  taa_upscaler.*           the core Upscaler backend: taa.comp and
+                           sharpen.comp, their pipelines and the
+                           ping-pong history
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -267,7 +268,10 @@ to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask in
 SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend today is `TaaUpscaler`,
-taa.comp, which writes its resolve to both its own history and `output`)
+taa.comp, which writes its resolve to its own history (pre-exposed, so
+rescaled by `ExposureState` exposure / previousExposure), then
+sharpen.comp, which writes `output` from it (CAS; a copy at sharpness 0,
+today's setting), both inside the `aa` pass)
 -> luminance histogram + exposure adaptation (compute) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
@@ -339,7 +343,8 @@ barriers account for that.
   `nearestSampler`, whose CLAMP_TO_EDGE its mirror-tile math relies on,
   so don't switch that sampler to mirrored; and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = upscaler output
   (`resolved`), grade LUT sampled and as storage (one set); TaaUpscaler
-  set 0 = HDR, motion, history read/write, output (two ping-pong sets); pyramid layout set 0 = source + destination level (one
+  set 0 = HDR, motion, history read/write, output (two ping-pong sets,
+  shared by taa.comp and sharpen.comp); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0

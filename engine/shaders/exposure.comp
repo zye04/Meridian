@@ -39,6 +39,7 @@ void main() {
         weightSum += inRange;
     }
 
+    post.exposure.previousExposure = post.exposure.exposure;
     float current = post.exposure.ev100;
     float target = current;
     if (weightSum > 0.0) {

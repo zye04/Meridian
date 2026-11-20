@@ -1,5 +1,6 @@
 // The core's Upscaler backend: temporal anti-aliasing (taa.comp) with a
-// ping-ponged, display-sized history of its own.
+// ping-ponged, display-sized history of its own, then an output-only
+// sharpen (sharpen.comp).
 #pragma once
 
 #include "gpu_types.h"
@@ -26,8 +27,8 @@ private:
   void writeSets(const UpscalerFrame &frame);
 
   Renderer::Impl &renderer_;
-  // The resolve is written to both the history and the frame's output, so
-  // output-only filters (sharpening) never feed back into the history.
+  // taa.comp writes the resolve to the history; sharpen.comp sharpens it
+  // into the frame's output, so the sharpening never feeds back.
   // Always in VK_IMAGE_LAYOUT_GENERAL.
   std::array<Image, 2> history_;
   // sets_[i] reads history_[i] and writes history_[1 - i].
@@ -42,6 +43,7 @@ private:
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
+  VkPipeline sharpenPipeline_ = VK_NULL_HANDLE;
 };
 
 } // namespace meridian

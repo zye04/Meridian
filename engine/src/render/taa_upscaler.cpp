@@ -8,12 +8,15 @@ namespace {
 
 // Must match TaaConstants in taa.comp.
 struct TaaConstants {
+  VkDeviceAddress exposure = 0;
   uint32_t historyValid = 0;
+  uint32_t pad = 0;
 };
-static_assert(sizeof(TaaConstants) == 4);
+static_assert(sizeof(TaaConstants) == 16);
 
-// Must match taa.comp: scene colour, motion, previous history, then the
-// new history and the output as storage images.
+// Must match taa.comp and sharpen.comp, which share the set: scene colour,
+// motion, previous history, then the new history and the output as storage
+// images.
 constexpr uint32_t kBindings = 5;
 VkDescriptorType bindingType(uint32_t binding) {
   return binding >= 3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
@@ -71,6 +74,7 @@ TaaUpscaler::TaaUpscaler(Renderer::Impl &renderer, Extent display)
   check(vkCreatePipelineLayout(dev, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout");
   pipeline_ = createComputePipeline(dev, "taa.comp", layout_);
+  sharpenPipeline_ = createComputePipeline(dev, "sharpen.comp", layout_);
 
   for (Image &image : history_) {
     image = renderer_.createImage(kHdrFormat, {display.width, display.height, 1},
@@ -94,6 +98,7 @@ TaaUpscaler::~TaaUpscaler() {
     renderer_.destroyImage(image);
   }
   vkDestroyPipeline(dev, pipeline_, nullptr);
+  vkDestroyPipeline(dev, sharpenPipeline_, nullptr);
   vkDestroyPipelineLayout(dev, layout_, nullptr);
   vkDestroyDescriptorPool(dev, pool_, nullptr);
   vkDestroyDescriptorSetLayout(dev, setLayout_, nullptr);
@@ -145,12 +150,22 @@ void TaaUpscaler::evaluate(const UpscalerFrame &frame) {
 
   // sets_[1 - next_] reads history_[1 - next_] and writes history_[next_].
   const VkDescriptorSet set = sets_[1 - next_];
-  const TaaConstants constants{frame.reset ? 0u : 1u};
+  TaaConstants constants;
+  constants.exposure = renderer_.exposureBuffer.address;
+  constants.historyValid = frame.reset ? 0u : 1u;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1,
                           &set, 0, nullptr);
   vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                      sizeof(constants), &constants);
+  vkCmdDispatch(cmd, (display_.width + 7) / 8, (display_.height + 7) / 8, 1);
+
+  // The sharpen reads the new history's neighbourhood.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sharpenPipeline_);
   vkCmdDispatch(cmd, (display_.width + 7) / 8, (display_.height + 7) / 8, 1);
   next_ = 1 - next_;
 }

@@ -10,6 +10,9 @@ layout(buffer_reference, std430) buffer ExposureBuffer {
     // Multiplier from scene luminance (cd/m^2) to display range.
     float exposure;
     float ev100;
+    // The exposure the previous frame shaded with: the TAA history is
+    // pre-exposed by it. Whatever writes `exposure` must set this too.
+    float previousExposure;
 };
 
 // The histogram covers log2 luminance from 2^-10 (deep night) to 2^20
