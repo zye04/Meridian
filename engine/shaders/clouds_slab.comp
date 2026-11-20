@@ -7,9 +7,14 @@
 #include "weather.glsl"
 #include "clouds.glsl"
 #include "clouds_march.glsl"
+#include "clouds_slab.glsl"
 
-// The 2.5D slab clouds: one pass at the render size, composited over HDR,
-// motion and the transparency mask. Skeleton: writes nothing yet.
+// The 2.5D slab clouds (clouds_slab.glsl): one pass at the render size
+// through the jittered camera ray, so the upscaler antialiases cloud edges
+// as it does geometry's (no cloud history). Composited premultiplied over
+// HDR with the haze in front and the cirrus sheet behind; where clouds
+// dominate the pixel, their motion; the transparency mask raised to their
+// coverage.
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -18,9 +23,61 @@ layout(set = 2, binding = 7, rgba16f) uniform image2D hdr;
 layout(set = 2, binding = 8, rg16f) uniform writeonly image2D motion;
 layout(set = 2, binding = 10, r8) uniform image2D transparencyMask;
 
+const float kMotionOpacity = 0.5;
+const float kMaxExposedLuminance = 60000.0;
+
 void main() {
-    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(id, imageSize(hdr)))) {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(hdr);
+    if (any(greaterThanEqual(pixel, size))) {
         return;
+    }
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    // The jittered ray this pixel rasterized; the haze and motion use the
+    // unjittered uv like the rest of the frame.
+    vec4 nearPoint = inverse(pc.scene.viewProjection) * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 direction = normalize(nearPoint.xyz / nearPoint.w);
+
+    float sceneDistance = kMaxDistance;
+    float depth = texelFetch(sceneDepth, pixel, 0).r;
+    if (depth > 0.0) {
+        vec2 ndc = (uv * 2.0 - 1.0) / pc.scene.projectionScale;
+        sceneDistance = pc.scene.nearPlane / depth * sqrt(1.0 + dot(ndc, ndc));
+    }
+
+    vec2 span = cloudLayerSpan(direction);
+    span.y = min(span.y, sceneDistance);
+    CloudMarch march = CloudMarch(vec3(0.0), 1.0, 0.0);
+    vec3 ambient = pc.scene.skyIrradiance.clearIrradiance;
+    if (span.y > span.x) {
+        march = marchSlab(direction, span.x, span.y, kSlabSearchSteps, kSlabMinStep,
+                          kSlabStepGrowth, ambient);
+    }
+    if (depth <= 0.0) {
+        march = withCirrus(march, direction, ambient);
+    }
+    if (march.transmittance >= 1.0) {
+        return;
+    }
+    vec3 luminance = march.luminance;
+    if (march.distance > 0.0) {
+        vec4 front = haze(uv, direction, march.distance);
+        luminance = front.rgb * (1.0 - march.transmittance) + front.a * luminance;
+    }
+    vec3 exposed = min(luminance * pc.scene.sunIlluminance * pc.scene.exposure.exposure,
+                       vec3(kMaxExposedLuminance));
+    float opacity = 1.0 - march.transmittance;
+    vec4 background = imageLoad(hdr, pixel);
+    imageStore(hdr, pixel, vec4(exposed + background.rgb * march.transmittance, background.a));
+    float mask = imageLoad(transparencyMask, pixel).r;
+    imageStore(transparencyMask, pixel, vec4(max(mask, opacity)));
+
+    if (opacity > kMotionOpacity && march.distance > 0.0) {
+        vec3 unjittered = cloudRay(uv);
+        vec4 currentClip = pc.scene.currentViewProjection * vec4(unjittered, 0.0);
+        vec4 previousClip = cloudPreviousClip(unjittered, march.distance);
+        imageStore(motion, pixel,
+                   vec4((previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5,
+                        0.0, 0.0));
     }
 }
