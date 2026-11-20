@@ -90,6 +90,7 @@ void Renderer::Impl::createSwapchain() {
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
   });
+  createBloomChain();
   if (!dlss) {
     upscaler = std::make_unique<TaaUpscaler>(*this, display);
   }
@@ -220,8 +221,100 @@ void Renderer::Impl::createDepthPyramid() {
   vkUpdateDescriptorSets(device.device, 1, &cullWrite, 0, nullptr);
 }
 
+void Renderer::Impl::createBloomChain() {
+  const VkExtent2D display = swapchain.extent;
+  VkExtent2D size{std::max(display.width / 2, 1u),
+                  std::max(display.height / 2, 1u)};
+  // Down to ~1/128 of the display: the widest level spans a good part of
+  // the screen, which the sun's glare needs.
+  uint32_t levels = 1;
+  while (levels < kMaxBloomLevels &&
+         std::min(size.width, size.height) >> levels >= 4) {
+    ++levels;
+  }
+  bloomExtent = size;
+  bloomImage = createImage(kHdrFormat, {size.width, size.height, 1},
+                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                           VK_IMAGE_ASPECT_COLOR_BIT, levels);
+  bloomLevels.resize(levels);
+  for (uint32_t level = 0; level < levels; ++level) {
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = bloomImage.image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = kHdrFormat;
+    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
+    check(vkCreateImageView(device.device, &viewInfo, nullptr, &bloomLevels[level]),
+          "vkCreateImageView");
+  }
+  submitNow([&](VkCommandBuffer cmd) {
+    transitionImage(cmd, {bloomImage.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0,
+                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+  });
+
+  const uint32_t setCount = 2 * levels;
+  const VkDescriptorPoolSize poolSizes[] = {
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, setCount},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, setCount},
+  };
+  VkDescriptorPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.maxSets = setCount;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
+  check(vkCreateDescriptorPool(device.device, &poolInfo, nullptr, &bloomPool),
+        "vkCreateDescriptorPool");
+  std::vector<VkDescriptorSetLayout> layouts(setCount, bloomSetLayout);
+  std::vector<VkDescriptorSet> sets(setCount);
+  VkDescriptorSetAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocInfo.descriptorPool = bloomPool;
+  allocInfo.descriptorSetCount = setCount;
+  allocInfo.pSetLayouts = layouts.data();
+  check(vkAllocateDescriptorSets(device.device, &allocInfo, sets.data()),
+        "vkAllocateDescriptorSets");
+  bloomDownSets.assign(sets.begin(), sets.begin() + levels);
+  bloomUpSets.assign(sets.begin() + levels, sets.end() - 1);
+  bloomCompositeSet = sets.back();
+
+  auto write = [&](VkDescriptorSet set, VkImageView source,
+                   VkImageView destination) {
+    const VkDescriptorImageInfo images[2] = {
+        {linearSampler, source, VK_IMAGE_LAYOUT_GENERAL},
+        {VK_NULL_HANDLE, destination, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet writes[2]{};
+    for (uint32_t b = 0; b < 2; ++b) {
+      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[b].dstSet = set;
+      writes[b].dstBinding = b;
+      writes[b].descriptorCount = 1;
+      writes[b].descriptorType = b == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                        : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      writes[b].pImageInfo = &images[b];
+    }
+    vkUpdateDescriptorSets(device.device, 2, writes, 0, nullptr);
+  };
+  for (uint32_t level = 0; level < levels; ++level) {
+    write(bloomDownSets[level], level == 0 ? output.view : bloomLevels[level - 1],
+          bloomLevels[level]);
+  }
+  for (uint32_t level = 0; level + 1 < levels; ++level) {
+    write(bloomUpSets[level], bloomLevels[level + 1], bloomLevels[level]);
+  }
+  write(bloomCompositeSet, bloomLevels[0], output.view);
+}
+
 void Renderer::Impl::destroySwapchain() {
   upscaler.reset();
+  vkDestroyDescriptorPool(device.device, bloomPool, nullptr);
+  for (VkImageView view : bloomLevels) {
+    vkDestroyImageView(device.device, view, nullptr);
+  }
+  bloomLevels.clear();
+  destroyImage(bloomImage);
   destroyImage(specularHitDistance);
   destroyImage(normalRoughness);
   destroyImage(specularAlbedo);
@@ -460,6 +553,15 @@ void Renderer::Impl::createDescriptors() {
   layoutInfo.bindingCount = 3;
   layoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &postSetLayout),
+        "vkCreateDescriptorSetLayout");
+
+  // Must match bloom.comp: sampled source, storage destination.
+  for (uint32_t b = 0; b < 2; ++b) {
+    bindings[b].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  }
+  bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  layoutInfo.bindingCount = 2;
+  check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &bloomSetLayout),
         "vkCreateDescriptorSetLayout");
 
   // Must match atmosphere.glsl and the *_lut.comp shaders: four sampled
@@ -915,6 +1017,21 @@ void Renderer::Impl::createPipelines() {
       createComputePipeline(dev, "histogram.comp", postLayout);
   exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
 
+  VkPushConstantRange bloomPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                     sizeof(BloomConstants)};
+  VkPipelineLayoutCreateInfo bloomLayoutInfo{};
+  bloomLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  bloomLayoutInfo.setLayoutCount = 1;
+  bloomLayoutInfo.pSetLayouts = &bloomSetLayout;
+  bloomLayoutInfo.pushConstantRangeCount = 1;
+  bloomLayoutInfo.pPushConstantRanges = &bloomPushRange;
+  check(vkCreatePipelineLayout(dev, &bloomLayoutInfo, nullptr, &bloomLayout),
+        "vkCreatePipelineLayout");
+  bloomDownPipeline = createComputePipeline(dev, "bloom_down.comp", bloomLayout);
+  bloomUpPipeline = createComputePipeline(dev, "bloom_up.comp", bloomLayout);
+  bloomCompositePipeline =
+      createComputePipeline(dev, "bloom_composite.comp", bloomLayout);
+
   transmittanceLutPipeline =
       createComputePipeline(dev, "transmittance_lut.comp", sceneLayout);
   multiScatteringLutPipeline =
@@ -1149,6 +1266,10 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->multiScatteringLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->transmittanceLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->exposurePipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->bloomDownPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->bloomUpPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->bloomCompositePipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->bloomLayout, nullptr);
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->pyramidPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
@@ -1213,6 +1334,7 @@ Renderer::~Renderer() {
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->atmosphereSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->bloomSetLayout, nullptr);
   vkDestroySampler(dev, impl_->linearSampler, nullptr);
   vkDestroySampler(dev, impl_->nearestSampler, nullptr);
   vmaDestroyAllocator(impl_->allocator);

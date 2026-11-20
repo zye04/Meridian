@@ -350,6 +350,7 @@ struct Options {
   // or lone-tree layers, no forest floor in the terrain material.
   bool trees = false;
   bool occlusion = true;
+  meridian::Bloom bloom;
   // Clean: Bruneton's very clean defaults (for A/B).
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
   // Largest simplification error on screen in pixels (0: full detail).
@@ -412,6 +413,9 @@ Options parseOptions(int argc, char **argv) {
       } else {
         throw std::runtime_error("--haze takes clean, summer or summer-hazy");
       }
+    } else if (arg == "--bloom") {
+      options.bloom.intensity = number(i);
+      options.bloom.scatter = number(i);
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -528,6 +532,7 @@ int main(int argc, char **argv) {
 #endif
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
+  renderer.setBloom(options.bloom);
   renderer.setLodErrorPixels(options.lodError);
   // A starting look toward the Chlorophyll Engine frames
   // (assets/reference/chlorophyll): AgX alone is flat and desaturated for

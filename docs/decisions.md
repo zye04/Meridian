@@ -1797,3 +1797,42 @@ What it does (`parallaxHit`, `terrainSurface` in mesh.frag):
 - **Motion** (ground close-up moving forward at 1.4 m/s, Laplacian ratio
   motion/still): DLAA + RR 0.862 -> 0.870, TAA 0.871 -> 0.859; shimmer
   unchanged (1.84 -> 1.82, 2.24 -> 2.27).
+
+## Sun glare: energy-conserving multi-scale bloom (2026-11-20)
+
+- Problem (user feedback): the sun reads as a small, hard circle. Its
+  size is right (`sunAngularRadius` 0.00465 rad, 0.53 deg); a real sun
+  looks bigger and edgeless because the eye's and lens's point spread
+  function spreads its luminance (~1e5 times the sky's) into a glare,
+  and the engine had no glare at all.
+- Options: (1) threshold glow: not physical, makes bright surfaces
+  hazy; (2) energy-conserving multi-scale bloom (Jimenez 2014, "Next
+  Generation Post Processing in Call of Duty: Advanced Warfare"; UE's
+  default bloom, Unity HDRP, Godot, Bevy): a downsample chain with a
+  13-tap filter and a tent upsample that mixes the levels, a sum of
+  Gaussians with a heavy tail, ~0.1 ms; (3) FFT convolution with a
+  measured PSF (UE Convolution Bloom): the most faithful, ~1-2 ms and
+  much more code; (4) physically-based glare with streaks (Spencer et
+  al. 1995, Ritschel et al. 2009 temporal glare): the eye's corona and
+  ciliary streaks, a look choice on top of (2) or (3).
+- Choice: (2), no threshold, energy-conserving: `output` =
+  mix(output, bloom, intensity), so a fraction of every pixel's energy
+  moves into the kernel. The sun's FP16-capped value (sky.frag
+  `kMaxExposedLuminance` 60000; measured 57888 at a high sun, where the
+  physical pre-exposed value is ~4-5e4, so the cap barely binds) is
+  enough: 1.5% of it spread over the chain still clips a wide core, so
+  the disk outline disappears at noon; at dusk the reddened, dimmer
+  sun keeps a visible disk with a small halo. Ordinary surfaces lose
+  only `intensity` of their contrast.
+- Where: after the upscaler on the display-sized `output` (the glare is
+  wider than any upscaler footprint and must not be fed into its
+  history), before the luminance histogram, so the auto-exposure meters
+  the frame the eye sees. Half-display RGBA16F mip chain, 8 levels at
+  1440p (down to 10x5).
+- Tuning (`Bloom` in renderer.h, `--bloom INTENSITY SCATTER`): intensity
+  0.015, scatter 0.7 (level weights (1 - s) s^k). 0.02 gave a slightly
+  larger glare but dropped the start view's Laplacian std 2.2%
+  (0.1338 -> 0.1308); 0.015 drops it 1.6% (-> 0.1316), within the 2%
+  budget (1.7%, 0.1393 -> 0.1369, with the terrain POM and micro
+  shadows).
+- Cost: bloom pass 0.12 ms at 2560x1440 (RTX 4080, Release).

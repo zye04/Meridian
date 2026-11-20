@@ -154,6 +154,15 @@ struct Lighting {
   Atmosphere atmosphere;
 };
 
+// Glare of the eye/lens: `intensity` of the HDR image's energy is
+// redistributed by a wide, heavy-tailed kernel (bloom.comp), so the sun
+// reads as an edgeless glare. `scatter` in [0, 1] weights the wider levels.
+// An intensity of 0 skips the pass.
+struct Bloom {
+  float intensity = 0.015f;
+  float scatter = 0.7f;
+};
+
 // GPU time of one named frame pass.
 struct PassTime {
   const char *name;
@@ -254,6 +263,8 @@ public:
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.
   void setGrade(const Grade &grade);
+
+  void setBloom(const Bloom &bloom);
 
   // Recreates the render-sized images and the upscaler and resets the
   // temporal history. DLSS falls back to TAA when the provider doesn't

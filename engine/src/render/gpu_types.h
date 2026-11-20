@@ -46,6 +46,7 @@ constexpr uint32_t kMaxTextures = 16384;
 constexpr uint32_t kDfgLutSize = 128;
 // Depth pyramid levels: enough for a 32768-pixel-wide screen.
 constexpr uint32_t kMaxPyramidLevels = 16;
+constexpr uint32_t kMaxBloomLevels = 8;
 // Shared geometry pools (bump-allocated; real streaming will need an
 // allocator with frees) grow by at least 1.5x when uploadMesh needs more,
 // from kMinPoolBytes. What bounds them besides maxBufferSize: work
@@ -631,6 +632,13 @@ static_assert(sizeof(ExposureState) == 12);
 constexpr uint32_t kHistogramBins = 256;
 
 // Must match the push_constant block in post.glsl.
+// Must match BloomConstants in bloom.comp.
+struct BloomConstants {
+  float scatter = 0.0f;
+  float intensity = 0.0f;
+};
+static_assert(sizeof(BloomConstants) == 8);
+
 struct PostConstants {
   float deltaSeconds = 0.0f;
   VkDeviceAddress histogram = 0;

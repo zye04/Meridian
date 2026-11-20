@@ -54,6 +54,10 @@ item 3 below is what brings them back.
 5. Performance overlay (backlog row), sharing the ImGui overlay.
 6. Frame pacing (backlog row).
 
+Bloom lane (done 2026-11-20): sun glare as an energy-conserving
+multi-scale bloom (decisions.md "Sun glare"); next for it: two sliders in
+the grading panel once the overlay is on main (backlog row).
+
 ## Priority for the next window (user review, 2026-11-20)
 
 The user played main in Release and judged it "absolutely terrible".

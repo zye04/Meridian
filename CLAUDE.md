@@ -98,7 +98,8 @@ DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
 310.9.16, Super Resolution ..., Ray Reconstruction ... (preset F)`.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
-detail, for A/B); `--no-occlusion` draws everything in the frustum
+detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
@@ -107,7 +108,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), bloom, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -306,7 +307,12 @@ its resolve to its own history (pre-exposed, so rescaled by
 `ExposureState` exposure / previousExposure), then sharpen.comp, which
 writes `output` from it (CAS; a copy at sharpness 0, today's setting),
 both inside the `aa` pass)
--> luminance histogram + exposure adaptation (compute) -> grade
+-> bloom (bloom.comp, glare: 13-tap downsamples of `output` into a
+half-display RGBA16F mip chain down to ~1/128, tent upsamples mixing each
+coarser level in by `scatter`, then `output` = mix(output, level 0,
+`intensity`), in place; energy-conserving, before the exposure meter so
+it meters the glare as the eye does; `Renderer::setBloom`, intensity 0
+skips it) -> luminance histogram + exposure adaptation (compute) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
@@ -415,7 +421,7 @@ barriers account for that.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
-  `ScanConstants` in scan.comp, `TlasFillConstants` in tlas_fill.comp,
+  `ScanConstants` in scan.comp, `BloomConstants` in bloom.comp, `TlasFillConstants` in tlas_fill.comp,
   `GpuGrade`/`GradeConstants` in grade_lut.comp; `PlacedInstance` in placement.h); change
   both together (static_asserts check the sizes). `placement.glsl` mirrors
   `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's

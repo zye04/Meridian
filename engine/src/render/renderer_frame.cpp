@@ -453,6 +453,11 @@ void Renderer::setGrade(const Grade &grade) {
   impl_->gradeDirty = true;
 }
 
+void Renderer::setBloom(const Bloom &bloom) {
+  impl_->bloom = {std::clamp(bloom.intensity, 0.0f, 1.0f),
+                  std::clamp(bloom.scatter, 0.0f, 1.0f)};
+}
+
 void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
@@ -1051,6 +1056,39 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdPipelineBarrier2(cmd, &postDependency);
   impl_->historyValid = true;
   endPass("aa");
+
+  // --- Glare: blends a heavy-tailed blur of the output back into it, before
+  // the exposure meter, which should see the glare as the eye does.
+  if (impl_->bloom.intensity > 0.0f) {
+    const BloomConstants bloomConstants{impl_->bloom.scatter,
+                                        impl_->bloom.intensity};
+    auto bloomPass = [&](VkPipeline pipeline, VkDescriptorSet set,
+                         VkExtent2D size) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              impl_->bloomLayout, 0, 1, &set, 0, nullptr);
+      vkCmdPushConstants(cmd, impl_->bloomLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         sizeof(bloomConstants), &bloomConstants);
+      vkCmdDispatch(cmd, (size.width + 7) / 8, (size.height + 7) / 8, 1);
+      vkCmdPipelineBarrier2(cmd, &postDependency);
+    };
+    const VkExtent2D chain = impl_->bloomExtent;
+    auto levelSize = [&](size_t level) {
+      return VkExtent2D{std::max(chain.width >> level, 1u),
+                        std::max(chain.height >> level, 1u)};
+    };
+    const size_t levels = impl_->bloomLevels.size();
+    for (size_t level = 0; level < levels; ++level) {
+      bloomPass(impl_->bloomDownPipeline, impl_->bloomDownSets[level],
+                levelSize(level));
+    }
+    for (size_t level = levels - 1; level-- > 0;) {
+      bloomPass(impl_->bloomUpPipeline, impl_->bloomUpSets[level],
+                levelSize(level));
+    }
+    bloomPass(impl_->bloomCompositePipeline, impl_->bloomCompositeSet, extent);
+  }
+  endPass("bloom");
 
   const VkDescriptorSet postSet = impl_->postSet;
   PostConstants postConstants;

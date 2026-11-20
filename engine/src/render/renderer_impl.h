@@ -76,6 +76,18 @@ struct Renderer::Impl {
   // powers of two, one view per level. Always in VK_IMAGE_LAYOUT_GENERAL.
   Image depthPyramid;
   std::vector<VkImageView> depthPyramidLevels;
+  // Glare mip chain (bloom.comp) at half the display size, display-sized
+  // like `output`. Each set reads binding 0 and writes binding 1:
+  // bloomDownSets[i] writes level i (from `output` for i = 0),
+  // bloomUpSets[i] adds level i + 1 into level i, bloomCompositeSet blends
+  // level 0 into `output`.
+  Image bloomImage;
+  VkExtent2D bloomExtent{};
+  std::vector<VkImageView> bloomLevels;
+  VkDescriptorPool bloomPool = VK_NULL_HANDLE;
+  std::vector<VkDescriptorSet> bloomDownSets;
+  std::vector<VkDescriptorSet> bloomUpSets;
+  VkDescriptorSet bloomCompositeSet = VK_NULL_HANDLE;
   VkExtent2D depthPyramidExtent{};
   bool historyValid = false;
   Mat4 previousViewProjection;
@@ -266,6 +278,12 @@ struct Renderer::Impl {
   // gradeLayout is the post set plus GradeConstants.
   Grade grade;
   bool gradeDirty = true;
+  Bloom bloom;
+  VkDescriptorSetLayout bloomSetLayout = VK_NULL_HANDLE;
+  VkPipelineLayout bloomLayout = VK_NULL_HANDLE;
+  VkPipeline bloomDownPipeline = VK_NULL_HANDLE;
+  VkPipeline bloomUpPipeline = VK_NULL_HANDLE;
+  VkPipeline bloomCompositePipeline = VK_NULL_HANDLE;
   Image gradeLut;
   Buffer gradeBuffer;
   VkPipelineLayout gradeLayout = VK_NULL_HANDLE;
@@ -277,6 +295,7 @@ struct Renderer::Impl {
 
   void createSwapchain();
   void destroySwapchain();
+  void createBloomChain();
   void createFrames();
   void createDescriptors();
   void createPipelines();
