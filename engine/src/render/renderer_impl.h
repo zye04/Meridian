@@ -369,6 +369,19 @@ struct Renderer::Impl {
   Image cloudDetailNoise;
   Image cloudCurlNoise;
   Image weatherMap;
+  // The slab clouds' baked column field (RGBA16F) and its bounds chain
+  // (RG16F, kSlabBakeLevels mips), GENERAL, rewritten every frame under the
+  // slab renderer; boundsLevel: a storage view per mip, boundsSets[i]
+  // reads level i - 1 (the field for i = 0) and writes level i.
+  Image slabField;
+  Image slabBounds;
+  std::array<VkImageView, kSlabBakeLevels> slabBoundsLevel{};
+  std::array<VkDescriptorSet, kSlabBakeLevels> slabBoundsSets{};
+  VkDescriptorSetLayout slabBoundsSetLayout = VK_NULL_HANDLE;
+  VkPipelineLayout slabBoundsLayout = VK_NULL_HANDLE;
+  VkPipeline slabBakePipeline = VK_NULL_HANDLE;
+  VkPipeline slabBoundsFieldPipeline = VK_NULL_HANDLE;
+  VkPipeline slabBoundsReducePipeline = VK_NULL_HANDLE;
   // The cloud shadow map (RGBA16F, GENERAL): the march's output and its
   // blurred copy, which the bindless table holds.
   Image cloudShadowRaw;
@@ -442,6 +455,7 @@ struct Renderer::Impl {
   bool cameraInCloudLayer(Vec3 cameraPosition) const;
   void drawClouds(VkCommandBuffer cmd, const FrameData &frame, Vec3 cameraPosition);
   void drawCloudsSlab(VkCommandBuffer cmd, const FrameData &frame);
+  void drawSlabBake(VkCommandBuffer cmd, const FrameData &frame);
 
   Image createImage(VkFormat format, VkExtent3D extent,
                     VkImageUsageFlags usage, VkImageAspectFlags aspect,

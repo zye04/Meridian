@@ -327,6 +327,12 @@ constexpr float kStratusBottom = 1700.0f;
 constexpr float kStratusTop = 2800.0f;
 constexpr uint32_t kWeatherMapResolution = 512;
 constexpr double kWeatherMapSize = 60000.0;
+// The slab clouds' baked column field (cloud_slab_bake.comp): 30 m texels
+// around the camera, texel-snapped, and its bounds chain of kSlabBakeLevels
+// levels (clouds_slab.glsl).
+constexpr uint32_t kSlabBakeResolution = 2048;
+constexpr double kSlabBakeSize = 61440.0;
+constexpr uint32_t kSlabBakeLevels = 9;
 // The weather map and the noise volumes move with the wind at this altitude.
 constexpr float kCloudWindAltitude = 3000.0f;
 // World-space tile periods (m). Every cloud noise tiles with kCloudNoisePeriod,
@@ -395,8 +401,17 @@ struct GpuClouds {
   float groundCoverage = 0.0f;
   // 0 off, 1 volumetric, 2 slab (CloudRenderer).
   uint32_t renderer = 0;
+  // The baked slab field's window (origin of its corner, size, texels per
+  // side) and its bindless indices: the field and the bounds chain.
+  float slabOrigin[2] = {};
+  float slabSize = static_cast<float>(kSlabBakeSize);
+  uint32_t slabResolution = kSlabBakeResolution;
+  uint32_t slabField = 0;
+  uint32_t slabBounds = 0;
+  uint32_t slabPad[2] = {};
 };
-static_assert(sizeof(GpuClouds) == 160);
+static_assert(sizeof(GpuClouds) == 192);
+static_assert(offsetof(GpuClouds, slabOrigin) == 160);
 static_assert(offsetof(GpuClouds, windDisplacement) == 88);
 static_assert(offsetof(GpuClouds, shadowRight) == 96);
 
@@ -498,8 +513,8 @@ static_assert(offsetof(SceneData, wind) == 1896);
 static_assert(offsetof(SceneData, previousWind) == 1944);
 static_assert(offsetof(SceneData, weather) == 1992);
 static_assert(offsetof(SceneData, clouds) == 2032);
-static_assert(offsetof(SceneData, farField) == 2192);
-static_assert(sizeof(SceneData) == 2224);
+static_assert(offsetof(SceneData, farField) == 2224);
+static_assert(sizeof(SceneData) == 2256);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

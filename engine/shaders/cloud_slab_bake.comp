@@ -1,0 +1,27 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "clouds_slab_field.glsl"
+
+// The slab clouds' columns (slabColumn) at every texel center of the
+// camera-centered, texel-snapped window: R base, G top (relative to
+// kSlabBakeOffset, so half floats keep ~1 m), B rim. Equal base and top =
+// no cloud.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 6, rgba16f) uniform writeonly image2D slabField;
+
+void main() {
+    Clouds c = pc.scene.clouds;
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, ivec2(c.slabResolution)))) {
+        return;
+    }
+    vec2 xz = c.slabOrigin + (vec2(id) + 0.5) * (c.slabSize / float(c.slabResolution));
+    SlabColumn column = slabColumn(xz, 0.0);
+    imageStore(slabField, id,
+               vec4(column.base - kSlabBakeOffset, column.top - kSlabBakeOffset, column.rim, 0.0));
+}

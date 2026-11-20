@@ -10,31 +10,19 @@
 #ifndef CLOUDS_SLAB_GLSL
 #define CLOUDS_SLAB_GLSL
 
-// Fraction of the type's layer height a full column reaches: cumulus wider
-// than tall, as the loaves in the reference frames.
-const float kSlabHeight = 0.4;
-// The cut shape s in [0, 1] reaches the full height at 1 / kSlabRimWidth
-// (a circular profile over that rim); kSlabTopHeap: the billow noise's
-// relative swing of the thickness on cumulus tops.
-const float kSlabRimWidth = 2.0;
-const float kSlabTopHeap = 0.8;
-// Rim fraction over which the density fades in.
-const float kSlabRimSoftness = 0.3;
-// The rim lifts above the flat base by this fraction of the missing
-// thickness, so the edge of a cumulus curls up instead of ending in a
-// knife-edge plate along the base.
-const float kSlabRimLift = 0.15;
-// Density ramps (m) inside the top and base surfaces: soft tops, a firmer
-// base.
-const vec2 kSlabSoftness = vec2(120.0, 40.0);
-// Extinction (1/m) at density 1.
-const float kSlabExtinction = 0.04;
-// Billows: the detail volume at kBillowScale x its period carves the
-// cumulus outline (scaled by type).
-const float kSlabBillowErosion = 0.6;
-// The noise slice advances with the weather time (wraps with it: an
-// integer number of tiles per time period), so clouds form and dissolve.
-const float kSlabSliceTiles = 16.0;
+#include "clouds_slab_field.glsl"
+
+// The baked field (cloud_slab_bake.comp) around the camera: RGBA16F
+// (base, top relative to kSlabBakeOffset, rim) and its conservative bounds
+// chain (RG16F, level k = (min base, max top) of the 2^k texels' bilinear
+// support). The traversal skips cells whose bounds the ray's altitudes miss:
+// kSlabTraverseSteps cell visits per call, kSlabCellSteps samples across a
+// finest cell, kSlabAltMargin (m) of slack for the shell's curvature.
+const int kSlabBakeLevels = 9;
+const int kSlabTraverseSteps = 160;
+const int kSlabCellSteps = 8;
+const float kSlabAltMargin = 4.0;
+
 // Search: steps grow with distance (kSlabStepGrowth x t, at least
 // kSlabMinStep), at most kSlabSearchSteps; the surface is then refined by
 // kSlabRefineSteps bisection steps; the chord behind it ends at the next
@@ -49,60 +37,37 @@ const int kSlabChordSamples = 4;
 // Sun taps along the column toward the sun (m), then the cloud shadow map.
 const vec4 kSlabSunTaps = vec4(40.0, 120.0, 280.0, 600.0);
 
-struct SlabColumn {
-    float base;
-    float top;
-    // The type's layer (bottom, top), for the ambient height gradient.
-    vec2 layer;
-    // 0 at the rim to 1 where the full height is reached: the density
-    // fades in over the rim, so thin rims are translucent, not walls.
-    float rim;
-};
+// Whether xz is inside the baked window (a half texel in from its edge,
+// where the bilinear lookup is exact).
+bool slabInWindow(vec2 xz) {
+    Clouds c = pc.scene.clouds;
+    if (c.renderer != 2u) {
+        return false;
+    }
+    vec2 texels = (xz - c.slabOrigin) * (float(c.slabResolution) / c.slabSize);
+    return all(greaterThanEqual(texels, vec2(0.5))) &&
+           all(lessThan(texels, vec2(float(c.slabResolution) - 0.5)));
+}
 
-// The column at world xz; lod: the noise mip for the search step (coarser
-// far away, so features finer than a step blur instead of aliasing).
-SlabColumn slabColumn(vec2 xz, float lod) {
-    SlabColumn column;
-    vec4 weather = weatherMapAt(vec3(xz.x, 0.0, xz.y));
-    float coverage = weather.r;
-    float type = clamp(weather.g, 0.0, 1.0);
-    column.layer = cloudLayer(type, max(coverage, 1e-3));
-    column.base = column.layer.x;
-    column.top = column.layer.x;
-    column.rim = 0.0;
-    if (coverage <= 0.0) {
+// The column at xz: the baked field inside the window, else slabColumn
+// (layer is left unset; slabLayer fills it where the light needs it).
+SlabColumn slabSample(vec2 xz, float lod) {
+    if (slabInWindow(xz)) {
+        Clouds c = pc.scene.clouds;
+        vec3 v = textureLod(textures[c.slabField], (xz - c.slabOrigin) / c.slabSize, 0.0).rgb;
+        SlabColumn column;
+        column.base = v.r + kSlabBakeOffset;
+        column.top = v.g + kSlabBakeOffset;
+        column.rim = v.b;
+        column.layer = vec2(0.0);
         return column;
     }
-    Clouds c = pc.scene.clouds;
-    vec2 p = xz - c.windOffset;
-    float slice = c.time * kSlabSliceTiles / c.timePeriod;
-    vec4 base = textureLod(textures3D[c.baseNoise], vec3(p / c.baseNoisePeriod, slice), lod);
-    float worley = dot(base.gba, vec3(0.625, 0.25, 0.125));
-    float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
-    shape = clamp(remap(shape, kShapeRange.x, kShapeRange.y, 0.0, 1.0), 0.0, 1.0);
-    // Billow texels are 4x the detail's: two mips fewer for the same step.
-    vec3 billowNoise = textureLod(textures3D[c.detailNoise],
-                                  vec3(p / (c.detailNoisePeriod * kBillowScale), slice * kBillowScale),
-                                  max(0.0, lod - 2.0)).rgb;
-    float billows = 1.0 - dot(billowNoise, vec3(0.5, 0.3, 0.2));
-    shape = clamp(remap(shape, billows * kSlabBillowErosion * type, 1.0, 0.0, 1.0), 0.0, 1.0);
-    shape = mix(shape, 1.0, kStratusShapeFloor * (1.0 - type));
-    float cut = mix(kShapeCut.x, kShapeCut.y, type);
-    float s = coverage * clamp(remap(shape, cut, 1.0, 0.0, 1.0), 0.0, 1.0);
-    // Circular profile over the rim (s up to 1 / kSlabRimWidth): steep
-    // sides and a flat-topped loaf; heaped tops from the billow noise,
-    // modulating the thickness by a fraction of itself only, since
-    // high-frequency height on a height field reads as vertical streaks
-    // from the side.
-    column.rim = min(s * kSlabRimWidth, 1.0);
-    float r = 1.0 - column.rim;
-    float dome = sqrt(max(1.0 - r * r, 0.0));
-    float heap = 1.0 + kSlabTopHeap * type * (billows - 0.5);
-    float height = kSlabHeight * (column.layer.y - column.layer.x);
-    float thickness = height * dome * heap * (s > 0.0 ? 1.0 : 0.0);
-    column.base = column.layer.x + kSlabRimLift * (height - thickness);
-    column.top = column.base + thickness;
-    return column;
+    return slabColumn(xz, lod);
+}
+
+vec2 slabLayer(vec2 xz) {
+    vec4 weather = weatherMapAt(vec3(xz.x, 0.0, xz.y));
+    return cloudLayer(clamp(weather.g, 0.0, 1.0), max(weather.r, 1e-3));
 }
 
 // Signed distance (m, vertical) inside the column at altitude y: > 0
@@ -118,7 +83,7 @@ float slabDensity(SlabColumn column, float y) {
 }
 
 float slabDensityAt(vec3 world, float lod) {
-    SlabColumn column = slabColumn(world.xz, lod);
+    SlabColumn column = slabSample(world.xz, lod);
     return slabDensity(column, world.y);
 }
 
@@ -163,6 +128,75 @@ vec3 slabLight(vec3 rel, vec3 world, SlabColumn column, float lod, float phases[
                       ground * mix(1.0, kAmbientBottom.x, heightFraction));
 }
 
+// Conservative search for the first point inside a column from t: the
+// bounds chain skips every cell the ray's altitudes over its crossing miss
+// (climbing a level after each skip, descending where the bounds overlap),
+// and the finest cells are sampled and bisected. Returns 1 with t at the
+// entry, 0 when the ray reaches tEnd, 2 when it leaves the window (t there),
+// 3 when the visit budget ran out (t advanced).
+int slabTraverse(vec3 direction, inout float t, float tEnd, float radius) {
+    Clouds c = pc.scene.clouds;
+    float res = float(c.slabResolution);
+    float texel = c.slabSize / res;
+    vec2 origin = pc.scene.cameraPosition.xz - c.slabOrigin;
+    vec2 dTexels = direction.xz / texel;
+    int level = min(5, kSlabBakeLevels - 1);
+    for (int i = 0; i < kSlabTraverseSteps; ++i) {
+        if (t >= tEnd) {
+            return 0;
+        }
+        vec2 p = origin / texel + dTexels * t;
+        if (any(lessThan(p, vec2(0.5))) || any(greaterThanEqual(p, vec2(res - 0.5)))) {
+            return 2;
+        }
+        float cellSize = float(1 << level);
+        vec2 cell = floor(p / cellSize);
+        vec2 edge = (cell + step(vec2(0.0), dTexels)) * cellSize;
+        vec2 toEdge = mix(vec2(1e30), (edge - p) / dTexels, notEqual(dTexels, vec2(0.0)));
+        float tExit = min(min(toEdge.x, toEdge.y) + t, tEnd);
+        tExit = max(tExit, t);
+        float ya = cloudPoint(direction * t, radius).y;
+        float yb = cloudPoint(direction * tExit, radius).y;
+        vec2 bounds = texelFetch(textures[c.slabBounds], ivec2(cell), level).rg + kSlabBakeOffset;
+        if (max(ya, yb) + kSlabAltMargin < bounds.x || min(ya, yb) - kSlabAltMargin > bounds.y) {
+            t = tExit + 0.05;
+            level = min(level + 1, kSlabBakeLevels - 1);
+            continue;
+        }
+        if (level > 0) {
+            --level;
+            continue;
+        }
+        float tPrevious = t;
+        float dt = (tExit - t) / float(kSlabCellSteps);
+        for (int k = 0; k <= kSlabCellSteps; ++k) {
+            float tk = t + dt * float(k);
+            vec3 q = cloudPoint(direction * tk, radius);
+            if (slabInside(slabSample(q.xz, 0.0), q.y) > 0.0) {
+                float t0 = tPrevious;
+                float t1 = tk;
+                if (k > 0) {
+                    for (int j = 0; j < kSlabRefineSteps; ++j) {
+                        float tm = 0.5 * (t0 + t1);
+                        vec3 m = cloudPoint(direction * tm, radius);
+                        if (slabInside(slabSample(m.xz, 0.0), m.y) > 0.0) {
+                            t1 = tm;
+                        } else {
+                            t0 = tm;
+                        }
+                    }
+                }
+                t = t1;
+                return 1;
+            }
+            tPrevious = tk;
+        }
+        t = tExit + 0.05;
+        level = 1;
+    }
+    return 3;
+}
+
 // The slab along [tStart, tEnd] of a ray from the camera: search for the
 // next cloud surface, refine it, integrate the chord behind it,
 // repeat until opaque or past tEnd. ambient: the sky irradiance lighting
@@ -193,16 +227,25 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
     float t = tStart;
     float lod = max(0.0, log2(max(minStep, t * stepGrowth) / 100.0));
     vec3 world = cloudPoint(direction * t, radius);
-    float inside = slabInside(slabColumn(world.xz, lod), world.y);
+    float inside = slabInside(slabSample(world.xz, lod), world.y);
     for (int i = 0; i < maxSearch && t < tEnd; ++i) {
         float tEntry = t;
         if (inside <= 0.0) {
+            if (slabInWindow(pc.scene.cameraPosition.xz + direction.xz * t)) {
+                int status = slabTraverse(direction, t, tEnd, radius);
+                if (status != 1) {
+                    world = cloudPoint(direction * t, radius);
+                    inside = slabInside(slabSample(world.xz, lod), world.y);
+                    continue;
+                }
+                tEntry = t;
+            } else {
             // Search: the next step where the ray is inside a column.
             float dt = min(max(minStep, t * stepGrowth), tEnd - t);
             float tNext = t + dt;
             lod = max(0.0, log2(dt / 100.0));
             vec3 next = cloudPoint(direction * tNext, radius);
-            float insideNext = slabInside(slabColumn(next.xz, lod), next.y);
+            float insideNext = slabInside(slabSample(next.xz, lod), next.y);
             if (insideNext <= 0.0) {
                 t = tNext;
                 inside = insideNext;
@@ -216,13 +259,14 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
             for (int k = 0; k < kSlabRefineSteps; ++k) {
                 float tm = 0.5 * (t0 + t1);
                 vec3 m = cloudPoint(direction * tm, radius);
-                if (slabInside(slabColumn(m.xz, lod), m.y) > 0.0) {
+                if (slabInside(slabSample(m.xz, lod), m.y) > 0.0) {
                     t1 = tm;
                 } else {
                     t0 = tm;
                 }
             }
             tEntry = t1;
+            }
         }
         // The chord's far end: step on from the entry until outside, then
         // bisect. Exact ends make the chord's opacity continuous across
@@ -234,13 +278,13 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
         for (int k = 0; k < kSlabExitSteps; ++k) {
             float tn = min(tIn + step, tEnd);
             vec3 q = cloudPoint(direction * tn, radius);
-            if (slabInside(slabColumn(q.xz, lod), q.y) <= 0.0) {
+            if (slabInside(slabSample(q.xz, lod), q.y) <= 0.0) {
                 float t0 = tIn;
                 float t1 = tn;
                 for (int j = 0; j < kSlabRefineSteps; ++j) {
                     float tm = 0.5 * (t0 + t1);
                     vec3 m = cloudPoint(direction * tm, radius);
-                    if (slabInside(slabColumn(m.xz, lod), m.y) > 0.0) {
+                    if (slabInside(slabSample(m.xz, lod), m.y) > 0.0) {
                         t0 = tm;
                     } else {
                         t1 = tm;
@@ -263,7 +307,7 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
         float meanDensity = 0.0;
         for (int k = 0; k < kSlabChordSamples; ++k) {
             vec3 q = cloudPoint(direction * (tEntry + chordLength * (float(k) + 0.5) / float(kSlabChordSamples)), radius);
-            meanDensity += slabDensity(slabColumn(q.xz, lod), q.y);
+            meanDensity += slabDensity(slabSample(q.xz, lod), q.y);
         }
         meanDensity /= float(kSlabChordSamples);
         float sigma = meanDensity * kSlabExtinction;
@@ -272,7 +316,8 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
             float tLight = tEntry + min(0.5 * chordLength, 0.7 / max(sigma, 1e-6));
             vec3 rel = direction * tLight;
             vec3 p = cloudPoint(rel, radius);
-            SlabColumn column = slabColumn(p.xz, lod);
+            SlabColumn column = slabSample(p.xz, lod);
+            column.layer = slabLayer(p.xz);
             vec3 light = slabLight(rel, p, column, lod, phases, ambient, ground, ambientBottom, radius);
             float opacity = result.transmittance * (1.0 - chordTransmittance);
             result.luminance += light * opacity;
@@ -291,7 +336,7 @@ CloudMarch marchSlab(vec3 direction, float tStart, float tEnd, int maxSearch, fl
         // resumes, or the next chord starts here.
         t = ts;
         world = cloudPoint(direction * t, radius);
-        inside = slabInside(slabColumn(world.xz, lod), world.y);
+        inside = slabInside(slabSample(world.xz, lod), world.y);
     }
     if (weightSum > 0.0) {
         result.distance = depthSum / weightSum;

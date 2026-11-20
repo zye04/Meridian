@@ -2,6 +2,7 @@
 
 #include <basisu_enc.h>
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdio>
@@ -64,6 +65,22 @@ void Renderer::Impl::createClouds() {
                            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                            VK_IMAGE_ASPECT_COLOR_BIT);
+  slabField = createImage(VK_FORMAT_R16G16B16A16_SFLOAT, {kSlabBakeResolution, kSlabBakeResolution, 1},
+                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                          VK_IMAGE_ASPECT_COLOR_BIT);
+  slabBounds = createImage(VK_FORMAT_R16G16_SFLOAT, {kSlabBakeResolution, kSlabBakeResolution, 1},
+                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                           VK_IMAGE_ASPECT_COLOR_BIT, kSlabBakeLevels);
+  for (uint32_t level = 0; level < kSlabBakeLevels; ++level) {
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = slabBounds.image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R16G16_SFLOAT;
+    viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
+    check(vkCreateImageView(dev, &viewInfo, nullptr, &slabBoundsLevel[level]),
+          "vkCreateImageView");
+  }
   for (Image *image : {&cloudShadowRaw, &cloudShadowMap}) {
     *image = createImage(VK_FORMAT_R16G16B16A16_SFLOAT,
                          {kCloudShadowResolution, kCloudShadowResolution, 1},
@@ -88,7 +105,7 @@ void Renderer::Impl::createClouds() {
 
   // Must match cloud_noise.comp, weather_map.comp, cloud_shadow.comp and
   // cloud_shadow_blur.comp.
-  constexpr uint32_t kCloudBindings = 6;
+  constexpr uint32_t kCloudBindings = 7;
   VkDescriptorSetLayoutBinding bindings[kCloudBindings]{};
   for (uint32_t b = 0; b < kCloudBindings; ++b) {
     bindings[b] = {b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
@@ -100,11 +117,11 @@ void Renderer::Impl::createClouds() {
   check(vkCreateDescriptorSetLayout(dev, &setLayoutInfo, nullptr, &cloudSetLayout),
         "vkCreateDescriptorSetLayout");
   // The generator set, then one march set per resolution and parity.
-  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kCloudBindings + 4 * 7},
+  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kCloudBindings + 4 * 7 + 2 * kSlabBakeLevels},
                                             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * 3}};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.maxSets = 5;
+  poolInfo.maxSets = 5 + kSlabBakeLevels;
   poolInfo.poolSizeCount = 2;
   poolInfo.pPoolSizes = poolSizes;
   check(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &cloudPool), "vkCreateDescriptorPool");
@@ -120,7 +137,8 @@ void Renderer::Impl::createClouds() {
       {VK_NULL_HANDLE, cloudCurlNoise.view, VK_IMAGE_LAYOUT_GENERAL},
       {VK_NULL_HANDLE, weatherMap.view, VK_IMAGE_LAYOUT_GENERAL},
       {VK_NULL_HANDLE, cloudShadowRaw.view, VK_IMAGE_LAYOUT_GENERAL},
-      {VK_NULL_HANDLE, cloudShadowMap.view, VK_IMAGE_LAYOUT_GENERAL}};
+      {VK_NULL_HANDLE, cloudShadowMap.view, VK_IMAGE_LAYOUT_GENERAL},
+      {VK_NULL_HANDLE, slabField.view, VK_IMAGE_LAYOUT_GENERAL}};
   VkWriteDescriptorSet writes[kCloudBindings]{};
   for (uint32_t b = 0; b < kCloudBindings; ++b) {
     writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -147,10 +165,61 @@ void Renderer::Impl::createClouds() {
   cloudShadowPipeline = createComputePipeline(dev, "cloud_shadow.comp", cloudLayout);
   cloudShadowBlurPipeline = createComputePipeline(dev, "cloud_shadow_blur.comp", cloudLayout);
   VkPipeline noisePipeline = createComputePipeline(dev, "cloud_noise.comp", cloudLayout);
+  slabBakePipeline = createComputePipeline(dev, "cloud_slab_bake.comp", cloudLayout);
+  {
+    // The bounds chain: set i = (source, destination); no push constants.
+    VkDescriptorSetLayoutBinding boundsBindings[2]{};
+    for (uint32_t b = 0; b < 2; ++b) {
+      boundsBindings[b] = {b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT,
+                           nullptr};
+    }
+    VkDescriptorSetLayoutCreateInfo boundsSetInfo{};
+    boundsSetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    boundsSetInfo.bindingCount = 2;
+    boundsSetInfo.pBindings = boundsBindings;
+    check(vkCreateDescriptorSetLayout(dev, &boundsSetInfo, nullptr, &slabBoundsSetLayout),
+          "vkCreateDescriptorSetLayout");
+    std::array<VkDescriptorSetLayout, kSlabBakeLevels> boundsSetLayouts;
+    boundsSetLayouts.fill(slabBoundsSetLayout);
+    VkDescriptorSetAllocateInfo boundsAlloc{};
+    boundsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    boundsAlloc.descriptorPool = cloudPool;
+    boundsAlloc.descriptorSetCount = kSlabBakeLevels;
+    boundsAlloc.pSetLayouts = boundsSetLayouts.data();
+    check(vkAllocateDescriptorSets(dev, &boundsAlloc, slabBoundsSets.data()),
+          "vkAllocateDescriptorSets");
+    for (uint32_t level = 0; level < kSlabBakeLevels; ++level) {
+      const VkDescriptorImageInfo images[2] = {
+          {VK_NULL_HANDLE, level == 0 ? slabField.view : slabBoundsLevel[level - 1],
+           VK_IMAGE_LAYOUT_GENERAL},
+          {VK_NULL_HANDLE, slabBoundsLevel[level], VK_IMAGE_LAYOUT_GENERAL}};
+      VkWriteDescriptorSet boundsWrites[2]{};
+      for (uint32_t b = 0; b < 2; ++b) {
+        boundsWrites[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        boundsWrites[b].dstSet = slabBoundsSets[level];
+        boundsWrites[b].dstBinding = b;
+        boundsWrites[b].descriptorCount = 1;
+        boundsWrites[b].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        boundsWrites[b].pImageInfo = &images[b];
+      }
+      vkUpdateDescriptorSets(dev, 2, boundsWrites, 0, nullptr);
+    }
+    VkPipelineLayoutCreateInfo boundsLayoutInfo{};
+    boundsLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    boundsLayoutInfo.setLayoutCount = 1;
+    boundsLayoutInfo.pSetLayouts = &slabBoundsSetLayout;
+    check(vkCreatePipelineLayout(dev, &boundsLayoutInfo, nullptr, &slabBoundsLayout),
+          "vkCreatePipelineLayout");
+    slabBoundsFieldPipeline =
+        createComputePipeline(dev, "cloud_slab_bounds_field.comp", slabBoundsLayout);
+    slabBoundsReducePipeline =
+        createComputePipeline(dev, "cloud_slab_bounds.comp", slabBoundsLayout);
+  }
 
   submitNow([&](VkCommandBuffer cmd) {
     for (const Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
-                               &cloudShadowRaw, &cloudShadowMap, &skyCapture}) {
+                               &cloudShadowRaw, &cloudShadowMap, &skyCapture, &slabField,
+                               &slabBounds}) {
       transitionImage(cmd, {image->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -205,11 +274,15 @@ void Renderer::Impl::createClouds() {
   skyCapturePipeline = createComputePipeline(dev, "sky_capture.comp", cloudMarchLayout);
   createCloudTargets();
 
-  if (textures.size() + 6 > kMaxTextures) {
+  if (textures.size() + 8 > kMaxTextures) {
     throw std::runtime_error("texture table is full");
   }
   const auto first = static_cast<uint32_t>(textures.size());
-  textures.resize(textures.size() + 6);
+  textures.resize(textures.size() + 8);
+  clouds.slabField = first + 6;
+  clouds.slabBounds = first + 7;
+  writeTexture(clouds.slabField, slabField.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
+  writeTexture(clouds.slabBounds, slabBounds.view, nearestSampler, VK_IMAGE_LAYOUT_GENERAL);
   clouds.weatherMap = first;
   clouds.baseNoise = first + 1;
   clouds.detailNoise = first + 2;
@@ -226,6 +299,14 @@ void Renderer::Impl::createClouds() {
 
 void Renderer::Impl::destroyClouds() {
   VkDevice dev = device.device;
+  vkDestroyPipeline(dev, slabBoundsReducePipeline, nullptr);
+  vkDestroyPipeline(dev, slabBoundsFieldPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, slabBoundsLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, slabBoundsSetLayout, nullptr);
+  vkDestroyPipeline(dev, slabBakePipeline, nullptr);
+  for (VkImageView view : slabBoundsLevel) {
+    vkDestroyImageView(dev, view, nullptr);
+  }
   vkDestroyPipeline(dev, skyCapturePipeline, nullptr);
   vkDestroyPipeline(dev, cloudSlabPipeline, nullptr);
   vkDestroyPipeline(dev, cloudCompositePipeline, nullptr);
@@ -243,7 +324,8 @@ void Renderer::Impl::destroyClouds() {
     vkDestroyImageView(dev, view, nullptr);
   }
   for (Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
-                       &cloudShadowRaw, &cloudShadowMap, &skyCapture}) {
+                       &cloudShadowRaw, &cloudShadowMap, &skyCapture, &slabField,
+                       &slabBounds}) {
     destroyImage(*image);
   }
 }
@@ -257,6 +339,40 @@ void Renderer::Impl::placeWeatherMap(Vec3 cameraPosition) {
   const double z = std::floor(cameraPosition.z / kTexel) * kTexel - 0.5 * kWeatherMapSize;
   clouds.mapOrigin[0] = static_cast<float>(x);
   clouds.mapOrigin[1] = static_cast<float>(z);
+  constexpr double kSlabTexel = kSlabBakeSize / kSlabBakeResolution;
+  clouds.slabOrigin[0] =
+      static_cast<float>(std::floor(cameraPosition.x / kSlabTexel) * kSlabTexel - 0.5 * kSlabBakeSize);
+  clouds.slabOrigin[1] =
+      static_cast<float>(std::floor(cameraPosition.z / kSlabTexel) * kSlabTexel - 0.5 * kSlabBakeSize);
+}
+
+// The slab field over the new weather map, then its bounds chain, one
+// dispatch per level.
+void Renderer::Impl::drawSlabBake(VkCommandBuffer cmd, const FrameData &frame) {
+  constexpr VkPipelineStageFlags2 kCompute = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, slabBakePipeline);
+  const VkDescriptorSet sets[] = {cloudSet, materialSet};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudLayout, 0, 2, sets, 0,
+                          nullptr);
+  PushConstants push;
+  push.sceneBuffer = frame.sceneBuffer.address;
+  vkCmdPushConstants(cmd, cloudLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+  vkCmdDispatch(cmd, kSlabBakeResolution / 8, kSlabBakeResolution / 8, 1);
+  // The weather map was just rewritten; this writes the field the bounds
+  // read, then each level reads the last.
+  constexpr VkAccessFlags2 kStorage =
+      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+  memoryBarrier(cmd, kCompute, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, kCompute, kStorage);
+  for (uint32_t level = 0; level < kSlabBakeLevels; ++level) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      level == 0 ? slabBoundsFieldPipeline : slabBoundsReducePipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, slabBoundsLayout, 0, 1,
+                            &slabBoundsSets[level], 0, nullptr);
+    const uint32_t groups = std::max((kSlabBakeResolution >> level) / 8, 1u);
+    vkCmdDispatch(cmd, groups, groups, 1);
+    memoryBarrier(cmd, kCompute, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, kCompute,
+                  kStorage | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  }
 }
 
 // Runs after a barrier that waits for the previous frame's reads (the map is

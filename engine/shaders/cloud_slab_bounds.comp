@@ -1,0 +1,50 @@
+#version 460
+
+// One level of the slab field's bounds chain: (min base, max top) over a
+// texel's bilinear support. Level 0 (FROM_FIELD) takes the 3x3 field texels
+// around each texel, level k the 2x2 children of level k - 1 (whose union
+// is the 4x4 of the first level's children, so the support stays exact).
+// Windows with no cloud store an interval nothing overlaps.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#ifdef FROM_FIELD
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D source;
+#else
+layout(set = 0, binding = 0, rg16f) uniform readonly image2D source;
+#endif
+layout(set = 0, binding = 1, rg16f) uniform writeonly image2D destination;
+
+const vec2 kEmpty = vec2(30000.0, -30000.0);
+
+void main() {
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(destination);
+    if (any(greaterThanEqual(id, size))) {
+        return;
+    }
+    ivec2 last = imageSize(source) - 1;
+    vec2 bounds = kEmpty;
+#ifdef FROM_FIELD
+    bool cloud = false;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 v = imageLoad(source, clamp(id + ivec2(x, y), ivec2(0), last)).rg;
+            cloud = cloud || v.g > v.r;
+            bounds = vec2(min(bounds.x, v.r), max(bounds.y, v.g));
+        }
+    }
+    if (!cloud) {
+        bounds = kEmpty;
+    }
+#else
+    bounds = vec2(30000.0, -30000.0);
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            vec2 v = imageLoad(source, min(id * 2 + ivec2(x, y), last)).rg;
+            bounds = vec2(min(bounds.x, v.x), max(bounds.y, v.y));
+        }
+    }
+#endif
+    imageStore(destination, id, vec4(bounds, 0.0, 0.0));
+}

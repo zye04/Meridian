@@ -942,6 +942,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // sky irradiance with the capture's clouds (the capture reads the LUTs).
   impl_->drawWeatherMap(cmd, frame);
   if (impl_->cloudRenderer != CloudRenderer::Off) {
+    if (impl_->cloudRenderer == CloudRenderer::Slab) {
+      impl_->drawSlabBake(cmd, frame);
+    }
     impl_->drawCloudShadow(cmd, frame);
     impl_->drawSkyCapture(cmd, frame);
   }
