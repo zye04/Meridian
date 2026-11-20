@@ -34,6 +34,32 @@ backlog rows; docs state current truth only).
 Reports to the user: "status" = running and waiting work only;
 "overview" = what is done.
 
+## Priority for the next window (user review, 2026-11-20)
+
+The user played main in Release and judged it "absolutely terrible".
+Screenshots: `.superpowers/user-review-2026-11-20/1-4.png` (local).
+Decision: put the tree/far-field work (M2a Task 8+) and DLSS on hold
+and do a visible-quality pass first. Every asset looks bad, not just
+the trees, which points at a systemic pipeline cause rather than the
+assets themselves. Order:
+
+1. **Asset fidelity investigation** (first lane, diagnose before fixing).
+   Render one tree, one rock and one Poly Haven model in a reference
+   viewer (Blender / a glTF viewer, same HDRI-ish light) and in Meridian,
+   side by side. Check the cook (texture compression, sRGB vs linear,
+   normal-map convention, mip bias, roughness/AO channels, decimation:
+   Megaplants 4M tris to what), the shading (sky ambient, the missing
+   bounce light, near-black shadows, exposure), and the LOD (far trees
+   render as leafless sticks while their RT shadows are full canopies:
+   raster LOD vs full-detail BLAS). Report the root causes with evidence.
+2. Green ground: the Napf is pasture, but everything renders as bare
+   dirt; the terrain material, then M3 meadow grass.
+3. Rocks: seated on slopes, no floating or tilted slabs.
+4. Steep-slope texture stretching (triplanar or similar).
+5. Shadow and foliage shimmer in motion: Ray Reconstruction (motion
+   clarity plan) or the fallback denoiser.
+6. Finish and merge clouds.
+
 ## Decisions waiting for the user
 
 1. M2a Task 8 gates (see below): tune the voxel far field (C) with the
