@@ -246,6 +246,9 @@ CloudMarch marchClouds(vec3 direction, float tStart, float tEnd, float jitter, f
             weightSum += opacity;
             result.transmittance *= stepTransmittance;
             if (result.transmittance < kOpaque) {
+                // Opaque from here on: the residue would still let the
+                // sun disk (~1e5 times the sky) through a thick cloud.
+                result.transmittance = 0.0;
                 break;
             }
         }

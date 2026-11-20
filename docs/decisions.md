@@ -2921,3 +2921,16 @@ blue one.
   to >= 0 after the clip instead of before it. The fringes are gone in the
   view above; flicker and turn sharpness as in "Cloud march sub-texel
   jitter" (measured with both).
+
+## Opaque clouds hide the sun disk (2026-11-20)
+
+The sun disk (clamped to 60000 exposed, ~1e5 times the sky) showed
+through thick cumulus and overcast: the march stops once the
+transmittance falls below `kOpaque` (0.01) and kept that residue, and
+60000 x 0.01 still tonemaps to white. The early-out now sets the
+transmittance to 0 (the dropped in-scattering is under 1%). Broken
+weather time-lapse with the sun behind a cloud (`1119 1356 -431 0.895
+0.70 --weather broken --time-scale 60`, frame 12 of 20-frame steps): max
+value around the sun 0.988 -> 0.675; overcast: the disk is gone. Thinner
+cloud edges (transmittance above 0.01) still pass a dimmed disk, as real
+thin cloud does.
