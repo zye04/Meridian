@@ -103,19 +103,25 @@ foreach(source
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp
     clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
-    cloud_shadow_blur.comp sky_capture.comp)
+    cloud_shadow_blur.comp sky_capture.comp voxel.mesh)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
+add_shader(voxel.frag voxel.frag ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
 add_shader(placement.comp placement_stream.comp PLACEMENT_STREAM)
 add_shader(bloom.comp bloom_down.comp)
 add_shader(bloom.comp bloom_up.comp BLOOM_UPSAMPLE)
 add_shader(bloom.comp bloom_composite.comp BLOOM_COMPOSITE)
+add_shader(farfield_bake.comp farfield_bake.comp)
+add_shader(farfield_splat.comp farfield_occupancy.comp FARFIELD_OCCUPANCY)
+add_shader(farfield_splat.comp farfield_accumulate.comp FARFIELD_ACCUMULATE)
+add_shader(farfield_splat.comp farfield_pack.comp FARFIELD_PACK)
+add_shader(farfield_check.comp farfield_check.comp)
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
@@ -124,10 +130,12 @@ add_library(meridian STATIC
     src/cluster.cpp
     src/clusterlod.cpp
     src/frame_stats.cpp
+    src/farfield.cpp
     src/grade.cpp
     src/model.cpp
     src/placement.cpp
     src/render/renderer_clouds.cpp
+    src/render/renderer_farfield.cpp
     src/render/renderer_frame.cpp
     src/render/renderer_placement.cpp
     src/render/renderer_resources.cpp

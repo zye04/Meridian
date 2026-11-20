@@ -166,10 +166,11 @@ triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
-(placement cells visible), `bvh nodes N` (cluster group BVH nodes the
+(placement cells visible), `far cells N` (cells drawn as far-field
+voxels), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -250,7 +251,12 @@ regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 trees, every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
-before and after compaction, cell margin).
+before and after compaction, cell margin). `--far-field off` draws
+every tree as clusters instead of distant forest cells as voxels (A/B).
+`--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
+beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
+in the TLAS and march the far field's voxels instead; `tlas` traces every
+tree for every receiver (A/B; also what `--far-field off` does).
 
 ## Testing policy (usage matters)
 
@@ -321,6 +327,11 @@ engine/src/render/         renderer internals:
                            submits), Debug check against evaluatePoint;
                            buildPlacedTlas: prototype BLAS + PrototypeInfo,
                            cell margin, TLAS fill (tlas_fill.comp) + build
+  renderer_farfield.cpp    far field at setPlacement: prototype bake
+                           (farfield_bake.comp, ray queries on the BLAS),
+                           splat of the placed table into world bricks
+                           (farfield_splat.comp), column map, Debug checks
+                           against the CPU replica (farfield.h/.cpp)
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
@@ -356,6 +367,10 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            chunks for cull.comp -> BVH seeds for
                            cluster_traverse.comp -> work items for
                            cluster_cull.comp.
+                           farfield.glsl: brick lookup, the far-cell
+                           march, farFieldTransmittance; voxel.mesh/.frag
+                           draw far cells; lighting.glsl: the shading
+                           mesh.frag and voxel.frag share.
                            wind.glsl (windVelocity, windOffset, gust),
                            weather.glsl (weatherAt: history lookup),
                            clouds.glsl (tileable noise, weatherMapAt +
@@ -406,7 +421,9 @@ one workgroup per (slot, streamed layer)) -> cull cells (cell_cull.comp
 phase 0: placement cells and streamed slot records visible
 last frame, frustum (displayed box) and the layers' draw distance; emits
 chunks of up to 64 consecutive instance ids; the hand-placed instances
-are chunks too) -> early cull (cull.comp, one workgroup per chunk, phase
+are chunks too; with the far field, a cell whose 4 m voxel is under
+~1 px skips its tree-layer chunks and joins the far list with its level)
+-> early cull (cull.comp, one workgroup per chunk, phase
 0: instances visible last frame, frustum test (placed: the prototype's
 sphere and draw distance) only, seeding (instance, level root) for each
 DAG level of each mesh whose LOD band can hold the cut) -> traverse
@@ -441,7 +458,10 @@ sun's exposed radiance, for contact shadows) + D32 depth
 (sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
-cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
+cluster; then the far field pass: voxel.mesh emits each far cell's
+canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
+and writes the hit's depth (conservative, depth_less), motion and the
+same attachments) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
 cull (cell cull phase 1: every cell against frustum + pyramid, writing
 cell visibility; then every instance of the emitted chunks against
 frustum + pyramid; the newly visible

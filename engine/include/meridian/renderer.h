@@ -288,6 +288,8 @@ public:
   CullDrops droppedCullEntries() const;
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
+  // Far cells drawn as voxels in a recent frame.
+  uint32_t drawnFarCellCount() const;
   // Cluster group BVH nodes the traversal visited in a recent frame.
   uint32_t visitedBvhNodeCount() const;
 
@@ -298,6 +300,11 @@ public:
   // On by default; off draws everything in the view frustum (for A/B
   // comparisons).
   void setOcclusionCulling(bool enabled);
+
+  // On by default: sun shadow rays from receivers beyond 4 km see distant
+  // forests as the far field's voxels; off traces every tree in the TLAS
+  // (for A/B comparisons). Needs a far field (setPlacement).
+  void setVoxelFarShadows(bool enabled);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

@@ -168,6 +168,7 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
     }
   }
   initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
+  initial.farTasks[1] = initial.farTasks[2] = 1;
   vkCmdUpdateBuffer(cmd, drawCounters.buffer, 0, sizeof(initial), &initial);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -457,6 +458,8 @@ CullDrops Renderer::droppedCullEntries() const {
 
 uint32_t Renderer::drawnCellCount() const { return impl_->drawnCells; }
 
+uint32_t Renderer::drawnFarCellCount() const { return impl_->drawnFarCells; }
+
 uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
 void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
@@ -481,6 +484,8 @@ void Renderer::setEffects(const Effects &effects) {
 void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
+
+void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
@@ -643,6 +648,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->droppedEntries = counters->overflow;
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
+    impl_->drawnFarCells = counters->farTasks[0];
     impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
               impl_->droppedByList.begin());
@@ -788,6 +794,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.streamCoords = impl_->stream.coords.address;
   scene.cellDrawDistance = impl_->cellDrawDistance;
   scene.cellMargin = impl_->cellMargin;
+  scene.farFieldEnabled = impl_->farFieldInfo.buffer != VK_NULL_HANDLE ? 1 : 0;
+  scene.farField = impl_->farFieldInfo.address;
+  scene.farCellList = impl_->farCellList.address;
+  scene.voxelFarShadows = scene.farFieldEnabled != 0 && impl_->voxelFarShadows ? 1 : 0;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -1084,8 +1094,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDraw(cmd, 3, 1, 0, 0);
   impl_->drawTerrain(cmd);
   drawCulled(0);
-  vkCmdEndRendering(cmd);
   endPass("scene early");
+  impl_->drawFarField(cmd);
+  vkCmdEndRendering(cmd);
+  endPass("far field");
 
   impl_->buildDepthPyramid(cmd);
   impl_->pyramidValid = true;

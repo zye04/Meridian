@@ -1,0 +1,43 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "farfield.glsl"
+
+// Debug: farFieldTransmittance on sample rays, which renderer_farfield.cpp
+// compares with farFieldTransmittanceCpu.
+
+layout(local_size_x = 64) in;
+
+// Per ray: origin + start distance, direction + max distance.
+struct FarCheckRay {
+    vec4 originStart;
+    vec4 directionMax;
+};
+
+layout(buffer_reference, std430) readonly buffer FarCheckRayBuffer {
+    FarCheckRay rays[];
+};
+
+layout(buffer_reference, std430) writeonly buffer FarCheckResultBuffer {
+    float transmittance[];
+};
+
+// Must match FarCheckConstants in C++.
+layout(push_constant) uniform FarCheckConstants {
+    FarFieldBuffer field;
+    FarCheckRayBuffer rays;
+    FarCheckResultBuffer results;
+    uint count;
+} check;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= check.count) {
+        return;
+    }
+    FarCheckRay ray = check.rays.rays[index];
+    check.results.transmittance[index] =
+        farFieldTransmittance(check.field, ray.originStart.xyz, ray.directionMax.xyz,
+                              ray.originStart.w, ray.directionMax.w, false);
+}

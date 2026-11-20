@@ -209,6 +209,8 @@ const float kCellSize = 64.0;
 struct PrototypeInfo {
     uint firstMesh;
     uint meshCount;
+    // Its TLAS records' instance mask (gpu_types.h).
+    uint tlasMask;
     vec3 boundsCenter;
     float boundsRadius;
     uvec2 blasAddress;
@@ -441,6 +443,13 @@ layout(buffer_reference, std430) readonly buffer StreamCoordBuffer {
     ivec2 coords[];
 };
 
+// Declared here, defined in farfield.glsl by the shaders that read it.
+layout(buffer_reference) buffer FarFieldBuffer;
+
+layout(buffer_reference, std430) buffer FarCellListBuffer {
+    uint entries[];
+};
+
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // All view matrices here leave out the camera translation: they take
     // positions relative to the camera (world - cameraPosition, or
@@ -511,7 +520,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // how far instances' bounds reach past their cell horizontally.
     float cellDrawDistance;
     float cellMargin;
-    uint pad3;
+    // Whether farField is set: cells past the far switch draw their voxels.
+    uint farFieldEnabled;
     // The ring's instances and the streamed cell records (which follow the
     // grid's cells in `cells`). Visibility: ids (static + ring), then the
     // grid cells and the streamed records.
@@ -535,6 +545,14 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     Wind previousWind;
     Weather weather;
     Clouds clouds;
+    // The far field (farfield.glsl) and the far cells the cell cull appends
+    // for voxel.mesh: cell | level << 30, one entry per cell.
+    FarFieldBuffer farField;
+    FarCellListBuffer farCellList;
+    // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
+    // far field instead of the TLAS's far-field trees.
+    uint voxelFarShadows;
+    uint pad6;
 };
 
 // Largest axis scale of a transform: a conservative bound under

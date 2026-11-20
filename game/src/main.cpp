@@ -248,8 +248,9 @@ constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEd
 constexpr uint32_t kPlacementSeed = 1;
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
-// placed on the GPU at load (placement.h).
-void placeScenery(meridian::Renderer &renderer, bool trees) {
+// placed on the GPU at load (placement.h). With farField, distant forest
+// cells are drawn as voxels (far field) instead of their trees.
+void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -356,6 +357,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees) {
                       {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
                        -kMaskEdge, 0.0f, 0.0f},
                       0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
+    layers[0].farField = layers[1].farField = farField;
   }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).
@@ -501,6 +503,9 @@ struct Options {
   // Trees are hidden by default (--trees): no tree prototypes, no forest
   // or lone-tree layers, no forest floor in the terrain material.
   bool trees = false;
+  // Distant forest cells as voxels; off draws every tree (for A/B).
+  bool farField = true;
+  bool voxelFarShadows = true;
   bool occlusion = true;
   std::optional<meridian::Bloom> bloom;
   std::optional<meridian::Effects> effects;
@@ -657,6 +662,16 @@ Options parseOptions(int argc, char **argv) {
                std::string(argv[i + 1]) == "off") {
       options.placement = false;
       ++i;
+    } else if (arg == "--far-field" && i + 1 < argc &&
+               std::string(argv[i + 1]) == "off") {
+      options.farField = false;
+      ++i;
+    } else if (arg == "--far-shadows" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "tlas" && mode != "voxel") {
+        throw std::runtime_error("--far-shadows takes tlas or voxel");
+      }
+      options.voxelFarShadows = mode == "voxel";
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -681,6 +696,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --trees, --no-occlusion, "
+                               "--far-field off, --far-shadows tlas|voxel, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -754,6 +770,7 @@ int main(int argc, char **argv) {
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
+  renderer.setVoxelFarShadows(options.voxelFarShadows);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
   renderer.setCloudsEnabled(options.clouds);
@@ -848,7 +865,7 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer, options.trees);
+    placeScenery(renderer, options.trees, options.farField);
   }
 
   meridian::Weather weather(1, meridian::weatherPreset(options.weather));
@@ -1056,12 +1073,14 @@ int main(int argc, char **argv) {
     renderer.printAmbient();
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, cells %u, bvh nodes %u, %u dropped by full "
+                "%u triangles, %u terrain nodes, cells %u, far cells %u, bvh nodes %u, "
+                "%u dropped by full "
                 "cull lists (chunks %u, work items %u, clusters %u, terrain nodes %u, "
                 "bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
+                renderer.drawnFarCellCount(),
                 renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
                 drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
                 renderer.placedInstanceCount(),

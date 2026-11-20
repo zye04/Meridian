@@ -941,54 +941,59 @@ foliage that survives simplification).
     https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
   - https://github.com/fstrugar/CDLOD (the level/quad sizes above)
 
-## Far-field forests: per-cell voxel bricks (M2a, 2026-11-20)
+## Far-field forests: voxel tiers (M2a, 2026-11-20)
 
-- **Chosen (user, 2026-11-20): per-cell voxel bricks.** Past a per-cell
-  far switch (tallest tree under ~6 px, ~4 km), each 64 m cell skips its
-  tree instances and is drawn as one aggregate of sparse 4^3 voxel bricks
-  (L0 4 m, L1 8 m, L2 16 m). The reference is Chlorophyll Engine's
-  per-tile far field. The same bricks are the far ray field for sun
-  shadows now and for sky visibility in M2b, replacing M2b's 2D canopy
-  field. Impostors stay, for the mid range only. Spec:
+- **Chosen (user, 2026-11-20): voxels, no impostors, in three tiers**,
+  as Chlorophyll Engine describes its own: near trees are clusters of
+  their LOD DAG; from where a tree's triangles go sub-pixel it is drawn as
+  its prototype's voxels (a sparse brick hierarchy in the prototype's
+  space, mips from height / 128 down to 4 m, shared by all instances);
+  past a per-cell far switch (a 4 m voxel <= 1 px, ~4.8 km) each 64 m
+  cell skips its tree instances and draws one aggregate of world voxel
+  bricks (L0 4 m, L1 8 m, L2 16 m). The world bricks are also the far ray
+  field: a sun shadow map built from them for far receivers now, sky
+  visibility in M2b (replacing M2b's 2D canopy field). Spec:
   `docs/superpowers/specs/2026-11-20-far-field-design.md`.
-- **Why:** per-instance impostors to the horizon would put ~1M+
-  instances, each a quad of 1-5 px, through culling and the mesh shader in
-  ridge and overview views. Those sub-pixel alpha-tested quads shimmer,
-  which TAA can't resolve. An aggregate costs per covered pixel and is
-  prefiltered.
+- **Why three tiers:** the Task 8 prototype (per-cell bricks beyond 4 km,
+  clusters nearer) measured the early scene pass at ~13 ms at the overview,
+  mostly cluster raster of trees inside 4 km, whose coarse DAG foliage
+  also loses leaves. That band is where triangles are sub-pixel, the
+  case UE 5.7's Nanite Foliage and Chlorophyll turn into voxels. Per
+  instance, prototype voxels cost memory per prototype, not per world.
+  Beyond the far switch, per-instance work for 1M+ trees of 2-6 px is
+  what the per-cell aggregate avoids.
 - **Rejected:**
-  - (A) impostors to the horizon: the cost and shimmer above.
-  - (B) a 2.5D canopy aggregate (top, bottom, density, albedo, normal per
-    4 m texel), cheaper, ~225 MB est. Kept as the documented fallback if
-    the prototype's gates fail; the user decides after the prototype.
-  - UE 5.7's per-cluster Nanite voxels: an aggregate per cluster doesn't
-    reduce per-instance work, and Epic's hardware RT for it falls back to
-    a mesh that users report casts poor shadows.
-- **Resolution dialed down:** the user accepted no 3D crown silhouettes
-  beyond ~4 km. So the finest voxel is 4 m (one pixel at the far switch;
-  2 m would be ~8x the memory) and a voxel is 4 B (log extinction,
-  octahedral normal, albedo palette index). Estimated ~350-450 MB resident
-  over the Napf (forest ~93 km^2: ~1.1-1.45M L0 bricks), with a load-time
-  peak of ~2 GB while one level's accumulators exist. No streaming.
-  Distance residency for L0 (re-splat from the placed table, no disk) is
-  the lever if the prototype measures over 500 MB.
+  - Impostors (mid range or to the horizon): sub-pixel alpha-tested quads
+    shimmer, the user dropped them.
+  - Per-instance voxels to the horizon: 1M+ tiny boxes at the overview.
+  - Per-cell bricks with clusters to 4 km (the prototype): the cost and
+    thin foliage above.
+  - Rasterized voxel cubes: one-pixel triangles at the far switch.
+  - (B) a 2.5D canopy aggregate: no 3D crowns; the user chose C.
+  - Nanite's stochastic per-pixel normals: noisy; a deterministic 0.5
+    opacity hit gives a stable image.
+- **Task 8 prototype, measured** (1440p Release, Napf seed 1, `--trees`):
+  resident 659 MiB (2.15M L0 bricks, 31.7 of 64 voxels occupied on
+  average), load peak 3.68 GB; far pass 2.40 ms ridge / 6.16 overview,
+  of which the per-pixel shadow march was 60-70% (0.93 / 2.22 with TLAS
+  shadow rays); scene early + far field 5.94 vs 4.01 (TLAS shadows) at
+  the ridge. Fixes chosen: bricks storing an occupancy mask and only
+  their occupied voxels, the L0 splat in spatial slices, a sun shadow map
+  of the bricks instead of the per-pixel march, one raster box per
+  occupied brick column, two-phase Hi-Z culling of far cells.
 - **Rays:** M2a keeps the static TLAS and chooses per ray, by the
-  receiver's distance from the camera against `kFarShadowDistance` (4 km
-  to start). Near receivers trace every tree
-  in the TLAS (the reference). Far receivers mask placed trees out of
-  the ray query (a new instance-mask bit) and march the voxels with
-  Beer-Lambert. Every ray uses exactly one tree representation, so none
-  is counted twice. M2b's partitioned TLAS switches to per-cell
-  `cellInTlas` flags.
-- **Gates (M2a Task 8 prototype; decided after it, not cut pre-emptively):**
-  - far field resident <= 500 MB, load-time peak <= 2.5 GB;
-  - far raster <= 1.0 ms at the overview and ridge views;
-  - the voxel shadow march costs no more than TLAS shadows for far
-    receivers;
-  - shadow quality vs the reference (`--far-field off`, full-detail TLAS)
-    at the ridge and sunset views, which the user inspects;
-  - coverage: far-forest luminance within 5% of the same reference, with
-    no step at the switch or between levels.
+  receiver's distance from the camera against `kFarShadowDistance` (the
+  far switch distance). Near receivers trace every tree in the TLAS (the
+  reference). Far receivers mask placed trees out of the ray query (an
+  instance-mask bit) and read the sun shadow map of the bricks, rebuilt
+  over frames into a second map when the sun turns (no stall; the per-ray
+  brick march covers a fast sun drag until the swap). Every ray uses
+  exactly one tree representation.
+- **Gates** (spec): far field resident <= 500 MB and load peak <= 2.5 GB;
+  far pass <= 1.0 ms and mid pass <= 1.5 ms at the forest and overview
+  views; far shadows cost no more than the TLAS path; shadow pairs for
+  the user; coverage of each prototype's voxels within 5% of its
+  ray-traced full-detail BLAS.
 - **Build on the player's hardware:** prototype templates come from ray
   queries against each prototype's full-detail BLAS (three-axis pass
   fractions calibrate extinction against what RT shadows trace). The

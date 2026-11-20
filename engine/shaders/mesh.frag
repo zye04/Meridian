@@ -5,8 +5,7 @@
 #include "atmosphere.glsl"
 #include "material.glsl"
 #include "terrain.glsl"
-#include "weather.glsl"
-#include "clouds.glsl"
+#include "lighting.glsl"
 #ifdef TERRAIN
 #include "placement.glsl"
 #endif
@@ -46,11 +45,6 @@ layout(location = 5) out vec4 outNormalRoughness;
 // its own, so glass never darkens.
 layout(location = 6) out vec4 outSunLight;
 
-const float kShadowRayBias = 0.05;
-const float kShadowRayLength = 20000.0;
-const float kGroundAlbedo = 0.1;
-const float kMinPerceptualRoughness = 0.045;
-
 // inRelativePosition + cameraPosition, set first thing in main(); both are
 // in the flat world, before the curvature warp (common.glsl). World
 // positions place the shadow rays; derivatives, distances and terrain
@@ -60,64 +54,8 @@ vec3 worldPosition;
 
 // ---------------------------------------------------------------- Shadows
 
-// Picks a direction inside the sun's disk. One ray per pixel per frame;
-// accumulated over frames this gives penumbrae that widen with distance from
-// the occluder, like real sun shadows.
-vec3 sampleSunDirection(vec2 pixel) {
-    vec3 sun = pc.scene.sunDirection;
-    vec3 tangent = normalize(cross(abs(sun.y) < 0.99 ? vec3(0, 1, 0)
-                                                      : vec3(1, 0, 0), sun));
-    vec3 bitangent = cross(sun, tangent);
-
-    float noiseRadius;
-    float noiseAngle;
-    if (pc.scene.whiteNoise != 0u) {
-        uvec3 h = pcg3d(uvec3(uvec2(pixel), pc.scene.frameIndex));
-        noiseRadius = float(h.x >> 8u) * (1.0 / 16777216.0);
-        noiseAngle = float(h.y >> 8u) * (1.0 / 16777216.0);
-    } else {
-        noiseRadius = interleavedGradientNoise(pixel, pc.scene.frameIndex);
-        noiseAngle = interleavedGradientNoise(pixel + vec2(17.0, 31.0),
-                                              pc.scene.frameIndex);
-    }
-    float radius = tan(pc.scene.sunAngularRadius) * sqrt(noiseRadius);
-    float angle = 2.0 * kPi * noiseAngle;
-    return normalize(sun + radius * (cos(angle) * tangent +
-                                     sin(angle) * bitangent));
-}
-
-// Only opaque and alpha-masked instances cast shadows (see buildTlas).
-const uint kShadowCasterMask = 0x01u;
-
-// Alpha-masked geometry is non-opaque in the acceleration structure, so the
-// ray query reports each candidate hit; we accept it only where the base
-// color alpha passes the material's cutoff.
-bool alphaTestCandidate(rayQueryEXT query) {
-    MeshInfo mesh = pc.scene.meshes.meshes[instanceMesh(
-        pc.scene, rayQueryGetIntersectionInstanceCustomIndexEXT(query, false),
-        rayQueryGetIntersectionGeometryIndexEXT(query, false))];
-    uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
-    vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, false);
-
-    uint first = mesh.firstIndex + primitive * 3u;
-    Vertex v0 = pc.scene.vertices.vertices[pc.scene.indices.indices[first] + mesh.vertexOffset];
-    Vertex v1 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 1u] + mesh.vertexOffset];
-    Vertex v2 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 2u] + mesh.vertexOffset];
-    vec3 w = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics);
-    vec2 uv = w.x * vec2(v0.uvX, v0.uvY) + w.y * vec2(v1.uvX, v1.uvY) +
-              w.z * vec2(v2.uvX, v2.uvY);
-
-    Material m = pc.scene.materials.materials[mesh.materialIndex];
-    float alpha = m.baseColorFactor.a;
-    if (m.baseColorTexture != kNoTexture) {
-        alpha *= textureLod(textures[nonuniformEXT(m.baseColorTexture)], uv, 0.0).a;
-    }
-    return alpha >= m.alphaCutoff;
-}
-
-// Traces one ray toward the sun: 1 if it escapes, 0 if an object (the
-// TLAS) or the terrain (its heightfield) blocks it. On terrain the normal is
-// the smooth shading normal, elsewhere the triangle's.
+// The sun's visibility at a surface point (traceSunVisibility). On terrain
+// the normal is the smooth shading normal, elsewhere the triangle's.
 float sunVisibility(vec3 position, vec3 normal) {
 #ifdef TERRAIN
     // Start on the heightfield the march tests, not on the raster: coarse
@@ -142,42 +80,10 @@ float sunVisibility(vec3 position, vec3 normal) {
     vec3 marchOrigin = origin;
     marchOrigin.y = max(origin.y, terrainHeight(pc.scene.terrain, origin.xz) + kShadowRayBias);
 #endif
-    vec3 direction = sampleSunDirection(gl_FragCoord.xy);
-    // The TLAS query first: inside canopies it hits within a few meters,
-    // where the terrain march would walk the whole pyramid first.
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, accelerationStructureEXT(pc.scene.tlas),
-                          gl_RayFlagsTerminateOnFirstHitEXT, kShadowCasterMask,
-                          origin, 0.0, direction, kShadowRayLength);
-    while (rayQueryProceedEXT(query)) {
-        if (rayQueryGetIntersectionTypeEXT(query, false) ==
-                gl_RayQueryCandidateIntersectionTriangleEXT &&
-            alphaTestCandidate(query)) {
-            rayQueryConfirmIntersectionEXT(query);
-        }
-    }
-    if (rayQueryGetIntersectionTypeEXT(query, true) !=
-        gl_RayQueryCommittedIntersectionNoneEXT) {
-        return 0.0;
-    }
-    return terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength) ? 0.0 : 1.0;
+    return traceSunVisibility(origin, marchOrigin, sampleSunDirection(gl_FragCoord.xy), 0.0);
 }
 
 // ---------------------------------------------------------------- Surface
-
-struct Surface {
-    vec3 baseColor;
-    float alpha;
-    float metallic;
-    float perceptualRoughness;
-    float occlusion;
-    // AO that drives the micro shadow (see terrainMicroOcclusion).
-    float microOcclusion;
-    vec3 emissive;
-    vec3 normal;
-    // Parallax self-shadowing of the sun (1 = lit).
-    float sunShadow;
-};
 
 vec4 sampleTexture(uint index, vec2 uv) {
     return texture(textures[nonuniformEXT(index)], uv, pc.scene.mipBias);
@@ -972,59 +878,6 @@ Surface materialSurface(Material m, vec3 normal) {
     return s;
 }
 
-// ---------------------------------------------------------------- BRDF
-// Filament's standard model (google/filament, shaders/src/surface_brdf.fs):
-// GGX distribution, height-correlated Smith visibility, Schlick Fresnel,
-// Lambert diffuse, with multiple-scattering energy compensation.
-
-float distributionGgx(float NoH, float a) {
-    float a2 = a * a;
-    float f = (NoH * a2 - NoH) * NoH + 1.0;
-    return a2 / (kPi * f * f);
-}
-
-float visibilitySmithGgxCorrelated(float NoV, float NoL, float a) {
-    float a2 = a * a;
-    float ggxL = NoV * sqrt((NoL - NoL * a2) * NoL + a2);
-    float ggxV = NoL * sqrt((NoV - NoV * a2) * NoV + a2);
-    return 0.5 / (ggxV + ggxL);
-}
-
-vec3 fresnelSchlick(vec3 f0, float VoH) {
-    float f = pow(1.0 - VoH, 5.0);
-    return f + f0 * (1.0 - f);
-}
-
-// ---------------------------------------------------------------- Ambient occlusion
-
-// Material AO is single-bounce visibility; light also reaches a cavity
-// after bouncing inside it, more so the brighter its walls. Jimenez et al.
-// 2016 fit that multi-bounce visibility as a cubic in AO per albedo.
-vec3 multiBounceOcclusion(float visibility, vec3 albedo) {
-    vec3 a = 2.0404 * albedo - 0.3324;
-    vec3 b = -4.7951 * albedo + 0.6417;
-    vec3 c = 2.7552 * albedo + 0.6903;
-    return max(vec3(visibility), ((visibility * a + b) * visibility + c) * visibility);
-}
-
-// Micro shadows: the AO says how much of the hemisphere the cavity leaves
-// open; a cone of that aperture around the normal hides the sun once N.L
-// drops below it. Chan, "Material Advances in Call of Duty: WWII" (2018),
-// as in Filament.
-float microShadow(float NoL, float visibility) {
-    float aperture = inversesqrt(1.0 - min(visibility, 0.9999));
-    float shadow = clamp(NoL * aperture, 0.0, 1.0);
-    return shadow * shadow;
-}
-
-// Diffuse AO applied to a reflection lobe (Lagarde and de Rousiers 2014):
-// a narrow lobe seen head-on escapes most cavities; at grazing angles or
-// with rough lobes it approaches the diffuse AO.
-float specularAmbientOcclusion(float NoV, float visibility, float roughness) {
-    return clamp(pow(NoV + visibility, exp2(-16.0 * roughness - 1.0)) - 1.0 + visibility,
-                 0.0, 1.0);
-}
-
 void main() {
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
 #ifdef TERRAIN
@@ -1045,19 +898,7 @@ void main() {
     }
 #endif
 
-    vec3 N = s.normal;
-    vec3 V = normalize(-inRelativePosition);
-    vec3 L = pc.scene.sunDirection;
-    float NoV = max(dot(N, V), 1e-4);
-
-    float perceptualRoughness = clamp(s.perceptualRoughness, kMinPerceptualRoughness, 1.0);
-    float a = perceptualRoughness * perceptualRoughness;
-    // Dielectrics reflect ~4% at normal incidence; metals tint reflection.
-    vec3 f0 = mix(vec3(0.04), s.baseColor, s.metallic);
-    vec3 diffuseColor = s.baseColor * (1.0 - s.metallic);
-
-    vec2 dfg = textureLod(dfgLut, vec2(NoV, perceptualRoughness), 0.0).xy;
-    vec3 energyCompensation = 1.0 + f0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
+    Shading sh = beginShading(s, inRelativePosition);
 
     // Offset shadow rays along the true triangle normal: the smooth shading
     // normal can point below the surface and make the ray hit its own
@@ -1068,115 +909,66 @@ void main() {
         geometricNormal = -geometricNormal;
     }
 
-    // All lighting is relative to a sun illuminance of 1 (as in the
-    // atmosphere LUTs) and scaled by the real sun at the end.
-    // The atmosphere is a sphere: light the point where it is displayed,
-    // not the flat point d^2 / 2R above it (shadow rays stay flat).
-    vec3 position = atmospherePosition(
-        pc.scene.cameraPosition + displayedPosition(pc.scene, inRelativePosition).xyz);
-    float height = length(position);
-    vec3 up = position / height;
-    vec3 sunAtSurface = transmittanceToSun(height, dot(up, L)) * cloudShadow(worldPosition);
-
-    // Diffuse and specular are kept apart: a blended surface (glass) fades
-    // its diffuse with alpha but keeps its full reflection.
-    vec3 diffuseLight = vec3(0.0);
-    vec3 specularLight = vec3(0.0);
     vec3 sunRadiance = vec3(0.0);
-    float NoL = clamp(dot(N, L), 0.0, 1.0);
 #ifdef TERRAIN
     // A coarse LOD triangle can face away from the sun where the
     // heightfield (the shading normal) doesn't; its facing would cut the
     // light per triangle.
     bool facesSun = true;
 #else
-    bool facesSun = dot(geometricNormal, L) > 0.0;
+    bool facesSun = dot(geometricNormal, sh.L) > 0.0;
 #endif
-    if (NoL > 0.0 && facesSun) {
+    if (sh.NoL > 0.0 && facesSun) {
 #ifdef TERRAIN
         float visibility = sunVisibility(worldPosition, normal);
 #else
         float visibility = sunVisibility(worldPosition, geometricNormal);
 #endif
-        vec3 H = normalize(V + L);
-        float NoH = clamp(dot(N, H), 0.0, 1.0);
-        float LoH = clamp(dot(L, H), 0.0, 1.0);
-
-        vec3 specular = distributionGgx(NoH, a) *
-                        visibilitySmithGgxCorrelated(NoV, NoL, a) *
-                        fresnelSchlick(f0, LoH) * energyCompensation;
 #ifdef TERRAIN
         float plantSun = 1.0;
 #else
         float plantSun = mix(1.0, plantOcclusion(material), 0.5);
 #endif
-        vec3 sunLight = sunAtSurface * (plantSun * NoL * visibility * mix(1.0, microShadow(NoL, s.microOcclusion),
-                                                         pc.scene.microShadowStrength) *
-                                        s.sunShadow);
-        diffuseLight = diffuseColor / kPi * sunLight;
-        specularLight = specular * sunLight;
-        sunRadiance = diffuseLight + specularLight;
+        addSunLight(sh, visibility,
+                    plantSun *
+                        mix(1.0, microShadow(sh.NoL, s.microOcclusion), pc.scene.microShadowStrength) *
+                        s.sunShadow);
+        sunRadiance = sh.diffuseLight + sh.specularLight;
     }
 #ifndef TERRAIN
     bool leaf = material.diffuseTransmission > 0.0;
-    if (leaf && dot(N, L) < 0.0 && dot(geometricNormal, L) < 0.0) {
+    if (leaf && dot(sh.N, sh.L) < 0.0 && dot(geometricNormal, sh.L) < 0.0) {
         float visibility = sunVisibility(worldPosition, -geometricNormal);
-        diffuseLight += diffuseColor / kPi * sunAtSurface *
-                        (clamp(-dot(N, L), 0.0, 1.0) * visibility) * material.diffuseTransmission;
+        sh.diffuseLight += sh.diffuseColor / kPi * sh.sunAtSurface *
+                           (clamp(-dot(sh.N, sh.L), 0.0, 1.0) * visibility) *
+                           material.diffuseTransmission;
     }
 #endif
 
-    // Ambient from the sky (clouds included). Diffuse: sky irradiance from
-    // above, light bounced off the ground from below. Specular: the sky in
-    // the reflected direction with the sky capture's clouds over it, blurred
-    // toward the irradiance as roughness grows (until reflections are ray
-    // traced).
-    vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
-    vec3 groundIrradiance =
-        kGroundAlbedo * (sunAtSurface * max(L.y, 0.0) + skyIrradiance);
-    vec3 diffuseIrradiance = mix(groundIrradiance, skyIrradiance, N.y * 0.5 + 0.5);
-    vec3 R = reflect(-V, N);
-    vec4 cloudsInR = skyCaptureAt(R);
-    vec3 skyRadiance =
-        mix(skyLuminance(position, R) * cloudsInR.a + cloudsInR.rgb, skyIrradiance / kPi, a);
-    vec3 specularReflectance = mix(dfg.xxx, dfg.yyy, f0) * energyCompensation;
-    float specularOcclusion = specularAmbientOcclusion(NoV, s.occlusion, a);
-    diffuseLight += diffuseColor / kPi * diffuseIrradiance *
-                    multiBounceOcclusion(s.occlusion, diffuseColor);
+    addAmbientLight(sh, s.occlusion);
 #ifndef TERRAIN
     if (leaf) {
-        vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -N.y * 0.5 + 0.5);
-        diffuseLight += diffuseColor / kPi * backIrradiance * material.diffuseTransmission *
-                        multiBounceOcclusion(s.occlusion, diffuseColor);
+        vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
+        vec3 groundIrradiance =
+            kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
+        vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -sh.N.y * 0.5 + 0.5);
+        sh.diffuseLight += sh.diffuseColor / kPi * backIrradiance * material.diffuseTransmission *
+                           multiBounceOcclusion(s.occlusion, sh.diffuseColor);
     }
 #endif
-    specularLight += specularReflectance * skyRadiance *
-                     multiBounceOcclusion(specularOcclusion, f0);
 
 #ifdef ALPHA_BLEND
     // Premultiplied alpha (blend: one, one-minus-source-alpha).
     float coverage = s.alpha;
-    vec3 luminance = diffuseLight * coverage + specularLight;
+    vec3 luminance = sh.diffuseLight * coverage + sh.specularLight;
 #else
     float coverage = 1.0;
-    vec3 luminance = diffuseLight + specularLight;
+    vec3 luminance = sh.diffuseLight + sh.specularLight;
 #endif
 
-    // Aerial perspective: haze between the camera and this point as
-    // displayed (inRelativePosition is the flat world's).
-    float distanceKm = length(displayedPosition(pc.scene, inRelativePosition).xyz) * 0.001;
-    float slice = distanceKm / kAerialPerspectiveKmPerSlice;
-    float weight = 1.0;
-    if (slice < 0.5) {
-        // Fade in over the first half slice instead of jumping.
-        weight = clamp(slice * 2.0, 0.0, 1.0);
-        slice = 0.5;
-    }
-    float w = sqrt(slice / kAerialPerspectiveSlices);
-    vec4 haze = textureLod(aerialPerspectiveLut,
-                           vec3(gl_FragCoord.xy * pc.scene.inverseResolution, w), 0.0);
-    luminance = luminance * mix(1.0, haze.a, weight) + haze.rgb * (weight * coverage);
-    sunRadiance *= mix(1.0, haze.a, weight);
+    float hazeTransmittance;
+    luminance = applyAerialPerspective(luminance, inRelativePosition, coverage, hazeTransmittance);
+    sunRadiance *= hazeTransmittance;
 
     // Emissive is already in physical units (cd/m^2), not relative to the sun.
     vec3 exposed = luminance * pc.scene.sunIlluminance + s.emissive;
@@ -1189,9 +981,9 @@ void main() {
     outTransparency = coverage;
     outSunLight = vec4(0.0, 0.0, 0.0, coverage);
 #else
-    outDiffuseAlbedo = vec4(diffuseColor, 1.0);
-    outSpecularAlbedo = vec4(mix(dfg.xxx, dfg.yyy, f0), 1.0);
-    outNormalRoughness = vec4(N, perceptualRoughness);
+    outDiffuseAlbedo = vec4(sh.diffuseColor, 1.0);
+    outSpecularAlbedo = vec4(mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0), 1.0);
+    outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
     outSunLight = vec4(sunRadiance * pc.scene.sunIlluminance * pc.scene.exposure.exposure, 1.0);
 #endif
 }

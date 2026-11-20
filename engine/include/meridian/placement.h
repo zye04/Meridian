@@ -51,6 +51,10 @@ struct PlacementLayer {
   // around the camera; full density within this distance, then thinned). A
   // streamed layer needs maxDrawDistance > 0.
   float streamFullDensity = 0.0f;
+  // Its instances are splatted into the far field (farfield.h), which draws
+  // distant cells instead of them. Far-field layers come first, and their
+  // prototypes are in no other layer.
+  bool farField = false;
 };
 
 // Streamed placement: fraction of a layer's points kept at distance d.

@@ -2,6 +2,7 @@
 // GLSL declarations in engine/shaders; change both together.
 #pragma once
 
+#include <meridian/farfield.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
 #include <meridian/weather.h>
@@ -454,7 +455,8 @@ struct SceneData {
   // far instances' bounds reach past their cell horizontally.
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
-  uint32_t pad3 = 0;
+  // Whether farField is set: cells past the far switch draw their voxels.
+  uint32_t farFieldEnabled = 0;
   // Streamed placement: the ring's instances, the streamed cell records
   // (after the grid's cells in `cells`), and per streamed layer
   // (fullDensity, maxDistance), per ring instance threshold | layer << 16,
@@ -479,6 +481,14 @@ struct SceneData {
   GpuWeather weather;
   // std430 aligns Clouds (vec3 members) to 16 bytes.
   alignas(16) GpuClouds clouds;
+  // The far field (GpuFarField) and the list of far cells the cell cull
+  // appends for voxel.mesh (cell | level << 30, one per cell).
+  VkDeviceAddress farField = 0;
+  VkDeviceAddress farCellList = 0;
+  // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
+  // far field instead of the TLAS's far-field trees (needs farField).
+  uint32_t voxelFarShadows = 0;
+  uint32_t pad6 = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -487,7 +497,8 @@ static_assert(offsetof(SceneData, wind) == 1896);
 static_assert(offsetof(SceneData, previousWind) == 1944);
 static_assert(offsetof(SceneData, weather) == 1992);
 static_assert(offsetof(SceneData, clouds) == 2032);
-static_assert(sizeof(SceneData) == 2192);
+static_assert(offsetof(SceneData, farField) == 2192);
+static_assert(sizeof(SceneData) == 2224);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -556,12 +567,14 @@ static_assert(sizeof(ClusterLevelGpu) == 16);
 // Must match PrototypeInfo in common.glsl. A placed prototype: its meshes
 // (prototypeMeshes[firstMesh..]; a ray hit's geometry index counts from
 // firstMesh), their combined bounding sphere and the BLAS holding them.
-// transitionSize: projected size below which it is drawn as an impostor
-// (0: never). maxDrawDistance: the largest of its layers' (0: none).
+// tlasMask: its TLAS records' instance mask (kShadowCasterMask, or
+// kFarFieldCasterMask in a far-field layer). transitionSize: projected size
+// below which it is drawn as an impostor (0: never). maxDrawDistance: the largest of its layers' (0: none).
 struct PrototypeInfo {
   uint32_t firstMesh = 0;
   uint32_t meshCount = 0;
-  uint32_t pad[2] = {}; // std430 aligns the vec3 to 16 bytes
+  uint32_t tlasMask = 0;
+  uint32_t pad = 0; // std430 aligns the vec3 to 16 bytes
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
   VkDeviceAddress blasAddress = 0;
@@ -605,8 +618,12 @@ struct DrawCounters {
   // workgroup per 64 nodes) and node count.
   uint32_t traverseDispatch[2][kBvhDepths][3];
   uint32_t traverseCount[2][kBvhDepths];
+  // vkCmdDrawMeshTasksIndirectEXT arguments for the far cells, one voxel.mesh
+  // workgroup per cell (x counts the far cells drawn).
+  uint32_t farTasks[3];
+  uint32_t pad2;
 };
-static_assert(sizeof(DrawCounters) == (52 + 8 * kBvhDepths) * 4);
+static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -622,6 +639,7 @@ static_assert(offsetof(DrawCounters, drops) == 45 * 4);
 static_assert(offsetof(DrawCounters, bvhNodes) == 50 * 4);
 static_assert(offsetof(DrawCounters, traverseDispatch) == 52 * 4);
 static_assert(offsetof(DrawCounters, traverseCount) == (52 + 6 * kBvhDepths) * 4);
+static_assert(offsetof(DrawCounters, farTasks) == (52 + 8 * kBvhDepths) * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -732,6 +750,118 @@ struct TlasFillConstants {
 static_assert(sizeof(TlasFillConstants) == 32);
 static_assert(sizeof(VkAccelerationStructureInstanceKHR) == 64);
 
+// Far field (renderer_farfield.cpp). Must match FarCell in farfield.glsl.
+// Per placement cell: the canopy's extent over all levels (bottom > top
+// when empty), how many of the cell's instances (the start of its run) are
+// in far-field layers, and the tallest of them (m above its origin).
+struct FarCell {
+  float bottom = 0.0f;
+  float top = 0.0f;
+  uint32_t treeCount = 0;
+  float treeHeight = 0.0f;
+};
+static_assert(sizeof(FarCell) == 16);
+
+// Must match FarField in farfield.glsl: per level the brick columns and
+// voxel pools, then FarCell per cell, the canopy top pyramid (levels
+// 1..pyramidLevels, max over 2^k x 2^k cells; level 0 is FarCell::top),
+// the albedo palette (vec4, linear) and the grid (FarFieldCpu's).
+struct GpuFarField {
+  VkDeviceAddress columns[kFarLevels] = {};
+  VkDeviceAddress voxels[kFarLevels] = {};
+  VkDeviceAddress cells = 0;
+  VkDeviceAddress pyramid = 0;
+  VkDeviceAddress palette = 0;
+  float originX = 0.0f;
+  float originZ = 0.0f;
+  float heightBase = 0.0f;
+  uint32_t cellsX = 0;
+  uint32_t cellsZ = 0;
+  uint32_t pyramidLevels = 0;
+  uint32_t paletteSize = 0;
+  uint32_t pad = 0;
+  uint32_t pyramidOffsets[16] = {};
+};
+static_assert(sizeof(GpuFarField) == 168);
+
+// Must match FarTemplateInfo in farfield.glsl; one per (prototype, level).
+struct FarTemplateInfo {
+  Vec3 centerMin;
+  uint32_t firstVoxel = 0;
+  Vec3 centerMax;
+  uint32_t voxelCount = 0;
+};
+static_assert(sizeof(FarTemplateInfo) == 32);
+
+// Must match the push constants in farfield_splat.comp.
+struct FarSplatConstants {
+  VkDeviceAddress placed = 0;
+  VkDeviceAddress templates = 0;
+  VkDeviceAddress templateVoxels = 0;
+  VkDeviceAddress columns = 0;
+  VkDeviceAddress accumulators = 0;
+  VkDeviceAddress voxels = 0;
+  VkDeviceAddress palette = 0;
+  VkDeviceAddress cellData = 0;
+  float originX = 0.0f;
+  float originZ = 0.0f;
+  float heightBase = 0.0f;
+  float fixedScale = 0.0f;
+  uint32_t cellsX = 0;
+  uint32_t cellsZ = 0;
+  uint32_t level = 0;
+  uint32_t count = 0;
+  uint32_t paletteSize = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarSplatConstants) == 104);
+
+// Must match the push constants in farfield_check.comp (Debug).
+struct FarCheckConstants {
+  VkDeviceAddress field = 0; // GpuFarField
+  VkDeviceAddress rays = 0;
+  VkDeviceAddress results = 0;
+  uint32_t count = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarCheckConstants) == 32);
+
+// The prototype bake: rays per axis and voxel face, and mesh slots per
+// prototype (its meshes; more share the last slot's hit counts).
+constexpr uint32_t kFarBakeRays = 8;
+constexpr uint32_t kFarBakeSlots = 8;
+static_assert(3 * kFarBakeRays * kFarBakeRays < 256, "slot hits are 8-bit");
+
+// Must match the push constants in farfield_bake.comp.
+struct FarBakeConstants {
+  VkDeviceAddress tlas = 0;
+  VkDeviceAddress vertices = 0;
+  VkDeviceAddress indices = 0;
+  VkDeviceAddress meshes = 0;
+  VkDeviceAddress materials = 0;
+  VkDeviceAddress prototypeMeshes = 0;
+  VkDeviceAddress bake = 0;
+  uint32_t firstMesh = 0;
+  uint32_t meshCount = 0;
+  float origin[3] = {};
+  uint32_t raysPerAxis = 0;
+  uint32_t size[3] = {};
+  uint32_t pad = 0;
+};
+static_assert(sizeof(FarBakeConstants) == 96);
+static_assert(offsetof(FarBakeConstants, origin) == 64);
+static_assert(offsetof(FarBakeConstants, size) == 80);
+
+// Must match BakeVoxel in farfield_bake.comp.
+struct FarBakeVoxel {
+  uint32_t passes;
+  uint32_t hits;
+  uint32_t slotHits[2];
+  float normal[4];
+  float slotColor[kFarBakeSlots][4];
+};
+static_assert(sizeof(FarBakeVoxel) == 160);
+
 // Must match the push constants in scan.comp.
 struct ScanConstants {
   VkDeviceAddress values = 0;
@@ -809,9 +939,12 @@ struct TerrainSelectConstants {
 };
 static_assert(sizeof(TerrainSelectConstants) == 48);
 
-// TLAS instance masks: shadow rays only test shadow casters.
+// TLAS instance masks: shadow rays only test shadow casters. The placed
+// trees of far-field layers cast shadows only on receivers nearer than
+// kFarShadowDistance (lighting.glsl); the far field stands in beyond.
 constexpr uint8_t kShadowCasterMask = 0x01;
 constexpr uint8_t kNonCasterMask = 0x02;
+constexpr uint8_t kFarFieldCasterMask = 0x04;
 
 // Must match SkyIrradianceBuffer in common.glsl (std430: each vec3 takes 16
 // bytes).

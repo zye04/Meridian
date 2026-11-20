@@ -53,6 +53,8 @@ const uint kCounterBvhNodes = 50u;
 // phase and depth the node counts.
 const uint kCounterTraverseDispatch = 52u;
 const uint kCounterTraverseCount = kCounterTraverseDispatch + 6u * kBvhDepths;
+// voxel.mesh's task arguments (3 uints): x is the far cell count.
+const uint kCounterFarTasks = kCounterTraverseDispatch + 8u * kBvhDepths;
 
 // Clusters phase 0 found occluded by last frame's pyramid: (instance,
 // cluster), retested in phase 1 against this frame's.

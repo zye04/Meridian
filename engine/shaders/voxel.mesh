@@ -1,0 +1,53 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "farfield.glsl"
+
+// One workgroup per far cell (the list cell_cull.comp appends in phase 0):
+// the cell's canopy box, which voxel.frag marches. The voxels are flat
+// (curvature is a display warp); the box and everything in it drop by one
+// constant, the drop at the box's center, so the march only shifts the view
+// ray up by it. Across a 64 m cell the drop varies by under 0.2 m.
+
+layout(local_size_x = 8) in;
+layout(triangles, max_vertices = 8, max_primitives = 12) out;
+
+// Relative to the camera, as displayed.
+layout(location = 0) out vec3 outDisplayed[];
+// The far list entry: cell | level << 30.
+layout(location = 1) flat out uint outEntry[];
+layout(location = 2) flat out float outDrop[];
+
+// Corner i is (x, y, z) = bits (0, 1, 2) of i. Two triangles per face,
+// counter-clockwise seen from outside (like the terrain's, seen from above).
+const uint kFaces[24] = uint[24](1, 3, 7, 5, 0, 4, 6, 2, 2, 6, 7, 3,
+                                 0, 1, 5, 4, 4, 5, 7, 6, 0, 2, 3, 1);
+
+void main() {
+    SceneBuffer scene = pc.scene;
+    uint entry = scene.farCellList.entries[gl_WorkGroupID.x];
+    uint index = entry & 0x3FFFFFFFu;
+    FarCell far = scene.farField.field.cells.cells[index];
+    float pad = farCanopyPad(entry >> 30u);
+    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
+    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
+    vec3 boxLo = vec3(lo.x, far.bottom - pad, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(lo.x + kCellSize, far.top + pad, lo.y + kCellSize) - scene.cameraPosition;
+    float drop = curvatureDrop(scene, (boxLo + boxHi) * 0.5);
+
+    SetMeshOutputsEXT(8, 12);
+    uint i = gl_LocalInvocationIndex;
+    vec3 corner = mix(boxLo, boxHi, vec3(i & 1u, (i >> 1) & 1u, (i >> 2) & 1u));
+    corner.y -= drop;
+    gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * vec4(corner, 1.0);
+    outDisplayed[i] = corner;
+    outEntry[i] = entry;
+    outDrop[i] = drop;
+    if (i < 6u) {
+        uvec4 q = uvec4(kFaces[i * 4u], kFaces[i * 4u + 1u], kFaces[i * 4u + 2u],
+                        kFaces[i * 4u + 3u]);
+        gl_PrimitiveTriangleIndicesEXT[i * 2u] = q.xyz;
+        gl_PrimitiveTriangleIndicesEXT[i * 2u + 1u] = q.xzw;
+    }
+}

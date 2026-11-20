@@ -1,272 +1,286 @@
-# Far-field forests: per-cell voxel bricks (M2a)
+# Far-field forests: voxel tiers (M2a)
 
-**Status:** decided; built by M2a Tasks 8-9 (not started).
+**Status:** revised 2026-11-20 (lane M2a-far): three tiers, no impostors.
+The far tier's prototype is built (Task 8, gates failed as measured); Tasks
+9-13 of the forests plan build the revision.
 
-Decided with the user on 2026-11-20: option C of the far-field draft. Forest
-cells past a screen-size threshold are drawn as one aggregate each, a
-sparse hierarchy of voxel bricks, instead of per-instance impostors. The
-same bricks are the far ray field for sun shadows (M2a) and sky
-visibility (M2b), so one structure serves raster and rays. The reference
-is Chlorophyll Engine's per-tile voxel far field. Read this spec with the
-M2a forests spec (`2026-11-19-forests-design.md`) and M2b's
-(`2026-11-19-forest-lighting-design.md`), whose far canopy field it
-replaces.
+Decided with the user on 2026-11-20: option C of the far-field draft
+(voxels), and no impostors anywhere. The model is Chlorophyll Engine, whose
+author describes three tiers: GPU-driven meshlets near, "small triangles
+rendered as voxels" per instance, and past a screen-footprint threshold only
+a per-tile voxel hierarchy (per-instance data dropped). This spec follows
+that:
+
+1. **Near:** each tree as clusters of its LOD DAG (unchanged).
+2. **Mid:** each tree as its prototype's voxels, from where its triangles
+   go sub-pixel. Every tree prototype has a sparse brick hierarchy in its
+   own space, shared by all its instances (memory per prototype).
+3. **Far:** forest cells past the far switch as one aggregate each, a
+   sparse hierarchy of world voxel bricks (the Task 8 prototype).
+
+The world bricks are also the far ray field for sun shadows (through a sun
+shadow map built from them) and for sky visibility (M2b), replacing M2b's
+2D canopy field. Read this spec with the M2a forests spec
+(`2026-11-19-forests-design.md`) and M2b's
+(`2026-11-19-forest-lighting-design.md`).
 
 ## Goals
 
 - Forests to the edge of the 15 km crop at a cost that scales with covered
   pixels, not with the 2.9M placed trees.
-- Distant forests are prefiltered rather than built from sub-pixel
-  alpha-tested quads, so they don't shimmer. They also give TAA/DLSS
-  exact depth and camera motion vectors, like any static surface.
-- One far ray field for sun shadows and sky visibility, traced in the
-  shader alongside the TLAS query.
-- Built at load on the player's GPU from the placed table (nothing on
-  disk). Prototype bricks are cached like impostors if their bake exceeds
-  ~5 s.
+- Trees whose triangles are sub-pixel are prefiltered voxels, not
+  simplified or alpha-tested triangles, so crowns keep their coverage (the
+  DAG's coarse foliage loses leaves) and don't shimmer. Every tier gives
+  TAA/DLSS exact depth and motion vectors, like any static surface.
+- One far ray field for sun shadows and sky visibility.
+- Built at load on the player's GPU (nothing on disk unless a bake exceeds
+  ~5 s).
 
 ## Non-goals
 
-- 3D silhouettes of single crowns beyond ~4 km. The user accepted this if
-  the ridge views look right. That is what lets the bricks stay coarse
-  (see Resolution).
-- Streaming. Everything stays resident unless the prototype fails the VRAM
-  gate.
-- Low-end pure-2D far field (backlog). Hand-placed models in the far field:
-  they stay per-instance meshes.
-- Animated far field (wind). Trees are static.
+- 3D silhouettes of single crowns beyond the far switch (~4.8 km). The
+  user accepted this if the ridge views look right; it keeps the world
+  bricks coarse (see Resolution).
+- Streaming. Everything stays resident unless the VRAM gate fails.
+- Low-end pure-2D far field (backlog). Hand-placed models stay
+  per-instance meshes at every distance.
+- Animated voxels (wind). Trees are static.
 
 ## Representations by distance (raster)
 
 ```mermaid
 flowchart LR
-  subgraph Near["clusters (to the impostor transition, measured)"]
-    C1[cluster BVH traversal]
+  subgraph Near["near: clusters"]
+    C1[cluster BVH traversal<br/>full triangles]
   end
-  subgraph Mid["impostors (to the far switch, ~4 km)"]
-    I1[hemi-octahedral impostor per instance]
+  subgraph Mid["mid: prototype voxels per instance"]
+    M1[instance box -> DDA in the<br/>prototype's local bricks<br/>mip by pixel size]
   end
-  subgraph Far["voxel cell (beyond)"]
-    V1[brick march per 64 m cell<br/>L0 4 m, L1 8 m, L2 16 m]
+  subgraph Far["far: world voxels per 64 m cell"]
+    V1[column boxes -> brick march<br/>L0 4 m, L1 8 m, L2 16 m]
   end
-  Near --> Mid --> Far
+  Near -- "finest prototype voxel <= 1 px<br/>(dithered band)" --> Mid
+  Mid -- "4 m voxel <= 1 px, per cell<br/>(hysteresis)" --> Far
 ```
 
-- The far switch is per 64 m cell, by projected size. A cell goes far when
-  its tallest prototype projects under `kFarSwitchPixels` (starting at
-  6 px, ~4 km for a 25 m tree, where one pixel is ~3.9 m, one L0 voxel).
-  It switches back at 1.1x that size (hysteresis), so a camera hovering at
-  the boundary doesn't thrash.
-- A far cell skips its tree-layer instances entirely: the cell cull emits
-  no chunk for them (rock instances still go through). This is Chlorophyll's "per-instance data streamed out", without
-  moving memory: the placed table is 70 MB and stays resident.
-- Handoff: a short projected-size band where the cell's impostors dither
-  out and its voxels dither in with complementary per-pixel masks,
-  resolved by TAA (the same scheme as the cluster-to-impostor fade).
-- Cell borders: bricks are splatted by world position, but the switch
+- **Near to mid, per instance** (cull.comp): an instance switches to its
+  prototype's voxels when the prototype's finest voxel projects to at most
+  `kVoxelSwitchPixels` (1 px to start; the finest voxel is the prototype's
+  height / 128, ~0.2 m for a 25 m tree, so ~250 m at 1440p). Over a short
+  band (10% of that distance) both draw with complementary per-pixel
+  dither masks, resolved by DLSS/TAA. The switch distance is tuned by
+  measurement (coverage against the reference, the look at the band).
+- **Mid to far, per 64 m cell** (cell_cull.comp): a cell goes far when an
+  L0 voxel (4 m) projects to at most 1 px from the nearest point of its
+  canopy box (~4.8 km), and back at 1.1x (hysteresis, `farSwitch`). A far
+  cell skips its tree-layer instances (rock instances still go through);
+  the placed table stays resident. Mid trees at that distance draw their
+  4 m mip, so the switch is between two 4 m voxel images: a hard switch
+  with hysteresis, no dither band unless the motion captures show a pop.
+- **Cell borders:** bricks are splatted by world position, but the switch
   works on whole cells by tree origin. A crown that crosses into a far
-  neighbor is drawn twice (as an impostor and as voxels), and one from a
-  far cell is cut where it reaches into a near one. At ~4 km that is
-  about half a crown, ~1.5 px, inside the dithered band. **Accepted**
-  (user, 2026-11-20),
-  and measured in Task 8's handoff capture. If it shows, the fix is
-  bricks per owner cell (each cell's bricks padded by the largest crown
-  radius, the DDA testing overlapping neighbors).
+  neighbor is drawn twice, one from a far cell is cut where it reaches a
+  mid one: about half a crown, ~1 px at 4.8 km. **Accepted** (user,
+  2026-11-20); if the captures show it, the fix is bricks per owner cell.
 
-## Data
+## Mid tier: prototype voxels
+
+- **Bake** at load per tree prototype (extends Task 8's bake): ray queries
+  against a one-instance TLAS of the prototype's full-detail BLAS (alpha
+  test included) measure three-axis pass fractions per finest voxel
+  (height / 128), giving extinction calibrated against what RT shadows
+  trace, plus the mean hit normal and albedo-palette entry. Mips halve down
+  to 4 m (5-6 levels). Bricks of 4^3 voxels in the prototype's local space,
+  only occupied ones stored, same 4 B voxel as the world bricks; a brick
+  table per mip (dense grid of brick indices, the prototype's bounds are
+  small). Expected a few MB per prototype.
+- **Draw:** cull.comp appends mid instances (instance id, mip) to a voxel
+  instance list (fixed capacity, overflow counted). `voxel_instance.mesh`
+  packs many instances per workgroup, emitting each one's oriented box
+  (instance quaternion and scale, curvature drop of the box center, padded
+  by the drop's variation). `voxel_instance.frag` moves the view ray into
+  the prototype's space and runs the same brick DDA as the far tier at the
+  instance's mip (the coarsest whose voxel projects to <= 1 px), stopping
+  at accumulated opacity 0.5 or discarding; conservative depth, motion
+  vectors from the flat hit with last frame's camera, shading through
+  `lighting.glsl`. Drawn in the early and late scene passes like clusters
+  (the instance's visibility bit decides which).
+- **Shadows on mid receivers:** the hit lies inside the crown, so a TLAS ray
+  from it would hit the tree's own leaves at a random depth. The ray toward
+  the sun marches the prototype's own bricks to the instance box's exit
+  (Beer-Lambert self-shadow), then traces the TLAS from the exit point (and
+  the far rule below beyond `kFarShadowDistance`).
+- **Ray-traced occluders** stay full-detail BLAS for every tier in the TLAS
+  (the reference), as now.
+
+## Far tier: world bricks
 
 ```mermaid
 flowchart LR
-  PT[Placed table<br/>2.9M x 24 B] --> SP[Brick splat at load<br/>per instance, rotated + scaled]
-  PB[Prototype bake<br/>ray-query voxelization of the BLAS<br/>+ extinction calibration] --> SP
-  SP --> BP[Brick pool L0/L1/L2<br/>4 B voxels]
+  PT[Placed table<br/>2.9M x 24 B] --> SP[Brick splat at load<br/>per instance, rotated + scaled<br/>L0 in spatial slices]
+  PB[Prototype bake<br/>ray-query voxelization of the BLAS] --> SP
+  PB --> PV[Prototype bricks<br/>mid tier]
+  SP --> BP[Compact brick pool L0/L1/L2<br/>occupancy mask + packed 4 B voxels]
   SP --> CM[Cell column map<br/>+ canopy max pyramid]
-  CC[Cell cull] -->|near cells| IC[Instance cull -> clusters / impostors]
+  CC[Cell cull] -->|near/mid cells| IC[Instance cull -> clusters or voxel instances]
   CC -->|far cells| FL[Far cell list]
-  FL --> VR[voxel.mesh/frag<br/>cell box, brick march<br/>depth + motion + shading]
+  FL --> VR[voxel.mesh/frag<br/>column boxes, brick march]
   BP --> VR
   CM --> VR
-  BP --> FM[farFieldTransmittance<br/>shadow + sky rays]
-  CM --> FM
-  FM --> SH[mesh.frag / impostor.frag / voxel.frag]
+  BP --> SM[Sun shadow map of the bricks<br/>rebuilt over frames when the sun moves]
+  SM --> SH[far receivers: mesh.frag, voxel shaders]
+  BP --> FM[farFieldTransmittance<br/>per-ray march: shadow-map fallback, M2b sky rays]
 ```
 
-- **Prototype bricks** are baked at load per tree prototype. Ray queries
-  against a one-instance TLAS of the prototype's full-detail BLAS (alpha
-  test included) measure, per 1 m template voxel, the fraction of rays
-  that pass along three axes. That gives extinction calibrated against
-  the same geometry the RT shadows trace. Each voxel also stores the
-  mean normal of the hits and the material (leaf or bark). The 1 m
-  template is filtered down to 4, 8 and 16 m.
-- **Splat** at load, in compute over the placed table. Each forest or
-  lone tree resamples its prototype template through its inverse
-  transform into the world voxels it overlaps, at each level. It
-  accumulates extinction-weighted density, normal and per-material
-  weight into a transient buffer, then packs them. First an occupancy
-  pass marks touched bricks, and then count, scan and allocate (the
-  placement pattern) give each level its dense brick pool. Only those
-  bricks get accumulators: ~6 u32 per voxel (extinction, normal xyz,
-  RGB albedo; the palette entry nearest the mean albedo is picked at
-  pack time). The atomics are fixed-point integer, so the sum doesn't
-  depend on order and the build is deterministic. The scale is chosen
-  so the worst-case overlap (every tree of a dense 64 m cell in one
-  voxel) can't overflow. Levels are built one at a time, so the peak
-  transient VRAM is one level's accumulators (L0: ~1.1-1.45M bricks x 64
-  x 24 B, ~1.7-2.2 GB, freed before the next level). Rocks are
-  not voxelized: their layer has no far switch and keeps the
-  per-instance cluster path at every distance (a 10 m rock is ~3 px at
-  4 km). Task 12 measures what that costs; the lever is the rock layer's
-  maximum draw distance (Task 5).
+- **Splat** at load, in compute over the placed table, from the prototype
+  bake's 1 m template filtered to 4, 8 and 16 m. Each forest or lone tree
+  resamples its template through its inverse transform into the world
+  voxels it overlaps. Occupancy, count, scan and allocate give each level
+  its brick pool; fixed-point integer atomics (order-independent,
+  deterministic) accumulate extinction, normal and albedo, then pack.
+  The worst-case overlap can't overflow. L0 is accumulated in spatial
+  slices (bands of cells), so the transient peak is one slice's
+  accumulators, freed before the next slice and level.
+- Rocks are not voxelized: their layer has no far switch and keeps the
+  per-instance cluster path at every distance (the lever if they cost too
+  much is the layer's maximum draw distance).
 - **Voxel (4 B):** extinction u8 (log-encoded, 1/m), octahedral normal
-  2 x u8, albedo index u8 (the dominant (prototype, material) entry of a
-  palette of mean albedos measured at bake).
-- **Brick:** 4^3 voxels (256 B), the same voxel count at every level, so
-  the brick edge is 16 m at L0, 32 m at L1 and 64 m at L2. Only occupied bricks are allocated.
-- **Cell column map:** per 64 m cell (the existing `Cell` grid), per
-  level, the brick columns (4x4 at L0, 2x2 at L1, 1 at L2). Each column
-  is `uvec2(firstBrick, baseHeight | brickCount << 16)`, with
-  `baseHeight` in 0.25 m units above the heightfield's minimum. There is also a
-  per-cell canopy top and bottom, and a max-top pyramid over cells (like
-  the terrain's) for hierarchical skipping.
+  2 x u8, albedo index u8 (palette of mean albedos measured at bake).
+- **Brick:** 4^3 voxels, the same count at every level (16 m at L0, 32 m
+  at L1, 64 m at L2). Only occupied bricks are allocated, and a brick
+  stores a 64-bit occupancy mask plus only its occupied voxels (the
+  prototype measured 31.7 of 64 occupied on average at L0), found by
+  `bitCount` of the mask below the voxel.
+- **Cell column map:** per 64 m cell, per level, the brick columns (4x4 at
+  L0, 2x2 at L1, 1 at L2), each `uvec2(firstBrick, baseHeight |
+  brickCount << 16)`, `baseHeight` in 0.25 m units above the heightfield's
+  minimum less 32 m; a per-cell canopy top and bottom and a max-top pyramid
+  over cells for hierarchical skipping.
 
 ## Resolution and VRAM (the dial)
 
-Option C as drafted assumed 2-4 m voxels and 8-16 B per voxel (0.3-1 GB,
-streaming needed). Relaxing silhouettes beyond ~4 km lets it dial down:
+- **Finest world level 4 m:** the far switch sits where 4 m is one pixel,
+  and the mid tier covers everything nearer. 2 m would be ~8x the memory.
+- **4 B voxels**, compacted bricks (above).
+- **Measured** by the Task 8 prototype (Napf, seed 1, uncompacted 256 B
+  bricks): L0 2.15M / L1 426k / L2 84k bricks, 659 MiB resident, 3.68 GB
+  load peak (all L0 accumulators at once). Compaction cuts brick storage
+  to ~(8 + 4 x 31.7) B / 256 B ~ 53% (~370 MB est. with the column map),
+  slicing cuts the peak to one slice. The sun shadow map counts against
+  the same 500 MB.
+- If it still measures over the gate, the next dial is distance residency
+  for L0 (re-splat per cell from the placed table, no disk), decided with
+  the user.
 
-- **Finest level 4 m**, not pixel-sized at 2-4 km: impostors cover to ~4
-  km, so voxels only appear where a pixel is already ~4 m. 2 m would be
-  ~8x the memory (~1.9 GB est.) and buys only silhouettes the user
-  accepted losing.
-- **4 B voxels** (an albedo index instead of RGB, octahedral normal): half
-  of an 8 B layout.
-- **Brick-level sparsity, with a 16 m L0 brick:** the canopy band (trees
-  up to ~27 m, plus ~10 m of ground relief across a column on steep
-  slopes) needs 3-4 bricks per column.
-- **Estimate** (Napf, seed 1): forest 2.59M trees at 6 m footprint is
-  ~93 km^2, ~363k L0 columns. L0 is ~1.1-1.45M bricks, ~280-370 MB; L1
-  ~46 MB; L2 6-12 MB; column map 4-9 MB; lone trees and partial edge
-  columns a little more: **~350-450 MB resident**, under the 500 MB gate
-  with a thin margin. The load-time peak (above) is the bigger VRAM
-  risk, so it has a gate too. The prototype measures both.
-- If it measures over the gate, the next dial before falling back is
-  distance residency. L0 would stay resident only for cells within ~8 km
-  of the camera, re-splatted per cell from the placed table on demand.
-  That is streaming without disk: GPU work only, built on the player's
-  hardware. It is decided after the prototype.
+## Raster (far tier)
 
-## Raster
-
-- `voxel.mesh` takes one far cell per workgroup and emits the cell's
-  canopy box (top and bottom from the column map), with the curvature
-  warp like every raster stage, padded by the drop's variation across
-  the cell (under 0.2 m).
-- `voxel.frag` marches in flat space. The voxels are flat (curvature is
-  a display warp), so it shifts the displayed view ray up by the cell's
-  `curvatureDrop`, a constant per cell. It marches the cell's bricks
-  (DDA) at the cell's level and stops at the first point where the
-  accumulated opacity reaches 0.5, refined inside the voxel by trilinear
-  density. If the ray leaves the cell below 0.5, it discards. The
-  level is chosen per cell, by its voxel's projected size, with the same
-  hysteresis as the far switch, so filtered density never shifts the
-  hit within a cell.
-- `voxel.frag` writes `gl_FragDepth = min(hitDepth, gl_FragCoord.z)`
-  from the displayed hit position. The hit is behind the box face, so in
-  reverse-Z that is `layout(depth_less)`, and the `min` enforces it so
-  early depth testing stays valid. Motion vectors come from the flat hit
-  displayed with last frame's camera and its own drop. Shading uses
-  `mesh.frag`'s lighting through a shared include, which Task 8 creates.
-- A deterministic threshold, not stochastic transparency: an image that
-  is stable frame to frame matters more here than partial coverage, which
-  TAA would have to integrate (Nanite's voxel normals are stochastic and
-  noisy). Edges antialias through TAA jitter.
+- `voxel.mesh` takes one far cell per workgroup and emits one box per
+  occupied brick column (top and bottom from the column map; the prototype
+  emitted one canopy box per cell, which marched the cell's empty columns),
+  displayed with the cell's constant curvature drop and padded by its
+  variation across the cell (under 0.2 m) and by one voxel of the level.
+- `voxel.frag` marches in flat space: it shifts the displayed view ray up
+  by the cell's drop, runs the brick DDA at the cell's level and stops
+  where the accumulated opacity reaches 0.5, or discards. The level is
+  chosen per cell (the coarsest whose voxel projects to <= 1 px), with
+  hysteresis.
+- `gl_FragDepth = min(hitDepth, gl_FragCoord.z)` with `layout(depth_less)`
+  (reverse-Z: the hit is behind the box face), so early depth testing stays
+  valid. Motion vectors from the flat hit displayed with last frame's
+  camera and its own drop. Shading through `lighting.glsl`, shared with
+  `mesh.frag`; it writes every scene attachment `mesh.frag` writes (sun
+  light for contact shadows, the Ray Reconstruction guides).
+- A deterministic 0.5 threshold, not stochastic transparency or stochastic
+  normals (Nanite's are noisy): a stable image matters more than partial
+  coverage. Edges antialias through the upscaler's jitter.
 - Culling: far cells go through the cell cull's frustum and Hi-Z tests and
-  the two-phase scheme (drawn early if visible last frame, retested
-  late), like instance chunks. They are drawn after the terrain, so
-  hills reject them early. The order within the list is an atomic
-  append, unsorted. Task 8 appends far cells in phase 0 only; Task 9
-  adds the two-phase scheme.
+  the two-phase scheme (drawn early if visible last frame, retested late),
+  like instance chunks, after the terrain so hills reject them early.
 
 ## Rays
 
+- **Representation per ray, by receiver distance** (M2a, static TLAS
+  holding every tree): receivers nearer than `kFarShadowDistance` (the
+  far switch distance, ~4.8 km) trace the TLAS with every tree (the
+  reference; mid receivers first march their own prototype bricks, see
+  the mid tier). Receivers beyond it trace the TLAS with placed trees
+  masked out (instance-mask bit on tree-layer records; rocks and
+  hand-placed objects stay) and take forest occlusion from the far field.
+  Every ray uses exactly one tree representation.
+- **Sun shadow map of the far field** (replaces the prototype's per-pixel
+  Beer-Lambert march, which was 60-70% of the far pass): an orthographic
+  map along the sun over the crop's forest bounds, 4 m texels to start
+  (8 m is the lever), R16 depth of the first point where the opacity of the
+  world bricks along the sun reaches 0.5, built by the same brick march
+  in compute. Receivers compare depth with a small PCF. A sun-space texel
+  is perpendicular to the sun, so low suns don't stretch it; long ground
+  shadows resolve through the depth compare.
+- **The sun moves** (G panel now, time of day later): the map records the
+  sun direction it was built for. When the sun has turned more than
+  `kShadowMapRebuildAngle` (0.1 degree to start: a 500 m low-sun shadow
+  moves < 1 m), a rebuild starts into a second map, a slice of texels per
+  frame under a fixed budget (~0.3 ms), and the maps swap when it
+  completes, so no frame stalls. Until the swap, receivers keep the old
+  map while the sun is within `kShadowMapStaleAngle` (1 degree to start)
+  of its build direction, else they use the per-ray `farFieldTransmittance`
+  march (correct, costlier, only while a fast sun drag outruns the
+  rebuild). Report: full rebuild ms, frames per rebuild, frame cost while
+  dragging.
 - `float farFieldTransmittance(origin, direction, startDistance,
-  maxDistance, bool skipTlasCells)` (`startDistance` ~one L0 voxel, 4 m,
-  for rays from voxel surfaces, so they don't shadow themselves): DDA over the cell grid with the
-  canopy pyramid. Inside a cell's canopy band it marches bricks with
-  Beer-Lambert (L0 for the first 256 m of the ray, L1 to 1 km, L2
-  beyond: starting values the prototype tunes). The terrain stays
-  `terrainOccludes` (boolean, unchanged); the voxel march runs only if
-  that misses.
-- **M2a, static TLAS holding every tree:** the representation is chosen
-  per ray by the receiver's distance from the camera against
-  `kFarShadowDistance` (starting at 4 km, the far switch's distance for a
-  25 m tree at 1440p; its own constant, because the switch is in pixels).
-  That avoids double occlusion without per-cell TLAS masking, which a
-  static TLAS can't do.
-  - Receivers nearer than `kFarShadowDistance` trace the TLAS as today:
-    full detail and the reference.
-  - Receivers beyond it trace the TLAS with a cull mask that excludes
-    placed trees (a new instance-mask bit on tree-layer records; rocks keep
-    theirs), then
-    `farFieldTransmittance` with `skipTlasCells = false`. Voxel surfaces
-    shadow themselves the same way.
-  - Hand-placed objects stay in the TLAS for every ray.
-- **M2b:** the partitioned TLAS holds near and mid tiles. Shadow rays
-  call `farFieldTransmittance(..., skipTlasCells = true)`, with a
-  per-cell flag for cells held by the TLAS. Sky rays trace the TLAS to
-  ~20 m and then march from 20 m with no skip. This is the role M2b's
-  2D canopy field had, which this spec replaces.
+  maxDistance, bool skipTlasCells)` stays: the fallback above, the CPU
+  replica's twin (tests), and M2b's sky rays (march from 20 m, partitioned
+  TLAS with per-cell `cellInTlas` flags), the role M2b's 2D canopy field
+  had.
 
 ## Resolved with the user (2026-11-20)
 
-1. Shadow rays from receivers beyond `kFarShadowDistance` (4 km) use the
-   voxels only, never the TLAS trees.
-2. Crowns that straddle a near/far cell border at the switch are
-   accepted. Task 8 measures them, and they are fixed (bricks per owner
-   cell) only if the captures show them.
-3. Whether the voxels replace M2b's mid-range 3-quad OMM shadow proxies
-   is decided after Task 8's numbers.
+1. Shadow rays from receivers beyond `kFarShadowDistance` use the voxels
+   only, never the TLAS trees.
+2. Crowns that straddle a mid/far cell border at the switch are accepted,
+   fixed (bricks per owner cell) only if the captures show them.
+3. No impostors anywhere (mid range is the prototype-voxel tier); option B
+   dropped.
+4. Whether the voxels replace M2b's mid-range OMM shadow proxies is
+   decided in M2b, from Task 12's ray-cost numbers.
 
-## Prototype gates (M2a Task 8)
+## Gates
 
-A minimal end-to-end prototype comes before the full build-out: bake,
-splat, far raster without the handoff band, and far shadows. It is
-measured against these gates. A failed gate does not trigger a fallback
-automatically. The numbers and captures go to the user, and the user
-decides after the prototype: tune C, take the gate's lever, or fall back
-to option B (a 2.5D canopy aggregate: the same splat into one
-column-height layer, the same raster and march shape).
+Measured with `--trees`, Release, 2560x1440, median of 5, under the GPU
+lock, at the forest edge, forest overview, ridge (default start) and high
+overview views. A gate that is truly unreachable goes to the user with
+numbers and a recommendation before it is relaxed.
 
-| Gate | Pass | Measured at | Lever inside C | Fallback |
-|---|---|---|---|---|
-| VRAM | far field resident <= 500 MB over the crop; load-time peak transient <= 2.5 GB, freed after load | log at load | distance residency for L0 (streaming without disk); L0 built in spatial slices | B (~225 MB est., no 3D) |
-| GPU ms | far raster pass <= 1.0 ms; scene early + far field + scene late, `--far-shadows voxel` <= the same sum with `--far-shadows tlas` | overview + ridge views, Release, 1440p, median of 5 | coarser level per cell; fewer march steps | B |
-| Shadows | ground and rock receivers beyond `kFarShadowDistance`: voxel vs the reference `--far-field off --far-shadows tlas` (clusters to the horizon, full-detail TLAS): mean difference reported, the user inspects the pairs; no lit forest floor, no voxel staircase, no seam at `kFarShadowDistance` | ridge + sunset | finer level for shadow rays only | B (2.5D slab march) |
-| Coverage | far forests vs that reference: mean luminance over forest regions within 5%, and no step across the far switch or the L0/L1/L2 bands (lone trees and sparse edges included) | ridge + overview | lower opacity threshold; per-prototype extinction scale | B |
+| Gate | Pass | Task 8 prototype |
+|---|---|---|
+| VRAM | far field resident (bricks, column map, prototype bricks, shadow maps) <= 500 MB; load peak transient <= 2.5 GB, freed after load | 659 MiB; 3.68 GB |
+| Far pass | `far field` <= 1.0 ms | ridge 2.40, overview 6.16 |
+| Mid pass | voxel instances <= 1.5 ms | (not built) |
+| Shadow cost | scene early + far field + scene late with far shadows from the far field <= the same with `--far-shadows tlas` | ridge 5.94 vs 4.01, overview 19.49 vs 14.29 |
+| Shadows | receivers beyond `kFarShadowDistance` vs the reference `--far-shadows tlas`: mean difference reported, pairs for the user; no lit forest floor, staircase or seam at `kFarShadowDistance`; sun rebuild cost reported | unmeasured |
+| Coverage | each prototype's voxel image vs its full-detail BLAS ray-traced at 2-200 px tall: coverage within 5%; in captures, no luminance step across the mid switch, the far switch or the level bands | unmeasured |
 
-Also reported, but not gates: bake + splat load time (Release), brick
-count, far cells drawn, a still/motion pair across the switch with the
-Laplacian ratio, and the cell-border error at the handoff.
+The coverage reference is ray-traced per prototype because the clusters'
+default cut is not a reference (coarse DAG foliage loses leaves, which is
+why the mid tier exists). The milestone's done bar (forest views <= 16.7
+ms per frame) is Task 12's.
 
 ## Testing
 
 - Unit:
-  - The template round trip: a synthetic solid box voxelizes to full
-    occupancy and an empty prototype to none.
-  - The splat conserves extinction: the sum over world voxels is within
-    1% of the template sum times scale^3.
-  - The CPU replica of `farFieldTransmittance` matches a brute-force
-    march within 1e-3, including a 2-degree grazing ray and a ray along
-    a cell boundary.
-  - The hysteresis switch over an oscillating path changes at most once
-    per crossing.
-- Captures:
-  - Ridge, overview, sunset and the far-horizon summit view: far
-    forests present, 0 dropped, 0 validation errors.
-  - The switch in motion (`--camera-velocity` toward and away): no pop
-    or flicker.
-  - `--far-field off` A/B: the switch is off, so far cells draw their
-    instances (clusters until Task 11, then impostors).
+  - Template round trip: a solid synthetic box voxelizes to full
+    occupancy, an empty prototype to none; prototype mips conserve
+    extinction-weighted mass.
+  - The splat conserves extinction (world sum within 1% of the template
+    sum x scale^3), sliced and unsliced splats are identical.
+  - Compacted brick lookup matches the dense brick for every voxel.
+  - The CPU replica of `farFieldTransmittance` matches a brute-force march
+    within 1e-3, including a 2-degree grazing ray and a ray along a cell
+    boundary; the shadow-map texel depth matches the replica's 0.5 point.
+  - `farSwitch` over an oscillating path changes at most once per crossing;
+    the mid switch band weights are complementary.
+- Captures: the gate views, sunset, the far-horizon summit view, and the
+  switches in motion (`--camera-velocity` toward and away): no pop or
+  flicker, 0 dropped, 0 validation errors.
 
 ## Sources
 

@@ -30,9 +30,6 @@ layout(push_constant) uniform TlasFillConstants {
     uint count;
 } fill;
 
-// Must match kShadowCasterMask in C++; placed prototypes have no blended
-// meshes, so every one casts shadows.
-const uint kShadowCasterMask = 0x01u;
 const uint kTriangleFacingCullDisable = 0x01u;
 
 void main() {
@@ -41,13 +38,14 @@ void main() {
         return;
     }
     PlacedInstance instance = fill.placed.placed[index];
+    PrototypeInfo prototype = fill.prototypes.prototypes[instance.prototype];
     mat4 m = placedTransform(instance);
     TlasInstance record;
     for (int row = 0; row < 3; ++row) {
         record.rows[row] = vec4(m[0][row], m[1][row], m[2][row], m[3][row]);
     }
-    record.customIndexMask = (kPlacedBase + index) | (kShadowCasterMask << 24);
+    record.customIndexMask = (kPlacedBase + index) | (prototype.tlasMask << 24);
     record.sbtOffsetFlags = kTriangleFacingCullDisable << 24;
-    record.blasAddress = fill.prototypes.prototypes[instance.prototype].blasAddress;
+    record.blasAddress = prototype.blasAddress;
     fill.records.records[index] = record;
 }
