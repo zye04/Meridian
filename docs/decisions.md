@@ -1916,11 +1916,8 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   (`c (1 + 0.15) - 0.075`). L = 5.5 km, fitted at 6.5, 10 and 20
   degrees; n = 1 from 26 degrees up. Calibration: top-down captures at
   9 km (map weight 1 on every pixel), mean map T vs mean fallback T on
-  the same pixels; default 40.5 degree sun, 6 positions: fair 0.816 vs
-  0.829 (`1 - R`: 0.680), broken 0.417 vs 0.437 (`1 - R`: 0.382),
-  overcast 0.000 vs 0.000; 3 positions per elevation: fair 0.443 vs
-  0.466 (6.5 degrees), 0.613 vs 0.618 (10), 0.783 vs 0.816 (20); broken
-  0.027 vs 0.017, 0.125 vs 0.075, 0.324 vs 0.360. On high oblique views
+  the same pixels, 3 positions per sun elevation (residuals of the
+  current fit: "Cloud look development", fallback refit). On high oblique views
   (6500 m, pitch -0.25) swept from 0 to 20 degrees of sun, the mean
   applied transmittance 11.5-13.8 km and 15.4-17.5 km from the camera
   differs with the cloud pattern either way, except at 4-5.5 degrees,
@@ -1928,7 +1925,7 @@ Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
   away from the sun) the near band was brighter by 0.03-0.22; the view's
   mean changes by at most 0.10 per half degree.
   Only the sun is dimmed: no local occlusion of ambient (spec). The
-  cloud march's 1.2 km sun march adds the optical depth from where it
+  cloud march's 1.26 km sun march adds the optical depth from where it
   ends (unless it left the layer) of `cloudShadow`'s blend: the map's
   near the camera, the fallback's mean beyond ~15 km horizontally and
   below 6 degrees of sun, so far and dusk clouds keep their
@@ -2066,7 +2063,7 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   slant path, single scattering with HG 0.75 forward (ice) and 30%
   isotropic, plus the sky ambient. The streak noise turns with the wind,
   so it doesn't tile with the wind offset's period (jumps once per
-  262 km of travel). A tiled base-noise slice gave cellular blotches
+  262 km of travel). From 9 km up the sheet is not drawn. A tiled base-noise slice gave cellular blotches
   (mackerel sky) and long straight streaks a zoom-blur of rays.
 - **March resolution:** half instead of quarter changed nothing visible
   on a near cumulus at 1:1 (the detail is in the noise, not the
@@ -2086,9 +2083,11 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   -0.07..-0.16 fair, -0.06..+0.17 broken). L = 3.5 km made fair at 6.5
   deg and broken at 10 deg worse (-0.13, -0.08): the remaining error is
   the step from one crossing to many at ~26 deg, not L.
-- **Measured (Release, 2560x1440):** `clouds` ms, fair from 1500 m 0.88
-  (was 0.83 at the rebase), looking up 1.0, broken 1.0-1.25, overcast
-  0.55, sunset from above 0.9; `weather` 0.34-0.5.
+- **Measured (Release, 2560x1440):** `clouds` ms, fair from 1500 m
+  0.91 (median of 3; 0.83 at the rebase, before this round), cirrus view
+  1.04, broken 1.16, overcast 0.60, sunset from above 0.99; `weather`
+  0.35-0.8. Fast turn sky crop 0.881 (clouds off 0.935), band crop 0.890
+  (off 0.898).
 - **Contour bands at full render scale** (Task 5 note): the stacked
   shelves came from the old profile x shape product under the steep
   shape stretch, not from sampling; the flat-base profile and finer noise

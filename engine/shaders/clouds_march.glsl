@@ -15,9 +15,10 @@ const vec3 kPhase = vec3(0.8, -0.3, 0.3);
 // contribution x b, eccentricity x c.
 const int kOctaves = 4;
 const vec3 kOctaveScale = vec3(0.5, 0.5, 0.5);
-// Diffuse multiple scattering deep inside: light diffuses through a thick
-// cloud with an algebraic, not exponential, falloff (two-stream:
-// transmittance 1 / (1 + 0.75 (1 - g) tau)); isotropic, scaled by x.
+// Diffuse multiple scattering: light diffuses through a thick cloud with
+// an algebraic, not exponential, falloff (two-stream: transmittance
+// 1 / (1 + 0.75 (1 - g) tau)), so it dominates the octaves deep inside;
+// isotropic, scaled by x, added everywhere (at the lit surface too).
 const vec2 kDiffuse = vec2(0.8, 0.75 * (1.0 - 0.6));
 // Ambient at the far side of the layer relative to the near side: the sky
 // at the bottom, the ground bounce at the top; under full coverage the

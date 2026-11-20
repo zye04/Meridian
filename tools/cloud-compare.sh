@@ -26,8 +26,7 @@ run() { # file view-args [args...]
   local file=$1 view=$2; shift 2
   # shellcheck disable=SC2086
   flock /tmp/meridian-gpu.lock "$build/game/game" --placement off $view "$@" "${extra[@]}" \
-    --capture "$file" > "${file%.*}.log" 2>&1 || { echo "game failed: $file (see ${file%.*}.log)" >&2; exit 1; }
-  grep -o "[0-9]* validation errors" "${file%.*}.log" | grep -v "^0 " && echo "VALIDATION: $file"
+    --capture "$file" > "${file%.*}.log" 2>&1 || { echo "game failed (or validation errors): $file (see ${file%.*}.log)" >&2; exit 1; }
   grep "GPU passes" "${file%.*}.log" | grep -o "clouds [0-9.]*" | sed "s|^|$(basename "$file") |"
 }
 ev() { grep -o "EV100 [0-9.-]*" "$1" | cut -d' ' -f2; }

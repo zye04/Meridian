@@ -6,8 +6,9 @@
 
 // Composites the resolved clouds over the HDR target at full resolution
 // (premultiplied: clouds + background x transmittance) and, where clouds
-// dominate the pixel, writes their motion. Reads scene depth; writes HDR
-// color and motion only. The upsample is bilateral on scene depth: each
+// dominate the pixel, writes their motion, and raises the transparency mask
+// to the cloud coverage. Reads scene depth; writes HDR color, motion and
+// the mask. The upsample is bilateral on scene depth: each
 // low-resolution texel counts only where it agrees with this pixel's
 // surface, so silhouettes in front of clouds stay sharp and clouds never
 // bleed onto them.

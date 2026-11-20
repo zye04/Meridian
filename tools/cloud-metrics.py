@@ -17,7 +17,8 @@ Prints `name value` lines:
   clouds number of clouds measured (connected areas over 0.05% of the frame)
 A capture's adjacent sky is the clouds-off luminance at the same pixel, with
 both images' pre-exposure divided out (EV100 from the run's log); captures
-only measure the sky (blue over red in the clouds-off image). A photo's
+only measure the sky (blue over red in the clouds-off image), so they
+are not meaningful for views whose sky or ground is red (sunset). A photo's
 clouds are achromatic pixels (saturation < 0.3, value > 0.15), its sky
 saturated blue; adjacent sky is the median sky within 4% of the image
 height around each cloud (top), and for bases the sky 2-4% of the image
