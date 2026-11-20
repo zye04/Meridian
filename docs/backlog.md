@@ -16,6 +16,8 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Shadows too dark (6-7.5% of sunlit vs ~10-20%) | Unrealistic black shadows | Shadow investigation 2026-11-20 | Multi-bounce AO in progress; rest below |
 | Haze anchored at sea level | Ridges (1.35 km) sit above most of the aerosol: less sky light up high, thin haze from above | Shadow investigation; haze tuning | Engine: aerosol layer from the valley floor / layered profile with a sharp top |
 | Bounce light / GI | No light bounced from the ground or between surfaces | Shadow investigation | Later (GI milestone not yet planned) |
+| Cloud occlusion of ambient | Dropped from M4: it double-darkened with the cloud-dimmed sky capture | M4 clouds spec | Revisit with GI |
+| RT reflections | No reflections beyond the specular from the sky | M2b spec non-goal | Later (with a denoiser) |
 | Sky occlusion | Forest interiors and under-canopy too bright from the sky | Roadmap | M2b sky visibility |
 | Haze pink cast at sunset | Slightly off color | Haze tuning | Revisit with clouds/look-dev |
 
@@ -26,7 +28,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | TAA blur | Keeps only ~48% of the still image's sharpness in motion; textures soft up close | CLAUDE.md known gap; user feedback | Quality pass step 2 |
 | TAA history not rescaled on exposure change | Ghosting when exposure adapts | CLAUDE.md known gap | Quality pass step 2 |
 | Dither pattern static per pixel | Fine at 8-bit; an HDR/10-bit swapchain needs the dither scaled | Dither fix | When HDR output lands |
-| DLSS integration | Upscaling, Ray Reconstruction (would also denoise) | Roadmap | Later |
+| DLSS integration | Upscaling, Ray Reconstruction (would also denoise); brings mip bias tuning. Linux: NGX SDK directly | Roadmap; terrain-material spec | Later |
 
 ## Geometry and vegetation
 
@@ -41,6 +43,9 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Trees beyond ~1.3 km may float/sink up to ~3 m on coarse terrain | Ground fit | M1 final review, M2a Task 4 | Checked in M2a Task 5 |
 | Blended instances not culled, full detail | Cost if a blended asset is scattered | CLAUDE.md known gap | When needed |
 | Masked-geometry RT shadows not visually verified | Possible wrong alpha-tested shadows | CLAUDE.md known gap | M2b (ferns with opacity micromaps) |
+| Grass and grass wind | Meadows are bare | Roadmap | M3, reading M4's global wind |
+| Undergrowth (shrubs, ferns) | Forest floor is bare | M2a spec non-goal | M2b first layer; revisit layered dithering between placement layers then |
+| Real land-cover data (swissTLM3D forest polygons as a mask) | Forests follow rules, not the real map | M2a spec non-goal | Content; the placement mask input is ready |
 | Partitioned TLAS is NVIDIA-only | Vendor lock-in | M2b spec | Plain-TLAS fallback later if AMD support wanted |
 
 ## Terrain
@@ -79,4 +84,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Precipitation (rain, snow), wet surfaces, puddles | M4 clouds spec | Later weather milestone |
 | Lightning, fog banks, valley mist, god rays | M4 clouds spec | Later |
 | Water | Roadmap | Later |
+| Cumulonimbus rendering (the cloud-type axis has room) | M4 clouds spec | Later weather milestone |
+| Authored weather zones (regional overrides on the analytic map) | M4 clouds spec | Later |
 | Collision beyond walking on the heightfield | Roadmap | Later |
+| CPU queries and editing/overrides of placed instances | M2a spec non-goal | When gameplay needs them (placement is deterministic) |
