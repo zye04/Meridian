@@ -67,7 +67,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Debug startup ~96 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
+| Debug startup ~95 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
 | Ground material costs ~1.1-1.4 ms on steep slopes | Budget | M1 | M5 |
 | Renderer constructor leaks partial Vulkan state on throw | Robustness | CLAUDE.md | Later |
 
