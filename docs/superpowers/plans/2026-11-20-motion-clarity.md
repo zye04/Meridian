@@ -1,8 +1,7 @@
 # Motion Clarity Implementation Plan
 
-**Status:** paused 2026-11-20 (usage limit): tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 3.1. Next steps:
-- Track 1: Task 1.3 is reviewed and approved on branch `motion-dlss` (29d1383, worktree `../meridian-motion-dlss`; WIP head has review fixes 1-2). To finish: drop the InPreExposure fix (ruled out: CPU-only input, and the 310.9.16 guide says exposure affects only presets J/K, default is M), then add backlog rows "DLSS InPreExposure needs CPU-side pre-exposure" and "Upscaler history reset on camera cuts (no hook)". Squash into one commit, set this Status, then merge protocol. Then 1.4 -> 1.5.
-- Track 1, user decision pending: DLAA default preset M passes every quality gate (fwd5 0.956, SSIM 0.993), but `aa` costs 2.36 ms at 1440p vs the 1.0 ms gate. Options: accept, Quality mode (fwd5 0.82, 1.25 ms), or TAA v2 as default (fwd5 0.94, 0.17 ms).
+**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 3.1. Next steps:
+- Track 1: 1.3 done on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). Next 1.4 -> 1.5.
 - Track 2: done.
 - Track 3: 3.1 done; 3.2a waits for 1.4, then 3.2b.
 - After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
@@ -189,7 +188,7 @@ The coordinator must relay this to the clouds lane; it applies whether `clouds` 
 
 **Interfaces:**
 - Consumes: `UpscalerProvider`, `Upscaler`, `UpscalerFrame` (1.2); `AaSettings` (1.1a).
-- Produces: `namespace meridian::dlss { std::unique_ptr<UpscalerProvider> createProvider(const std::filesystem::path &featureDirectory); const char *attribution(); }` in `dlss.h`; CLI `--aa dlss|taa` (default dlss when `supports()` reports SR, else taa with log line `DLSS unavailable: <reason>; using TAA`), `--dlss-mode dlaa|quality|balanced|performance` (default dlaa), `--dlss-preset <letter>` (default: NGX's per-mode default). The DLSS backend owns its 1x1 R32F exposure texture (or none, with AutoExposure).
+- Produces: `namespace meridian::dlss { std::unique_ptr<UpscalerProvider> createProvider(const std::filesystem::path &featureDirectory); const char *attribution(); }` in `dlss.h`; CLI `--aa taa|dlss` (default taa, decided 2026-11-20: DLAA preset M costs 2.36 ms at 1440p vs the 1.0 ms slot; dlss falls back to taa with log line `DLSS unavailable: <reason>; using TAA`), `--dlss-mode dlaa|quality|balanced|performance` (default dlaa), `--dlss-preset <letter>` (default: M for DLAA/Quality/Balanced, NGX's own for Performance, since NGX's K fails the motion gates). The DLSS backend owns its 1x1 R32F exposure texture (or none, with AutoExposure).
 
 - [ ] **Step 1: Fetch + verify.** FetchContent `https://github.com/NVIDIA/DLSS` pinned by commit hash: the newest 310.x tag at fetch time (`git ls-remote --tags`), recorded with its version in the CMake comment and decisions.md. Before using it: check `.gitattributes` for LFS (if the Linux libs are LFS pointers, stop and report: no git-lfs); read the licence for the attribution text and redistribution terms; use the library file names the SDK ships in `lib/Linux_x86_64/`.
 - [ ] **Step 2: Module.** `meridian_dlss` STATIC links `meridian` (headers) + the NGX static lib + `dl`; `-w` on SDK code. Provider: `instanceExtensions()` / `deviceExtensions()` from `NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements` / `...DeviceExtensionRequirements`; `init()` calls `NVSDK_NGX_VULKAN_Init_with_ProjectID` (fixed project UUID generated once, engine type custom, feature path = the binary's directory) and reads `SuperSampling_Available`; prints SR and RR availability (`SuperSamplingDenoising_Available`) at startup. Wrap NGX init and feature creation in `DriverLeakScope` (gpu_types.h). `renderExtent` from `NGX_DLSS_GET_OPTIMAL_SETTINGS` (DLAA: display size). `create` at the max render size with flags `IsHDR | MVLowRes | DepthInverted` (no `MVJittered`), preset hint only if `preset != 0`. `evaluate`: `NGX_VULKAN_EVALUATE_DLSS_EXT` with jitter, `InMVScale = motionScale`, `InRenderSubrectDimensions`, reset flag. Shutdown in the provider's destructor, after the feature is released and before the device is destroyed (the Renderer owns the Upscaler; document the order).
@@ -199,7 +198,7 @@ The coordinator must relay this to the clouds lane; it applies whether `clouds` 
 - [ ] **Step 6: Licence-clean build.** `-DMERIDIAN_DLSS=OFF` configure + build + `ctest`; the game runs with `--aa taa`.
 - [ ] **Step 7: Unavailable.** With DLSS ON, `--aa dlss` with the feature directory pointed at an empty dir: one log line, TAA, capture fine.
 - [ ] **Step 8:** Debug captures, DLAA and `--dlss-mode quality`: 0 validation errors (if NGX itself trips validation, stop and report with the message). Resize by reading: the feature is recreated with the swapchain.
-- [ ] **Step 9: Docs + commit.** CLAUDE.md: the three flags, the CMake option, licence-clean OFF build, credits. decisions.md: SDK version + hash, presets left at defaults, exposure/jitter findings, measured gates. Commit: "Add the DLSS module with SR and DLAA behind the Upscaler interface".
+- [ ] **Step 9: Docs + commit.** CLAUDE.md: the three flags, the CMake option, licence-clean OFF build, credits. decisions.md: SDK version + hash, preset M for DLAA/Quality/Balanced, exposure/jitter findings, measured gates. Commit: "Add the DLSS module with SR and DLAA behind the Upscaler interface".
 - [ ] **Step 10: Stop and decide.** If NGX reported RR unavailable on this Linux driver, stop and report to the orchestrator before starting 1.4 (the spec's fallback, SR + the 3.2b denoiser, would become the shadow path).
 
 ### Task 1.4: Guide buffers and hashed white noise
@@ -224,7 +223,7 @@ The coordinator must relay this to the clouds lane; it applies whether `clouds` 
 
 **Interfaces:**
 - Consumes: 1.3 provider; 1.4 guides and `whiteNoise`; `jitterPhaseCount(..., true)` (>= 32).
-- Produces: `AaSettings.rayReconstruction` honoured; `--rr on|off`, default on whenever DLSS is active and RR is available; `wantsGuides()` true for RR.
+- Produces: `AaSettings.rayReconstruction` honoured; `--rr on|off`, default on whenever DLSS is selected (`--aa dlss`) and RR is available; `wantsGuides()` true for RR.
 
 - [ ] **Step 1:** DLSSD create/evaluate (`NGX_VULKAN_CREATE_DLSSD_EXT` / `NGX_VULKAN_EVALUATE_DLSSD_EXT`, creation inside `DriverLeakScope`): colour = full noisy lit colour, guides, roughness packed in the normal's alpha (`NVSDK_NGX_DLSS_Roughness_Mode_Packed`), hardware depth, `worldToView` / `viewToClip`, constant far specular hit distance, NGX's default RR preset; no exposure input.
 - [ ] **Step 2: Budget.** Release RR DLAA, ground + beech: `aa` ms (median of 5, scaled per Global Constraints). If > 3.0 ms: the default RR mode is Quality (0.66 scale); re-measure everything below there.

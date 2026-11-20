@@ -46,6 +46,7 @@ tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate tabl
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
+cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
 ```
 
@@ -80,9 +81,16 @@ Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
-`--render-scale S` (0 < S <= 1, default 1) renders the scene at the
-display size times S and lets the upscaler (TAA) upscale (startup prints `Render WxH,
-display WxH, jitter phases N, mip bias B`).
+`--aa taa|dlss` picks the upscaler: TAA (default) or DLSS (falls back to
+TAA with the log line `DLSS unavailable: <reason>; using TAA` when NGX
+reports no Super Resolution). `--dlss-mode dlaa|quality|balanced|performance` (default dlaa)
+and `--dlss-preset E|F|J|K|L|M` (default: M for DLAA, Quality and Balanced,
+NGX's own for Performance, `defaultPreset` in dlss.cpp; A/B override)
+set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
+at the display size times S for TAA; DLSS picks its own render size.
+Startup prints `Render WxH, display WxH, jitter phases N, mip bias B,
+DLSS|TAA` and, with the DLSS module, `DLSS: Super Resolution ..., Ray
+Reconstruction ...`.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--no-occlusion` draws everything in the frustum
@@ -173,6 +181,13 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            extension point for upscaler backends; the
                            Renderer constructor takes an optional
                            provider), window.h, math/{vec3,mat4}.h
+engine/dlss/               meridian_dlss (MERIDIAN_DLSS, default ON):
+                           dlss.h (createProvider, attribution),
+                           dlss.cpp (NGX SR/DLAA as an UpscalerProvider),
+                           the SDK by FetchContent; the core never
+                           includes or links NGX. The build copies the
+                           NGX snippets, dlss_third_party_notices.txt and
+                           game/credits.txt next to the game binary
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
   vulkan_util.*            barriers, shader loading, pipeline builders
@@ -267,11 +282,12 @@ late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask in
 SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
-display-sized RGBA16F `output`; the backend today is `TaaUpscaler`,
-taa.comp, which writes its resolve to its own history (pre-exposed, so
-rescaled by `ExposureState` exposure / previousExposure), then
-sharpen.comp, which writes `output` from it (CAS; a copy at sharpness 0,
-today's setting), both inside the `aa` pass)
+display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
+`NGX_VULKAN_EVALUATE_DLSS_EXT`) or `TaaUpscaler`: taa.comp, which writes
+its resolve to its own history (pre-exposed, so rescaled by
+`ExposureState` exposure / previousExposure), then sharpen.comp, which
+writes `output` from it (CAS; a copy at sharpness 0, today's setting),
+both inside the `aa` pass)
 -> luminance histogram + exposure adaptation (compute) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
@@ -382,8 +398,20 @@ barriers account for that.
 
 - LeakSanitizer: libdecor's dbus/pango leaks are suppressed in
   `window.cpp`; NVIDIA driver leaks around device creation and acceleration
-  structure builds are ignored with `DriverLeakScope` (gpu_types.h). Don't
+  structure builds are ignored with `DriverLeakScope` (gpu_types.h; dlss.cpp
+  has its own copy for NGX calls). Don't
   use DWARF unwinding to chase them; it makes startup 6x slower.
+- DLSS: NGX's device extension VK_NVX_binary_import makes the driver start
+  CUDA, which fails device creation under ASan unless
+  `protect_shadow_gap=0` (set by `__asan_default_options` in dlss.cpp; it
+  applies to the whole Debug game binary when the module is linked). The
+  SDK is a 684 MB commit tarball fetched once per build directory
+  (`-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=<other build>/_deps/dlss_sdk-src`
+  reuses one).
+  NGX clears the upscaler output on reset, so `output` has TRANSFER_DST.
+  The Renderer calls `UpscalerProvider::shutdown` (NGX shutdown) before it
+  destroys the device; the provider outlives the Renderer. Credits: the
+  game prints NVIDIA's attribution at startup and ships `credits.txt`.
 - Linking against the engine by hand also needs `-lsimdjson` (fastgltf uses
   the system simdjson) and `-lzstd`.
 - git-lfs is not installed, so dependencies whose repos need LFS must come

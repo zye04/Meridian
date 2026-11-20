@@ -1,0 +1,9 @@
+Meridian credits
+
+Terrain: swissALTI3D, © swisstopo.
+
+NVIDIA DLSS (builds with the DLSS module, MERIDIAN_DLSS=ON):
+This product uses the NVIDIA DLSS SDK 310.9.16. NVIDIA, the NVIDIA logo,
+DLSS and GeForce RTX are trademarks or registered trademarks of NVIDIA
+Corporation in the U.S. and other countries. The DLSS library's copyright
+and third-party notices are in dlss_third_party_notices.txt.

@@ -68,11 +68,6 @@ assets themselves. Order:
 2. Clouds: the motion-sharpness trade-off the clouds lane will write up,
    then the Task 7 comparisons before Task 8.
 
-Decided 2026-11-20, not yet applied: TAA v2 is the default upscaler for
-now; DLSS 4.5 support is mandatory, with DLAA preset M (2.36 ms at
-1440p, passes every quality gate) as an option, not the default. Record
-it in the motion-clarity plan and decisions.md when merging `motion-dlss`.
-
 ## In progress (WIP branches on origin)
 
 - **Motion clarity** (plan `docs/superpowers/plans/2026-11-20-motion-clarity.md`,
@@ -80,9 +75,9 @@ it in the motion-clarity plan and decisions.md when merging `motion-dlss`.
   Status line has the next steps). On main: gate tools, grading (CPU
   reference + GPU LUT bake), render/display split, transparency mask,
   Upscaler interface, TAA v2 (forward 5 m/s 0.94, 0.17 ms at 1440p).
-  `motion-dlss` at 29d1383: DLSS module (Task 1.3), review-approved, two
-  of three fixes done (the third becomes a backlog row); finish, squash,
-  merge. Then 1.4 -> 1.5 and 3.2a -> 3.2b, docs sweep, final review.
+  DLSS module (Task 1.3) on main: TAA v2 stays the default, DLSS 4.5
+  (DLAA preset M) is opt-in with `--aa dlss` (decided 2026-11-20, see
+  decisions.md). Next: 1.4 -> 1.5, 3.2a -> 3.2b, docs sweep, final review.
   The clouds branch must follow the plan's clouds rebase checklist
   (cloud targets sized from `renderExtent`, transparency mask, white
   noise under Ray Reconstruction). Ledger:

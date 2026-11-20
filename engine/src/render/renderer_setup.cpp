@@ -40,7 +40,24 @@ void Renderer::Impl::createSwapchain() {
   }
 
   const Extent display{swapchain.extent.width, swapchain.extent.height};
-  const Extent render = scaledExtent(display, aaSettings.renderScale);
+  // setAntiAliasing picks DLSS only when the provider supports it; if the
+  // feature still can't be made at this size, TAA takes over.
+  Extent render;
+  if (aaSettings.method == AaMethod::Dlss) {
+    try {
+      render = upscalerProvider->renderExtent(aaSettings, display);
+      submitNow([&](VkCommandBuffer cmd) {
+        upscaler = upscalerProvider->create(aaSettings, render, display, cmd);
+      });
+    } catch (const std::runtime_error &error) {
+      std::cout << "DLSS unavailable: " << error.what() << "; using TAA\n";
+      aaSettings.method = AaMethod::Taa;
+    }
+  }
+  const bool dlss = aaSettings.method == AaMethod::Dlss;
+  if (!dlss) {
+    render = scaledExtent(display, aaSettings.renderScale);
+  }
   renderExtent = {render.width, render.height};
   depth = createRenderImage(kDepthFormat,
                             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
@@ -59,9 +76,11 @@ void Renderer::Impl::createSwapchain() {
                                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                            VK_IMAGE_USAGE_SAMPLED_BIT,
                                        VK_IMAGE_ASPECT_COLOR_BIT);
+  // DLSS clears the output when its history resets (TRANSFER_DST).
   output = createDisplayImage(kHdrFormat,
                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                               VK_IMAGE_ASPECT_COLOR_BIT);
   submitNow([&](VkCommandBuffer cmd) {
     transitionImage(cmd, {output.image, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -70,7 +89,9 @@ void Renderer::Impl::createSwapchain() {
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
   });
-  upscaler = std::make_unique<TaaUpscaler>(*this, display);
+  if (!dlss) {
+    upscaler = std::make_unique<TaaUpscaler>(*this, display);
+  }
   historyValid = false;
 
   // Safe because the device is idle whenever the swapchain is (re)created.
@@ -93,7 +114,8 @@ void Renderer::Impl::createSwapchain() {
   std::cout << "Render " << render.width << "x" << render.height << ", display "
             << display.width << "x" << display.height << ", jitter phases "
             << jitterPhaseCount(render, display, aaSettings.rayReconstruction)
-            << ", mip bias " << textureMipBias(render, display) << "\n";
+            << ", mip bias " << textureMipBias(render, display) << ", "
+            << (dlss ? "DLSS" : "TAA") << "\n";
 }
 
 void Renderer::Impl::createDepthPyramid() {
@@ -1125,6 +1147,9 @@ Renderer::~Renderer() {
   impl_->destroyBuffer(impl_->exposureBuffer);
   impl_->destroyBuffer(impl_->histogramBuffer);
   impl_->destroySwapchain();
+  if (impl_->upscalerProvider) {
+    impl_->upscalerProvider->shutdown();
+  }
   vkDestroyDescriptorPool(dev, impl_->pyramidPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->pyramidSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->cullSetLayout, nullptr);

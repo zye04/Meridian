@@ -224,9 +224,11 @@ public:
   // next frame. Identity by default.
   void setGrade(const Grade &grade);
 
-  // Recreates the render-sized images and resets the temporal history. Only
-  // renderScale (0 < scale <= 1, the render size over the display size) is
-  // honoured so far; antiAliasing() returns the settings in effect.
+  // Recreates the render-sized images and the upscaler and resets the
+  // temporal history. DLSS falls back to TAA when the provider doesn't
+  // support the settings; it picks its own render size, TAA renders at
+  // renderScale (0 < scale <= 1) of the display. antiAliasing() returns the
+  // settings in effect.
   void setAntiAliasing(const AaSettings &settings);
   AaSettings antiAliasing() const;
 

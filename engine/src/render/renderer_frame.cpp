@@ -458,7 +458,11 @@ void Renderer::setAntiAliasing(const AaSettings &settings) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
   }
   check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
-  impl_->aaSettings = {.renderScale = settings.renderScale};
+  impl_->aaSettings = settings;
+  if (settings.method == AaMethod::Dlss &&
+      !(impl_->upscalerProvider && impl_->upscalerProvider->supports(settings))) {
+    impl_->aaSettings.method = AaMethod::Taa;
+  }
   impl_->destroySwapchain();
   impl_->createSwapchain();
 }

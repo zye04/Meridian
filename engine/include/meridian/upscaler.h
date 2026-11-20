@@ -19,7 +19,7 @@ enum class DlssMode { Dlaa, Quality, Balanced, Performance };
 struct AaSettings {
   AaMethod method = AaMethod::Taa;
   DlssMode mode = DlssMode::Dlaa;
-  char preset = 0; // 0: NGX default
+  char preset = 0; // 0: the DLSS module's per-mode default
   bool rayReconstruction = false;
   float renderScale = 1.0f;
 };

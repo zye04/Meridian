@@ -4,6 +4,9 @@
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
 #include <meridian/window.h>
+#ifdef MERIDIAN_HAS_DLSS
+#include <meridian/dlss.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -14,6 +17,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -317,7 +321,11 @@ struct Options {
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
-  // Render size over display size, in (0, 1].
+  // TAA unless --aa dlss; DLSS falls back to TAA when unsupported.
+  meridian::AaMethod aa = meridian::AaMethod::Taa;
+  meridian::DlssMode dlssMode = meridian::DlssMode::Dlaa;
+  char dlssPreset = 0; // 0: the DLSS module's per-mode default
+  // TAA's render size over display size, in (0, 1].
   std::optional<float> renderScale;
   // Fullscreen by default: consistent size for GPU timings, and the way the
   // game is played.
@@ -375,6 +383,37 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--render-scale takes a value in (0, 1]");
       }
       options.renderScale = scale;
+    } else if (arg == "--aa" && i + 1 < argc) {
+      const std::string aa = argv[++i];
+      if (aa == "dlss") {
+        options.aa = meridian::AaMethod::Dlss;
+      } else if (aa == "taa") {
+        options.aa = meridian::AaMethod::Taa;
+      } else {
+        throw std::runtime_error("--aa takes dlss or taa");
+      }
+    } else if (arg == "--dlss-mode" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode == "dlaa") {
+        options.dlssMode = meridian::DlssMode::Dlaa;
+      } else if (mode == "quality") {
+        options.dlssMode = meridian::DlssMode::Quality;
+      } else if (mode == "balanced") {
+        options.dlssMode = meridian::DlssMode::Balanced;
+      } else if (mode == "performance") {
+        options.dlssMode = meridian::DlssMode::Performance;
+      } else {
+        throw std::runtime_error("--dlss-mode takes dlaa, quality, balanced or performance");
+      }
+    } else if (arg == "--dlss-preset" && i + 1 < argc) {
+      const std::string preset = argv[++i];
+      // The presets NGX 310.9.16 names (nvsdk_ngx_defs.h); the other
+      // letters are removed or reserved.
+      if (preset.size() != 1 || std::string_view("EFJKLM").find(preset[0]) ==
+                                    std::string_view::npos) {
+        throw std::runtime_error("--dlss-preset takes E, F, J, K, L or M");
+      }
+      options.dlssPreset = preset[0];
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--placement" && i + 1 < argc &&
@@ -390,7 +429,9 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
-                               "--lod-error px, --render-scale s, "
+                               "--lod-error px, --render-scale s, --aa dlss|taa, "
+                               "--dlss-mode dlaa|quality|balanced|performance, "
+                               "--dlss-preset E|F|J|K|L|M, "
                                "--windowed, "
                                "--capture file.png|file.pfm, --frames n)");
     }
@@ -416,12 +457,34 @@ int main(int argc, char **argv) {
   const bool interactive = options.frames == 0;
 
   meridian::Window window(1280, 720, "Meridian", options.fullscreen);
+#ifdef MERIDIAN_HAS_DLSS
+  std::printf("%s\n", meridian::dlss::attribution());
+  // NGX finds its snippets next to the binary (copied there by the build).
+  const auto upscalerProvider = meridian::dlss::createProvider(
+      std::filesystem::read_symlink("/proc/self/exe").parent_path());
+  meridian::Renderer renderer(window, upscalerProvider.get());
+#else
   meridian::Renderer renderer(window);
+#endif
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setLodErrorPixels(options.lodError);
-  if (options.renderScale) {
-    renderer.setAntiAliasing({.renderScale = *options.renderScale});
+  const meridian::AaSettings aa{.method = options.aa,
+                                .mode = options.dlssMode,
+                                .preset = options.dlssPreset,
+                                .renderScale = options.renderScale.value_or(1.0f)};
+  // The Renderer logs its own fallback when feature creation fails.
+  if (aa.method == meridian::AaMethod::Dlss) {
+#ifdef MERIDIAN_HAS_DLSS
+    if (!upscalerProvider->supports(aa)) {
+      std::printf("DLSS unavailable: NGX reports no Super Resolution; using TAA\n");
+    }
+#else
+    std::printf("DLSS unavailable: built with MERIDIAN_DLSS=OFF; using TAA\n");
+#endif
+  }
+  if (aa.method != meridian::AaMethod::Taa || options.renderScale) {
+    renderer.setAntiAliasing(aa);
   }
 
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.

@@ -57,7 +57,8 @@ struct UpscalerDevice {
 
 // Supplies an optional backend (DLSS). The renderer enables its instance
 // extensions and those of its device extensions the device has before
-// creating each, then calls init once the device exists.
+// creating each, calls init once the device exists, and shutdown before it
+// destroys the device, once every Upscaler from create is gone.
 class UpscalerProvider {
 public:
   virtual ~UpscalerProvider() = default;
@@ -65,6 +66,7 @@ public:
   virtual std::vector<const char *> deviceExtensions(VkInstance,
                                                      VkPhysicalDevice) = 0;
   virtual void init(const UpscalerDevice &) = 0;
+  virtual void shutdown() = 0;
   virtual bool supports(const AaSettings &) const = 0;
   virtual Extent renderExtent(const AaSettings &, Extent display) const = 0;
   virtual std::unique_ptr<Upscaler> create(const AaSettings &, Extent maxRender,

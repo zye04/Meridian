@@ -1191,7 +1191,8 @@ Spec: `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`.
 **DLSS 4.5 sits behind an `Upscaler` interface, in an optional,
 separately linked module (`MERIDIAN_DLSS`).**
 - It uses direct NGX on Linux (Streamline is Windows-only), with NGX
-  default presets, so an SDK update is a version bump.
+  default presets except M for DLAA, Quality and Balanced (see below), so
+  an SDK update is a version bump plus a preset re-measure.
 - The core stays free of NGX and licence-clean: the DLSS licence forbids
   making the SDK subject to an open-source licence and requires NVIDIA
   attribution.
@@ -1210,6 +1211,72 @@ separately linked module (`MERIDIAN_DLSS`).**
   change: Release 1080p ground still and forward 5 m/s mean diff
   0.0000/255 vs the previous build; the `aa` pass median of 5 is 0.17 ms
   vs `taa` 0.17 ms (interleaved runs; re-measure at 1440p).
+- The DLSS module (`engine/dlss`, `meridian_dlss`) uses NVIDIA DLSS SDK
+  v310.9.16, the newest 310.x tag on 2026-11-20, pinned by its commit
+  tarball (9981c6350dc58c0ce21f024fd65e31e851c31689, SHA-256 in the
+  CMake file; a git clone would fetch every release's binaries). It
+  links the SDK's `libnvsdk_ngx.a` and ships the release snippets
+  `libnvidia-ngx-dlss.so.310.9.16` and `libnvidia-ngx-dlssd.so.310.9.16`
+  (Ray Reconstruction) next to the binary, with the guide's section 9.5-9.6
+  copyright and third-party notices; the dev snippets (watermark) and
+  Frame Generation are not shipped. NGX init uses a fixed project id
+  (custom engine), the binary's directory as the feature path, and
+  reports at startup on driver 620.70 (RTX 4080): Super Resolution
+  available, Ray Reconstruction available.
+- The feature is created at the render size NGX gives for the mode (DLAA:
+  the display size) with IsHDR, MVLowRes (no MVJittered: our motion
+  vectors carry no jitter), DepthInverted and AutoExposure;
+  `InMVScale` = render size. Exposure A/B, Release 1080p, DLAA, default
+  preset: a constant 1.0 R32F exposure texture (colour is pre-exposed)
+  vs NGX's AutoExposure measured forward 5 m/s ground 0.4600 vs 0.4596,
+  beech forward 0.751 vs 0.757, shimmer crown 0.311 vs 0.312, shadow
+  0.304 vs 0.305, the same within noise. AutoExposure needs no texture,
+  and presets L and M always use it (programming guide 3.9).
+- Jitter sign: NGX's `InJitterOffset` is the offset the jitter moved the
+  image by, the negative of `UpscalerFrame.jitter` (each pixel samples at
+  its center + jitter; `perspective` in mat4.h flips y with
+  m[1][1] = -f). Release 1080p DLAA ground still Laplacian: both negated
+  0.1803, x only 0.1743, y only 0.1743, neither 0.1738; frame 120 vs 121
+  mean diff 0.048 vs 0.066 (y flipped) and 0.071 (neither).
+- TAA v2 stays the default upscaler (decided 2026-11-20); DLSS 4.5
+  support is mandatory and selected with `--aa dlss`, DLAA preset M being
+  the option that passes every quality gate. The DLAA preset M `aa` pass
+  costs 2.36 ms at 1440p against the 1.0 ms slot, while TAA v2 measures
+  forward 0.94 at 0.17 ms. Re-decide the default if the DLSS cost drops
+  or the budget moves.
+- When DLSS is selected, the Super Resolution preset is M for DLAA, Quality and
+  Balanced and NGX's own (also M) for Performance (`defaultPreset` in
+  dlss.cpp); `--dlss-preset` overrides for A/B. NGX 310.9.16 defaults
+  DLAA, Quality and Balanced to K, which fails the motion gates; M is the
+  second-generation transformer (DLSS 4.5). An SDK bump must re-measure
+  the newest preset against these numbers. Measured at 2560x1440,
+  Release, `tools/motion-gates.sh` (GPU ms median of 5 ground stills):
+
+  | | fwd 5 ground | side 5 | fwd 5 beech | pitch | shimmer crown/shadow | SSIM fwd | `aa` ms |
+  |---|---|---|---|---|---|---|---|
+  | DLAA, K (NGX default) | 0.44 | 1.04 | 0.77 | 1.04 | 0.27/0.30 | 0.926 | 0.75 |
+  | DLAA, M | 0.96 | 1.01 | 0.90 | 0.93 | 0.80/0.40 | 0.993 | 2.36 |
+  | Quality (1707x960), K | 0.49 | | | | | | 0.74 |
+  | Quality, M | 0.82 | | | | | | 1.25 |
+  | Balanced, K | 0.49 | | | | | | 0.76 |
+  | Balanced, M | 0.78 | | | | | | 1.05 |
+  | Performance, M (NGX default) | 0.75 | | | | | | 0.90 |
+  | TAA | 0.49 | | | | | | 0.15 |
+
+  Preset K (first transformer) smears forward motion like the old TAA;
+  preset M passes every motion gate. Its `aa` pass costs 2.36 ms, a measured miss of the 1.0 ms SR/DLAA slot at 1440p,
+  which is why TAA stays the default. TAA v2 measures forward 0.94 at
+  0.17 ms. Upscaled modes' ratios are against their own stills (sharper
+  by the mip bias).
+- Debug builds: VK_NVX_binary_import (an NGX device extension) makes the
+  driver start CUDA, which needs ASan's `protect_shadow_gap=0`; NGX leaks
+  in its extension queries, init, feature creation and first evaluate
+  sit in a `DriverLeakScope`. NGX clears the output on reset, so the
+  output image has TRANSFER_DST.
+- `MERIDIAN_DLSS=OFF` builds, tests and runs TAA with no NGX symbol in
+  the core; with DLSS on, a missing snippet gives `DLSS: Super Resolution
+  unavailable (0xbad00004)` and one `DLSS unavailable: ...; using TAA`
+  line, and renders the TAA image exactly (mean diff 0.0000/255).
 
 **Ray Reconstruction first, for the shadows and AO.**
 - It takes the noisy lit colour plus guides (diffuse and specular albedo,

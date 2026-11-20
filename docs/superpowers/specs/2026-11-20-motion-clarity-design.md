@@ -179,9 +179,11 @@ hash via FetchContent, and the version is verified at fetch time.
   `libnvidia-ngx-dlss*.so`);
   Streamline is Windows-only.
 
-**Modes.** `--aa dlss|taa`; the default is dlss when NGX reports the
-feature, else taa. `--dlss-mode dlaa|quality|balanced|performance`, with
-default dlaa. `--rr on|off`, with default on whenever DLSS is active.
+**Modes.** `--aa taa|dlss`; the default is taa (decided 2026-11-20: DLAA
+preset M costs 2.36 ms at 1440p vs the 1.0 ms slot), dlss falls back to
+taa when NGX reports no Super Resolution. `--dlss-mode dlaa|quality|balanced|performance`, with
+default dlaa. `--rr on|off`, with default on whenever `--aa dlss` is selected and RR is available. The
+SR preset defaults to M for DLAA, Quality and Balanced.
 
 **Out of scope** (backlog rows):
 - DLSS 5: RTX 50 only, no Linux evidence, and the dev GPU is an RTX 4080.
@@ -207,8 +209,10 @@ default dlaa. `--rr on|off`, with default on whenever DLSS is active.
 4. **Depth** is passed with `DepthInverted`. Sky depth 0 (infinite far) is
    verified in the task.
 5. **Exposure.** Colour is already pre-exposed by last frame's exposure
-   (GPU-only). Task 1.3 A/Bs a constant 1.0 exposure texture against
-   NGX's AutoExposure flag and records the result here.
+   (GPU-only). Task 1.3 measured a constant 1.0 exposure texture and
+   NGX's AutoExposure flag the same (DLAA, 1080p: forward 5 ground
+   0.4600 vs 0.4596, beech shimmer 0.311 vs 0.312); DLSS uses
+   AutoExposure, which needs no texture (presets L and M always use it).
 6. **Mip bias** = `log2(render/display)`, plus -1 when upscaling; 0 for
    DLAA. It is applied to the material samplers.
 7. **Guides** (for RR):
@@ -228,7 +232,7 @@ default dlaa. `--rr on|off`, with default on whenever DLSS is active.
 
 ### 3. Ray Reconstruction first, for shadows and AO
 
-When DLSS is active, RR is the default and replaces SR.
+When `--aa dlss` is selected, RR is the default and replaces SR.
 - Its input is the full noisy lit colour: raw 1-ray visibility times the
   sun, not pre-blurred. AO today is material/terrain AO, which is not
   stochastic; a future stochastic AO feeds RR the same way.
@@ -379,7 +383,7 @@ The capture drift fix landed in b6432cf. Gate scripts live in `tools/`
 | same, pitch 0.02 rad/s | ground | >= 0.85 | >= 0.95 | 0.71 |
 | shimmer crown / shadow (/255) | beech | <= 2.0 / 2.0 | <= 1.0 / 1.0 | 2.0 / 1.5 |
 | SSIM motion vs still, forward 5 | ground | >= 0.98 | | 0.95 |
-| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.18 (TAA, 1080p) |
+| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.18 (TAA, 1080p); DLAA preset M 2.36 (1440p): measured miss; TAA v2 stays the default, DLSS is opt-in |
 | AA slot GPU ms, RR | 1440p | <= 3.0 (else Quality mode) | | n/a |
 | TAA v2 + shadow denoiser GPU ms | 1440p | <= 0.9 | | 0.18 (1080p) |
 | grade + tonemap GPU ms | 1440p | <= 0.08 | | 0.06 (1080p) |
