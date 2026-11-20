@@ -10,11 +10,12 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Shadow denoiser | Soft RT sun shadows use 1 ray/pixel accumulated by TAA; leaf shadows shimmer in motion | User screenshots 2026-11-20 | Quality pass step 2 (spec pending) |
+| Shadow denoiser | Soft RT sun shadows use 1 ray/pixel accumulated by TAA; leaf shadows shimmer in motion | User screenshots 2026-11-20 | Motion-clarity plan: DLSS Ray Reconstruction (Task 1.5), fallback MIT shadow denoiser (Tasks 3.2a-3.2b) |
 | Leaf translucency (light through leaves) | Canopies read dull and dark; tree shadows too dark | M2a spec non-goal; user feedback | After M2b sky visibility |
 | Leaf textures (venation, normal, translucency maps) | Megaplants USD ships flat leaf colors only | Task 2 import; user feedback | Content, with leaf translucency |
 | Shadows too dark (needle ground ~11% of sunlit in two measured views; real ~10-20%) | Shadows at the dark end of real | Shadow investigation 2026-11-20 | Haze profile and bounce light (rows below) |
 | Haze anchored at sea level | Ridges (1.35 km) sit above most of the aerosol: less sky light up high, thin haze from above | Shadow investigation; haze tuning | Engine: aerosol layer from the valley floor / layered profile with a sharp top |
+| Distant hills violet | Brown placeholder terrain albedo under blue haze: far-band OKLCh hue 277 vs 242 with a mid-green ground (reference 236-252); fix = green ground cover / vegetation albedo | Motion-clarity haze investigation | Real terrain albedo (M3 meadow) |
 | Bounce light / GI | No light bounced from the ground or between surfaces | Shadow investigation | Later (GI milestone not yet planned) |
 | Cloud occlusion of ambient | Dropped from M4: it double-darkened with the cloud-dimmed sky capture | M4 clouds spec | Revisit with GI |
 | RT reflections | No reflections beyond the specular from the sky | M2b spec non-goal | Later (with a denoiser) |
@@ -25,11 +26,16 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| TAA blur | Keeps only ~48% of the still image's sharpness in motion; textures soft up close | Known gap before the backlog; user feedback | Quality pass step 2 |
-| TAA history not rescaled on exposure change | Ghosting when exposure adapts | Known gap before the backlog | Quality pass step 2 |
+| TAA blur | Keeps only ~48% of the still image's sharpness in motion; textures soft up close | Known gap before the backlog; user feedback | Motion-clarity plan (DLSS 4.5 Task 1.3, TAA v2 Task 3.1) |
+| TAA history not rescaled on exposure change | Ghosting when exposure adapts | Known gap before the backlog | Motion-clarity plan Task 3.1 |
 | HDR output (mandatory, top quality) | User 2026-11-20: "the best of the best HDR possible", Windows acceptable. Linux path looks viable but unproven: NVIDIA 610.43 (May 2026) added HDR output and the DRM color pipeline, VK_EXT_hdr_metadata since 580.94.11 (Wayland only), Hyprland >= 0.55 does HDR (`cm = hdr`, 10-bit); open risks are NVIDIA's wp_color_management_v1 support and driver bugs (610.43.02 passes invalid metadata luminance). Dev box `vulkaninfo` lists HDR10_ST2084/HLG/scRGB, but the monitor test is pending: the session ran on Hyprland's headless fallback output (`hdr: no`). Windows (DXGI/Vulkan HDR10 + scRGB, mature) is the fallback. Engine work: HDR swapchain + hdr_metadata, display-transform split so grading stays scene-referred and shared by SDR/HDR (AgX stays the SDR path), paper-white and peak-nits settings, UI composited at paper white, dither scaled to the format | User 2026-11-20; sources: ubuntuhandbook.org/index.php/2026/05/nvidia-610-43-02-released-with-hdr-output-support-for-linux, webpronews.com/nvidias-linux-driver-leap-hdr-metadata-unlocks-new-era-for-wayland-gaming, wiki.hypr.land/configuring/core/monitors/colors, wiki.archlinux.org/title/HDR | Mandatory; spec first, test on a real HDR monitor |
 | Dither pattern static per pixel | Fine at 8-bit; an HDR/10-bit swapchain needs the dither scaled | Dither fix | When HDR output lands |
-| DLSS integration | Upscaling, Ray Reconstruction (would also denoise); brings mip bias tuning. Linux: NGX SDK directly | Roadmap; terrain-material spec | Later |
+| DLSS integration | Upscaling, Ray Reconstruction (would also denoise); brings mip bias tuning. Linux: NGX SDK directly | Roadmap; terrain-material spec | Motion-clarity plan Tasks 1.1a-1.5 |
+| DLSS Frame Generation / Multi Frame Generation | Higher displayed frame rate; FG needs RTX 40, MFG RTX 50; NVIDIA recommends Streamline (Windows-only), native Linux via NGX unverified | Motion-clarity spec non-goal | After the Upscaler interface; verify Linux first |
+| DLSS 5 | Newest DLSS (shipped 2026-09), RTX 50 only, no Linux evidence; dev GPU is an RTX 4080 | Motion-clarity spec | When the Linux SDK carries it and an RTX 50 target exists (a version bump behind the Upscaler interface) |
+| XeSS backend | Intel's upscaler; no Linux binaries | Motion-clarity spec non-goal | When Linux binaries exist and a non-NVIDIA target needs it |
+| FSR 4 backend | Better than TAA v2 on AMD RDNA 2-4 (FidelityFX SDK 2.4, MIT, Vulkan); Linux binaries unverified | Motion-clarity spec non-goal | When a non-NVIDIA target exists |
+| Grade look tuning | Grading system lands with an identity grade; the measured reference starting set (decisions.md) waits for real lighting | Motion-clarity spec | After sky occlusion, leaf translucency and forests in frame |
 
 ## Geometry and vegetation
 

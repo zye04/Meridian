@@ -1165,3 +1165,63 @@ slice 5's compression and streaming stay deferred.
   dispatches at most `kBvhDepths` levels; and no pool may exceed the
   device's `maxBufferSize` (Vulkan 1.3; buffer device addresses are not
   bound by `maxStorageBufferRange`).
+
+## Motion clarity: DLSS 4.5, Ray Reconstruction, TAA v2, grading (2026-11-20)
+
+Spec: `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`.
+
+**The smear is in the TAA history, not in the motion vectors.**
+- Measured at 1080p, eye-height ground view, motion/still Laplacian:
+  forward 5 m/s 0.49, sideways 0.91, backward 0.95.
+- Every frame resamples the history at a fractional offset (Catmull-Rom)
+  and keeps 90% of it, so the blur compounds.
+- Forward motion also magnifies older, coarser history.
+- The reprojection residual has a sharp minimum at motion-vector scale
+  1.0, so the motion vectors are right.
+
+**Temporal accumulation stays.**
+- Without TAA, shimmer between consecutive frames rises from 1.9/1.7 to
+  19.1/17.0 (/255, foliage crown and shadow), and the 1-ray-per-pixel
+  sun penumbrae dither.
+- SSAA and MSAA cost too much or don't fix shading and shadow noise.
+- Forza Horizon 5's MSAA lost to its later TAA because trees shimmered.
+- Source: https://www.computerbase.de/2022-06/forza-horizon-5-series-9-update-taa-test/
+
+**DLSS 4.5 sits behind an `Upscaler` interface, in an optional,
+separately linked module (`MERIDIAN_DLSS`).**
+- It uses direct NGX on Linux (Streamline is Windows-only), with NGX
+  default presets, so an SDK update is a version bump.
+- The core stays free of NGX and licence-clean: the DLSS licence forbids
+  making the SDK subject to an open-source licence and requires NVIDIA
+  attribution.
+- Source: https://github.com/NVIDIA/DLSS
+
+**Ray Reconstruction first, for the shadows and AO.**
+- It takes the noisy lit colour plus guides (diffuse and specular albedo,
+  normal + roughness).
+- Its samples must be hashed white noise, not interleaved gradient noise.
+- NRD SIGMA is not used: it is under the NVIDIA RTX SDKs licence.
+
+**The fallback is TAA v2 plus a port of FidelityFX's shadow denoiser
+(MIT).**
+- Shortening the history alone doubles or triples shadow shimmer: current
+  weight 0.2 gives 3.3/255, 0.3 gives 4.9.
+- Source: https://gpuopen.com/manuals/fidelityfx_sdk/techniques/denoiser/
+
+**The grade is scene-referred and parametric.**
+- White balance, CDL and per-hue OKLCh grading are baked with the DRT
+  into a 33^3 LUT (65^3 if the identity gate fails), indexed after
+  AgX's inset by a log2 shaper over -12.47..+8 EV, so one grade serves
+  SDR and HDR and a negative exposure offset recovers highlights.
+- The grade defaults to identity.
+- Reference starting set, for tuning after the lighting work: CDL power
+  1.10, saturation 1.10, greens 10 degrees toward yellow x1.15, blues
+  10 degrees toward cyan.
+- AgX itself already matches the Chlorophyll reference's rolloff and
+  greens.
+- Sources: https://dev.epicgames.com/documentation/en-us/unreal-engine/color-grading-and-the-filmic-tonemapper-in-unreal-engine
+  and https://gdcvault.com/play/1024253/High-Dynamic-Range-Color-Grading
+
+**The reference's motion/still ratio is about 0.9** (0.8-1.0, low
+confidence), estimated from the YouTube video. Gates: forward 5 m/s
+>= 0.85 minimum, >= 0.95 stretch, on every path.
