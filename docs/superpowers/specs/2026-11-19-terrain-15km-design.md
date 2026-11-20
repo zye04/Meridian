@@ -1,5 +1,7 @@
 # 15 km terrain (showcase milestone M1) — design
 
+**Status:** done on main (M1, 4a6cc04..aa5dbe3).
+
 ## Intent
 
 First milestone toward the 15 x 15 km natural showcase scene (forests,

@@ -1,5 +1,7 @@
 # M2b Forest lighting — design
 
+**Status:** not started; begins after M2a (`docs/superpowers/plans/2026-11-19-forests.md`) is complete.
+
 Second half of milestone M2 (see `2026-11-19-forests-design.md` for M2a
 and `2026-11-19-showcase-roadmap.md`). M2a puts millions of placed trees
 and rocks on the Napf with a TLAS built once over full-detail shared

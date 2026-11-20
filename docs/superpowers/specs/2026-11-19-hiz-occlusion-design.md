@@ -1,5 +1,7 @@
 # Two-phase Hi-Z occlusion culling — design
 
+**Status:** done on main (a8211f5..5fd09b4).
+
 ## Intent
 
 GPU-driven phase 2: skip drawing instances hidden behind others (behind a

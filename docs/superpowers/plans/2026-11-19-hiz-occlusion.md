@@ -1,5 +1,7 @@
 # Hi-Z Occlusion Culling Implementation Plan
 
+**Status:** done on main (a8211f5..5fd09b4).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Two-phase Hi-Z occlusion culling on the GPU, proven on a dense Poly Haven scatter at eye height.

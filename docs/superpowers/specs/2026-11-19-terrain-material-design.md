@@ -1,5 +1,7 @@
 # Terrain material — design
 
+**Status:** done on main (c3302f5..c4aa310).
+
 ## Intent
 
 Replace the flat slope/height colors in `proceduralTerrain()` (mesh.frag)

@@ -1,5 +1,7 @@
 # Terrain Material Implementation Plan
 
+**Status:** done on main (c3302f5..c4aa310).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Texture the terrain with Poly Haven ground scans (hex-tiled, height-blended, triplanar rock), and add a motion-capture option that proves nothing smears in motion.

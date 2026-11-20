@@ -1,5 +1,7 @@
 # M2b Forest Lighting Implementation Plan
 
+**Status:** not started; begins after M2a (`docs/superpowers/plans/2026-11-19-forests.md`) is complete.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Forest light that is right and affordable: per-tile near/mid/far ray representations in a partitioned TLAS over M2a's voxel far field, sky visibility traced after a depth + normal prepass, and the first undergrowth.

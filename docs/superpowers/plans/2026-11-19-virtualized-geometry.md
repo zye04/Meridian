@@ -1,5 +1,7 @@
 # Virtualized geometry slice 1 (cluster LOD raster) Implementation Plan
 
+**Status:** slice 1 done on main (6af0c51..f1ccccd); slices 2-5 are deferred, see `docs/backlog.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Render every opaque/masked mesh as Nanite-style clusters with continuous LOD, cluster culling and mesh-shader raster.
