@@ -18,6 +18,8 @@
 # Megascans Megaplants trees (Fab, need a login, so not downloaded): pass the
 # directory holding the tree_*_usd.zip downloads as the first argument to
 # import variant A of each through tools/usd2gltf and meridian-cook --tree.
+# The same directory may hold Megascans rock downloads (*_ue_high.zip, Fab):
+# the massive sandstone cliff is cooked for placement.
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
 megaplants="${1:-}"
@@ -204,6 +206,26 @@ else
       --bark-texture "$bark"
     echo "$triangles" > "$out.part/budget"
     rm -rf "$out"
+    mv "$out.part" "$out"
+  done
+
+  # Megascans rocks for placement (Fab *_ue_high.zip downloads, same
+  # directory): the tier 1 glTF and its 4K textures, cooked like the Poly
+  # Haven models (which bakes the scan's Z-up centimeter node transform).
+  for id in massive_sandstone_cliff_vmmdcj2; do
+    zip="$megaplants/${id}_ue_high.zip"
+    out="$megascans/$id"
+    [[ -f "$zip" && ! -d "$out" ]] || continue
+    extract="$megascans/_extract/${id}_ue_high"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part" '*_tier_1.gltf' '*_tier_1.bin' 'Textures/*'
+      mv "$extract.part" "$extract"
+    fi
+    gltf="$(find "$extract" -maxdepth 1 -name '*_tier_1.gltf' | head -n 1)"
+    rm -rf "$out.part"
+    "$cook" "$gltf" "$out.part"
     mv "$out.part" "$out"
   done
 fi

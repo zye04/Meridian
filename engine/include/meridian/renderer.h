@@ -15,6 +15,8 @@
 namespace meridian {
 
 class Window;
+struct Prototype;
+struct PlacementLayer;
 
 struct MeshId {
   uint32_t index = 0;
@@ -71,6 +73,11 @@ struct TerrainLayer {
   TextureId height;
   float tileSize = 2.0f; // meters per texture repeat
 };
+
+// The ground turns to rock as the terrain normal's y falls from
+// kRockNormalY[1] (26 degrees) to kRockNormalY[0] (41 degrees). Placement
+// rules that follow rock (boulders) use the same values.
+constexpr float kRockNormalY[2] = {0.75f, 0.9f};
 
 // Flat ground mixes soil and needles; steep slopes are rock; flat ground
 // above the snow line is snow.
@@ -142,6 +149,14 @@ public:
   // TerrainMaterial, or procedural colors until one is set.
   void setTerrain(const Heightfield &field);
   void setTerrainMaterial(const TerrainMaterial &material);
+
+  // Places the layers' prototypes over the terrain (call after setTerrain)
+  // on the GPU, deterministically: placement.h's evaluatePoint is the CPU
+  // reference. The result replaces any earlier placement. Prototype indices
+  // in the layers index `prototypes`.
+  void setPlacement(std::span<const Prototype> prototypes,
+                    std::span<const PlacementLayer> layers, uint32_t seed);
+  uint32_t placedInstanceCount() const;
 
   // Copies the mesh into GPU-only memory. The data can be freed afterwards.
   MeshId uploadMesh(const MeshData &mesh, MaterialId material);

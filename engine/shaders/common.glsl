@@ -128,6 +128,51 @@ layout(buffer_reference, std430) readonly buffer InstanceBuffer {
     InstanceData instances[];
 };
 
+// One placed object (id >= kPlacedBase). Must match PlacedInstance in
+// placement.h: rotation xy, then z | scale (half float) << 16, where
+// rotation is a unit quaternion's x, y, z in snorm16 (w >= 0 rebuilt).
+struct PlacedInstance {
+    float positionX;
+    float positionY;
+    float positionZ;
+    uint rotationXY;
+    uint rotationZScale;
+    uint prototype;
+};
+
+layout(buffer_reference, std430) buffer PlacedInstanceBuffer {
+    PlacedInstance placed[];
+};
+
+// A 64 m placement cell (x/z bounds from its index in the grid): the height
+// range of its instances' bounding spheres and its run of the placed table.
+// Must match Cell in C++.
+struct Cell {
+    float minY;
+    float maxY;
+    uint firstInstance;
+    uint instanceCount;
+};
+
+layout(buffer_reference, std430) buffer CellBuffer {
+    Cell cells[];
+};
+
+vec4 placedRotation(PlacedInstance instance) {
+    vec3 xyz = vec3(unpackSnorm2x16(instance.rotationXY),
+                    unpackSnorm2x16(instance.rotationZScale).x);
+    float w = sqrt(max(0.0, 1.0 - dot(xyz, xyz)));
+    return normalize(vec4(xyz, w));
+}
+
+float placedScale(PlacedInstance instance) {
+    return unpackHalf2x16(instance.rotationZScale >> 16u).x;
+}
+
+vec3 rotateByQuaternion(vec4 q, vec3 v) {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 // Must match AtmosphereParameters in C++. Distances in km, coefficients
 // per km.
 struct AtmosphereParameters {
@@ -202,7 +247,8 @@ struct Terrain {
     uint rootLevel;
     // The camera's x/z wrapped by the mix noise's period (renderer_frame.cpp).
     vec2 noiseOffset;
-    vec2 pad;
+    // Ground turns to rock from normal.y = y down to x (kRockNormalY).
+    vec2 rockNormalY;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
@@ -255,6 +301,13 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     ClusterVertexBuffer clusterVertices;
     ClusterTriangleBuffer clusterTriangles;
     DrawListBuffer drawLists;
+    // Placement (setPlacement): the placed table and the cells, row-major
+    // from the north-west; cell (cellGrid.x + column, cellGrid.y + row)
+    // spans [cell, cell + 1) * 64 m.
+    PlacedInstanceBuffer placedInstances;
+    CellBuffer cells;
+    ivec2 cellGrid;
+    uvec2 cellGridSize;
 };
 
 // Largest axis scale of a transform: a conservative bound under

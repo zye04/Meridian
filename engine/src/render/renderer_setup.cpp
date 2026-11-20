@@ -976,7 +976,7 @@ Renderer::~Renderer() {
         &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
-        &impl_->terrainPyramid}) {
+        &impl_->terrainPyramid, &impl_->placedInstances, &impl_->cells}) {
     impl_->destroyBuffer(*buffer);
   }
 

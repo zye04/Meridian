@@ -333,6 +333,8 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     info.boundsRadius =
         std::max(info.boundsRadius, length(v.position - info.boundsCenter));
   }
+  mesh.boundsCenter = info.boundsCenter;
+  mesh.boundsRadius = info.boundsRadius;
   info.firstIndex = mesh.firstIndex;
   info.indexCount = mesh.indexCount;
   info.vertexOffset = mesh.vertexOffset;

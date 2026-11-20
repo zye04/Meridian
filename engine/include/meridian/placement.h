@@ -4,6 +4,7 @@
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -106,5 +107,36 @@ std::optional<PlacedPoint> evaluatePoint(const Heightfield &field,
                                          const PlacementLayer &layer,
                                          const DitherPattern &pattern, uint32_t seed,
                                          int32_t cellX, int32_t cellZ, uint32_t point);
+
+// The cells holding the crop: cell (firstX + column, firstZ + row), rows
+// from the north-west corner (min x, min z). Placement's cell table and
+// its instances' order follow it.
+struct PlacementGrid {
+  int32_t firstX, firstZ;
+  uint32_t columns, rows;
+};
+PlacementGrid placementGrid(const Heightfield &field);
+
+// One placed object, 24 bytes. Must match PlacedInstance in common.glsl.
+// rotation: a unit quaternion's x, y, z in snorm16 (w >= 0 is rebuilt);
+// scaleHalf: the uniform scale as an IEEE half float.
+struct PlacedInstance {
+  float position[3];
+  int16_t rotation[3];
+  uint16_t scaleHalf;
+  uint32_t prototype;
+};
+static_assert(sizeof(PlacedInstance) == 24);
+
+struct DecodedInstance {
+  Vec3 position;
+  std::array<float, 4> rotation; // x, y, z, w
+  float scale;
+  uint32_t prototype;
+};
+// The point's axis-angle as a unit quaternion (x, y, z, w) with w >= 0.
+std::array<float, 4> placedRotation(const PlacedPoint &point);
+PlacedInstance encodePlacedInstance(const PlacedPoint &point);
+DecodedInstance decodePlacedInstance(const PlacedInstance &instance);
 
 } // namespace meridian

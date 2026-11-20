@@ -88,9 +88,10 @@ uint placementFbm16(uint u, uint v, uint period, uint octaves, uint salt) {
 
 // h: the nearest sample (placementNearestSample); dx, dz: its central
 // differences (indices clamped to the grid), in sample steps. layerSeed:
-// placementLayerSeed. Returns the density 0..65535.
+// placementLayerSeed. Returns the density 0..65535; mask: the mask factor
+// alone (it also shrinks the scale at the edge).
 uint placementDensity(PlacementRule rule, uint seed, uint layerSeed, int x, int z, int h, int dx,
-                      int dz) {
+                      int dz, out uint mask) {
   dx = clamp(dx, -32767, 32767);
   dz = clamp(dz, -32767, 32767);
   int g2 = dx * dx + dz * dz;
@@ -98,7 +99,7 @@ uint placementDensity(PlacementRule rule, uint seed, uint layerSeed, int x, int 
                                 placementBand16(h, rule.altitude));
   uint u = uint(x) ^ 0x80000000u;
   uint v = uint(z) ^ 0x80000000u;
-  uint mask = 0xFFFFu;
+  mask = 0xFFFFu;
   if (rule.maskPeriod != 0u) {
     int m = int(placementFbm16(u, v, rule.maskPeriod, kPlacementMaskOctaves,
                                seed ^ kPlacementMaskSalt));

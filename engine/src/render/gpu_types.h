@@ -2,6 +2,7 @@
 // GLSL declarations in engine/shaders; change both together.
 #pragma once
 
+#include <meridian/placement.h>
 #include <meridian/renderer.h>
 
 #include <vk_mem_alloc.h>
@@ -101,6 +102,9 @@ struct GpuMesh {
   uint32_t drawBucket = 0;
   AlphaMode alphaMode = AlphaMode::Opaque;
   bool doubleSided = false;
+  // Bounding sphere (MeshInfo's), for placement's cell bounds.
+  Vec3 boundsCenter;
+  float boundsRadius = 0.0f;
   // Bottom-level acceleration structure: the mesh's triangles for ray tracing.
   AccelerationStructure blas;
 };
@@ -226,7 +230,7 @@ struct GpuTerrain {
   uint32_t rootLevel = 0;
   // The camera's x/z wrapped by kTerrainNoiseWrap.
   float noiseOffset[2] = {};
-  float pad[2] = {};
+  float rockNormalY[2] = {kRockNormalY[0], kRockNormalY[1]};
 };
 static_assert(sizeof(GpuTerrain) == 240);
 
@@ -276,8 +280,14 @@ struct SceneData {
   VkDeviceAddress clusterVertices = 0;
   VkDeviceAddress clusterTriangles = 0;
   VkDeviceAddress drawLists = 0;
+  // Placement (renderer_placement.cpp): the placed table, the cell table
+  // and the cell grid (PlacementGrid).
+  VkDeviceAddress placedInstances = 0;
+  VkDeviceAddress cells = 0;
+  int32_t cellGrid[2] = {};
+  uint32_t cellGridSize[2] = {};
 };
-static_assert(sizeof(SceneData) == 960);
+static_assert(sizeof(SceneData) == 992);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -365,6 +375,59 @@ static_assert([] {
   instance.instanceCustomIndex = kMaxInstanceId;
   return instance.instanceCustomIndex == kMaxInstanceId;
 }());
+
+static_assert(sizeof(PlacedInstance) == 24); // must match common.glsl
+
+// Must match Cell in common.glsl. Empty cells have minY = maxY = 0.
+struct Cell {
+  float minY, maxY;
+  uint32_t firstInstance, instanceCount;
+};
+static_assert(sizeof(Cell) == 16);
+
+// Must match PlacementLayer in placement.comp. Points index the uploaded
+// dither patterns, prototypes the (cumulative threshold, prototype) pairs.
+struct GpuPlacementLayer {
+  PlacementRule rule;
+  uint32_t id = 0;
+  uint32_t firstPoint = 0;
+  uint32_t pointCount = 0;
+  uint32_t firstPrototype = 0;
+  float scaleMin = 0.0f;
+  float scaleMax = 0.0f;
+  float sinkDepth = 0.0f;
+  uint32_t fullRotation = 0;
+};
+static_assert(sizeof(GpuPlacementLayer) == 84);
+
+// Must match the push constants in placement.comp.
+struct PlacementConstants {
+  VkDeviceAddress heights = 0; // the samples, two per uint
+  VkDeviceAddress layers = 0;
+  VkDeviceAddress points = 0; // uvec2 (point, threshold)
+  VkDeviceAddress prototypes = 0; // uvec2 (cumulative threshold, prototype)
+  VkDeviceAddress bounds = 0; // vec4 per prototype: sphere center, radius
+  VkDeviceAddress counts = 0; // per (cell, layer); offsets after the scan
+  VkDeviceAddress instances = 0;
+  VkDeviceAddress cells = 0;
+  PlacementField field;
+  int32_t gridFirst[2] = {};
+  uint32_t gridColumns = 0;
+  uint32_t layerCount = 0;
+  uint32_t seed = 0;
+  float minHeight = 0.0f;
+  float heightScale = 0.0f;
+  float spacing = 0.0f;
+};
+static_assert(sizeof(PlacementConstants) == 120);
+
+// Must match the push constants in scan.comp.
+struct ScanConstants {
+  VkDeviceAddress values = 0;
+  uint32_t count = 0;
+  uint32_t pad = 0;
+};
+static_assert(sizeof(ScanConstants) == 16);
 
 // Must match depth_pyramid.comp.
 struct PyramidConstants {

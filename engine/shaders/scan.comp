@@ -1,0 +1,49 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+
+// Exclusive prefix sum in place over count values, plus their total at
+// values[count]. One workgroup: each thread sums a contiguous chunk, the
+// chunk sums are scanned in shared memory, then each chunk is rewritten.
+// For load-time tables (placement's per (cell, layer) counts).
+
+layout(local_size_x = 1024) in;
+
+layout(buffer_reference, std430) buffer ScanValues {
+    uint values[];
+};
+
+// Must match ScanConstants in gpu_types.h.
+layout(push_constant) uniform ScanConstants {
+    ScanValues data;
+    uint count;
+} pc;
+
+shared uint sums[1024];
+
+void main() {
+    uint thread = gl_LocalInvocationID.x;
+    uint chunk = (pc.count + 1023u) / 1024u;
+    uint begin = min(thread * chunk, pc.count);
+    uint end = min(begin + chunk, pc.count);
+    uint sum = 0u;
+    for (uint i = begin; i < end; ++i) {
+        sum += pc.data.values[i];
+    }
+    sums[thread] = sum;
+    barrier();
+    for (uint offset = 1u; offset < 1024u; offset <<= 1u) {
+        uint before = thread >= offset ? sums[thread - offset] : 0u;
+        barrier();
+        sums[thread] += before;
+        barrier();
+    }
+    uint running = sums[thread] - sum;
+    for (uint i = begin; i < end; ++i) {
+        uint value = pc.data.values[i];
+        pc.data.values[i] = running;
+        running += value;
+    }
+    if (thread == 1023u) {
+        pc.data.values[pc.count] = sums[1023];
+    }
+}

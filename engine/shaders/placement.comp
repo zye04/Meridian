@@ -1,0 +1,255 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "placement.glsl"
+
+// Placement at load (renderer_placement.cpp), one workgroup per 64 m cell
+// of the grid, layers in order inside it. Two variants:
+//   PLACEMENT_COUNT: kept points per (cell, layer) into counts;
+//   PLACEMENT_WRITE: after scan.comp turned the counts into offsets, the
+//     instances in (cell, layer, pattern point) order and the cell table.
+// Keep/reject mirrors evaluatePoint (placement.cpp) in integer math; the
+// order comes from the offsets, never from atomics, so the table is
+// deterministic.
+
+#if defined(PLACEMENT_COUNT) == defined(PLACEMENT_WRITE)
+#error define one of PLACEMENT_COUNT and PLACEMENT_WRITE
+#endif
+
+layout(local_size_x = 64) in;
+
+// Must match GpuPlacementLayer in gpu_types.h.
+struct PlacementLayer {
+    PlacementRule rule;
+    uint id;
+    uint firstPoint;
+    uint pointCount;
+    uint firstPrototype;
+    float scaleMin;
+    float scaleMax;
+    float sinkDepth;
+    uint fullRotation;
+};
+
+layout(buffer_reference, std430) readonly buffer HeightWords {
+    uint words[];
+};
+layout(buffer_reference, std430) readonly buffer PlacementLayers {
+    PlacementLayer layers[];
+};
+// (point x | z << 16, threshold) per pattern point.
+layout(buffer_reference, std430) readonly buffer PatternPoints {
+    uvec2 points[];
+};
+// (cumulative threshold, prototype) per layer entry.
+layout(buffer_reference, std430) readonly buffer PrototypePicks {
+    uvec2 picks[];
+};
+// Per prototype: bounding sphere center (prototype space) and radius.
+layout(buffer_reference, std430) readonly buffer PrototypeBounds {
+    vec4 bounds[];
+};
+layout(buffer_reference, std430) buffer PlacementCounts {
+    uint counts[];
+};
+
+// Must match PlacementConstants in gpu_types.h.
+layout(push_constant) uniform PlacementConstants {
+    HeightWords heights;
+    PlacementLayers layers;
+    PatternPoints points;
+    PrototypePicks prototypes;
+    PrototypeBounds bounds;
+    PlacementCounts counts;
+    PlacedInstanceBuffer instances;
+    CellBuffer cells;
+    PlacementField field;
+    // Not an ivec2: its 8-byte alignment would open a gap after field.
+    int gridFirstX;
+    int gridFirstZ;
+    uint gridColumns;
+    uint layerCount;
+    uint seed;
+    float minHeight;
+    float heightScale;
+    float spacing;
+} pc;
+
+int heightSample(uint i, uint j) {
+    uint k = j * pc.field.width + i;
+    return int((pc.heights.words[k >> 1u] >> ((k & 1u) * 16u)) & 0xFFFFu);
+}
+
+// Heightfield::heightAt, operation for operation. Inside the crop the
+// mirrored indices equal clamped ones. precise: no FMA contraction, which
+// the C++ reference doesn't do either.
+float heightAt(float x, float z) {
+    precise float gx = x / pc.spacing + 0.5 * float(pc.field.width - 1u);
+    precise float gz = z / pc.spacing + 0.5 * float(pc.field.height - 1u);
+    float fx0 = floor(gx);
+    float fz0 = floor(gz);
+    precise float tx = gx - fx0;
+    precise float tz = gz - fz0;
+    uint i0 = uint(clamp(int(fx0), 0, int(pc.field.width) - 1));
+    uint i1 = uint(clamp(int(fx0) + 1, 0, int(pc.field.width) - 1));
+    uint j0 = uint(clamp(int(fz0), 0, int(pc.field.height) - 1));
+    uint j1 = uint(clamp(int(fz0) + 1, 0, int(pc.field.height) - 1));
+    precise float s00 = pc.minHeight + pc.heightScale * float(heightSample(i0, j0));
+    precise float s10 = pc.minHeight + pc.heightScale * float(heightSample(i1, j0));
+    precise float s01 = pc.minHeight + pc.heightScale * float(heightSample(i0, j1));
+    precise float s11 = pc.minHeight + pc.heightScale * float(heightSample(i1, j1));
+    precise float top = s00 + (s10 - s00) * tx;
+    precise float bottom = s01 + (s11 - s01) * tx;
+    precise float height = top + (bottom - top) * tz;
+    return height;
+}
+
+bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, uint point,
+              out ivec2 p, out uint mask) {
+    mask = 0u;
+    uvec2 pattern = pc.points.points[layer.firstPoint + point];
+    p = placementPointPosition(cell, cellHash, pattern.x);
+    if (!placementInsideCrop(pc.field, p)) {
+        return false;
+    }
+    uvec2 s = placementNearestSample(pc.field, p);
+    uint i0 = s.x > 0u ? s.x - 1u : 0u;
+    uint i1 = min(s.x + 1u, pc.field.width - 1u);
+    uint j0 = s.y > 0u ? s.y - 1u : 0u;
+    uint j1 = min(s.y + 1u, pc.field.height - 1u);
+    uint density = placementDensity(
+        layer.rule, pc.seed, layerSeed, p.x, p.y, heightSample(s.x, s.y),
+        heightSample(i1, s.y) - heightSample(i0, s.y),
+        heightSample(s.x, j1) - heightSample(s.x, j0), mask);
+    return placementKeep(pattern.y, density);
+}
+
+#ifdef PLACEMENT_COUNT
+shared uint keptCount;
+#else
+shared uint keptFlags[64];
+shared float lowest[64];
+shared float highest[64];
+
+float unitFloat(uint bits) { return float(bits & 0xFFFFu) / 65535.0; }
+
+// evaluatePoint's attributes; the scale shrinks toward the mask's edge.
+PlacedInstance placeInstance(PlacementLayer layer, uint cellHash, uint point, ivec2 p,
+                             uint mask) {
+    const float kTwoPi = 6.2831855;
+    uint pointHash = placementPointHash(cellHash, point);
+    uint pick = layer.firstPrototype;
+    while ((pointHash & 0xFFFFu) >= pc.prototypes.picks[pick].x) {
+        ++pick;
+    }
+    vec3 position = vec3(float(p.x) / 65536.0, 0.0, float(p.y) / 65536.0);
+    position.y = heightAt(position.x, position.z) - layer.sinkDepth;
+    float edge = 0.5 + 0.5 * float(mask) / 65535.0;
+    float scale =
+        (layer.scaleMin + (layer.scaleMax - layer.scaleMin) * unitFloat(pointHash >> 16u)) * edge;
+    uint rotationHash = placementHash(pointHash, 3u, 0u);
+    vec3 axis = vec3(0.0, 1.0, 0.0);
+    float angle = unitFloat(rotationHash) * kTwoPi;
+    if (layer.fullRotation != 0u) {
+        float y = 2.0 * unitFloat(rotationHash >> 16u) - 1.0;
+        float phi = unitFloat(placementHash(pointHash, 4u, 0u)) * kTwoPi;
+        float r = sqrt(max(0.0, 1.0 - y * y));
+        axis = vec3(r * cos(phi), y, r * sin(phi));
+        angle = unitFloat(placementHash(pointHash, 5u, 0u)) * kTwoPi;
+    }
+    vec4 q = vec4(axis * sin(0.5 * angle), cos(0.5 * angle));
+    if (q.w < 0.0) {
+        q = -q;
+    }
+    PlacedInstance instance;
+    instance.positionX = position.x;
+    instance.positionY = position.y;
+    instance.positionZ = position.z;
+    instance.rotationXY = packSnorm2x16(q.xy);
+    instance.rotationZScale =
+        (packSnorm2x16(vec2(q.z, 0.0)) & 0xFFFFu) | (packHalf2x16(vec2(scale, 0.0)) << 16u);
+    instance.prototype = pc.prototypes.picks[pick].y;
+    return instance;
+}
+#endif
+
+void main() {
+    uint thread = gl_LocalInvocationID.x;
+    ivec2 cell = ivec2(pc.gridFirstX, pc.gridFirstZ) + ivec2(gl_WorkGroupID.xy);
+    uint cellIndex = gl_WorkGroupID.y * pc.gridColumns + gl_WorkGroupID.x;
+#ifndef PLACEMENT_COUNT
+    float minY = 3.4e38;
+    float maxY = -3.4e38;
+#endif
+    for (uint l = 0u; l < pc.layerCount; ++l) {
+        PlacementLayer layer = pc.layers.layers[l];
+        uint layerSeed = placementLayerSeed(layer.id, pc.seed);
+        uint cellHash = placementCellHash(cell, layerSeed);
+#ifdef PLACEMENT_COUNT
+        if (thread == 0u) {
+            keptCount = 0u;
+        }
+        barrier();
+        uint kept = 0u;
+        for (uint point = thread; point < layer.pointCount; point += 64u) {
+            ivec2 p;
+            uint mask;
+            kept += evaluate(layer, layerSeed, cell, cellHash, point, p, mask) ? 1u : 0u;
+        }
+        atomicAdd(keptCount, kept);
+        barrier();
+        if (thread == 0u) {
+            pc.counts.counts[cellIndex * pc.layerCount + l] = keptCount;
+        }
+        barrier();
+#else
+        uint next = pc.counts.counts[cellIndex * pc.layerCount + l];
+        for (uint base = 0u; base < layer.pointCount; base += 64u) {
+            uint point = base + thread;
+            ivec2 p;
+            uint mask;
+            bool keep = point < layer.pointCount &&
+                        evaluate(layer, layerSeed, cell, cellHash, point, p, mask);
+            keptFlags[thread] = keep ? 1u : 0u;
+            barrier();
+            uint before = 0u;
+            uint total = 0u;
+            for (uint t = 0u; t < 64u; ++t) {
+                before += t < thread ? keptFlags[t] : 0u;
+                total += keptFlags[t];
+            }
+            if (keep) {
+                PlacedInstance instance = placeInstance(layer, cellHash, point, p, mask);
+                pc.instances.placed[next + before] = instance;
+                vec4 sphere = pc.bounds.bounds[instance.prototype];
+                float scale = placedScale(instance);
+                float centerY = instance.positionY +
+                                scale * rotateByQuaternion(placedRotation(instance), sphere.xyz).y;
+                minY = min(minY, centerY - scale * sphere.w);
+                maxY = max(maxY, centerY + scale * sphere.w);
+            }
+            next += total;
+            barrier();
+        }
+#endif
+    }
+#ifndef PLACEMENT_COUNT
+    lowest[thread] = minY;
+    highest[thread] = maxY;
+    barrier();
+    if (thread == 0u) {
+        for (uint t = 1u; t < 64u; ++t) {
+            minY = min(minY, lowest[t]);
+            maxY = max(maxY, highest[t]);
+        }
+        Cell result;
+        result.firstInstance = pc.counts.counts[cellIndex * pc.layerCount];
+        result.instanceCount =
+            pc.counts.counts[(cellIndex + 1u) * pc.layerCount] - result.firstInstance;
+        result.minY = result.instanceCount > 0u ? minY : 0.0;
+        result.maxY = result.instanceCount > 0u ? maxY : 0.0;
+        pc.cells.cells[cellIndex] = result;
+    }
+#endif
+}

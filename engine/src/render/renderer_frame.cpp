@@ -432,6 +432,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.clusterVertices = impl_->clusterVertexPool.address;
   scene.clusterTriangles = impl_->clusterTrianglePool.address;
   scene.drawLists = impl_->drawLists.address;
+  scene.placedInstances = impl_->placedInstances.address;
+  scene.cells = impl_->cells.address;
+  scene.cellGrid[0] = impl_->placementGrid.firstX;
+  scene.cellGrid[1] = impl_->placementGrid.firstZ;
+  scene.cellGridSize[0] = impl_->placementGrid.columns;
+  scene.cellGridSize[1] = impl_->placementGrid.rows;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   std::memcpy(frame.sceneBuffer.mapped, &scene, sizeof(scene));
   check(vmaFlushAllocation(impl_->allocator, frame.sceneBuffer.allocation, 0,

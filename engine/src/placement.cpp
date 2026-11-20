@@ -4,6 +4,7 @@
 #include <bit>
 #include <climits>
 #include <cmath>
+#include <cstring>
 #include <numbers>
 #include <stdexcept>
 
@@ -158,6 +159,51 @@ Factors densityAtFixed(const Heightfield &heights, const PlacementField &field,
   const uint32_t j0 = j > 0 ? j - 1 : 0, j1 = std::min(j + 1, field.height - 1);
   return densityCore(rule, seed, layerSeed, x, z, at(i, j), at(i1, j) - at(i0, j),
                      at(i, j1) - at(i, j0));
+}
+
+// IEEE half, round to nearest even; scales are positive and far from the
+// half range's ends, but subnormals and overflow still come out right.
+uint16_t floatToHalf(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint32_t sign = (bits >> 16) & 0x8000u;
+  const uint32_t magnitude = bits & 0x7FFFFFFFu;
+  if (magnitude >= 0x47800000u) { // >= 65536 (or inf/nan): infinity
+    return static_cast<uint16_t>(sign | 0x7C00u);
+  }
+  if (magnitude < 0x38800000u) { // below the smallest normal half
+    const uint32_t mantissa = (magnitude & 0x7FFFFFu) | 0x800000u;
+    const int shift = 126 - static_cast<int>(magnitude >> 23);
+    if (shift > 24) {
+      return static_cast<uint16_t>(sign);
+    }
+    const uint32_t half = mantissa >> shift;
+    const uint32_t rest = mantissa & ((1u << shift) - 1);
+    const uint32_t halfway = 1u << (shift - 1);
+    return static_cast<uint16_t>(
+        sign | (half + (rest > halfway || (rest == halfway && (half & 1)))));
+  }
+  const uint32_t rounded = magnitude - 0x38000000u + 0xFFFu + ((magnitude >> 13) & 1);
+  return static_cast<uint16_t>(sign | std::min(rounded >> 13, 0x7C00u));
+}
+
+float halfToFloat(uint16_t half) {
+  const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+  const uint32_t exponent = (half >> 10) & 0x1Fu;
+  const uint32_t mantissa = half & 0x3FFu;
+  float magnitude = 0.0f;
+  if (exponent == 0) {
+    magnitude = std::ldexp(static_cast<float>(mantissa), -24);
+  } else if (exponent == 31) {
+    magnitude = mantissa ? NAN : INFINITY;
+  } else {
+    magnitude = std::ldexp(static_cast<float>(mantissa | 0x400u), static_cast<int>(exponent) - 25);
+  }
+  return sign ? -magnitude : magnitude;
+}
+
+int16_t toSnorm16(float v) {
+  return static_cast<int16_t>(std::lround(std::clamp(v, -1.0f, 1.0f) * 32767.0f));
 }
 
 int64_t torusDistance2(uint32_t a, uint32_t b) {
@@ -400,6 +446,67 @@ std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const Placeme
     out.axis = {r * std::cos(phi), y, r * std::sin(phi)};
     out.angle = unit(placementHash(pointHash, 5, 0)) * kTwoPi;
   }
+  return out;
+}
+
+PlacementGrid placementGrid(const Heightfield &heights) {
+  const PlacementField field = placementField(heights);
+  // Arithmetic shifts floor: cell c holds [c, c + 1) * 2^22 (64 m).
+  const auto cells = [](int32_t origin) {
+    return static_cast<uint32_t>((-origin >> 22) - (origin >> 22) + 1);
+  };
+  const PlacementGrid grid{field.originX >> 22, field.originZ >> 22, cells(field.originX),
+                           cells(field.originZ)};
+  if (!cellInRange(grid.firstX, grid.firstZ) ||
+      !cellInRange(grid.firstX + static_cast<int32_t>(grid.columns) - 1,
+                   grid.firstZ + static_cast<int32_t>(grid.rows) - 1)) {
+    throw std::runtime_error("heightfield too large for the placement cells");
+  }
+  return grid;
+}
+
+std::array<float, 4> placedRotation(const PlacedPoint &point) {
+  const float s = std::sin(0.5f * point.angle);
+  std::array<float, 4> q = {point.axis.x * s, point.axis.y * s, point.axis.z * s,
+                            std::cos(0.5f * point.angle)};
+  if (q[3] < 0.0f) {
+    for (float &c : q) {
+      c = -c;
+    }
+  }
+  return q;
+}
+
+PlacedInstance encodePlacedInstance(const PlacedPoint &point) {
+  const std::array<float, 4> q = placedRotation(point);
+  PlacedInstance out{};
+  out.position[0] = point.position.x;
+  out.position[1] = point.position.y;
+  out.position[2] = point.position.z;
+  for (int i = 0; i < 3; ++i) {
+    out.rotation[i] = toSnorm16(q[i]);
+  }
+  out.scaleHalf = floatToHalf(point.scale);
+  out.prototype = point.prototype;
+  return out;
+}
+
+DecodedInstance decodePlacedInstance(const PlacedInstance &instance) {
+  DecodedInstance out{};
+  out.position = {instance.position[0], instance.position[1], instance.position[2]};
+  float length2 = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    out.rotation[i] = std::max(static_cast<float>(instance.rotation[i]) / 32767.0f, -1.0f);
+    length2 += out.rotation[i] * out.rotation[i];
+  }
+  out.rotation[3] = std::sqrt(std::max(0.0f, 1.0f - length2));
+  // Rounding can push |xyz| past 1 (then w = 0); renormalize.
+  const float norm = std::sqrt(length2 + out.rotation[3] * out.rotation[3]);
+  for (float &c : out.rotation) {
+    c /= norm;
+  }
+  out.scale = halfToFloat(instance.scaleHalf);
+  out.prototype = instance.prototype;
   return out;
 }
 

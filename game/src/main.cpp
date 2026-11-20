@@ -1,4 +1,5 @@
 #include <meridian/model.h>
+#include <meridian/placement.h>
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
@@ -6,12 +7,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -179,6 +182,104 @@ int scatterModels(meridian::Renderer &renderer, const meridian::Heightfield &ter
   return count;
 }
 
+// Prototypes from a model in assets/: one with all its meshes, or one per
+// draw item (rock sets: each rock on its own; their offsets are dropped).
+std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
+                                    std::vector<meridian::Prototype> &prototypes,
+                                    const std::string &path, bool perItem) {
+  std::vector<uint32_t> added;
+  const auto model = loadModel(renderer, path.c_str());
+  if (!model) {
+    return added;
+  }
+  for (const meridian::DrawItem &item : model->drawItems) {
+    if (perItem || added.empty()) {
+      added.push_back(static_cast<uint32_t>(prototypes.size()));
+      prototypes.emplace_back();
+    }
+    prototypes.back().meshes.push_back(item.mesh);
+  }
+  return added;
+}
+
+// Forests, lone trees on meadow slopes and rocks over the whole terrain,
+// placed on the GPU at load (placement.h). Not drawn yet.
+void placeScenery(meridian::Renderer &renderer) {
+  using meridian::PlacementLayer;
+  using meridian::Rotation;
+  constexpr float kDegrees = 180.0f / 3.14159265f;
+  std::vector<meridian::Prototype> prototypes;
+  // (prototype, weight) per tree; the saplings make the forest's understory.
+  std::vector<std::pair<uint32_t, float>> forest, lone;
+  for (const auto &[tree, weight] :
+       {std::pair{"tree_european_beech_01_a", 0.4f}, {"tree_english_oak_forest_01_a", 0.25f},
+        {"tree_norway_maple_01_a", 0.2f}, {"tree_european_beech_saplings_01_a", 0.1f},
+        {"tree_rowan_sapling_a", 0.05f}}) {
+    const std::string name = tree;
+    for (uint32_t id : addPrototypes(renderer, prototypes,
+                                     "source/megascans/" + name + "/" + name + ".gltf", false)) {
+      forest.emplace_back(id, weight);
+      if (name.find("sapling") == std::string::npos) {
+        lone.emplace_back(id, weight);
+      }
+    }
+  }
+  // Megaplants trees are 15-27 m tall; the Poly Haven stand-in is 5 m.
+  float treeScale = 1.0f;
+  if (lone.empty()) {
+    std::printf("Warning: no Megaplants trees (see tools/fetch-sample-assets.sh); placing "
+                "island_tree_01 scaled to canopy height instead\n");
+    forest.clear();
+    for (uint32_t id :
+         addPrototypes(renderer, prototypes, "island_tree_01/island_tree_01_2k.gltf", false)) {
+      forest.emplace_back(id, 1.0f);
+      lone.emplace_back(id, 1.0f);
+    }
+    treeScale = 4.4f;
+  }
+  std::vector<std::pair<uint32_t, float>> rocks;
+  for (const auto &[path, perItem, weight] :
+       {std::tuple{"source/megascans/massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf",
+                   false, 0.5f},
+        {"boulder_01/boulder_01_2k.gltf", false, 1.0f},
+        {"namaqualand_boulder_04/namaqualand_boulder_04_2k.gltf", false, 1.0f},
+        {"rock_moss_set_01/rock_moss_set_01_2k.gltf", true, 0.3f},
+        {"rock_moss_set_02/rock_moss_set_02_2k.gltf", true, 0.3f}}) {
+    for (uint32_t id : addPrototypes(renderer, prototypes, path, perItem)) {
+      rocks.emplace_back(id, weight);
+    }
+  }
+
+  std::vector<PlacementLayer> layers;
+  // One mask: the forest inside it, lone trees in its exact complement.
+  constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEdge = 0.08f;
+  if (!forest.empty()) {
+    layers.push_back({1, forest, 6.0f,
+                      {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold,
+                       kMaskEdge, 1.0f / 120.0f, 0.3f},
+                      0.8f * treeScale, 1.2f * treeScale, Rotation::Yaw, 0.3f});
+    layers.push_back({2, lone, 40.0f,
+                      {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
+                       -kMaskEdge, 0.0f, 0.0f},
+                      0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
+  }
+  // Rocks where the ground material turns to rock: the density ramps up
+  // over the same slopes as the material's blend (kRockNormalY).
+  const float rockStart = std::acos(meridian::kRockNormalY[1]) * kDegrees;
+  const float rockFull = std::acos(meridian::kRockNormalY[0]) * kDegrees;
+  if (!rocks.empty()) {
+    layers.push_back({3, rocks, 12.0f,
+                      {rockStart, 90.0f, -1e9f, 1e9f, (rockFull - rockStart) / (90.0f - rockStart),
+                       0.0f, 0.0f, 0.0f, 1.0f / 80.0f, 0.6f},
+                      0.5f, 1.5f, Rotation::Full, 0.3f, 1500.0f});
+  }
+  if (layers.empty()) {
+    std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
+    return;
+  }
+  renderer.setPlacement(prototypes, layers, 1);
+}
+
 // Command-line options for deterministic, automated runs, e.g.
 //   game --camera 1119 4354 -431 -1.55 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
@@ -189,6 +290,8 @@ struct Options {
   std::optional<std::filesystem::path> capturePath;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
+  // Forests, lone trees and rocks over the terrain (placeScenery).
+  bool placement = true;
   bool occlusion = true;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
@@ -230,12 +333,17 @@ Options parseOptions(int argc, char **argv) {
       options.lodError = number(i);
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
+    } else if (arg == "--placement" && i + 1 < argc &&
+               std::string(argv[i + 1]) == "off") {
+      options.placement = false;
+      ++i;
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
-                               "--camera-velocity x y z, --scatter n, --no-occlusion, "
+                               "--camera-velocity x y z, --scatter n, --placement off, "
+                               "--no-occlusion, "
                                "--lod-error px, "
                                "--windowed, "
                                "--capture file.png, --frames n)");
@@ -305,6 +413,9 @@ int main(int argc, char **argv) {
   }
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter);
+  }
+  if (options.placement) {
+    placeScenery(renderer);
   }
 
   meridian::Lighting lighting;
@@ -382,11 +493,11 @@ int main(int argc, char **argv) {
   if (!interactive) {
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, %u dropped by full cull lists, "
-                "%u validation errors\n",
+                "placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.droppedCullEntryCount(),
-                renderer.validationErrorCount());
+                renderer.placedInstanceCount(), renderer.validationErrorCount());
     std::printf("GPU passes:");
     const char *separator = " ";
     for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {

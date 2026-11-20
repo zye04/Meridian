@@ -182,7 +182,9 @@ Surface proceduralTerrain(vec3 normal) {
     const vec3 kSnow = vec3(0.80, 0.82, 0.85);
 
     Surface s;
-    s.baseColor = mix(kRock, kGrass, smoothstep(0.75, 0.9, normal.y));
+    Terrain terrain = pc.scene.terrain;
+    s.baseColor = mix(kRock, kGrass,
+                      smoothstep(terrain.rockNormalY.x, terrain.rockNormalY.y, normal.y));
     float snow = snowCover(normal);
     s.baseColor = mix(s.baseColor, kSnow, snow);
     s.alpha = 1.0;
@@ -469,7 +471,7 @@ Surface terrainSurface(vec3 normal) {
     float noise = 0.65 * valueNoise(p, kNoiseWrapCells, 19u) +
                   0.35 * valueNoise(p * 2.7, kNoiseWrapCells * 27 / 10, 20u);
     float needles = smoothstep(0.45, 0.55, noise);
-    float rock = 1.0 - smoothstep(0.75, 0.9, normal.y);
+    float rock = 1.0 - smoothstep(terrain.rockNormalY.x, terrain.rockNormalY.y, normal.y);
 
     TerrainTexel ground;
     if (rock < 1.0) {

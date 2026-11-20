@@ -82,13 +82,15 @@ foreach(source
     multiscattering_lut.comp sky_view_lut.comp aerial_perspective_lut.comp
     sky_irradiance.comp dfg_lut.comp cull.comp depth_pyramid.comp
     cluster_cull.comp mesh.mesh terrain_select.comp terrain.mesh
-    terrain_normals.comp)
+    terrain_normals.comp scan.comp)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
+add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
+add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
@@ -99,6 +101,7 @@ add_library(meridian STATIC
     src/model.cpp
     src/placement.cpp
     src/render/renderer_frame.cpp
+    src/render/renderer_placement.cpp
     src/render/renderer_resources.cpp
     src/render/renderer_setup.cpp
     src/render/renderer_terrain.cpp

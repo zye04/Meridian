@@ -1,5 +1,6 @@
 // Private state of meridian::Renderer, shared by renderer_setup.cpp,
-// renderer_resources.cpp, renderer_terrain.cpp and renderer_frame.cpp.
+// renderer_resources.cpp, renderer_terrain.cpp, renderer_placement.cpp and
+// renderer_frame.cpp.
 #pragma once
 
 #include "gpu_types.h"
@@ -144,6 +145,15 @@ struct Renderer::Impl {
   VkPipelineLayout terrainSelectLayout = VK_NULL_HANDLE;
   VkPipeline terrainSelectPipeline = VK_NULL_HANDLE;
   VkPipeline terrainPipeline = VK_NULL_HANDLE;
+
+  // A copy of setTerrain's heightfield: placement reads its samples.
+  Heightfield heightfield;
+  // Placement (renderer_placement.cpp): the placed table (24-bit ids from
+  // kPlacedBase) and one Cell per grid cell; empty until setPlacement.
+  Buffer placedInstances;
+  Buffer cells;
+  PlacementGrid placementGrid{};
+  uint32_t placedCount = 0;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;

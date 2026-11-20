@@ -27,10 +27,10 @@ cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
-./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF
+./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation + scale)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
-./tools/fetch-sample-assets.sh ~/Downloads       # + imports the Megascans Megaplants tree_*_usd.zip found there
+./tools/fetch-sample-assets.sh ~/Downloads       # + imports the Megascans Megaplants tree_*_usd.zip and the Fab sandstone cliff (*_ue_high.zip) found there
 tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd2gltf.py in.usd out.gltf   # USD tree -> unflattened glTF
 ./build/tools/cook/meridian-cook --tree in.gltf outDir --triangles N [--bark-texture dir]   # flatten to <= N tris
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
@@ -60,7 +60,8 @@ ending at `--camera`) and compare with the still capture of the same view:
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry).
-They also print drawn terrain nodes (2048 triangles each) and `GPU passes:`
+They also print drawn terrain nodes (2048 triangles each), `placed N`
+(placed instances), and `GPU passes:`
 with GPU ms per pass (upload + tlas, terrain select, cull early, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
@@ -84,8 +85,15 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 `1119 1362 -431 -1.55 -0.25`; a 27 m beech (with `--scatter 100`):
 `1115.47 1366.85 -429.72 1.223 0`. Missing models drop out of the pick,
 so without the Megaplants trees the same seed places different content
-and these views differ. Debug
-startup without scatter is ~12 s (heightfield pyramid and normal map).
+and these views differ.
+The game places forests, lone trees and rocks over the whole Napf at load
+(`placeScenery` in main.cpp; ~2.9M instances, not drawn until M2a Task 5),
+which loads the Megaplants trees and rocks as prototypes: Debug startup
+~95 s, Release ~9.4 s. `--placement off` skips it (Debug ~18 s, Release
+~2.3 s; heightfield pyramid and normal map); use it for captures that
+don't need placement. Debug runs print `placement check:` (GPU table vs
+the CPU reference, must be 0 mismatches) and `placement hash 0x...`
+(0x0d994d776496812c for seed 1 with every asset present).
 
 ## Testing policy (usage matters)
 
@@ -111,7 +119,7 @@ startup without scatter is ~12 s (heightfield pyramid and normal map).
 ```
 engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            createMaterial, uploadTexture, setTerrain,
-                           setTerrainMaterial,
+                           setTerrainMaterial, setPlacement,
                            addInstance, draw; Lighting, Atmosphere,
                            MaterialData, TerrainMaterial), camera.h, mesh.h,
                            model.h (loadGltf, applyUvTransform),
@@ -122,7 +130,8 @@ engine/include/meridian/   public API: renderer.h (Renderer: uploadMesh,
                            generateHeightfield, buildHeightPyramid),
                            placement.h (Prototype, PlacementLayer, dither
                            pattern, fixed-point rules, evaluatePoint: the
-                           CPU reference of GPU placement),
+                           CPU reference of GPU placement, PlacementGrid,
+                           PlacedInstance encode/decode),
                            window.h, math/{vec3,mat4}.h
 engine/src/render/         renderer internals:
   gpu_types.h              constants + structs mirroring GLSL layouts
@@ -133,6 +142,8 @@ engine/src/render/         renderer internals:
   renderer_resources.cpp   buffers, images, BLAS, texture/material/mesh upload
   renderer_terrain.cpp     setTerrain (height image, normal map, pyramid),
                            CDLOD selection dispatches, terrain draw
+  renderer_placement.cpp   setPlacement: count, scan, write at load (two
+                           submits), Debug check against evaluatePoint
   renderer_frame.cpp       per-frame: instance upload + TLAS build when
                            instances change, GPU culling, all passes in
                            draw()
@@ -145,7 +156,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            terrain_select.comp, terrain.mesh, terrain.frag
                            (mesh.frag with TERRAIN), terrain_normals.comp.
                            placement.glsl: integer keep/reject twin of
-                           placement.cpp
+                           placement.cpp; placement.comp
+                           (PLACEMENT_COUNT / PLACEMENT_WRITE variants)
+                           and scan.comp (exclusive scan) run at load
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten), ktx2.cpp (shared encoder)
@@ -212,8 +225,12 @@ images are shared between them, and barriers account for that.
   allocated); `MeshInfo` and `InstanceData` tables are on the GPU. One
   24-bit instance id space (`kMaxInstanceId`) serves culling, draw lists,
   visibility and the TLAS custom index: ids below `kPlacedBase` index
-  `InstanceData`, the rest are reserved for placed instances; shaders read
-  instances only through `loadInstance` (common.glsl). Opaque/masked
+  `InstanceData`, the rest index the placed table (`PlacedInstance`, 24
+  B, order (cell, layer, pattern point); its index is not a persistent
+  id, (layer id, cell, point) is), whose `loadInstance` branch is still
+  to come; shaders read instances only through `loadInstance`
+  (common.glsl). `SceneData` carries the placed table, the `Cell` table
+  (64 m cells, row-major from the north-west of `cellGrid`) and the grid. Opaque/masked
   meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
   and cluster-triangle pools; draw list entries are (instance, cluster));
   blended meshes and the BLAS use the original indices. Push constants
@@ -239,8 +256,10 @@ images are shared between them, and barriers account for that.
   every surface) besides the TLAS query; terrain fragments start the ray
   on the bilinear heightfield. Pyramid level 0 bounds each bilinear cell.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
-  `shaders/common.glsl`, `post.glsl` or `exposure.glsl`; change both
-  together (static_asserts check the sizes). `placement.glsl` mirrors
+  `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
+  names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
+  `ScanConstants` in scan.comp; `PlacedInstance` in placement.h); change
+  both together (static_asserts check the sizes). `placement.glsl` mirrors
   `PlacementField`/`PlacementRule` (placement.h) and placement.cpp's
   integer core operation for operation: placement keep/reject must be
   bit-exact on CPU and GPU (no floats on that path).
@@ -281,7 +300,10 @@ images are shared between them, and barriers account for that.
   1M, Bark012 bark). Their USD has no normals on most meshes (the cook computes them),
   leftHanded winding (usd2gltf flips it), and leaf materials named
   `TwoSided_Material` (usd2gltf marks them double-sided; the cook treats
-  double-sided materials as leaves).
+  double-sided materials as leaves). The Fab sandstone cliff lands in
+  `massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf` there (10.6 m
+  tall, origin at its base). The rock placement layer and the terrain
+  material's rock blend share `kRockNormalY` (renderer.h).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building
@@ -300,7 +322,9 @@ images are shared between them, and barriers account for that.
   displacement (+-0.3 m, near the camera) casts no shadows (the march tests
   the bilinear heightfield); the sunset view (3 degree sun) makes the march
   cost ~1.15 ms; shadow rays are limited to 20 km; placed vegetation
-  doesn't exist yet (M2); the terrain quadtree root is level 16 (~524 km
+  isn't drawn yet (M2a Task 5); placed instances stand on the bilinear
+  heightfield while distant CDLOD levels draw ridges up to a few meters
+  lower (accepted for impostor range, numbers in decisions.md); the terrain quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.
   RT shadows trace full-detail BLAS while the raster draws LOD
   clusters; shadow rays start the cluster's simplification error above the

@@ -709,3 +709,87 @@ foliage that survives simplification).
     tracing" (best-candidate): https://doi.org/10.1145/127719.122736
   - Jarzynski and Olano 2020, "Hash Functions for GPU Rendering" (PCG3D):
     https://jcgt.org/published/0009/03/02/
+
+## GPU placement at load (M2a, 2026-11-20)
+
+- **Count, scan, write** (Horizon Zero Dawn places on the GPU the same
+  way, from rules and dither patterns): `placement.comp` runs one
+  workgroup per 64 m cell, layers in order inside it. `PLACEMENT_COUNT`
+  counts kept points per (cell, layer), `scan.comp` turns the counts into
+  offsets (one workgroup: chunk sums, a shared-memory scan, rewrite) and
+  reads back with the total (submit 1, sizes the table), and
+  `PLACEMENT_WRITE` writes each kept point at its offset plus its rank in
+  its 64-point batch (submit 2). The order is (cell, layer, pattern point)
+  and never depends on atomics, so the table is identical run to run.
+  The samples go to the GPU as raw 16-bit words in a temporary buffer:
+  the keep path reads integers, not the R16_UNORM image through floats.
+  Each layer's dither pattern is seeded by its layer id.
+- **Identity**: the table index is not a persistent id (it shifts when an
+  earlier cell or layer changes); (layer id, cell, pattern point) is,
+  recomputable from the rules. Nothing stores it yet.
+- **Instance format** (24 B, `PlacedInstance`): position 3 x f32, the
+  rotation quaternion's x, y, z in snorm16 with w >= 0 rebuilt, scale as
+  a half float, prototype u32. Measured round trip: < 7.5e-5 rad for
+  rotations up to ~106 degrees (w >= 0.6), worst 0.011 rad (0.6 degrees)
+  near 180 degrees, where w is rebuilt from 1 - |xyz|^2 and the 16-bit
+  grid is coarse; invisible for random yaw and rock rotations
+  (a smallest-three layout in the same 48 bits would fix it if ever
+  needed). Scale within 5e-4 relative.
+- **Cells**: the crop's grid (`placementGrid`, 236 x 236 = 55,696 cells on
+  the Napf), row-major from the north-west; each holds its run of the
+  table and the height range of its instances' bounding spheres
+  (prototype sphere rotated by the decoded quaternion, scaled).
+- **Debug check**: whole (cell, layer) runs from the GPU table against
+  `evaluatePoint`: every layer of the crop's four corner cells and one
+  edge cell, then random runs up to at least 4096 points. Keep
+  decisions, order, prototypes and x/z bit-exact, height within 1 mm,
+  rotation within 2 snorm steps, scale within one half-float step; plus
+  each sampled cell's run and height range (recomputed from its decoded
+  instances). Napf: 4148 points, 1240 kept, 0 mismatches (giving the GPU
+  the wrong seed fails it). The tables' FNV-1a hash (`placement hash
+  0x0d994d776496812c`) repeats run to run. The GPU's `heightAt` is
+  `precise` (no FMA contraction; the C++ build doesn't contract either)
+  and matched the CPU bit for bit on every compared instance; the check
+  still allows 1 mm because GLSL division isn't guaranteed correctly
+  rounded.
+- **Measured on the Napf** (seed 1): 2,916,637 instances: forest
+  2,590,549 (6 m footprint, slopes under 42 degrees, mask 1/1500 m at 0.45
+  with a 0.08 edge, clustering 0.3), lone trees 33,495 (40 m, under 25
+  degrees, the mask's complement), rocks 292,593 (12 m, the ground
+  material's rock slopes via `kRockNormalY`, clustered 0.6). Table 70 MB,
+  cells 0.9 MB, a 112 MB samples buffer during the pass only. Release:
+  placement 65-135 ms; loading the prototypes (three 4M-triangle trees,
+  saplings, the 4K-textured cliff, rocks) adds ~7 s to startup (2.1 ->
+  9.4 s); `--placement off` skips both.
+- **Rocks from Fab**: the massive sandstone cliff (tier 1 glTF) comes in
+  centimeters and Z up through its node's rotation and scale;
+  `meridian-cook` now bakes a childless node's rotation and scale into a
+  mesh only it uses (translations stay), so the mesh stands upright in
+  meters as a prototype. The "rough sandstone rock" download is a surface
+  scan (textures on a 2 m plane), not a rock mesh, so it isn't used.
+- **Ground fit: accepted for impostor-range trees.** Instances stand on
+  the bilinear heightfield (`heightAt`), while CDLOD draws level k with
+  2^(k-2)-sample quads, so ridges drawn coarse sit below the true surface
+  and trunks float. Measured over 2M random Napf points (true minus
+  coarse; positive = floating, before the 0.3 m sink):
+
+  | level (drawn at) | p50 | p90 | p99 | floats > 1 m |
+  |---|---|---|---|---|
+  | 3 (320-640 m) | 0.00 | 0.14 | 0.47 | 0.08% |
+  | 4 (640-1280 m) | 0.01 | 0.39 | 1.24 | 0.9% |
+  | 5 (1.3-2.6 km) | 0.03 | 0.98 | 2.90 | 6.4% |
+  | 6 (2.6-5.1 km) | 0.08 | 2.36 | 6.27 | 20% |
+
+  A pixel at 1440p (fovY 1.2) is ~0.95 m at 1 km and ~1.4 m at 1.5 km, so
+  up to level 5 the p90 gap is under a pixel and the p99 about two; what
+  floats is a sub-pixel trunk under a 15-27 m canopy. A per-level sink
+  would bury every tree by the p99 bound and step at level changes, so it
+  isn't used. If the ridge capture at 1-2 km (Task 5, the first drawn
+  placement) shows sky under canopies, the fix is to snap each drawn
+  instance to the displayed CDLOD height at its origin (same morph as
+  terrain.mesh) rather than to sink.
+  - https://www.guerrilla-games.com/media/News/Files/GDC2017_VanMuijden_GPUBasedProceduralPlacementInHorizonZeroDawn.pdf
+  - Harris, Sengupta and Owens, "Parallel Prefix Sum (Scan) with CUDA",
+    GPU Gems 3 ch. 39 (stream compaction by count + scan + write):
+    https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
+  - https://github.com/fstrugar/CDLOD (the level/quad sizes above)

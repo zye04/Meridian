@@ -2,6 +2,7 @@
 #include <meridian/placement.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numeric>
 
@@ -205,4 +206,72 @@ TEST_CASE("an all-reject layer keeps nothing") {
     }
   }
   CHECK(kept == 0);
+}
+
+namespace {
+
+// Angle of the rotation between two unit quaternions (x, y, z, w).
+// From the chord between the quaternions (2 sin(angle / 4)), in double:
+// acos of their dot product loses small angles to rounding.
+float rotationError(const std::array<float, 4> &a, const std::array<float, 4> &b) {
+  double dot = 0.0, na = 0.0, nb = 0.0;
+  for (int i = 0; i < 4; ++i) {
+    dot += double{a[i]} * b[i];
+    na += double{a[i]} * a[i];
+    nb += double{b[i]} * b[i];
+  }
+  const double sign = dot < 0.0 ? -1.0 : 1.0;
+  double chord2 = 0.0;
+  for (int i = 0; i < 4; ++i) {
+    const double d = a[i] / std::sqrt(na) - sign * b[i] / std::sqrt(nb);
+    chord2 += d * d;
+  }
+  return static_cast<float>(4.0 * std::asin(std::min(1.0, 0.5 * std::sqrt(chord2))));
+}
+
+} // namespace
+
+TEST_CASE("placed instances round-trip through the 24-byte encoding") {
+  float worst = 0.0f, worstAccurate = 0.0f;
+  for (uint32_t i = 0; i < 20000; ++i) {
+    PlacedPoint point{};
+    point.position = {-7499.0f + i * 0.75f, 1300.25f + i * 0.001f, 7000.5f - i * 0.5f};
+    const float u = static_cast<float>(placementHash(i, 1, 0) & 0xFFFF) / 65535.0f;
+    const float v = static_cast<float>(placementHash(i, 2, 0) & 0xFFFF) / 65535.0f;
+    if (i % 2 == 0) {
+      point.axis = {0.0f, 1.0f, 0.0f}; // trees: yaw only
+    } else {
+      const float y = 2.0f * v - 1.0f, r = std::sqrt(1.0f - y * y);
+      point.axis = {r * std::cos(6.2831853f * u), y, r * std::sin(6.2831853f * u)};
+    }
+    point.angle = 6.2831853f * static_cast<float>(placementHash(i, 3, 0) & 0xFFFF) / 65535.0f;
+    point.scale = 0.2f + 3.0f * u;
+    point.prototype = i % 7;
+
+    const DecodedInstance decoded = decodePlacedInstance(encodePlacedInstance(point));
+    CHECK(decoded.position == point.position);
+    CHECK(decoded.prototype == point.prototype);
+    CHECK(std::abs(decoded.scale - point.scale) <= 1e-3f * point.scale);
+    const std::array<float, 4> q = placedRotation(point);
+    CHECK(q[3] >= 0.0f);
+    const float error = rotationError(q, decoded.rotation);
+    worst = std::max(worst, error);
+    // xyz in snorm16 with w rebuilt from them: the error grows as 1/w.
+    if (q[3] >= 0.6f) {
+      worstAccurate = std::max(worstAccurate, error);
+    }
+  }
+  CHECK(worstAccurate < 1e-4f);
+  CHECK(worst < 0.015f);
+}
+
+TEST_CASE("the placement grid covers the crop with whole cells") {
+  Heightfield field; // the Napf's size; the grid needs no samples
+  field.width = field.height = 7500;
+  field.spacing = 2.0f; // crop +-7499 m
+  const PlacementGrid grid = placementGrid(field);
+  CHECK(grid.firstX == -118);
+  CHECK(grid.firstZ == -118);
+  CHECK(grid.columns == 236);
+  CHECK(grid.rows == 236);
 }

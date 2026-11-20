@@ -283,6 +283,7 @@ void Renderer::setTerrain(const Heightfield &field) {
   impl_->terrainPyramid =
       impl_->uploadStorage(pyramid.data(), pyramid.size() * sizeof(uint32_t));
 
+  impl_->heightfield = field;
   terrain.pyramid = impl_->terrainPyramid.address;
   terrain.pyramidLevels = static_cast<uint32_t>(levels.size() - 1);
   terrain.width = field.width;
