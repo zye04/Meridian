@@ -65,7 +65,8 @@ flowchart LR
   works on whole cells by tree origin. A crown that crosses into a far
   neighbor is drawn twice (as an impostor and as voxels), and one from a
   far cell is cut where it reaches into a near one. At ~4 km that is
-  about half a crown, ~1.5 px, inside the dithered band. **Accepted**,
+  about half a crown, ~1.5 px, inside the dithered band. **Accepted**
+  (user, 2026-11-20),
   and measured in Task 8's handoff capture. If it shows, the fix is
   bricks per owner cell (each cell's bricks padded by the largest crown
   radius, the DDA testing overlapping neighbors).
@@ -213,6 +214,16 @@ streaming needed). Relaxing silhouettes beyond ~4 km lets it dial down:
   per-cell flag for cells held by the TLAS. Sky rays trace the TLAS to
   ~20 m and then march from 20 m with no skip. This is the role M2b's
   2D canopy field had, which this spec replaces.
+
+## Resolved with the user (2026-11-20)
+
+1. Shadow rays from receivers beyond `kFarShadowDistance` (4 km) use the
+   voxels only, never the TLAS trees.
+2. Crowns that straddle a near/far cell border at the switch are
+   accepted. Task 8 measures them, and they are fixed (bricks per owner
+   cell) only if the captures show them.
+3. Whether the voxels replace M2b's mid-range 3-quad OMM shadow proxies
+   is decided after Task 8's numbers.
 
 ## Prototype gates (M2a Task 8)
 

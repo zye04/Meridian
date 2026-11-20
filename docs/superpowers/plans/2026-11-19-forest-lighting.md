@@ -53,6 +53,8 @@ Superseded on 2026-11-20: the 2D canopy field is replaced by M2a's voxel far fie
 
 ### Task 3: Mid proxies with opacity micromaps
 
+Open until M2a Task 8 reports (user, 2026-11-20): the voxel far field may replace these proxies; if it does, this task goes.
+
 **Files:**
 - Create: `engine/src/render/renderer_micromap.cpp` (OMM build helper shared with Task 6), `engine/shaders/proxy_bake.frag` (orthographic coverage along three axes, reuses the bake path of M2a's impostors)
 - Modify: `renderer_setup.cpp` (enable `VK_EXT_opacity_micromap`; startup error if absent), `renderer_impostor.cpp` (bake proxies next to the impostor; same cache rule), `gpu_types.h` (`PrototypeInfo`: proxy BLAS address), `tests/impostor_test.cpp`, `docs/decisions.md` (HPG 2026 proxies, Indiana Jones OMM)
