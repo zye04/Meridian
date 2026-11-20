@@ -1,0 +1,80 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+
+// The cloud shadow map, every frame: a Beer shadow map (Hillaire, UE4
+// volumetric clouds) orthographic along the light, one line per texel
+// marched across the layer envelope. Per texel: R front depth along the
+// light (km from the camera's plane; the first cloudy step), G mean
+// extinction (1/m) from the front to the last cloudy step, B total optical
+// depth (meridian::beerShadowTexel mirrors this), A 1 (all 0: not
+// marched). cloud_shadow_blur.comp smooths it into the map cloudShadow
+// reads.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D shadowRaw;
+
+const int kShadowSteps = 32;
+// Texels around a marched one that the blur (2) and the bilinear read (1)
+// reach.
+const float kShadowFootprintTexels = 3.0;
+
+void main() {
+    Clouds c = pc.scene.clouds;
+    int resolution = int(c.shadowResolution);
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, ivec2(resolution)))) {
+        return;
+    }
+    vec3 forward = c.shadowForward;
+    if (forward.y > -kCloudShadowSunFade.x) {
+        imageStore(shadowRaw, id, vec4(0.0));
+        return;
+    }
+    float texelSize = c.shadowSize / float(resolution);
+    vec2 p = (vec2(id) + 0.5) * texelSize - 0.5 * c.shadowSize - c.shadowCamera;
+    vec3 origin = pc.scene.cameraPosition + c.shadowRight * p.x + c.shadowUp * p.y;
+    float bottom = min(c.stratusBottom, c.cumulusBottom);
+    float top = max(c.stratusTop, c.cumulusTop);
+    float tTop = (top - origin.y) / forward.y;
+
+    // Only lines that reach a receiver cloudShadowMap weights: between sea
+    // level and the layer top, within half the map horizontally from the
+    // camera, plus the footprint of the texels reading this one (a texel
+    // across the sun shifts the line's ground track by up to its size over
+    // the sun's height). At low sun most of the map's plane serves terrain
+    // far away along the sun (the fallback's); this keeps the ground
+    // footprint ~30 km at any elevation.
+    float tReceiver = (kCloudShadowReceiverBottom - origin.y) / forward.y;
+    vec2 a = (origin.xz + forward.xz * tTop) - pc.scene.cameraPosition.xz;
+    vec2 ab = forward.xz * (tReceiver - tTop);
+    float s = clamp(-dot(a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    float reach = 0.5 * c.shadowSize + kShadowFootprintTexels * texelSize / -forward.y;
+    if (length(a + ab * s) > reach) {
+        imageStore(shadowRaw, id, vec4(0.0));
+        return;
+    }
+    float tBottom = (bottom - origin.y) / forward.y;
+    float dt = (tBottom - tTop) / float(kShadowSteps);
+    float lod = max(0.0, log2(dt / 100.0));
+
+    float front = tTop;
+    float back = tTop;
+    float opticalDepth = 0.0;
+    for (int i = 0; i < kShadowSteps; ++i) {
+        float t = tTop + float(i) * dt;
+        float density = cloudDensity(origin + forward * (t + 0.5 * dt), lod);
+        if (density > 0.0) {
+            if (opticalDepth == 0.0) {
+                front = t;
+            }
+            back = t + dt;
+            opticalDepth += density * kCloudExtinction * dt;
+        }
+    }
+    float meanExtinction = opticalDepth > 0.0 ? opticalDepth / (back - front) : 0.0;
+    imageStore(shadowRaw, id, vec4(front * 0.001, meanExtinction, opticalDepth, 1.0));
+}

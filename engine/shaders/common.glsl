@@ -384,7 +384,9 @@ struct Weather {
 // its corner). windOffset is the wind offset at the clouds' altitude modulo
 // noisePeriod, which every cloud noise period divides; time is the weather
 // noise's time coordinate modulo timePeriod. Periods in m; textures are
-// bindless indices.
+// bindless indices. The cloud shadow map (cloudShadow): orthographic along
+// shadowForward (the light's travel), shadowSize m across (0 = off),
+// the camera sits shadowCamera m from its center in (shadowRight, shadowUp).
 struct Clouds {
     float cumulusBottom;
     float cumulusTop;
@@ -407,6 +409,14 @@ struct Clouds {
     uint curlNoise;
     uint pad0;
     vec2 windDisplacement;
+    vec3 shadowRight;
+    float shadowSize;
+    vec3 shadowUp;
+    uint shadowResolution;
+    vec3 shadowForward;
+    uint shadowMap;
+    vec2 shadowCamera;
+    vec2 pad1;
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

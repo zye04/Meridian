@@ -5,6 +5,8 @@
 #include "atmosphere.glsl"
 #include "material.glsl"
 #include "terrain.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
 #ifdef TERRAIN
 #include "placement.glsl"
 #endif
@@ -1056,7 +1058,7 @@ void main() {
         pc.scene.cameraPosition + displayedPosition(pc.scene, inRelativePosition).xyz);
     float height = length(position);
     vec3 up = position / height;
-    vec3 sunAtSurface = transmittanceToSun(height, dot(up, L));
+    vec3 sunAtSurface = transmittanceToSun(height, dot(up, L)) * cloudShadow(worldPosition);
 
     // Diffuse and specular are kept apart: a blended surface (glass) fades
     // its diffuse with alpha but keeps its full reflection.

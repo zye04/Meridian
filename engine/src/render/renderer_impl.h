@@ -323,6 +323,10 @@ struct Renderer::Impl {
   Image cloudDetailNoise;
   Image cloudCurlNoise;
   Image weatherMap;
+  // The cloud shadow map (RGBA16F, GENERAL): the march's output and its
+  // blurred copy, which the bindless table holds.
+  Image cloudShadowRaw;
+  Image cloudShadowMap;
   // Level 0 of each noise volume, for storage writes.
   std::array<VkImageView, 2> cloudNoiseLevel0{};
   VkDescriptorSetLayout cloudSetLayout = VK_NULL_HANDLE;
@@ -330,6 +334,8 @@ struct Renderer::Impl {
   VkDescriptorSet cloudSet = VK_NULL_HANDLE;
   VkPipelineLayout cloudLayout = VK_NULL_HANDLE;
   VkPipeline weatherMapPipeline = VK_NULL_HANDLE;
+  VkPipeline cloudShadowPipeline = VK_NULL_HANDLE;
+  VkPipeline cloudShadowBlurPipeline = VK_NULL_HANDLE;
   // Cloud march output, [0] quarter and [1] half resolution (inside the
   // layer): luminance + transmittance and mean cloud depth, sized like the
   // swapchain and recreated with it, always in GENERAL layout; and the
@@ -377,6 +383,8 @@ struct Renderer::Impl {
   void destroyClouds();
   void placeWeatherMap(Vec3 cameraPosition);
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
+  void placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection);
+  void drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame);
   void createCloudTargets();
   void destroyCloudTargets();
   bool cameraInCloudLayer(Vec3 cameraPosition) const;
