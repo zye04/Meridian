@@ -23,3 +23,6 @@
 
 
 Spec: docs/superpowers/specs/2026-11-19-clouds-weather-design.md (the binding authority). Repo conventions: CLAUDE.md, docs/decisions.md.
+
+## Closeout rule (user, 2026-11-20) — every folded commit and the merge
+Leave the repo clean for agents: remove temporary debug views, flags, dead code, stray files/scripts the lane created. Docs (CLAUDE.md, decisions.md, backlog.md, resume.md) state only current truth, concisely; no history narration in CLAUDE.md.

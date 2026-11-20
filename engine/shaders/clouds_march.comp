@@ -97,6 +97,9 @@ void main() {
         march = marchClouds(direction, span.x, span.y, jitter, kMinStep, kStepGrowth, kMaxSteps,
                             pc.scene.skyIrradiance.clearIrradiance);
     }
+    if (!cut && sceneDistance >= kMaxDistance) {
+        march = withCirrus(march, direction, pc.scene.skyIrradiance.clearIrradiance);
+    }
     vec3 luminance = march.luminance;
     float transmittance = march.transmittance;
 
