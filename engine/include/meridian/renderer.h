@@ -316,6 +316,11 @@ public:
   // its window.
   void dumpWeatherMap(const std::filesystem::path &path);
 
+  // Debug: waits for the GPU, then prints the last frame's exposure (EV100)
+  // and sky irradiance on an upward-facing surface (relative to the sun's
+  // illuminance), with the clouds and of the clear sky alone.
+  void printAmbient();
+
   // Vulkan validation errors reported so far (Debug builds only).
   uint32_t validationErrorCount() const;
 

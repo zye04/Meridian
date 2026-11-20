@@ -1,0 +1,63 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "clouds_temporal.glsl"
+#include "atmosphere.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "clouds_march.glsl"
+
+// The sky capture: a coarse cloud march from the camera into an octahedral
+// map of the whole sphere, storing the clouds' in-scattered luminance with
+// the haze in front of them (rgb, sun illuminance 1) and their
+// transmittance (a). The sky behind them stays the sky-view LUT, combined
+// where the capture is read (skyCaptureAt), so a clear sky reads exactly
+// the LUT. Time-sliced: each frame updates one texel of every 2x2 block,
+// all of them when historyValid is 0 (first frame, swapchain rebuild).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 9, rgba16f) uniform writeonly image2D skyCapture;
+
+// Coarse march: a few long steps per ray; the capture is integrated into
+// irradiance and read by rough reflections.
+const float kCaptureMinStep = 250.0;
+const float kCaptureStepGrowth = 0.03;
+const int kCaptureMaxSteps = 32;
+
+void main() {
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texel = id;
+    if (pc.historyValid != 0u) {
+        uint slice = pc.scene.frameIndex % 4u;
+        texel = id * 2 + ivec2(slice & 1u, slice >> 1u);
+    }
+    ivec2 size = imageSize(skyCapture);
+    if (any(greaterThanEqual(texel, size))) {
+        return;
+    }
+    vec3 direction = octahedralDirection((vec2(texel) + 0.5) / vec2(size));
+
+    vec4 result = vec4(0.0, 0.0, 0.0, 1.0);
+    vec2 span = cloudLayerSpan(direction);
+    span.y = min(span.y, kMaxDistance);
+    if (span.y > span.x) {
+        // Fixed per texel, so the capture doesn't flicker.
+        float jitter = fract(52.9829189 * fract(dot(vec2(texel), vec2(0.06711056, 0.00583715))));
+        CloudMarch march = marchClouds(direction, span.x, span.y, jitter, kCaptureMinStep,
+                                       kCaptureStepGrowth, kCaptureMaxSteps,
+                                       pc.scene.skyIrradiance.clearIrradiance);
+        if (march.distance > 0.0) {
+            // Haze in front of the clouds from the sky-view and
+            // transmittance LUTs (no aerial perspective LUT off screen).
+            vec3 camera = cloudCameraKm();
+            float haze = transmittanceBetween(camera, camera + direction * (march.distance * 0.001),
+                                              direction);
+            vec3 sky = skyLuminance(camera, direction);
+            result = vec4(sky * (1.0 - haze) * (1.0 - march.transmittance) + haze * march.luminance,
+                          march.transmittance);
+        }
+    }
+    imageStore(skyCapture, texel, result);
+}

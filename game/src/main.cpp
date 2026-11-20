@@ -965,6 +965,7 @@ int main(int argc, char **argv) {
     renderer.dumpWeatherMap(*options.weatherMapPath);
   }
   if (!interactive) {
+    renderer.printAmbient();
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, cells %u, bvh nodes %u, %u dropped by full "
