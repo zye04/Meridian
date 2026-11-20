@@ -1472,11 +1472,17 @@ white, 0.8 EV under grey; `kMeanToGreyEv` in exposure.comp adds those
 0.8 EV. Start view display luminance mean 102 -> 125 of 255, p99 159 ->
 193; forest edge 103 -> 125.
 
-**The game starts with a grade of contrast 1.25, saturation 1.3** (not
-the engine default, which stays identity). AgX alone reads flat and
-desaturated for daylight foliage; these are moderate values pending an
-art-direction pass. Mean chroma (max-min)/max: start 0.37 -> 0.46,
-forest 0.25 -> 0.33.
+**The game starts with a grade of contrast 1.4, saturation 1.4, greens
+rotated 12 degrees toward yellow and 1.15x chroma** (not the engine
+default, which stays identity), aimed at the user's look target, the
+Chlorophyll Engine frames in `assets/reference/chlorophyll/`: bright,
+saturated sunlit greens, deep blue sky. AgX alone reads flat and
+desaturated, and the cooked leaf colour leans blue. Display stats,
+Release 1440p (luminance std, mean chroma (max-min)/max): references
+std 50-70, chroma 0.37-0.49; start view std 28 -> 40, chroma 0.37 ->
+0.53; forest edge std 39 -> 37, chroma 0.25 -> 0.45 (leaf transmission
+included). The remaining gap is depth inside crowns (no ambient
+visibility for foliage; backlog).
 
 **Poly Haven AO.** Their glTFs bind the `_arm` pack (R occlusion, G
 roughness, B metallic) only as metallicRoughness; the cook now binds the
