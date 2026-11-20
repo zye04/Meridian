@@ -346,6 +346,17 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
   };
   const auto grassMat = gather({"wild_grass_vlkhcbxia", "grass_clumps_qmbr2"});
   const auto grassTufts = gather({"rough_meadow_grass_skfjj", "wild_grass_sjliz"});
+  // Graded toward target-meadow.png's fresh green and cream-yellow heads
+  // (linear albedo multipliers, measured against its mean colour).
+  const auto tint = [&](const std::vector<std::pair<uint32_t, float>> &variants,
+                        meridian::Vec3 factor) {
+    for (const auto &[prototype, weight] : variants) {
+      prototypes[prototype].tint = factor;
+    }
+  };
+  tint(grassMat, {1.15f, 1.9f, 0.95f});
+  tint(grassTufts, {1.15f, 1.9f, 0.95f});
+  tint(hawkbit, {1.1f, 1.0f, 0.6f});
 
   std::vector<PlacementLayer> layers;
   if (!forest.empty()) {
@@ -805,7 +816,7 @@ int main(int argc, char **argv) {
       // Matched to the streamed grass mat's mean as rendered, so the mat
       // thins into a terrain of the same brightness (decisions.md).
       {TerrainRole::Grass,
-       {0.027f, 0.034f, 0.006f},
+       {0.037f, 0.058f, 0.0104f},
        {{"uncut_grass_oilpt20", 2.0f, 0.0177f},
         {"wild_grass_pjwgw0", 1.0f, 0.0219f},
         {"lawn_grass_sbykrmp0", 0.41f, 0.0107f}}},

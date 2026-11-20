@@ -236,7 +236,8 @@ and these views differ.
 The game places rocks over the whole Napf at load (`placeScenery` in
 main.cpp; 21281 instances), poppies, goldenrod and ferns (~500k
 together), streamed meadow layers around the camera (a short grass mat,
-seed-head tufts in patches, hawkbit drifts, clover: ring ~4.2M slots,
+seed-head tufts in patches, hawkbit drifts (grasses and hawkbit graded
+by `Prototype::tint`), clover: ring ~4.2M slots,
 ~1.1M live; building their dense dither patterns adds ~8 s to Release
 and ~45 s to Debug startup), plus forests and lone trees with `--trees`
 (~2.65M instances), which loads the rocks (and with `--trees` the

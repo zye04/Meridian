@@ -211,12 +211,18 @@ struct PrototypeInfo {
     uint meshCount;
     // Its TLAS records' instance mask (gpu_types.h).
     uint tlasMask;
+    // Base colour multiplier, RGB8 over 0..2 (unpackPrototypeTint).
+    uint tint;
     vec3 boundsCenter;
     float boundsRadius;
     uvec2 blasAddress;
     float transitionSize;
     float maxDrawDistance;
 };
+
+vec3 unpackPrototypeTint(uint tint) {
+    return unpackUnorm4x8(tint).rgb * 2.0;
+}
 
 layout(buffer_reference, std430) readonly buffer PrototypeBuffer {
     PrototypeInfo prototypes[];

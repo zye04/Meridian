@@ -2748,6 +2748,16 @@ should be in the TLAS is open (plan task 4). Plan:
   (near) to 0.87/0.90. Blue stays ~0.7 (haze). The terrain grass target
   went from linear (0.085, 0.12, 0.024) to (0.027, 0.034, 0.006): the mat
   is darker than its albedo because of self-occlusion.
+- **Grade toward the target:** `Prototype::tint` multiplies a placed
+  prototype's base colour (RGB unorm8 of tint / 2 in `PrototypeInfo`,
+  passed flat from mesh.mesh). Without it the scanned grasses read olive.
+  The target-meadow.png mat has linear R/G 0.76; ours had 1.09 and was
+  2.4x darker in G, though part of that is exposure and the grade. Grass
+  tint is (1.15, 1.9, 0.95), and the hawkbit tint (1.1, 1.0, 0.6) turns
+  the white heads cream-yellow. The terrain grass target was re-matched
+  to (0.037, 0.058, 0.0104). Exposure-normalized mat/terrain: R/G 0.95/0.98
+  in the mid band and 0.83/0.89 near; blue 0.57 to 0.59, from haze on the
+  bare terrain.
 
 ## Clouds and weather measured (M4 clouds, 2026-11-20)
 

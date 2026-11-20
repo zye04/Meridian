@@ -23,6 +23,8 @@ layout(location = 6) flat in uint inMaterialIndex;
 layout(location = 7) flat in float inLodError;
 // Height within the mesh, 0 at its base to 1 at its top (1 where unknown).
 layout(location = 8) in float inHeight;
+// Placed instances' prototype tint (Prototype::tint), 1 otherwise.
+layout(location = 9) flat in vec3 inTint;
 #endif
 
 layout(location = 0) out vec4 outColor;
@@ -839,6 +841,9 @@ Surface materialSurface(Material m, vec3 normal) {
     if (m.baseColorTexture != kNoTexture) {
         baseColor *= sampleTexture(m.baseColorTexture, inUv);
     }
+#ifndef TERRAIN
+    baseColor.rgb *= inTint;
+#endif
     s.baseColor = baseColor.rgb;
     s.alpha = baseColor.a;
 

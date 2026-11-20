@@ -11,6 +11,7 @@ layout(location = 5) out vec4 outTangent;
 layout(location = 6) flat out uint outMaterialIndex;
 layout(location = 7) flat out float outLodError;
 layout(location = 8) out float outHeight;
+layout(location = 9) flat out vec3 outTint;
 
 void main() {
     // Blended draws set firstInstance to the instance's index; the indexed
@@ -32,6 +33,7 @@ void main() {
     outMaterialIndex = mesh.materialIndex;
     outLodError = 0.0;
     outHeight = 1.0;
+    outTint = vec3(1.0);
     // Static geometry for now: only the camera moves between frames.
     outCurrentClip = pc.scene.currentViewProjection * displayed;
     outPreviousClip = pc.scene.previousViewProjection *

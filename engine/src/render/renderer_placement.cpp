@@ -585,6 +585,11 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
     if (unlimited) {
       info.maxDrawDistance = 0.0f;
     }
+    const Vec3 &tint = prototypes[p].tint;
+    for (int c = 0; c < 3; ++c) {
+      const float t = std::clamp((&tint.x)[c] * 0.5f, 0.0f, 1.0f);
+      info.tint |= static_cast<uint32_t>(std::lround(t * 255.0f)) << (8 * c);
+    }
     infos.push_back(info);
   }
   const double blasMs = msSince(blasStart);

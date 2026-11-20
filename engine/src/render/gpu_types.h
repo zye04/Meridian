@@ -574,7 +574,8 @@ struct PrototypeInfo {
   uint32_t firstMesh = 0;
   uint32_t meshCount = 0;
   uint32_t tlasMask = 0;
-  uint32_t pad = 0; // std430 aligns the vec3 to 16 bytes
+  // Prototype::tint, RGB unorm8 of tint / 2 (unpackPrototypeTint).
+  uint32_t tint = 0;
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
   VkDeviceAddress blasAddress = 0;
