@@ -712,6 +712,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.weather = impl_->weather;
   scene.weather.history = frame.weatherHistory.address;
   impl_->placeWeatherMap(camera.position);
+  impl_->placeCloudShadow(camera.position, lighting.sunDirection);
   scene.clouds = impl_->clouds;
   std::memcpy(frame.weatherHistory.mapped, impl_->weatherHistory.data(),
               impl_->weather.historyCount * sizeof(WeatherHistorySample));
@@ -786,6 +787,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   atmosphereDependency.pMemoryBarriers = &atmosphereBarrier;
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   impl_->drawWeatherMap(cmd, frame);
+  if (impl_->cloudsEnabled) {
+    impl_->drawCloudShadow(cmd, frame);
+  }
   endPass("weather");
 
   // From here on, each pass reads what the one before it wrote.

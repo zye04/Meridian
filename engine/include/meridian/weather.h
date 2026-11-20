@@ -54,6 +54,30 @@ struct WeatherHistorySample {
 // Wind velocity (m/s, xz, y = 0) at `altitude` meters above the ground.
 Vec3 windVelocityAt(const WindState &wind, float altitude);
 
+// The cloud shadow map's orthographic frame: forward is the light's travel
+// (-sunDirection), right and up span the map, right x up = sunDirection.
+// Continuous in the sun direction everywhere except the nadir (Frisvad's
+// basis with its one singular direction there), so it doesn't flip or spin
+// as the sun passes overhead or along the horizon.
+struct SunBasis {
+  Vec3 right, up, forward;
+};
+SunBasis cloudShadowBasis(Vec3 sunDirection);
+
+// One Beer shadow map texel (cloud_shadow.comp mirrors this): depth along
+// the light (m) where the cloud starts, its mean extinction (1/m) up to
+// where it ends, and its total optical depth.
+struct BeerShadowTexel {
+  float front = 0.0f;
+  float meanExtinction = 0.0f;
+  float maxOpticalDepth = 0.0f;
+};
+// From extinction samples (1/m) at the centers of steps of `step` m along the
+// light, the first starting at depth `start`.
+BeerShadowTexel beerShadowTexel(std::span<const float> extinction, float start, float step);
+// exp(-min(maxOpticalDepth, meanExtinction * max(0, depth - front))).
+float beerShadowTransmittance(const BeerShadowTexel &texel, float depth);
+
 // The global weather: a current state blending toward a target, the
 // integrated wind, and a history of past states that fronts are read from.
 class Weather {

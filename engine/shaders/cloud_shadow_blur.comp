@@ -1,0 +1,44 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+// Bilateral 5x5 blur of the cloud shadow map's mean extinction and optical
+// depth (binomial weights, neighbours whose front depth differs fall off),
+// which smooths the per-texel march into soft shadow edges without mixing
+// clouds at different depths along the light. The front depth stays the
+// center texel's; unmarched texels (A 0) stay 0 and don't contribute.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 4, rgba16f) uniform readonly image2D shadowRaw;
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D shadowMap;
+
+// Front depth difference (km) at which a neighbour's weight falls to 1/e.
+const float kFrontSigma = 1.0;
+
+void main() {
+    int resolution = int(pc.scene.clouds.shadowResolution);
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(id, ivec2(resolution)))) {
+        return;
+    }
+    const float kBinomial[5] = float[](1.0, 4.0, 6.0, 4.0, 1.0);
+    vec4 center = imageLoad(shadowRaw, id);
+    if (center.a <= 0.0) {
+        imageStore(shadowMap, id, vec4(0.0));
+        return;
+    }
+    vec2 sum = vec2(0.0);
+    float weightSum = 0.0;
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            vec4 texel = imageLoad(shadowRaw, clamp(id + ivec2(x, y), ivec2(0), ivec2(resolution - 1)));
+            float frontDifference = (texel.r - center.r) / kFrontSigma;
+            float weight = kBinomial[x + 2] * kBinomial[y + 2] * texel.a *
+                           exp(-frontDifference * frontDifference);
+            sum += texel.gb * weight;
+            weightSum += weight;
+        }
+    }
+    imageStore(shadowMap, id, vec4(center.r, sum / weightSum, 1.0));
+}
