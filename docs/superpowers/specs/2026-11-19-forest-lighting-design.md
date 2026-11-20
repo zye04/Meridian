@@ -5,8 +5,8 @@ and `2026-11-19-showcase-roadmap.md`). M2a puts millions of placed trees
 and rocks on the Napf with a TLAS built once over full-detail shared
 BLAS, and records what that costs. M2b makes the forest's light right and
 affordable: ray representations that change with distance in a
-partitioned TLAS, a canopy height/density map for everything rays no
-longer reach, and sky visibility so forest interiors and the ground
+partitioned TLAS, M2a's voxel far field (2026-11-20; it replaced the
+canopy height/density map) for everything rays no longer reach, and sky visibility so forest interiors and the ground
 under trees darken the way they do in the reference.
 
 Execution: Lane A, after M2a. Its numbers (TLAS build time and memory,
@@ -31,10 +31,10 @@ because near-only ray representations make it affordable.
 - Sun shadows from placed objects at every distance, matching what the
   raster shows closely enough that no shadow appears without a caster or
   vice versa: full geometry near, three-quad opacity-micromap proxies
-  mid, canopy field far.
+  mid, M2a's voxel far field far.
 - Sky visibility per pixel: forest interiors, the ground under canopies,
   gullies and the shaded side of dense stands darken; open meadow stays
-  as today. Near the camera from rays, far from the canopy field and the
+  as today. Near the camera from rays, far from the voxel far field and the
   terrain march.
 - Partitioned TLAS updated incrementally as the camera moves, with a
   bounded number of instance writes per frame (no frame-time spikes).
@@ -100,7 +100,11 @@ because near-only ray representations make it affordable.
   per sun change, its shadow shape swims as the sun moves); coarse
   cluster levels as BLAS (the canopy collapses at coarse levels, the
   coverage problem M2a's impostors exist for).
-- **Far representation.** Chosen: a canopy height/density field (2D,
+- **Far representation.** *Superseded 2026-11-20 (user): M2a's per-cell
+  voxel-brick far field is the far ray field, see
+  `2026-11-20-far-field-design.md`; shadow and sky
+  rays use its `farFieldTransmittance` with the per-cell `cellInTlas` mask.*
+  Originally chosen: a canopy height/density field (2D,
   per texel: canopy bottom, top, density) marched with the terrain.
   Rejected: proxies to the horizon (millions of TLAS instances for
   sub-pixel shadows); no far tree shadows (forests seen from a ridge
@@ -108,7 +112,7 @@ because near-only ray representations make it affordable.
   would stay bright).
 - **Sky visibility (roadmap approach 6).** Chosen: one short
   cosine-distributed ray per pixel against the TLAS, continued as a far
-  march through the terrain and canopy field, accumulated in its own
+  march through the terrain and the voxel far field, accumulated in its own
   temporal history. Rejected: screen-space AO (misses off-screen and
   behind-surface occluders, which is most of a canopy); baked
   per-tile occlusion (no dynamic objects later, low resolution under
@@ -127,7 +131,7 @@ flowchart LR
     M1[3-quad OMM proxy BLAS<br/>per prototype]
   end
   subgraph Far["far (beyond)"]
-    F1[canopy height/density field<br/>+ terrain march]
+    F1[M2a voxel far field<br/>+ terrain march]
   end
   Near --> Mid --> Far
 ```
@@ -193,6 +197,10 @@ flowchart LR
   instance mask scheme, whichever verifies clean).
 
 ### Canopy height/density field
+
+*Superseded 2026-11-20 by M2a's voxel far field
+(`2026-11-20-far-field-design.md`); kept as the record of option B, the
+fallback if M2a Task 8's gates fail.*
 
 - 2D, over the crop, built at load on the GPU from the placed table: per
   texel (2-4 m, from measurement) the canopy bottom and top heights and
@@ -323,8 +331,7 @@ noise at disocclusions would shimmer constantly on canopy edges.
 - **Measurements (Release, 2560x1440, median of 5; every game run under
   `flock /tmp/meridian-gpu.lock` so no other GPU work overlaps):** per-pass GPU ms at the four
   views, the frame against the ~7.7 ms target and against M2a's numbers;
-  TLAS memory vs M2a's static TLAS; load time added (canopy field,
-  proxy bake).
+  TLAS memory vs M2a's static TLAS; load time added (proxy bake).
 
 ## GPU budget (M2b)
 
@@ -370,7 +377,8 @@ method; undergrowth densities and draw distance; CLI names.
 
 Direction (partitioned TLAS with tile partitions, near BLAS, mid
 three-quad OMM proxies, far canopy map; sky-visibility rays) approved by
-the user on 2026-11-19, staged after M2a. Calls made without the user:
+the user on 2026-11-19, staged after M2a (far canopy map superseded by
+M2a's voxel far field on 2026-11-20). Calls made without the user:
 the starting radii and hysteresis, transmittance-matched proxy coverage,
 the far march returning transmittance (growing M1's `terrainOccludes`),
 tiles in the TLAS masked out of the field, the sky ray continuing as a

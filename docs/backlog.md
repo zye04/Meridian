@@ -35,7 +35,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Leaves vanish at distance | Cluster simplification thins disjoint leaves | User screenshots; VG spec | M2a impostors (Tasks 8-9); coverage-preserving simplification = VG slice 3 |
+| Leaves vanish at distance | Cluster simplification thins disjoint leaves | User screenshots; VG spec | M2a impostors (Tasks 10-11) and voxel far field (Tasks 8-9); coverage-preserving simplification = VG slice 3 |
 | RT on clusters | Shadows trace full-detail BLAS while raster draws LOD clusters | VG spec | VG slice 2 |
 | Visibility buffer | Tiny-triangle shading efficiency | VG spec | VG slice 4, if measurements call for it |
 | Cluster compression and streaming | Memory at larger scale | VG spec | VG slice 5 |
@@ -47,6 +47,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Grass and grass wind | Meadows are bare | Roadmap | M3, reading M4's global wind |
 | Undergrowth (shrubs, ferns) | Forest floor is bare | M2a spec non-goal | M2b first layer; revisit layered dithering between placement layers then |
 | Real land-cover data (swissTLM3D forest polygons as a mask) | Forests follow rules, not the real map | M2a spec non-goal | Content; the placement mask input is ready |
+| Low-end far field (pure 2D canopy, Chlorophyll-style scaling) | Lower-end GPUs and VRAM; the voxel far field targets this machine | Far-field spec, user 2026-11-20 | Later; option B's 2.5D layer is the starting point |
 | Partitioned TLAS is NVIDIA-only | Vendor lock-in | M2b spec | Plain-TLAS fallback later if AMD support wanted |
 
 ## Terrain
@@ -85,6 +86,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Precipitation (rain, snow), wet surfaces, puddles | M4 clouds spec | Later weather milestone |
 | Lightning, fog banks, valley mist, god rays | M4 clouds spec | Later |
 | Water | Roadmap | Later |
+| Procedural rivers and paths (meshes/splats over the terrain, like Chlorophyll Engine's; placement exclusion along them) | User, 2026-11-20 | Later; placement mask input is ready |
 | Cumulonimbus rendering (the cloud-type axis has room) | M4 clouds spec | Later weather milestone |
 | Authored weather zones (regional overrides on the analytic map) | M4 clouds spec | Later |
 | Collision beyond walking on the heightfield | Roadmap | Later |

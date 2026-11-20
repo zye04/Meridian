@@ -893,3 +893,66 @@ foliage that survives simplification).
     GPU Gems 3 ch. 39 (stream compaction by count + scan + write):
     https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
   - https://github.com/fstrugar/CDLOD (the level/quad sizes above)
+
+## Far-field forests: per-cell voxel bricks (M2a, 2026-11-20)
+
+- **Chosen (user, 2026-11-20): per-cell voxel bricks.** Past a per-cell
+  far switch (tallest tree under ~6 px, ~4 km), each 64 m cell skips its
+  tree instances and is drawn as one aggregate of sparse 4^3 voxel bricks
+  (L0 4 m, L1 8 m, L2 16 m). The reference is Chlorophyll Engine's
+  per-tile far field. The same bricks are the far ray field for sun
+  shadows now and for sky visibility in M2b, replacing M2b's 2D canopy
+  field. Impostors stay, for the mid range only. Spec:
+  `docs/superpowers/specs/2026-11-20-far-field-design.md`.
+- **Why:** per-instance impostors to the horizon would put ~1M+
+  instances, each a quad of 1-5 px, through culling and the mesh shader in
+  ridge and overview views. Those sub-pixel alpha-tested quads shimmer,
+  which TAA can't resolve. An aggregate costs per covered pixel and is
+  prefiltered.
+- **Rejected:**
+  - (A) impostors to the horizon: the cost and shimmer above.
+  - (B) a 2.5D canopy aggregate (top, bottom, density, albedo, normal per
+    4 m texel), cheaper, ~225 MB est. Kept as the documented fallback if
+    the prototype's gates fail; the user decides after the prototype.
+  - UE 5.7's per-cluster Nanite voxels: an aggregate per cluster doesn't
+    reduce per-instance work, and Epic's hardware RT for it falls back to
+    a mesh that users report casts poor shadows.
+- **Resolution dialed down:** the user accepted no 3D crown silhouettes
+  beyond ~4 km. So the finest voxel is 4 m (one pixel at the far switch;
+  2 m would be ~8x the memory) and a voxel is 4 B (log extinction,
+  octahedral normal, albedo palette index). Estimated ~350-450 MB resident
+  over the Napf (forest ~93 km^2: ~1.1-1.45M L0 bricks), with a load-time
+  peak of ~2 GB while one level's accumulators exist. No streaming.
+  Distance residency for L0 (re-splat from the placed table, no disk) is
+  the lever if the prototype measures over 500 MB.
+- **Rays:** M2a keeps the static TLAS and chooses per ray, by the
+  receiver's distance from the camera against `kFarShadowDistance` (4 km
+  to start). Near receivers trace every tree
+  in the TLAS (the reference). Far receivers mask placed trees out of
+  the ray query (a new instance-mask bit) and march the voxels with
+  Beer-Lambert. Every ray uses exactly one tree representation, so none
+  is counted twice. M2b's partitioned TLAS switches to per-cell
+  `cellInTlas` flags.
+- **Gates (M2a Task 8 prototype; decided after it, not cut pre-emptively):**
+  - far field resident <= 500 MB, load-time peak <= 2.5 GB;
+  - far raster <= 1.0 ms at the overview and ridge views;
+  - the voxel shadow march costs no more than TLAS shadows for far
+    receivers;
+  - shadow quality vs the reference (`--far-field off`, full-detail TLAS)
+    at the ridge and sunset views, which the user inspects;
+  - coverage: far-forest luminance within 5% of the same reference, with
+    no step at the switch or between levels.
+- **Build on the player's hardware:** prototype templates come from ray
+  queries against each prototype's full-detail BLAS (three-axis pass
+  fractions calibrate extinction against what RT shadows trace). The
+  world bricks are a GPU splat of the placed table at load. Nothing goes
+  to disk unless the template bake exceeds ~5 s.
+  - https://dev.epicgames.com/documentation/unreal-engine/nanite-foliage
+  - https://forums.unrealengine.com/t/bad-raytraced-shadows-with-voxelised-nanite-foliage-in-5-7/2696233
+  - https://www.youtube.com/watch?v=VC_NUxbeA0E (Chlorophyll Engine)
+  - https://wccftech.com/custom-forest-engine-delivers-stunning-visuals-at-130-fps-on-an-rtx-3080-at-1440p-without-hardware-ray-tracing/
+  - https://dl.acm.org/doi/10.1145/3820021 (HPG 2026 massive foliage;
+    far plants as aggregates)
+  - https://hal.archives-ouvertes.fr/hal-01468817v1 (Loubet and Neyret
+    2017, mesh-volume LoDs)
+  - http://www.cse.yorku.ca/~amana/research/grid.pdf (voxel DDA)

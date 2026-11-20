@@ -43,7 +43,8 @@ import fails. M2a's systems must not depend on which assets fill them.
 - Cluster LOD traversal whose cost follows what is on screen, not the
   total clusters of visible instances (a Poly Haven tree has ~33K clusters
   across its DAG levels).
-- Far trees as hemi-octahedral impostors that relight under a moving sun,
+- Mid-range trees as hemi-octahedral impostors (far trees: voxel bricks,
+  `2026-11-20-far-field-design.md`) that relight under a moving sun,
   write real depth and correct motion vectors, and hand over to the
   cluster tree without a visible pop.
 - Every placed object casts RT sun shadows through a TLAS built once for
@@ -56,8 +57,8 @@ import fails. M2a's systems must not depend on which assets fill them.
 
 ## Non-goals (M2a)
 
-- Partitioned TLAS, near/mid/far ray representations, canopy map, sky
-  visibility: M2b.
+- Partitioned TLAS, near/mid/far ray representations, sky visibility:
+  M2b (the far ray field moved into M2a as voxel bricks, 2026-11-20).
 - Tree wind and sway: deferred (the RT BLAS can't sway with the raster).
   No wind field and no wind bytes in the instance format; added when wind
   lands.
@@ -132,7 +133,10 @@ import fails. M2a's systems must not depend on which assets fill them.
    thread traversal (vendor-tuned, heuristic thread counts; Nanite reports
    25% over per-level dispatch, worth revisiting in M5 if traversal shows
    in profiles).
-4. **Far trees.** Chosen: hemi-octahedral impostors with albedo, normal
+4. **Far trees.** *Revised 2026-11-20 (user): impostors cover only the
+   mid range, to a per-cell far switch (~4 km); beyond it each 64 m cell is
+   drawn as voxel bricks, which are also the far ray field
+   (`2026-11-20-far-field-design.md`).* Chosen: hemi-octahedral impostors with albedo, normal
    and depth atlases. Rejected: three crossed quads with opacity
    micromaps for raster (reads as cards; kept for M2b's mid-range RT
    proxy); coverage-preserving cluster simplification or voxels (slice

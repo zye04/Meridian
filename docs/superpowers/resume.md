@@ -26,7 +26,7 @@ Open branches, in the proposed order (the user may reorder):
 2. `wip/quality-shadows`: finish per-layer AO strength, review, merge.
 3. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
    Tasks 6-8, final review, merge.
-4. Then M2a Tasks 7-10 and the rest under "Next after that".
+4. Then M2a Tasks 7-12 and the rest under "Next after that".
 
 The clouds branch touches the same frame and shading files as the other
 two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
@@ -90,8 +90,11 @@ Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
 
 ## Next after that
 
-M2a Tasks 7 (GPU BVH traversal), 8-9 (impostors), 10 (gate: forest views
-<= 16.7 ms with shadows). Quality pass step 2 (shadow denoiser + TAA
+M2a Tasks 7 (GPU BVH traversal), 8 (voxel far-field prototype: stop and
+show the user its gates; option B is the fallback), 9 (far-field
+completion), 10-11 (mid-range impostors), 12 (gate: forest views
+<= 16.7 ms with shadows). Far field decided 2026-11-20
+(`docs/superpowers/specs/2026-11-20-far-field-design.md`). Quality pass step 2 (shadow denoiser + TAA
 sharpness) needs a spec first. Then M2b (forest lighting), M3 (meadow).
 
 ## Process

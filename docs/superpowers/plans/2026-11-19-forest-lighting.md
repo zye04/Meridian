@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Forest light that is right and affordable: per-tile near/mid/far ray representations in a partitioned TLAS, a canopy height/density field, sky visibility traced after a depth + normal prepass, and the first undergrowth.
+**Goal:** Forest light that is right and affordable: per-tile near/mid/far ray representations in a partitioned TLAS over M2a's voxel far field, sky visibility traced after a depth + normal prepass, and the first undergrowth.
 
-**Architecture:** A prepass writes depth, motion and a normal/roughness guide; a compute pass traces one sky ray per pixel (TLAS to 20 m, then a far-field march through terrain and canopy) and filters it before the main pass shades each pixel once (depth EQUAL). Ray geometry lives in a partitioned TLAS whose tiles switch between full-detail BLAS, a three-quad opacity-micromap proxy and nothing (canopy field) by camera distance, updated incrementally on the GPU.
+**Architecture:** A prepass writes depth, motion and a normal/roughness guide; a compute pass traces one sky ray per pixel (TLAS to 20 m, then M2a's far-field march through terrain and voxel bricks) and filters it before the main pass shades each pixel once (depth EQUAL). Ray geometry lives in a partitioned TLAS whose tiles switch between full-detail BLAS, a three-quad opacity-micromap proxy and nothing (M2a's voxel far field) by camera distance, updated incrementally on the GPU.
 
 **Tech Stack:** C++20, Vulkan 1.3, `VK_NV_partitioned_acceleration_structure`, `VK_EXT_opacity_micromap`, ray queries, GLSL, doctest.
 
@@ -23,7 +23,7 @@
 
 1. Camera teleport (`--camera` far from the start, or walk-mode respawn): every tile reaches its representation before the first shown frame; no frame with trees missing from shadows (Task 4 capture at a teleported view vs the static-TLAS reference).
 2. Fast flight (50 m/s over forest): per-frame partition writes stay under the cap and pending transitions never starve far-behind tiles (Task 4 fly-through log: max update ms under cap, pending queue drains).
-3. Sun near the horizon through a forest edge: canopy transmittance gives a soft partial shadow, never a hard cut or a lit forest floor (Task 2 brute-force march test with a grazing ray; Task 4 sunset capture).
+3. Sun near the horizon through a forest edge: canopy transmittance gives a soft partial shadow, never a hard cut or a lit forest floor (M2a Task 8 brute-force march test with a grazing ray; Task 4 sunset capture).
 4. Masked ferns and impostors in the prepass: the main pass's EQUAL test leaves no holes (Task 1 clear-color check; Task 6 repeats it with ferns).
 5. Disocclusion at canopy edges in motion: sky visibility neither shimmers nor leaves dark halos (Task 5 motion capture past a forest edge, Laplacian ratio and visual inspection).
 
@@ -45,23 +45,9 @@
 
 ---
 
-### Task 2: Canopy field and the transmittance march
+### Task 2: (moved to M2a) Far ray field
 
-**Files:**
-- Create: `engine/shaders/canopy_splat.comp`, `engine/shaders/canopy.glsl`, `tests/canopy_test.cpp`
-- Modify: `engine/shaders/terrain.glsl` (`terrainOccludes` becomes the far-field march), `mesh.frag`/`impostor.frag` (shadow uses transmittance), `renderer_placement.cpp` (build the field after placement), `gpu_types.h` + `common.glsl` (`GpuCanopy`), `engine/include/meridian/placement.h` (CPU replica declarations), `engine/src/placement.cpp`, `CLAUDE.md`, `docs/decisions.md` (Beer-Lambert slab, Bruneton & Neyret 2012)
-
-**Interfaces:**
-- Produces in GLSL: `float farFieldTransmittance(SceneBuffer scene, vec3 worldOrigin, vec3 direction, float startDistance, float maxDistance, bool skipTlasTiles)` (terrain hit -> 0; canopy slab between bottom and top attenuates exp(-density * path length); hierarchical skipping over a canopy max-top pyramid and the terrain pyramid). `terrainOccludes` callers move to it.
-- CPU replica in `placement.h`: `float farFieldTransmittanceCpu(const Heightfield &, const CanopyField &, Vec3 origin, Vec3 direction, float start, float max, const std::vector<uint8_t> &tileInTlas)` and `struct CanopyField { uint32_t width, height; float texel; std::vector<float> bottom, top, density; };`
-- Per-prototype crown bounds and extinction come from the Task 3 bake; until then a constant per prototype from its bounds (replaced in Task 3).
-- `--canopy off` (game flag) disables the field for A/B. Capture output adds the canopy build ms (load).
-- Tile flags buffer `tileInTlas` (all 1 while the static TLAS holds every tree, so shadows are unchanged in this task).
-
-- [ ] **Step 1: Failing tests:** slab transmittance equals the analytic exp(-d * L) for rays through a uniform slab at 0, 30 and 85 degrees; the hierarchical CPU march equals a brute-force march within 1e-3 over a synthetic field and terrain, including a grazing ray (2 degrees); splat conserves per-tree extinction (sum over texels within 1%).
-- [ ] **Step 2:** Implement the splat (load time) and the march; shadows call it with `skipTlasTiles = true`.
-- [ ] **Step 3: Verify.** Tests; default view mean difference vs previous commit within noise (all tiles flagged); a debug run with every tile flag forced to 0 and placed instances masked out of shadow rays, at the ridge view: forest reads as a self-shadowed mass, compare with the full TLAS reference (mean difference reported, no bright forest floor at distance).
-- [ ] **Step 4:** Commit ("Shadow far forests through a canopy height and density field").
+Superseded on 2026-11-20: the 2D canopy field is replaced by M2a's voxel far field (`docs/superpowers/specs/2026-11-20-far-field-design.md`; M2a Tasks 8-9), which already provides `farFieldTransmittance(worldOrigin, direction, startDistance, maxDistance, skipTlasCells)`, its CPU replica and tests. M2b only adds the per-cell TLAS flags (Task 4). The number is kept so references stay valid.
 
 ---
 
@@ -69,10 +55,10 @@
 
 **Files:**
 - Create: `engine/src/render/renderer_micromap.cpp` (OMM build helper shared with Task 6), `engine/shaders/proxy_bake.frag` (orthographic coverage along three axes, reuses the bake path of M2a's impostors)
-- Modify: `renderer_setup.cpp` (enable `VK_EXT_opacity_micromap`; startup error if absent), `renderer_impostor.cpp` (bake proxies, crown bounds and extinction next to the impostor; same cache rule), `gpu_types.h` (`PrototypeInfo`: proxy BLAS address, crown bounds, extinction), `tests/impostor_test.cpp`, `docs/decisions.md` (HPG 2026 proxies, Indiana Jones OMM)
+- Modify: `renderer_setup.cpp` (enable `VK_EXT_opacity_micromap`; startup error if absent), `renderer_impostor.cpp` (bake proxies next to the impostor; same cache rule), `gpu_types.h` (`PrototypeInfo`: proxy BLAS address), `tests/impostor_test.cpp`, `docs/decisions.md` (HPG 2026 proxies, Indiana Jones OMM)
 
 **Interfaces:**
-- Produces: `VkDeviceAddress PrototypeInfo.proxyBlas` (three quads, one OMM each, opaque/transparent states), `float extinction` and crown bounds replacing Task 2's constant. `MicromapBuild buildMicromap(cmd, coverage, width, height, subdivisionLevel)` in `renderer_micromap.cpp` (internal helper).
+- Produces: `VkDeviceAddress PrototypeInfo.proxyBlas` (three quads, one OMM each, opaque/transparent states), coverage thinning reads the three-axis pass fractions M2a's far-field bake (`farfield_bake.comp`) already measures; no separate extinction. `MicromapBuild buildMicromap(cmd, coverage, width, height, subdivisionLevel)` in `renderer_micromap.cpp` (internal helper).
 - Coverage per quad thinned to the measured pass fraction of rays through the full tree along that axis.
 
 - [ ] **Step 1: Failing test:** coverage thinning: for a synthetic coverage image and target pass fraction p, the opaque fraction after thinning is within 1% of 1 - p.
@@ -86,11 +72,11 @@
 
 **Files:**
 - Create: `engine/shaders/tlas_update.comp`, `engine/src/render/renderer_ptlas.cpp`, `tests/representation_test.cpp`
-- Modify: `renderer_setup.cpp` (enable `VK_NV_partitioned_acceleration_structure`, query `maxPartitionCount`; startup error if absent), `renderer_placement.cpp`/`renderer_frame.cpp` (replace M2a's static TLAS; pass `"tlas update"`), `gpu_types.h` (tile tables, operation buffers, capacities), `mesh.frag`/`impostor.frag` (shadow rays: TLAS full length + field with `skipTlasTiles`), `game/src/main.cpp` (`--representation-debug` tint), `CLAUDE.md` (Frame, Conventions), `docs/decisions.md` (PTLAS numbers, radii, cap)
+- Modify: `renderer_setup.cpp` (enable `VK_NV_partitioned_acceleration_structure`, query `maxPartitionCount`; startup error if absent), `renderer_placement.cpp`/`renderer_frame.cpp` (replace M2a's static TLAS; pass `"tlas update"`), `gpu_types.h` (tile tables, operation buffers, capacities), `mesh.frag`/`impostor.frag`/`voxel.frag` (shadow rays: TLAS full length + `farFieldTransmittance` with `skipTlasCells = true`; M2a's receiver-distance rule and the placed-tree mask bit go), `farfield.glsl` (per-cell `cellInTlas` flags), `engine/include/meridian/farfield.h` + `tests/farfield_test.cpp` (CPU replica's `cellInTlas` argument non-null: a ray through a flagged cell ignores it), `game/src/main.cpp` (`--representation-debug` tint), `CLAUDE.md` (Frame, Conventions), `docs/decisions.md` (PTLAS numbers, radii, cap)
 
 **Interfaces:**
 - Produces in a header shared by C++ tests and the shader logic (`engine/include/meridian/representation.h`): `enum class Representation : uint8_t { Far, Mid, Near };` and `Representation chooseRepresentation(float distance, Representation current, float nearRadius, float midRadius, float hysteresis)` (switches out at the boundary, back at `hysteresis` x boundary).
-- Tiles: groups of 64 m cells with <= ~1,024 instances; partition = tile; hand-placed objects in their own partition(s); global partition empty. Partition translation = tile origin. Per frame: compute appends write / update (BLAS swap near<->mid) / clear ops for at most `kMaxTileTransitionsPerFrame` tiles, nearest first; teleports run the full set before the first shown frame. `tileInTlas` flags follow. Capture output adds TLAS instances per representation and partition operations this frame.
+- Tiles: groups of 64 m cells with <= ~1,024 instances; partition = tile; hand-placed objects in their own partition(s); global partition empty. Partition translation = tile origin. Per frame: compute appends write / update (BLAS swap near<->mid) / clear ops for at most `kMaxTileTransitionsPerFrame` tiles, nearest first; teleports run the full set before the first shown frame. Per-cell `cellInTlas` flags (every cell of a tile held near or mid) follow. Capture output adds TLAS instances per representation and partition operations this frame.
 - Undergrowth layers only ever enter as Near (used in Task 6).
 
 - [ ] **Step 1: Failing tests:** `chooseRepresentation` over a camera path oscillating +-5 m around each boundary changes state at most once per crossing direction; distances 0, 149, 151, 1999, 2001 m pick Near, Near, Mid, Mid, Far from Far start states as specified.
@@ -107,7 +93,7 @@
 - Modify: `renderer_frame.cpp` (after the prepass: trace, filter; passes `"sky visibility"`, `"sky filter"`), `renderer_setup.cpp` (history images, sampling sequence), `mesh.frag`/`impostor.frag` (multiply diffuse sky ambient incl. ground bounce and the specular sky term with roughness-based specular occlusion), `CMakeLists.txt` (define `SKY_VISIBILITY_RAW` that skips the history, for RR later), `game/src/main.cpp` (`--sky-visibility off`), `CLAUDE.md`, `docs/decisions.md`
 
 **Interfaces:**
-- Consumes: Task 1 targets; `farFieldTransmittance(..., startDistance = 20, ..., skipTlasTiles = false)`.
+- Consumes: Task 1 targets; `farFieldTransmittance(..., startDistance = 20, ..., skipTlasCells = false)` (M2a Task 8).
 - Produces: filtered visibility image read by the main pass; blended surfaces use 1.
 
 - [ ] **Step 1:** Implement: cosine ray per pixel (blue-noise/R2 by frame), TLAS to ~20 m then the far march; temporal accumulation (~0.05-0.1) with prepass motion, reset on depth/normal mismatch, extra spatial support on disoccluded pixels; edge-aware spatial filter.
