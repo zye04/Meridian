@@ -2728,3 +2728,23 @@ should be in the TLAS is open (plan task 4). Plan:
   0.00 ms when no cell changes; scene early 2.28 ms, total 7.70 ms
   (DLSS RR 4.68 of it). The density is still well under
   the target; a tuning pass follows.
+
+## Clouds and weather measured (M4 clouds, 2026-11-20)
+
+- **GPU ms** (Release 2560x1440, DLSS DLAA + RR, `--placement off`, median
+  of 5, `weather` + `clouds` passes / frame total): fair from the ground
+  (`1119 1355.9 -431 -1.55 0.15`) 0.49 + 1.49 / 9.00; overcast (`1119
+  1356 -431 -1.55 0.25 --weather overcast`) 0.50 + 0.81 / 8.26; above
+  the layer (`1119 6500 -431 -1.55 -0.25`) 0.48 + 1.29 / 11.41; inside
+  the layer (`1119 3200 -431 -1.55 0`, half-resolution march) 0.48 +
+  1.89 / 10.82. Over the spec's ~1 ms (2 ms inside) on every view but
+  overcast; the user accepted ~2 ms for the sharp detail. Levers left:
+  the 16-tap composite as a 9-tap bilinear one, an adaptive shadow-map
+  step count, fewer sun steps far from the camera.
+- **Motion gates** (`tools/motion-gates.sh`, same session, main 899fcba
+  vs clouds): laplacian forward 5 ground 0.1286 vs 0.1284, sideways
+  0.1397 vs 0.1395, forward 5 beech 0.2083 vs 0.2050, pitch 0.1288 vs
+  0.1283; shimmer crown 1.42 vs 1.57, shadow 0.30 vs 0.28; SSIM 0.9815
+  vs 0.9806. All pass; the ground views look down (little sky), so this
+  checks that the clouds pass, the cloud shadow and the capture ambient
+  cost no sharpness. 0 validation errors in every run.
