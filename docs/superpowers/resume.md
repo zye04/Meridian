@@ -63,17 +63,10 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   decisions.md "Natural ground transitions", "Non-repeating cliffs").
   M3 step 1 can now rebase onto G2's role weights. Worktrees
   `../meridian-ground2*` can be removed.
-- **C2 clouds** (PAUSED at 15:25, branch `clouds` at 197d458, worktree
-  `../meridian-clouds`; user chose: merge to main after Task 8, no look
-  gate). Done: cumulus detail across the body, stepped underside fixed,
-  size variety, altitudes (cumulus base 2.8 km, top 4.8, stratus
-  1.7-2.8, cirrus 9), cost 1.92 ms fair. Next (ledger
-  `docs/superpowers/wip-ledgers/clouds/progress.md`, CHECKPOINT 15:18):
-  explain the darker low-sun shadow map (half-row update? heights? the
-  new .pfm reader?), then refit the cloud-shadow fallback properly (user:
-  no backlog row), motion numbers, Task 8, rebase, Opus final review,
-  squash the WIP commits, merge. Sheets:
-  `.superpowers/sdd/2026-11-19-clouds-weather/artifacts/t7/sharp/`.
+- **C2 clouds** (DONE, merged 2026-11-20; plan Status line, decisions.md
+  "Cloud shadow fallback refit", "Clouds and weather measured"). Worktrees
+  `../meridian-clouds*` can be removed; ledger and artifacts in
+  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`.
 - **M3 meadow** (PAUSED at 15:01). Branches `meadow` (worktree
   `../meridian-meadow`: step 1 7c248e0 terrain_roles.glsl + wind clock,
   also cherry-picked as 68ab406 in `../meridian-meadow-merge`, unpushed;
@@ -124,9 +117,7 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   default"); fullscreen startup builds one swapchain. Next: 3.2a -> 3.2b
   (shadow denoiser, fallback paths only), Task 4 sweep, Task 5 final
   review.
-  The clouds branch must follow the plan's clouds rebase checklist
-  (cloud targets sized from `renderExtent`, transparency mask, white
-  noise under Ray Reconstruction). Ledger:
+  Ledger:
   `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/`.
 - **M2a Task 8** (`wip/m2a-task8` at 156e3fc, worktree
   `../meridian-forests`, ledger in its

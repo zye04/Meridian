@@ -1,5 +1,7 @@
 # M4 Clouds and Weather Implementation Plan
 
+**Status:** done, merged to main 2026-11-20 (Tasks 1-8; measurements in decisions.md "Clouds and weather measured").
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A game-driven weather state with a shared global wind, and volumetric clouds that read it: drifting with the wind, fronts arriving from upwind, lit from clear to overcast, dimming the sun through a cloud shadow map and the ambient through a sky + cloud capture, without smear.

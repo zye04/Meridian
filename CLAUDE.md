@@ -407,7 +407,8 @@ sky-view, aerial perspective every frame) -> weather (weather_map.comp:
 map, cloud_shadow.comp: a Beer shadow map, 1024^2 over 30 km across the
 sun, orthographic along it, texel-snapped in its frame, 32 steps per
 texel across the layer, only for lines that reach a receiver within ~15
-km of the camera, and cloud_shadow_blur.comp, a bilateral 5x5 of its
+km of the camera, every other row per frame (alternating) once a full
+map exists, and cloud_shadow_blur.comp, a bilateral 5x5 of its
 extinction and optical depth; then sky_capture.comp: a coarse cloud march
 from the camera into a 64^2 octahedral map (cloud luminance + haze,
 transmittance; one texel of every 2x2 block per frame, all when the
