@@ -46,4 +46,9 @@ inline Vec3 scriptedPosition(Vec3 end, Vec3 velocity, float dt,
   return end - velocity * (dt * static_cast<float>(framesLeft));
 }
 
+// The same for a camera angle (rad) turning at `rate` rad/s.
+inline float scriptedAngle(float end, float rate, float dt, int framesLeft) {
+  return end - rate * dt * static_cast<float>(framesLeft);
+}
+
 } // namespace meridian

@@ -367,17 +367,22 @@ The capture drift fix landed in b6432cf. Gate scripts live in `tools/`
 
 | gate | view | minimum | stretch | today |
 |---|---|---|---|---|
-| Laplacian motion/still, forward 5 m/s | ground | >= 0.85 (every path) | >= 0.95 | 0.49 |
-| same, sideways 5 m/s | ground | >= 0.95 | >= 0.98 | 0.91 |
+| Laplacian motion/still, forward 5 m/s | ground | >= 0.85 (every path) | >= 0.95 | 0.50 |
+| same, sideways 5 m/s | ground | >= 0.95 | >= 0.98 | 0.92 |
 | same, forward 5 m/s | beech | >= 0.85 | >= 0.95 | 0.68 |
 | same, pitch 0.02 rad/s | ground | >= 0.85 | >= 0.95 | 0.71 |
-| shimmer crown / shadow (/255) | beech | <= 2.0 / 2.0 | <= 1.0 / 1.0 | 1.9 / 1.7 |
-| SSIM motion vs still, forward 5 | ground | >= 0.98 | | re-baseline |
-| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.17 (TAA) |
+| shimmer crown / shadow (/255) | beech | <= 2.0 / 2.0 | <= 1.0 / 1.0 | 2.0 / 1.5 |
+| SSIM motion vs still, forward 5 | ground | >= 0.98 | | 0.95 |
+| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.18 (TAA, 1080p) |
 | AA slot GPU ms, RR | 1440p | <= 3.0 (else Quality mode) | | n/a |
-| TAA v2 + shadow denoiser GPU ms | 1440p | <= 0.9 | | 0.17 |
-| grade + tonemap GPU ms | 1440p | <= 0.08 | | 0.04 |
+| TAA v2 + shadow denoiser GPU ms | 1440p | <= 0.9 | | 0.18 (1080p) |
+| grade + tonemap GPU ms | 1440p | <= 0.08 | | 0.06 (1080p) |
 | identity grade vs analytic AgX | all | mean <= 0.3/255 | | |
+
+Baseline measured on main with `tools/motion-gates.sh` (Release,
+1920x1080: the session's fullscreen gives the 1080p fallback output, so
+GPU ms are 1080p, median of 5, `taa` 0.18 + `tonemap` 0.06; re-measure
+at 1440p). Captures: `.superpowers/sdd/motion-clarity/artifacts/task0`.
 
 Every capture keeps 0 validation errors.
 

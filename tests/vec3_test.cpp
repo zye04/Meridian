@@ -28,3 +28,9 @@ TEST_CASE("scripted camera path ends exactly at the target") {
       meridian::scriptedPosition(end, v, 1.0f / 60.0f, frames);
   CHECK(first.x == doctest::Approx(end.x - 20.0f).epsilon(1e-6));
 }
+
+TEST_CASE("scriptedAngle ends on the requested angle") {
+  CHECK(meridian::scriptedAngle(0.3f, 0.02f, 1.0f / 60, 0) == 0.3f);
+  CHECK(meridian::scriptedAngle(0.3f, 0.02f, 1.0f / 60, 120) ==
+        doctest::Approx(0.3f - 0.04f));
+}

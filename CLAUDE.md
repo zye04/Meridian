@@ -40,6 +40,8 @@ cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
+python3 -I tools/image-gates.py ratio motion.png still.png   # laplacian|ratio|shimmer|ssim|diff
+tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate table, GPU passes
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
@@ -65,10 +67,13 @@ validation error):
 A `.pfm` capture path writes the linear HDR image the tonemap reads
 (post-TAA, pre-exposed) instead, for luminance ratios.
 
-Motion sharpness: add `--camera-velocity X Y Z` (m/s, fixed 1/60 s steps,
-ending at `--camera`) and compare with the still capture of the same view:
-`magick out.png -colorspace gray -morphology Convolve Laplacian:0 -format
-"%[fx:standard_deviation]\n" info:` (higher = sharper).
+Motion sharpness: add `--camera-velocity X Y Z` (m/s) and/or
+`--camera-angular-velocity YAW PITCH` (rad/s), fixed 1/60 s steps ending at
+`--camera`, and compare with the still capture of the same view:
+`python3 -I tools/image-gates.py ratio motion.png still.png` (Laplacian
+std ratio; also `laplacian`, `shimmer`, `ssim`, `diff`). The whole motion
+gate set runs with `tools/motion-gates.sh BUILD OUT [game args]`
+(`GPU_RUNS=5` adds per-pass GPU medians).
 
 `--haze clean|summer|summer-hazy` picks the aerosol (default summer:
 Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:

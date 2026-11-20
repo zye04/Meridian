@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -305,6 +306,7 @@ struct Options {
   std::optional<meridian::Vec3> sunDirection;
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
+  std::optional<std::pair<float, float>> cameraAngularVelocity;
   std::optional<std::filesystem::path> capturePath;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
@@ -343,6 +345,9 @@ Options parseOptions(int argc, char **argv) {
           meridian::normalize({number(i), number(i), number(i)});
     } else if (arg == "--camera-velocity") {
       options.cameraVelocity = {number(i), number(i), number(i)};
+    } else if (arg == "--camera-angular-velocity") {
+      const float yawRate = number(i);
+      options.cameraAngularVelocity = {yawRate, number(i)};
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
@@ -373,7 +378,8 @@ Options parseOptions(int argc, char **argv) {
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
-                               "--camera-velocity x y z, --scatter n, --placement off, "
+                               "--camera-velocity x y z, "
+                               "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, "
@@ -385,8 +391,11 @@ Options parseOptions(int argc, char **argv) {
   if (options.capturePath && options.frames == 0) {
     options.frames = 120;
   }
-  if (options.cameraVelocity && options.frames == 0) {
-    throw std::runtime_error("--camera-velocity needs --capture or --frames");
+  if ((options.cameraVelocity || options.cameraAngularVelocity) &&
+      options.frames == 0) {
+    throw std::runtime_error(
+        "--camera-velocity and --camera-angular-velocity need --capture or "
+        "--frames");
   }
   return options;
 }
@@ -473,6 +482,19 @@ int main(int argc, char **argv) {
   // exactly.
   constexpr float kScriptedStep = 1.0f / 60.0f;
   const meridian::Vec3 scriptedEnd = camera.position;
+  const float scriptedYaw = camera.yaw;
+  const float scriptedPitch = camera.pitch;
+  auto scriptAngles = [&](int framesLeft) {
+    if (options.cameraAngularVelocity) {
+      camera.yaw = meridian::scriptedAngle(
+          scriptedYaw, options.cameraAngularVelocity->first, kScriptedStep,
+          framesLeft);
+      camera.pitch = meridian::scriptedAngle(
+          scriptedPitch, options.cameraAngularVelocity->second, kScriptedStep,
+          framesLeft);
+    }
+  };
+  scriptAngles(options.frames);
   if (options.cameraVelocity) {
     camera.position = meridian::scriptedPosition(
         scriptedEnd, *options.cameraVelocity, kScriptedStep, options.frames);
@@ -511,6 +533,7 @@ int main(int argc, char **argv) {
                       walking ? &terrain : nullptr);
     }
     ++totalFrames;
+    scriptAngles(options.frames - totalFrames);
     if (options.cameraVelocity) {
       camera.position = meridian::scriptedPosition(
           scriptedEnd, *options.cameraVelocity, kScriptedStep,
