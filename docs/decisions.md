@@ -1737,6 +1737,13 @@ restores the previous behaviour exactly (2645325 instances, hash
   sees no extra noise. Sources:
   https://google.github.io/filament/Filament.html ("Micro-shadowing"),
   https://www.activision.com/cdn/research/MaterialAdvancesInWWII.pdf
+  On the terrain the term reads the AO relative to each layer's mean
+  (its last mip; `terrainMicroOcclusion`): the Megascans ground AO also
+  bakes the scan's large-scale occlusion (means 0.5-0.7), and fed raw it
+  hid a 14 degree sun across open ground in large blotches (full-ground
+  view, `--sun 0.9 0.25 -0.4`: 10.4/255 mean darker, 9-19% in sRGB per
+  band; normalised, 4.8/255 with crevice detail kept, contact shadows
+  included). Ambient AO keeps the raw value. Meshes keep the raw AO.
 
 ## Terrain parallax occlusion mapping (2026-11-20)
 

@@ -181,6 +181,8 @@ struct Surface {
     float metallic;
     float perceptualRoughness;
     float occlusion;
+    // AO that drives the micro shadow (see terrainMicroOcclusion).
+    float microOcclusion;
     vec3 emissive;
     vec3 normal;
     // Parallax self-shadowing of the sun (1 = lit).
@@ -237,6 +239,7 @@ Surface proceduralTerrain(vec3 normal) {
     s.sunShadow = 1.0;
     s.perceptualRoughness = mix(0.9, 0.5, snow);
     s.occlusion = 1.0;
+    s.microOcclusion = 1.0;
     s.emissive = vec3(0.0);
     s.normal = normal;
     return s;
@@ -255,6 +258,7 @@ struct TerrainTexel {
     vec3 baseColor;
     vec3 normal; // world space
     vec2 occlusionRoughness;
+    float microOcclusion;
     float height;
 };
 
@@ -263,8 +267,18 @@ TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
     r.baseColor = mix(a.baseColor, b.baseColor, t);
     r.normal = normalize(mix(a.normal, b.normal, t));
     r.occlusionRoughness = mix(a.occlusionRoughness, b.occlusionRoughness, t);
+    r.microOcclusion = mix(a.microOcclusion, b.microOcclusion, t);
     r.height = mix(a.height, b.height, t);
     return r;
+}
+
+// Megascans ground AO also bakes the scan's large-scale occlusion (layer
+// means 0.5-0.7), which the micro shadow turned into blotches across open
+// ground at low sun. Relative to the layer's mean (its last mip) only the
+// cavities darker than average shadow the sun.
+float terrainMicroOcclusion(TerrainLayer layer, float occlusion) {
+    float mean = textureLod(textures[nonuniformEXT(layer.arm)], vec2(0.5), 16.0).r;
+    return mix(1.0, clamp(occlusion / max(mean, 1e-3), 0.0, 1.0), layer.occlusionStrength);
 }
 
 vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
@@ -429,6 +443,7 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     vec3 n = normalize(vec3(-derivative, 1.0));
     vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
     texel.normal = normalize(mat3(t, cross(normal, t), normal) * n);
+    texel.microOcclusion = terrainMicroOcclusion(layer, texel.occlusionRoughness.x);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
     return texel;
@@ -488,6 +503,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     ny = vec3(ny.xy + normal.xz, abs(normal.y) * ny.z * axisSign.y);
     nz = vec3(nz.xy + normal.xy, abs(normal.z) * nz.z * axisSign.z);
     texel.normal = normalize(nx.zyx * blend.x + ny.xzy * blend.y + nz.xyz * blend.z);
+    texel.microOcclusion = terrainMicroOcclusion(layer, texel.occlusionRoughness.x);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
     return texel;
@@ -770,6 +786,7 @@ Surface terrainSurface(vec3 normal) {
     Surface s;
     s.baseColor = ground.baseColor;
     s.occlusion = ground.occlusionRoughness.x;
+    s.microOcclusion = ground.microOcclusion;
     s.perceptualRoughness = ground.occlusionRoughness.y;
     s.normal = ground.normal;
     float snow = snowCover(normal);
@@ -808,6 +825,7 @@ Surface materialSurface(Material m, vec3 normal) {
         s.occlusion = mix(1.0, sampleTexture(m.occlusionTexture, inUv).r,
                           m.occlusionStrength);
     }
+    s.microOcclusion = s.occlusion;
 
     s.sunShadow = 1.0;
     s.emissive = m.emissiveFactor;
@@ -958,8 +976,8 @@ void main() {
         vec3 specular = distributionGgx(NoH, a) *
                         visibilitySmithGgxCorrelated(NoV, NoL, a) *
                         fresnelSchlick(f0, LoH) * energyCompensation;
-        vec3 sunLight =
-            sunAtSurface * (NoL * visibility * microShadow(NoL, s.occlusion) * s.sunShadow);
+        vec3 sunLight = sunAtSurface * (NoL * visibility * microShadow(NoL, s.microOcclusion) *
+                                        s.sunShadow);
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;
     }
