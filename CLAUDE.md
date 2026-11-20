@@ -321,6 +321,8 @@ account for that.
   version 3, so older caches rebuild once). `selectClustersBvh` is the
   CPU reference for the GPU traversal: it must select exactly the clusters
   `lodVisible` accepts.
+- Deferred work and known issues are tracked in `docs/backlog.md`: add a
+  row for anything deferred, remove it in the commit that resolves it.
 - Known gaps: blended instances are drawn at full detail with no culling
   (every instance, every frame; harmless while no scattered model is
   blended); masked-geometry RT shadows are not visually verified yet; TAA
