@@ -227,6 +227,32 @@ else
     "$cook" "$gltf" "$out.part"
     mv "$out.part" "$out"
   done
+
+  # Megascans ground surfaces for the terrain material (Fab *_4k_ue_high.zip,
+  # same directory): the 4K maps downscaled to 2K, then cooked like the
+  # Poly Haven layers. ORM is AO/roughness/metal, the same packing as ARM;
+  # the normal maps are OpenGL (green up), checked against the height maps.
+  for id in uncut_grass_oilpt20 wild_grass_pjwgw0 forest_floor_xdfddec soil_mud_olsetpp0 \
+      gravel_on_soil_rmsigwp0 rock_cliff_tg1mcgbl; do
+    zip="$megaplants/${id}_4k_ue_high.zip"
+    dest="$root/assets/terrain/$id"
+    [[ -f "$zip" && ! -f "$dest/height.ktx2" ]] || continue
+    extract="$megascans/_extract/${id}_4k_ue_high"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part" 'Textures/*'
+      mv "$extract.part" "$extract"
+    fi
+    staging="$megascans/_terrain/$id"
+    mkdir -p "$staging" "$dest"
+    for map in "B base_color color" "N normal normal" "ORM arm data" "H height data"; do
+      read -r suffix name usage <<<"$map"
+      png="$(find "$extract/Textures" -maxdepth 1 -iname "*_4K_${suffix}.png" | head -n 1)"
+      magick "$png" -resize 2048x2048 "$staging/$name.png"
+      "$cook" --texture "$staging/$name.png" "$dest/$name.ktx2" "$usage"
+    done
+  done
 fi
 
 echo "Assets in $root/assets"
