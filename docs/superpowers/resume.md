@@ -67,20 +67,20 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
   "Cloud shadow fallback refit", "Clouds and weather measured"). Worktrees
   `../meridian-clouds*` can be removed; ledger and artifacts in
   `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`.
-- **M3 meadow** (dense meadow MERGED 2026-11-20 ~17:45, branch
-  `meadow-stream`, worktree `../meridian-meadow-stream`). Streamed
-  placement (plan `docs/superpowers/plans/2026-11-20-streamed-placement.md`,
-  decisions.md "Streamed placement", "Plant micro occlusion"): grass mat,
-  seed-head tufts, hawkbit and clover streamed around the camera,
-  matched far-field terrain colour. The procedural blade grass was dropped
-  (user: "horrendous"); branches `meadow` and `meadow-accents` are
-  obsolete. Next (second merge, two parallel implementers): seamless
-  transition: (X) prefetch margin, a wider thinning band, a terrain-normal
-  blend for fading tufts, then velocity and shimmer gates at 30 and
-  150 m/s, with an Opus review; (Y) a grass-blade detail layer in the
-  terrain material past the mat, plus luminance matching at 3 distances
-  and 2 sun angles; then a per-layer albedo tint (fresher green), and
-  plan task 4 (TLAS for streamed instances).
+- **M3 meadow** (PAUSED 2026-11-20 ~18:40; most of it on main).
+  Streamed placement (plan `docs/superpowers/plans/2026-11-20-streamed-placement.md`,
+  decisions.md "Streamed placement", "Plant micro occlusion") is merged
+  with the dense meadow, Prototype::tint (fresh green, cream hawkbit),
+  wide thinning and the terrain-normal blend (40a230d), and the dither
+  pattern cache (851d0ad). Paused and NOT merged: branch `meadow-y`
+  (pushed; worktree `../meridian-meadow-y`, WIP 1fc4abf), the far-field
+  match: terrain blade detail, distance gain, canopy sun shadow and
+  `tools/placement-match.py`, all unverified. Resume from
+  `../meridian-meadow-stream/.superpowers/sdd/stream/next.md`: re-measure
+  the table, tune to 3-5% (low sun is the hard case), Debug validation,
+  merge, motion gates at 30 and 150 m/s, then plan task 4 (TLAS for
+  streamed instances). Obsolete branches: `meadow`, `meadow-accents`,
+  `meadow-x`, `meadow-tint`, `meadow-cache`.
 - **Queue after those** (in order, each when the user says go):
   1. Terrain detail: near-camera displacement from the material height
      maps (tessellated near nodes) + erosion-style procedural detail;
