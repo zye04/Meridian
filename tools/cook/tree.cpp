@@ -63,6 +63,9 @@ struct Instance {
 // silhouettes and leaf outlines move by at most a centimeter.
 constexpr float kSimplifyError = 0.01f;
 constexpr float kNormalWeight = 0.5f;
+// Thin leaves transmit about as much light as they reflect diffusely; kept
+// below that so reflectance + transmittance stays under 1.
+constexpr float kLeafDiffuseTransmission = 0.35f;
 // Leaf tint range around the species color: hue in turns, value as a factor.
 constexpr float kLeafHueJitter = 0.03f;
 constexpr float kLeafValueJitter = 0.08f;
@@ -428,6 +431,10 @@ public:
       asset.extensionsUsed.emplace_back("KHR_texture_basisu");
       asset.extensionsRequired.emplace_back("KHR_texture_basisu");
     }
+    if (std::any_of(asset.materials.begin(), asset.materials.end(),
+                    [](const fastgltf::Material &m) { return m.diffuseTransmission.has_value(); })) {
+      asset.extensionsUsed.emplace_back("KHR_materials_diffuse_transmission");
+    }
     fastgltf::FileExporter exporter;
     exporter.setBufferPath("buffers");
     exporter.setImagePath("textures");
@@ -764,6 +771,8 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     material.pbrData.metallicFactor = from.pbrData.metallicFactor;
     material.pbrData.roughnessFactor = from.pbrData.roughnessFactor;
     if (from.doubleSided) {
+      material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
+      material.diffuseTransmission->diffuseTransmissionFactor = kLeafDiffuseTransmission;
       const float color[3] = {from.pbrData.baseColorFactor[0], from.pbrData.baseColorFactor[1],
                               from.pbrData.baseColorFactor[2]};
       const size_t palette = writer.addTexture(

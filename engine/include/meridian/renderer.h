@@ -66,6 +66,9 @@ struct MaterialData {
   float alphaCutoff = 0.5f;
   // Render back faces too (thin geometry such as leaves).
   bool doubleSided = false;
+  // KHR_materials_diffuse_transmission factor: the share of the diffuse
+  // colour that passes through a thin surface (leaves).
+  float diffuseTransmission = 0.0f;
 };
 
 // One ground texture set, projected in world space.

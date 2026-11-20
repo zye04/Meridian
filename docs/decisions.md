@@ -1490,6 +1490,20 @@ ray query stops within meters while the height-pyramid march walks
 toward the sun first. Release 1440p, with leaf transmission (below):
 forest edge 33.2 -> 21.8 ms, start view 5.70 -> 5.21 ms.
 
+**Leaves transmit light (KHR_materials_diffuse_transmission).** Only the
+factor is read (`MaterialData::diffuseTransmission`); `meridian-cook
+--tree` sets 0.35 on leaf materials. Back-lit sun adds
+`diffuseColor / pi * sun * -NoL * visibility * factor`, with its own
+shadow ray offset toward the sun's side of the leaf, and the back face's
+sky/ground irradiance adds the same share of the diffuse colour with the
+usual occlusion. Why: the Cycles beech crown with 35%
+translucency was 1.8x brighter than without, and Meridian had only
+`sun * NoL`. Forest edge foliage/sky luminance 0.225 -> 0.278 (+24%),
+chroma 0.32 -> 0.34; the extra shadow ray cost 6.5 ms there (Release
+1440p) before the TLAS-first reorder above. Trees cooked before this must be
+re-cooked (`fetch-sample-assets.sh` skips cooked trees: delete
+`assets/source/megascans/tree_*/budget` first).
+
 ## Forest species mix favours the mature beech (2026-11-20)
 
 Trees read as skinny, sparse "baby trees". The cook is not the cause:

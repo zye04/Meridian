@@ -719,6 +719,14 @@ void main() {
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;
     }
+#ifndef TERRAIN
+    bool leaf = material.diffuseTransmission > 0.0;
+    if (leaf && dot(N, L) < 0.0 && dot(geometricNormal, L) < 0.0) {
+        float visibility = sunVisibility(worldPosition, -geometricNormal);
+        diffuseLight += diffuseColor / kPi * sunAtSurface *
+                        (clamp(-dot(N, L), 0.0, 1.0) * visibility) * material.diffuseTransmission;
+    }
+#endif
 
     // Ambient from the sky. Diffuse: sky irradiance from above, light bounced
     // off the ground from below. Specular: the sky in the reflected
@@ -734,6 +742,13 @@ void main() {
     float specularOcclusion = specularAmbientOcclusion(NoV, s.occlusion, a);
     diffuseLight += diffuseColor / kPi * diffuseIrradiance *
                     multiBounceOcclusion(s.occlusion, diffuseColor);
+#ifndef TERRAIN
+    if (leaf) {
+        vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -N.y * 0.5 + 0.5);
+        diffuseLight += diffuseColor / kPi * backIrradiance * material.diffuseTransmission *
+                        multiBounceOcclusion(s.occlusion, diffuseColor);
+    }
+#endif
     specularLight += specularReflectance * skyRadiance *
                      multiBounceOcclusion(specularOcclusion, f0);
 

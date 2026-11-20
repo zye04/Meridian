@@ -333,7 +333,8 @@ void applyUvTransform(MeshData &mesh, const UvTransform &t) {
 Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
   fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
                           fastgltf::Extensions::KHR_materials_emissive_strength |
-                          fastgltf::Extensions::KHR_texture_transform);
+                          fastgltf::Extensions::KHR_texture_transform |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
   auto data = fastgltf::GltfDataBuffer::FromPath(path);
   if (data.error() != fastgltf::Error::None) {
     throw std::runtime_error("cannot read " + path.string());
@@ -389,6 +390,9 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
     }
     material.alphaCutoff = m.alphaCutoff;
     material.doubleSided = m.doubleSided;
+    if (m.diffuseTransmission) {
+      material.diffuseTransmission = m.diffuseTransmission->diffuseTransmissionFactor;
+    }
     materials.push_back(renderer.createMaterial(material));
   }
   const MaterialId defaultMaterial = renderer.createMaterial({});

@@ -673,7 +673,8 @@ struct GpuMaterial {
   uint32_t occlusionTexture = kNoTexture;
   uint32_t emissiveTexture = kNoTexture;
   uint32_t flags = 0;
-  uint32_t pad[2] = {};
+  float diffuseTransmission = 0.0f;
+  uint32_t pad[1] = {};
 };
 static_assert(sizeof(GpuMaterial) == 80);
 
@@ -697,6 +698,7 @@ inline GpuMaterial toGpu(const MaterialData &m) {
   g.emissiveTexture = textureIndex(m.emissiveTexture);
   g.alphaCutoff = m.alphaCutoff;
   g.flags = m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u;
+  g.diffuseTransmission = m.diffuseTransmission;
   return g;
 }
 constexpr VkShaderStageFlags kScenePushStages =

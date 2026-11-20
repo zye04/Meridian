@@ -30,6 +30,7 @@ struct Material {
     uint occlusionTexture;
     uint emissiveTexture;
     uint flags;
+    float diffuseTransmission;
 };
 
 layout(buffer_reference, std430) readonly buffer MaterialBuffer {

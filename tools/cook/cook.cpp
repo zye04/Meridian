@@ -260,7 +260,8 @@ void bakeNodeTransform(fastgltf::Asset &asset) {
 void cook(const std::filesystem::path &input, const std::filesystem::path &output) {
   fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
                           fastgltf::Extensions::KHR_materials_emissive_strength |
-                          fastgltf::Extensions::KHR_texture_transform);
+                          fastgltf::Extensions::KHR_texture_transform |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
   auto data = fastgltf::GltfDataBuffer::FromPath(input);
   if (data.error() != fastgltf::Error::None) {
     throw std::runtime_error("cannot read " + input.string());
