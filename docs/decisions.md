@@ -90,6 +90,70 @@ sources. Check here before re-researching a topic.
   reference reports artifacts with 16-bit), and Earth defaults from
   Bruneton 2017. The sky has rotation-only motion vectors.
   - https://github.com/sebh/UnrealEngineSkyAtmosphere
+- **Summer haze (2026-11-19)**: the game sets a summer Mie aerosol for
+  the Swiss Plateau / Napf (`summerHaze(aod, H)` in main.cpp). Presets:
+  `--haze summer` (default, AOD(550) 0.10, H 0.5 km), `--haze
+  summer-hazy` (AOD 0.2, H 1.5 km), `--haze clean` (Bruneton's very clean
+  defaults, ~0.004/km, visibility ~300 km). The engine defaults stay
+  Earth-clean and parametric. The derivation below is for summer-hazy;
+  summer follows it with its own numbers.
+  - Boundary layer: the convective boundary layer over the Plateau
+    (Payerne, 491 m) peaks at 1200-1500 m above ground in May-August
+    (Collaud Coen 2014), so its top is ~2 km above sea level; Swiss sun
+    photometers measure an AOD scale height of 1-2 km and monthly mean
+    AOD(500 nm) from 0.05 in winter to 0.3 in summer (Ingold 2001).
+    Scale height 1.5 km.
+  - Extinction: take a boundary-layer AOD(550) of 0.2 (summer means ~0.26
+    after the Angstrom shift to 550 nm include free-troposphere and dust
+    events). With an exponential profile, AOD = beta(ground) * H, so
+    beta = 0.2 / 1.5 = 0.133/km at the Plateau floor (0.5 km). Koschmieder
+    (V = 3.912 / beta_total, 2% contrast threshold; Rayleigh adds
+    0.0116/km at 550 nm): ~27 km visibility on the Plateau, and
+    0.133 * exp(-0.85 / 1.5) = 0.075/km, ~45 km, on the Napf ridges
+    (1.35 km), which is OPAC's "continental average" (0.075/km, 35 km at
+    80% RH). Hazy but clear: ridges 5-15 km away at that level keep exp(-0.087 d), 65-27%, of their contrast.
+  - Altitude reference: the atmosphere's density is exp(-y / H) with y
+    above sea level (atmospherePosition), so the coefficient passed is the
+    sea-level value 0.133 * exp(0.5 / 1.5) = 0.186/km. Density is highest
+    in the valleys and falls through the camera's altitude; above ~3 km the
+    view looks down onto the haze layer.
+  - Optics (OPAC continental average, 550 nm): single-scattering albedo
+    0.925, asymmetry g 0.703 (g = 0.7), Angstrom exponent 1.42 for
+    500-800 nm and 1.11 for 350-500 nm, applied at the 680/550/440 nm the
+    RGB coefficients stand for: extinction x {0.740, 1, 1.281}. The haze
+    is bluer than gray, as aerosol of mostly sub-micron particles is.
+  - Effect: noon sky is paler (top-of-frame blue/red 1.51 vs 2.33 clean)
+    and the region around the sun brighter (g 0.7). That read as too
+    grey: on a real hazy summer day the zenith stays clearly blue and the
+    haze sits low. A first milder try (AOD 0.15, H 1.2 km) still greyed
+    the sky (noon blue/red 1.63).
+  - summer (default): AOD(550) 0.10, inside Ingold's summer range, with
+    H 0.5 km. What greys the zenith is the aerosol above the camera, and
+    an exponential profile cannot have the real layer's well-mixed body
+    and sharp top, so the scale height is a deliberate, perceptual
+    deviation from the ~2 km CBL: it keeps the haze in the valleys the
+    view looks across. beta = 0.2/km at 0.5 km, 0.13/km at the Napf's
+    valley floors (0.7 km, V ~27 km), 0.037/km on the ridges (V ~80 km);
+    sea-level coefficient 0.2 * exp(0.5 / 0.5) = 0.544/km. The aerosol
+    column above the summit is 0.017 (summer-hazy 0.11).
+  - Measured (2560x1440 captures, summit at 1.41 km): zenith blue/red
+    1.98 (clean 2.11, hazy 1.58) with the default sun, 1.59 with a
+    74-degree sun 16 degrees off the zenith (clean 1.91, hazy 1.24). Ridges
+    5-15 km away (rows 745-810 of the far-horizon view): Laplacian std
+    0.063 (clean 0.141, hazy 0.046), so their fine contrast is cut by
+    55%. Tried and rejected: H 1.0 (zenith 1.81), H 0.7 (1.89), AOD
+    0.08 with H 0.7 (1.93, less ridge fade).
+  - Hess, Koepke, Schult 1998, "Optical Properties of Aerosols and Clouds:
+    The Software Package OPAC", BAMS 79(5), Table 3:
+    https://lweb.cfa.harvard.edu/hitran/HITRAN2012/Aerosols/papers/hess_opac_1998.pdf
+  - Collaud Coen et al. 2014, "Determination and climatology of the
+    planetary boundary layer height above the Swiss plateau", ACP 14:
+    https://acp.copernicus.org/articles/14/13205/2014/
+  - Ingold, Matzler, Kampfer, Heimo 2001, "Aerosol optical depth
+    measurements by means of a Sun photometer network in Switzerland",
+    JGR 106, doi:10.1029/2000JD000088
+  - Koschmieder 1924 visibility relation (V = -ln(0.02) / beta):
+    https://en.wikipedia.org/wiki/Visibility#Meteorological_visibility
 
 ## Materials and assets
 

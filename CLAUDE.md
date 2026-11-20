@@ -56,6 +56,11 @@ ending at `--camera`) and compare with the still capture of the same view:
 `magick out.png -colorspace gray -morphology Convolve Laplacian:0 -format
 "%[fx:standard_deviation]\n" info:` (higher = sharper).
 
+`--haze clean|summer|summer-hazy` picks the aerosol (default summer:
+Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
+haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
+clean = Bruneton's very clean defaults, for A/B).
+
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing

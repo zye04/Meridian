@@ -280,6 +280,24 @@ void placeScenery(meridian::Renderer &renderer) {
   renderer.setPlacement(prototypes, layers, 1);
 }
 
+// Summer aerosol over the Swiss Plateau and the Napf, from the boundary
+// layer's optical depth at 550 nm and its scale height in km (derivation and
+// sources in docs/decisions.md, "Summer haze").
+meridian::Atmosphere summerHaze(float opticalDepth, float scaleHeight) {
+  meridian::Atmosphere atmosphere;
+  // Extinction on the Plateau floor (0.5 km); the density reference is sea
+  // level.
+  const float extinction =
+      opticalDepth / scaleHeight * std::exp(0.5f / scaleHeight);
+  // Continental aerosol's Angstrom exponents (1.42 above 500 nm, 1.11
+  // below) at the 680/550/440 nm the RGB coefficients stand for.
+  atmosphere.mieExtinction = meridian::Vec3{0.740f, 1.0f, 1.281f} * extinction;
+  atmosphere.mieScattering = atmosphere.mieExtinction * 0.925f;
+  atmosphere.mieScaleHeight = scaleHeight;
+  atmosphere.miePhaseG = 0.7f;
+  return atmosphere;
+}
+
 // Command-line options for deterministic, automated runs, e.g.
 //   game --camera 1119 4354 -431 -1.55 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
@@ -293,6 +311,8 @@ struct Options {
   // Forests, lone trees and rocks over the terrain (placeScenery).
   bool placement = true;
   bool occlusion = true;
+  // Clean: Bruneton's very clean defaults (for A/B).
+  enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
   // Fullscreen by default: consistent size for GPU timings, and the way the
@@ -327,6 +347,17 @@ Options parseOptions(int argc, char **argv) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
       options.fullscreen = false;
+    } else if (arg == "--haze" && i + 1 < argc) {
+      const std::string haze = argv[++i];
+      if (haze == "clean") {
+        options.haze = Options::Haze::Clean;
+      } else if (haze == "summer") {
+        options.haze = Options::Haze::Summer;
+      } else if (haze == "summer-hazy") {
+        options.haze = Options::Haze::SummerHazy;
+      } else {
+        throw std::runtime_error("--haze takes clean, summer or summer-hazy");
+      }
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -344,6 +375,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, --scatter n, --placement off, "
                                "--no-occlusion, "
+                               "--haze clean|summer|summer-hazy, "
                                "--lod-error px, "
                                "--windowed, "
                                "--capture file.png, --frames n)");
@@ -419,6 +451,11 @@ int main(int argc, char **argv) {
   }
 
   meridian::Lighting lighting;
+  if (options.haze == Options::Haze::Summer) {
+    lighting.atmosphere = summerHaze(0.10f, 0.5f);
+  } else if (options.haze == Options::Haze::SummerHazy) {
+    lighting.atmosphere = summerHaze(0.2f, 1.5f);
+  }
   if (options.sunDirection) {
     lighting.sunDirection = *options.sunDirection;
   }
