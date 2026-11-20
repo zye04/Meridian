@@ -58,6 +58,27 @@ std::vector<uint8_t> sourceImageBytes(const fastgltf::Asset &asset,
   throw std::runtime_error("unsupported image source");
 }
 
+// glTF's ORM packing puts occlusion in R, so an _arm pack bound only as
+// metallicRoughness serves as the occlusion map too (Poly Haven omits the binding).
+void bindArmOcclusion(fastgltf::Asset &asset) {
+  for (fastgltf::Material &m : asset.materials) {
+    const auto &mr = m.pbrData.metallicRoughnessTexture;
+    if (!mr || m.occlusionTexture) {
+      continue;
+    }
+    const auto image = asset.textures[mr->textureIndex].imageIndex;
+    const auto *uri =
+        image ? std::get_if<fastgltf::sources::URI>(&asset.images[*image].data) : nullptr;
+    if (uri && uri->uri->fspath().filename().string().find("_arm") != std::string::npos) {
+      // The same texture info, transform included: the loader requires one
+      // texture transform per material.
+      fastgltf::OcclusionTextureInfo occlusion;
+      static_cast<fastgltf::TextureInfo &>(occlusion) = *mr;
+      m.occlusionTexture = std::move(occlusion);
+    }
+  }
+}
+
 // Which way each image is sampled decides how it's encoded.
 std::map<size_t, Usage> imageUsages(const fastgltf::Asset &asset) {
   std::map<size_t, Usage> usages;
@@ -252,6 +273,7 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
   }
   fastgltf::Asset &asset = loaded.get();
   bakeNodeTransform(asset);
+  bindArmOcclusion(asset);
 
   basisu::basisu_encoder_init();
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));

@@ -1478,6 +1478,12 @@ desaturated for daylight foliage; these are moderate values pending an
 art-direction pass. Mean chroma (max-min)/max: start 0.37 -> 0.46,
 forest 0.25 -> 0.33.
 
+**Poly Haven AO.** Their glTFs bind the `_arm` pack (R occlusion, G
+roughness, B metallic) only as metallicRoughness; the cook now binds the
+same texture info (texture transform included) as occlusion when the
+image file name holds `_arm`. 14 of 16 models gain AO; the two
+rock_moss sets ship a plain roughness map and have none.
+
 ## Forest species mix favours the mature beech (2026-11-20)
 
 Trees read as skinny, sparse "baby trees". The cook is not the cause:
