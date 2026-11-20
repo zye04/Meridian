@@ -178,28 +178,25 @@ overlay, F4 / `--benchmark` CSV, kMaxPassTimes 32.
 - **M2a far field, three voxel tiers** (spec
   `docs/superpowers/specs/2026-11-20-far-field-design.md`, plan
   `docs/superpowers/plans/2026-11-19-forests.md` Tasks 9-13, ledger in
-  `../meridian-forests/.superpowers/sdd/2026-11-19-forests/`). On main:
-  the far-field prototype (cddcd66; `--trees` only; gates failing as
-  prototyped). Paused 2026-11-20 on four pushed branches, each with a
-  `next.md` in its worktree's `.superpowers/` (state, gates, resume):
-  - `far-a` (`../meridian-farA`, e334b7c): compact bricks + sliced splat;
-    load line 394 MiB resident / 1257 MiB peak (gates 500 / 2500). Left:
-    re-measure on the real assets, one Debug run (3 validation errors
-    from a missing TRANSFER_SRC flag, fixed, unverified), merge first.
-  - `far-b` (`../meridian-farB`, 748520c): sun shadow map of the bricks,
-    double-buffered, amortised rebuild; Opus review fixes in code, GPU-
-    unverified. Left: gates + sunset check on the real assets, Debug.
-  - `far-c` (`../meridian-farC`, c8b84a8): far-cell two-phase culling,
-    column boxes, switch hysteresis. Far pass slower than main's far pass
-    on its runs (per-pixel shadow march dominates; B's map is the lever).
-  - `far-m` (`../meridian-farM`, 71b3ee9): mid tier, prototype voxels per
-    instance (bake, switch, draw work). The voxel pass costs more than the
-    clusters it replaces (forest overview 85 ms): needs a structural fix
-    or a user decision on switch distance / voxel pixel size.
-  Then plan Task 12 (measurement) and Task 13 (forest-edge placement
-  rules: size gradient, open crowns outside, sparse understory).
-  Worktree assets/ must be main's (`ln -s .../meridian/assets`): a partial
-  asset set changes the placement hash and every timing.
+  `../meridian-forests/.superpowers/sdd/2026-11-19-forests/`). On main
+  (2026-11-20): compact bricks + sliced splat (1efb4cb; far field 394 MiB
+  resident, 1257 MiB load peak, gates pass) and the far sun shadow map
+  (d599dcd; far field pass 2-3 ms at the overviews, was 7.5-11). Open,
+  each with a `next.md` in its worktree's `.superpowers/`:
+  - `far-c` (`../meridian-farC`, rebased on d599dcd): far-cell two-phase
+    culling, column boxes, 1 px switch with hysteresis. Fails: far field
+    6.0 ms high overview / 10.0 sunset vs 2.7 / 2.9 on main (more far
+    cells from the nearer switch, larger boxes). Next: split the switch
+    distance from the culling/box change (old 6 px switch with C's
+    culling), keep only what pays.
+  - `far-m` (`../meridian-farM`, 71b3ee9, not rebased): mid tier,
+    per-instance box + DDA, 6.7-85 ms (gate 1.5). Waiting on the user:
+    rasterize the voxels (Epic's Nanite Foliage approach, recommended) vs
+    narrower band vs tuning; options in its next.md.
+  Then Task 12 (measurement); Task 13 (forest-edge rules) waits for the
+  SpeedTree models (the density/scale edge ramp exists; variants need the
+  new prototypes). Gates are measured with `--rr off`. Worktree assets/
+  must be main's (`ln -s .../meridian/assets`).
 ## Done on main
 
 - M1 (15 km Napf terrain).
