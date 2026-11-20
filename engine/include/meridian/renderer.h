@@ -134,6 +134,7 @@ struct CullDrops {
   uint32_t workItems = 0;
   uint32_t clusters = 0;
   uint32_t terrainNodes = 0;
+  uint32_t traversalNodes = 0;
 };
 
 // A mesh placed in the world (what loadGltf returns per node primitive).
@@ -196,12 +197,15 @@ public:
   uint32_t drawnTriangleCount() const;
   // Terrain quadtree nodes drawn in a recent frame (2048 triangles each).
   uint32_t drawnTerrainNodeCount() const;
-  // Work items, clusters and terrain nodes the culling passes dropped in a
-  // recent frame because a list was full (nonzero means geometry is missing).
+  // Chunks, work items, clusters, terrain nodes and BVH traversal nodes the
+  // culling passes dropped in a recent frame because a list was full
+  // (nonzero means geometry is missing).
   uint32_t droppedCullEntryCount() const;
   CullDrops droppedCullEntries() const;
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
+  // Cluster group BVH nodes the traversal visited in a recent frame.
+  uint32_t visitedBvhNodeCount() const;
 
   // Level of detail: the largest simplification error allowed on screen, in
   // pixels (default 1; 0 draws full detail).

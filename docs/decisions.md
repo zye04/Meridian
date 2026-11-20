@@ -343,9 +343,10 @@ foliage that survives simplification).
   vertices/triangles) per culled cluster, `vkCmdDrawMeshTasksIndirectEXT`
   per draw list with the cull writing the group count. Cross-vendor
   (NVIDIA Turing+, AMD RDNA2+, Intel Arc); no index expansion, unlike a
-  compute-expanded index buffer. Culling is two-level: instances emit work
-  items of up to 64 clusters, a cluster pass (indirect dispatch) applies
-  the LOD cut and frustum test. Full work-item or draw lists drop the
+  compute-expanded index buffer. Culling ends in a cluster pass (indirect
+  dispatch, one workgroup per work item of up to 64 clusters, which the
+  cluster-group BVH traversal's leaves emit) applying the LOD cut and
+  frustum test. Full work-item or draw lists drop the
   excess, give the count back so indirect arguments stay at capacity
   (device creation checks the dispatch limits cover it), and report the
   drops.
@@ -1053,7 +1054,8 @@ foliage that survives simplification).
   missing from the raster (the TLAS still shadows with all of them).
   Chunks, clusters and terrain nodes drop 0 everywhere. With the list
   raised to 2^26 for a test (not kept), the edge draws every tree at
-  81 ms, 65 of them the flat cull: Task 7's BVH traversal replaces it.
+  81 ms, 65 of them the flat cull; the BVH traversal (next section)
+  replaced it.
   - https://developer.nvidia.com/blog/rtx-best-practices/ (compaction,
     one BLAS per object with its geometries, static TLAS)
   - https://docs.vulkan.org/spec/latest/chapters/accelstructures.html (instance records, geometry index, compaction queries)
@@ -1061,3 +1063,75 @@ foliage that survives simplification).
   - https://github.com/nvpro-samples/vk_lod_clusters (instance cull feeding cluster LOD)
   - Wihlidal, "Optimizing the Graphics Pipeline with Compute", GDC 2016
     (coarse chunk culling ahead of finer culling)
+
+## Cluster-group BVH traversal on the GPU (M2a, 2026-11-20)
+
+Pulls virtualized geometry slice 5's hierarchical traversal forward;
+slice 5's compression and streaming stay deferred.
+
+- **Breadth-first, one indirect dispatch per BVH depth**, as
+  vk_lod_clusters (and like our CDLOD terrain selection): the instance
+  cull seeds `(instance, level root)` for each DAG level of each mesh
+  whose band can hold the cut (the CPU reference's two tests), then
+  `cluster_traverse.comp` runs one thread per queued node: skipped when
+  its LOD sphere's largest self error projects at or under the threshold,
+  or when its culling sphere is outside the frustum; inner survivors push
+  their (up to 8) children to the next depth's queue, leaves emit work
+  items of their group's clusters to the unchanged cluster cull. The
+  dispatch count is the deepest leaf over all uploaded meshes plus one
+  (5 with the Napf's trees and rocks; at most 12). Rejected: the
+  roadmap's flat level-range iteration (vk_lod_clusters measured it ~2x
+  slower than its BVH, 226-252 vs 111-118 µs for 3M instances) and
+  Nanite's persistent-thread traversal (vendor-tuned thread counts;
+  Nanite reports 25% over per-level dispatch, worth revisiting in M5).
+- **Queues:** three node queues of `(instance, node)` entries: phase 0
+  ping-pongs between queues 0 and 1 by depth parity; phase 1 starts from
+  queue 2 (its instance cull's seeds plus the nodes phase 0 found
+  occluded), then ping-pongs too. Counts and dispatch arguments per
+  phase and depth live in `DrawCounters`. Node children are rebased into
+  shared node and cluster pools at upload, so an entry needs no mesh.
+- **Occlusion at node granularity:** phase 0 tests a node against last
+  frame's pyramid (from last frame's view) and hands an occluded one to
+  phase 1, which retests it and its subtree against this frame's; when
+  phase 1's queue is full the node goes on in phase 0 instead, so nothing
+  is dropped. Phase 1 culls nodes against the new pyramid. Clusters
+  below a visible node keep the cluster-level retest. A node's sphere
+  encloses its clusters' and its pyramid footprint covers theirs, so a
+  node found occluded hides every cluster below: at the forest interior
+  the traversal draws 135 fewer clusters (63,479 vs 63,614) than the
+  flat path with an identical image (0 pixels differ); the flat path's
+  per-cluster test samples a slightly wider footprint and keeps some
+  hidden clusters.
+- **A/B against the flat work items** (Release, 1920x1080,
+  `--placement off`): default start and over-scatter (`--scatter 100`,
+  `1119 1362 -431 -1.55 -0.25`) draw the same clusters and triangles
+  (208 / 23,387 and 1,627 / 169,228) with bit-identical images, as do
+  repeated runs of either path. The flat path is removed.
+- **Capacities** (peak at the six verification views, Release 1080p):
+  node queues 2^21 each (peak 798K, the overview's phase-0 seeds), work
+  items 2^21 per phase (peak 813K, overview; was 2^19), cluster draw
+  lists 2^21 per list (peak 570K, overview; was 2^20, raised for 1440p,
+  where the 1-pixel cut should draw ~1.8x the clusters, the pixel-count
+  ratio; not measured, the monitor was off), node pool 2^18 (23.6K for
+  the placement's prototypes), levels 2^16.
+  ~150 MB more VRAM; 4.72 GB in use at the forest views (nvidia-smi),
+  11.7 GB free. 0 drops in every list at every view.
+- **Measured** (Release, 1920x1080, median of 5; trees and rocks all as
+  clusters, no impostors or far field yet):
+
+  | View | GPU ms | cull early / traverse / cull clusters / cull late | scene early | instances | clusters | triangles | bvh nodes |
+  |---|---|---|---|---|---|---|---|
+  | forest edge | 12.07 | 0.02 / 0.05 / 0.09 / 0.07 | 11.53 | 22,895 | 349,832 | 28.8M | 217,529 |
+  | overview | 12.17 | 0.13 / 0.10 / 0.92 / 0.15 | 10.41 | 416,070 | 1,017,297 | 46.6M | 951,707 |
+  | ridge (open view) | 4.11 | 0.07 / 0.06 / 0.32 / 0.11 | 3.25 | 140,301 | 329,253 | 14.1M | 317,162 |
+
+  Culling at the forest edge fell from 3.0 ms (flat, mostly dropped) to
+  0.23 ms with every tree drawn; the cost is now the cluster raster of
+  distant trees, which the impostors and voxel far field (Tasks 8-11)
+  take over. The cluster cull's 64-thread workgroups mostly idle on
+  small leaf groups (0.92 ms at the overview; backlog).
+  - https://github.com/nvpro-samples/vk_lod_clusters (per-level BVH,
+    traversal per depth, flat vs BVH timings)
+  - https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/lod_generation.md
+  - Karis, "Nanite: A Deep Dive", SIGGRAPH 2021 (persistent-thread
+    hierarchy traversal, two-pass occlusion)

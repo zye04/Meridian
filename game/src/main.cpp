@@ -535,14 +535,15 @@ int main(int argc, char **argv) {
   if (!interactive) {
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, cells %u, %u dropped by full cull lists "
-                "(chunks %u, work items %u, clusters %u, terrain nodes %u), "
-                "placed %u, %u validation errors\n",
+                "%u triangles, %u terrain nodes, cells %u, bvh nodes %u, %u dropped by full "
+                "cull lists (chunks %u, work items %u, clusters %u, terrain nodes %u, "
+                "bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
-                renderer.droppedCullEntryCount(), drops.chunks, drops.workItems, drops.clusters,
-                drops.terrainNodes, renderer.placedInstanceCount(),
+                renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
+                drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
+                renderer.placedInstanceCount(),
                 renderer.validationErrorCount());
     std::printf("GPU passes:");
     const char *separator = " ";

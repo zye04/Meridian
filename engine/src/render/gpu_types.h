@@ -62,12 +62,19 @@ constexpr uint32_t kDrawBuckets = 4;
 // drawn clusters per draw list; clusters to retest in phase 1. Overflow is
 // dropped and counted, and the counts that size indirect dispatches stay at
 // capacity (the device must allow dispatches that large).
-constexpr uint32_t kMaxWorkItems = 1u << 19;
+constexpr uint32_t kMaxWorkItems = 1u << 21;
 // Per culling phase: instance chunks (up to 64 consecutive ids) the cell cull
 // emits. Every cell of the crop visible needs ~55K + 2.9M / 64 = ~100K.
 constexpr uint32_t kMaxChunks = 1u << 17;
-constexpr uint32_t kMaxDrawnClusters = 1u << 20;
+constexpr uint32_t kMaxDrawnClusters = 1u << 21;
 constexpr uint32_t kMaxRetestClusters = 1u << 20;
+// Cluster group BVHs of every mesh (ClusterNodeInfo, ClusterLevelGpu) and
+// the traversal: kBvhDepths dispatches per phase at most, over three node
+// queues of (instance, node) entries (cluster_traverse.comp).
+constexpr uint32_t kMaxClusterNodes = 1u << 18;
+constexpr uint32_t kMaxClusterLevels = 1u << 16;
+constexpr uint32_t kBvhDepths = 12;
+constexpr uint32_t kMaxTraversalNodes = 1u << 21;
 constexpr uint32_t kDrawBucketBlended = 4;
 
 #ifdef NDEBUG
@@ -303,8 +310,11 @@ struct SceneData {
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
   uint32_t pad3 = 0;
+  // Every mesh's cluster group BVH nodes and DAG levels.
+  VkDeviceAddress clusterNodes = 0;
+  VkDeviceAddress clusterLevels = 0;
 };
-static_assert(sizeof(SceneData) == 1040);
+static_assert(sizeof(SceneData) == 1056);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -317,9 +327,11 @@ struct MeshInfo {
   uint32_t drawBucket = 0;
   uint32_t firstCluster = 0;
   uint32_t clusterCount = 0;
-  uint32_t pad = 0;
+  uint32_t firstLevel = 0;
+  uint32_t levelCount = 0;
+  uint32_t pad[3] = {};
 };
-static_assert(sizeof(MeshInfo) == 48);
+static_assert(sizeof(MeshInfo) == 64);
 
 // Must match ClusterInfo in common.glsl. See meridian::Cluster.
 struct ClusterInfo {
@@ -342,6 +354,31 @@ struct ClusterInfo {
   uint32_t pad = 0;
 };
 static_assert(sizeof(ClusterInfo) == 80);
+
+// Must match ClusterNodeInfo in common.glsl. See meridian::ClusterBvhNode;
+// firstChild indexes the node pool (inner nodes) or the cluster pool
+// (leaves).
+struct ClusterNodeInfo {
+  Vec3 lodCenter;
+  float lodRadius = 0.0f;
+  Vec3 boundsCenter;
+  float boundsRadius = 0.0f;
+  float lodError = 0.0f;
+  uint32_t firstChild = 0;
+  uint32_t childCount = 0;
+  uint32_t leaf = 0;
+};
+static_assert(sizeof(ClusterNodeInfo) == 48);
+
+// Must match ClusterLevelGpu in common.glsl. See meridian::ClusterLevelInfo;
+// rootNode indexes the node pool.
+struct ClusterLevelGpu {
+  uint32_t rootNode = 0;
+  float minError = 0.0f;
+  float maxError = 0.0f;
+  float minGroupRadius = 0.0f;
+};
+static_assert(sizeof(ClusterLevelGpu) == 16);
 
 // Must match PrototypeInfo in common.glsl. A placed prototype: its meshes
 // (prototypeMeshes[firstMesh..]; a ray hit's geometry index counts from
@@ -386,11 +423,17 @@ struct DrawCounters {
   // chunk.
   uint32_t chunkDispatch[2][3];
   // What overflow counts, per list: chunks, work items, cluster draw list
-  // entries, terrain nodes.
-  uint32_t drops[4];
-  uint32_t pad[3];
+  // entries, terrain nodes, traversal nodes.
+  uint32_t drops[5];
+  // BVH nodes the traversal visited, both phases.
+  uint32_t bvhNodes;
+  uint32_t pad;
+  // Per phase and BVH depth: the traversal's dispatch arguments (one
+  // workgroup per 64 nodes) and node count.
+  uint32_t traverseDispatch[2][kBvhDepths][3];
+  uint32_t traverseCount[2][kBvhDepths];
 };
-static_assert(sizeof(DrawCounters) == 208);
+static_assert(sizeof(DrawCounters) == (52 + 8 * kBvhDepths) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -403,6 +446,9 @@ static_assert(offsetof(DrawCounters, terrainNodes) == 37 * 4);
 static_assert(offsetof(DrawCounters, cells) == 38 * 4);
 static_assert(offsetof(DrawCounters, chunkDispatch) == 39 * 4);
 static_assert(offsetof(DrawCounters, drops) == 45 * 4);
+static_assert(offsetof(DrawCounters, bvhNodes) == 50 * 4);
+static_assert(offsetof(DrawCounters, traverseDispatch) == 52 * 4);
+static_assert(offsetof(DrawCounters, traverseCount) == (52 + 6 * kBvhDepths) * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -498,8 +544,8 @@ struct PyramidConstants {
 };
 static_assert(sizeof(PyramidConstants) == 32);
 
-// Must match CullConstants in cull.glsl; shared by cull.comp and
-// cluster_cull.comp.
+// Must match CullConstants in cull.glsl; shared by cell_cull.comp, cull.comp,
+// cluster_traverse.comp and cluster_cull.comp.
 struct CullConstants {
   VkDeviceAddress sceneBuffer = 0;
   // This phase's work items.
@@ -517,8 +563,12 @@ struct CullConstants {
   VkDeviceAddress retest = 0;
   // This phase's instance chunks.
   VkDeviceAddress chunks = 0;
+  // The traversal's three node queues and the BVH depth it processes.
+  VkDeviceAddress nodeQueues = 0;
+  uint32_t depth = 0;
+  uint32_t pad = 0;
 };
-static_assert(sizeof(CullConstants) == 72);
+static_assert(sizeof(CullConstants) == 88);
 constexpr uint32_t kCullRetest = 2;
 
 // Must match TerrainCounters in terrain_select.comp. Per quadtree level: the

@@ -75,9 +75,10 @@ struct Renderer::Impl {
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
   uint32_t droppedEntries = 0;
-  std::array<uint32_t, 4> droppedByList{};
+  std::array<uint32_t, 5> droppedByList{};
   uint32_t drawnTerrainNodes = 0;
   uint32_t drawnCells = 0;
+  uint32_t visitedBvhNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
 
@@ -94,6 +95,7 @@ struct Renderer::Impl {
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
   VkPipeline cellCullPipeline = VK_NULL_HANDLE;
   VkPipeline cullPipeline = VK_NULL_HANDLE;
+  VkPipeline clusterTraversePipeline = VK_NULL_HANDLE;
   VkPipeline clusterCullPipeline = VK_NULL_HANDLE;
   VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
   // The depth pyramid, sampled through minSampler.
@@ -128,10 +130,19 @@ struct Renderer::Impl {
   uint32_t clusterCount = 0;
   uint32_t clusterVertexCount = 0;
   uint32_t clusterTriangleCount = 0;
-  // Culling output, both phases: instance chunks for the instance cull, work
-  // items for the cluster cull, cluster draw lists, and the DrawCounters
-  // (indirect arguments and statistics).
+  // Their group BVHs and DAG levels; traversalDepths: dispatches per phase
+  // that reach the deepest leaf.
+  Buffer clusterNodePool;
+  Buffer clusterLevelPool;
+  uint32_t clusterNodeCount = 0;
+  uint32_t clusterLevelCount = 0;
+  uint32_t traversalDepths = 0;
+  // Culling output, both phases: instance chunks for the instance cull, BVH
+  // nodes for the traversal, work items for the cluster cull, cluster draw
+  // lists, and the DrawCounters (indirect arguments and statistics).
   Buffer chunks;
+  // The BVH traversal's three node queues (see cull.glsl).
+  Buffer nodeQueues;
   Buffer workItems;
   Buffer drawLists;
   // Clusters the early cull found occluded, retested by the late cull.
@@ -283,6 +294,8 @@ struct Renderer::Impl {
   CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;
   void cullCells(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   void cullInstances(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
+  void traverseClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
+  void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   void selectTerrain(VkCommandBuffer cmd, const FrameData &frame);
   void drawTerrain(VkCommandBuffer cmd);
   void buildDepthPyramid(VkCommandBuffer cmd);

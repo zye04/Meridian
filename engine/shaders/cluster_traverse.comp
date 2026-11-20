@@ -1,0 +1,77 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "cull.glsl"
+
+// Breadth-first traversal of the cluster group BVHs the instance cull
+// seeded (cull.comp), one dispatch per BVH depth and one thread per
+// (instance, node) of that depth's queue. A node is skipped when no cluster
+// below can be in the LOD cut (its largest self error projects at or under
+// the threshold), or when it is outside the view frustum or occluded.
+// Survivors push their children to the next depth's queue; leaves emit
+// their clusters as work items for cluster_cull.comp. Occlusion is
+// two-phase like the cluster cull's: phase 0 tests against last frame's
+// pyramid and hands what it hides to phase 1's first depth, which tests it
+// again against this frame's.
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint phase = cull.phase;
+    uint depth = cull.depth;
+    uint counter = phase * kBvhDepths + depth;
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= min(cull.counters.counters[kCounterTraverseCount + counter],
+                     kMaxTraversalNodes)) {
+        return;
+    }
+    uint queue = phase == 1u && depth == 0u ? 2u : depth & 1u;
+    uvec2 entry = cull.nodeQueues.entries[queue * kMaxTraversalNodes + index];
+    atomicAdd(cull.counters.counters[kCounterBvhNodes], 1u);
+
+    SceneBuffer scene = cull.scene;
+    LoadedInstance instance = loadInstance(scene, entry.x);
+    ClusterNodeInfo node = scene.clusterNodes.nodes[entry.y];
+    float scale = instance.scale;
+    if (projectedError((instance.transform * vec4(node.lodCenter, 1.0)).xyz,
+                       node.lodRadius * scale, node.lodError * scale) <=
+        scene.lodErrorPixels) {
+        return;
+    }
+
+    vec3 world = (instance.transform * vec4(node.boundsCenter, 1.0)).xyz;
+    float radius = node.boundsRadius * scale;
+    vec4 sphere = displayedSphere(world - scene.cameraPosition, radius);
+    if (!inFrustum(sphere.xyz, sphere.w)) {
+        return;
+    }
+    // Last frame's pyramid holds last frame's warp. When phase 1's queue is
+    // full, the node goes on now instead: dropping it could hide something
+    // visible.
+    if (cull.occlusion != 0u && phase == 0u && cull.previousPyramid != 0u &&
+        occluded(displayedSphere(world - scene.previousCameraPosition, radius),
+                 scene.previousView) &&
+        pushNode(1u, 0u, entry)) {
+        return;
+    }
+    if (cull.occlusion != 0u && phase == 1u && occluded(sphere, scene.view)) {
+        return;
+    }
+
+    if (node.leaf == 0u) {
+        for (uint i = 0u; i < node.childCount; ++i) {
+            if (!pushNode(phase, depth + 1u, uvec2(entry.x, node.firstChild + i))) {
+                countDrops(4u, 1u);
+            }
+        }
+        return;
+    }
+    uint itemCount = (node.childCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
+    uint first = reserveEntries(phase * 3u, kMaxWorkItems, 1u, itemCount);
+    for (uint i = 0u; i < itemCount; ++i) {
+        uint offset = i * kClustersPerWorkItem;
+        uint count = min(kClustersPerWorkItem, node.childCount - offset);
+        cull.work.items[first + i] = uvec2(entry.x, (node.firstChild + offset) | ((count - 1u) << 26));
+    }
+}

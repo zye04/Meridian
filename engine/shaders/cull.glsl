@@ -1,11 +1,23 @@
-// Shared by the cell, instance and cluster culling passes (cell_cull.comp,
-// cull.comp, cluster_cull.comp). Include after common.glsl with
+// Shared by the cell, instance and cluster culling passes and the cluster
+// BVH traversal (cell_cull.comp, cull.comp, cluster_traverse.comp,
+// cluster_cull.comp). Include after common.glsl with
 // MERIDIAN_CUSTOM_PUSH_CONSTANTS defined.
 
 // Work items: up to 64 clusters of one instance, culled by one cluster_cull
 // workgroup. x: instance; y: first cluster | (count - 1) << 26.
-const uint kMaxWorkItems = 1u << 19;
+const uint kMaxWorkItems = 1u << 21;
 const uint kClustersPerWorkItem = 64u;
+
+// The BVH traversal's node queues, (instance, node) entries: phase 0 reads
+// depth d from queue d % 2 and writes depth d + 1 to the other; phase 1
+// reads depth 0 from queue 2 (the instance cull's seeds plus the nodes
+// phase 0 found occluded), then continues like phase 0.
+const uint kMaxTraversalNodes = 1u << 21;
+const uint kBvhDepths = 12u;
+
+layout(buffer_reference, std430) buffer NodeQueueBuffer {
+    uvec2 entries[];
+};
 
 layout(buffer_reference, std430) buffer WorkItemBuffer {
     uvec2 items[];
@@ -33,9 +45,14 @@ const uint kCounterOverflow = 35u;
 const uint kCounterRetest = 36u;
 const uint kCounterCells = 38u;
 const uint kCounterChunkDispatch = 39u;
-// Per list: chunks, work items, cluster draw list entries (terrain nodes:
-// terrain_select.comp).
+// Per list: chunks, work items, cluster draw list entries, terrain nodes
+// (terrain_select.comp), traversal nodes.
 const uint kCounterDrops = 45u;
+const uint kCounterBvhNodes = 50u;
+// Per phase and depth: traversal dispatch arguments (3 uints), then per
+// phase and depth the node counts.
+const uint kCounterTraverseDispatch = 52u;
+const uint kCounterTraverseCount = kCounterTraverseDispatch + 6u * kBvhDepths;
 
 // Clusters phase 0 found occluded by last frame's pyramid: (instance,
 // cluster), retested in phase 1 against this frame's.
@@ -73,6 +90,9 @@ layout(push_constant) uniform CullConstants {
     vec2 pyramidSize;
     RetestBuffer retest;
     ChunkBuffer chunks;
+    NodeQueueBuffer nodeQueues;
+    // The BVH depth cluster_traverse.comp processes.
+    uint depth;
 } cull;
 
 // Counts entries dropped from a full list.
@@ -95,6 +115,33 @@ uint reserveEntries(uint counter, uint capacity, uint list, inout uint count) {
         count = kept;
     }
     return first;
+}
+
+// Appends a node at a BVH depth of a phase (see NodeQueueBuffer); false
+// when its queue is full (the caller counts what that drops).
+bool pushNode(uint phase, uint depth, uvec2 entry) {
+    uint counter = phase * kBvhDepths + depth;
+    uint slot = atomicAdd(cull.counters.counters[kCounterTraverseCount + counter], 1u);
+    if (slot >= kMaxTraversalNodes) {
+        return false;
+    }
+    // One traversal workgroup per 64 entries.
+    if (slot % 64u == 0u) {
+        atomicAdd(cull.counters.counters[kCounterTraverseDispatch + counter * 3u], 1u);
+    }
+    uint queue = phase == 1u && depth == 0u ? 2u : depth & 1u;
+    cull.nodeQueues.entries[queue * kMaxTraversalNodes + slot] = entry;
+    return true;
+}
+
+// Simplification error in pixels of LOD bounds already in world space
+// (clusterlod's estimate; must match meridian::projectedErrorPixels).
+float projectedError(vec3 center, float radius, float error) {
+    SceneBuffer scene = cull.scene;
+    float distance = max(length(center - scene.cameraPosition) - radius,
+                         scene.nearPlane);
+    return error / distance * abs(scene.projectionScale.y) * 0.5 /
+           scene.inverseResolution.y;
 }
 
 // A sphere (relative to the camera it is seen from) as displayed under the

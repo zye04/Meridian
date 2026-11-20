@@ -102,6 +102,11 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd) {
   for (auto &dispatch : initial.chunkDispatch) {
     dispatch[1] = dispatch[2] = 1;
   }
+  for (auto &depths : initial.traverseDispatch) {
+    for (auto &dispatch : depths) {
+      dispatch[1] = dispatch[2] = 1;
+    }
+  }
   for (auto &lists : initial.meshTasks) {
     for (auto &tasks : lists) {
       tasks[1] = tasks[2] = 1;
@@ -130,6 +135,7 @@ CullConstants Renderer::Impl::cullConstants(const FrameData &frame, uint32_t pha
   constants.previousPyramid = pyramidValid ? 1 : 0;
   constants.retest = retestClusters.address;
   constants.chunks = chunks.address + VkDeviceSize{phase} * kMaxChunks * 2 * sizeof(uint32_t);
+  constants.nodeQueues = nodeQueues.address;
   return constants;
 }
 
@@ -153,12 +159,13 @@ void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-// Culls on the GPU and fills one phase's cluster draw lists. Phase 0 takes
-// last frame's visible instances (frustum test only); phase 1 tests all of
-// them against the depth pyramid, adds the newly visible ones and records
+// Culls on the GPU and fills one phase's cluster draw lists, in three steps
+// (cullInstances, traverseClusters, cullClusters). Phase 0 takes last
+// frame's visible instances (frustum test only); phase 1 tests all of them
+// against the depth pyramid, adds the newly visible ones and records
 // visibility for the next frame. In each phase the instance cull runs over
-// cullCells' chunks and emits work items, which the cluster cull
-// LOD-selects and frustum-culls.
+// cullCells' chunks and seeds the cluster BVH traversal, whose leaves emit
+// work items the cluster cull LOD-selects and culls.
 void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                                    uint32_t phase) {
   CullConstants constants = cullConstants(frame, phase);
@@ -178,7 +185,36 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
+// One dispatch per BVH depth, each over the nodes the previous one pushed.
+void Renderer::Impl::traverseClusters(VkCommandBuffer cmd, const FrameData &frame,
+                                      uint32_t phase) {
+  CullConstants constants = cullConstants(frame, phase);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, clusterTraversePipeline);
+  for (uint32_t depth = 0; depth < traversalDepths; ++depth) {
+    constants.depth = depth;
+    vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(constants), &constants);
+    vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+                          offsetof(DrawCounters, traverseDispatch) +
+                              (phase * kBvhDepths + depth) *
+                                  sizeof(DrawCounters::traverseDispatch[0][0]));
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  }
+}
+
+void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
+                                  uint32_t phase) {
+  CullConstants constants = cullConstants(frame, phase);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, clusterCullPipeline);
+  vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                     sizeof(constants), &constants);
   vkCmdDispatchIndirect(cmd, drawCounters.buffer,
                         offsetof(DrawCounters, workDispatch) +
                             phase * sizeof(DrawCounters::workDispatch[0]));
@@ -352,10 +388,12 @@ uint32_t Renderer::droppedCullEntryCount() const { return impl_->droppedEntries;
 
 CullDrops Renderer::droppedCullEntries() const {
   const auto &d = impl_->droppedByList;
-  return {d[0], d[1], d[2], d[3]};
+  return {d[0], d[1], d[2], d[3], d[4]};
 }
 
 uint32_t Renderer::drawnCellCount() const { return impl_->drawnCells; }
+
+uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
 void Renderer::setLodErrorPixels(float pixels) { impl_->lodErrorPixels = pixels; }
 
@@ -425,6 +463,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->droppedEntries = counters->overflow;
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
+    impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
               impl_->droppedByList.begin());
     impl_->drawnClusters = 0;
@@ -523,6 +562,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.clusters = impl_->clusterPool.address;
   scene.clusterVertices = impl_->clusterVertexPool.address;
   scene.clusterTriangles = impl_->clusterTrianglePool.address;
+  scene.clusterNodes = impl_->clusterNodePool.address;
+  scene.clusterLevels = impl_->clusterLevelPool.address;
   scene.drawLists = impl_->drawLists.address;
   scene.placedInstances = impl_->placedInstances.address;
   scene.cells = impl_->cells.address;
@@ -583,6 +624,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);
   endPass("cull early");
+  impl_->traverseClusters(cmd, frame, 0);
+  endPass("traverse");
+  impl_->cullClusters(cmd, frame, 0);
+  endPass("cull clusters");
 
   // --- Atmosphere: LUTs for the sky, sun color, ambient light and haze.
 
@@ -750,6 +795,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("pyramid");
   impl_->cullCells(cmd, frame, 1);
   impl_->cullInstances(cmd, frame, 1);
+  impl_->traverseClusters(cmd, frame, 1);
+  impl_->cullClusters(cmd, frame, 1);
   endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,

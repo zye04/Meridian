@@ -1,6 +1,6 @@
 # Virtualized geometry (GPU-driven phase 3) — design
 
-**Status:** slice 1 done on main (6af0c51..f1ccccd); slices 2-5 are deferred, see `docs/backlog.md`.
+**Status:** slice 1 done on main (6af0c51..f1ccccd); slice 5's hierarchical traversal done in M2a Task 7 (`docs/superpowers/plans/2026-11-19-forests.md`); slices 2-4 and slice 5's compression and streaming are deferred, see `docs/backlog.md`.
 
 ## Intent
 

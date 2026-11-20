@@ -13,18 +13,34 @@
 //      but wasn't processed in phase 0, recording visibility for the next
 //      frame.
 // Placed instances are tested with their prototype's bounds and draw
-// distance. Survivors append work items covering each of their meshes'
-// clusters; cluster_cull.comp then culls and LOD-selects the clusters.
+// distance. Survivors seed the cluster BVH traversal
+// (cluster_traverse.comp) with the root of every DAG level of their meshes
+// that can hold the LOD cut.
 
 layout(local_size_x = 64) in;
 
-void emitWorkItems(uint id, MeshInfo mesh) {
-    uint itemCount = (mesh.clusterCount + kClustersPerWorkItem - 1u) / kClustersPerWorkItem;
-    uint first = reserveEntries(cull.phase * 3u, kMaxWorkItems, 1u, itemCount);
-    for (uint i = 0u; i < itemCount; ++i) {
-        uint offset = i * kClustersPerWorkItem;
-        uint count = min(kClustersPerWorkItem, mesh.clusterCount - offset);
-        cull.work.items[first + i] = uvec2(id, (mesh.firstCluster + offset) | ((count - 1u) << 26));
+// Seeds the root of each DAG level that can hold the LOD cut (must match
+// meridian::selectClustersBvh): not when even the level's smallest refined
+// error projects over the threshold from as far as any refined sphere can
+// be, nor when its largest self error projects at or under it.
+void seedTraversal(uint id, LoadedInstance instance, MeshInfo mesh) {
+    SceneBuffer scene = cull.scene;
+    float pixelsPerError = abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y;
+    for (uint i = 0u; i < mesh.levelCount; ++i) {
+        ClusterLevelGpu level = scene.clusterLevels.levels[mesh.firstLevel + i];
+        ClusterNodeInfo root = scene.clusterNodes.nodes[level.rootNode];
+        vec3 center = (instance.transform * vec4(root.lodCenter, 1.0)).xyz;
+        float farthest = length(center - scene.cameraPosition) +
+                         (root.lodRadius - level.minGroupRadius) * instance.scale;
+        float finest = level.minError * instance.scale / max(farthest, scene.nearPlane) *
+                       pixelsPerError;
+        if (finest <= scene.lodErrorPixels &&
+            projectedError(center, root.lodRadius * instance.scale,
+                           level.maxError * instance.scale) > scene.lodErrorPixels) {
+            if (!pushNode(cull.phase, 0u, uvec2(id, level.rootNode))) {
+                countDrops(4u, 1u);
+            }
+        }
     }
 }
 
@@ -82,10 +98,11 @@ void main() {
 
     atomicAdd(cull.counters.counters[kCounterInstances], 1u);
     if (!instance.placed) {
-        emitWorkItems(id, scene.meshes.meshes[instance.meshOrPrototype]);
+        seedTraversal(id, instance, scene.meshes.meshes[instance.meshOrPrototype]);
         return;
     }
     for (uint i = 0u; i < prototype.meshCount; ++i) {
-        emitWorkItems(id, scene.meshes.meshes[scene.prototypeMeshes.meshes[prototype.firstMesh + i]]);
+        seedTraversal(id, instance,
+                      scene.meshes.meshes[scene.prototypeMeshes.meshes[prototype.firstMesh + i]]);
     }
 }

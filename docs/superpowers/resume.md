@@ -24,7 +24,7 @@ Open branches, in the proposed order (the user may reorder):
 
 1. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
    Tasks 6-8, final review, merge.
-2. Then M2a Tasks 7-12 and the rest under "Next after that".
+2. Then M2a Tasks 8-12 and the rest under "Next after that".
 
 The clouds branch touches the same frame and shading files as the other
 two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
@@ -35,8 +35,9 @@ so rebasing it after each merge keeps conflicts small.
 - M1 (15 km Napf terrain) complete.
 - M2a forests: Task 1 (static TLAS), 2 (Megaplants import), 3 (placement
   rules), 4 (GPU placement at load, 2.9M instances), 5 (cell cull,
-  prototype BLAS + TLAS fill, placed trees and rocks drawn; wide forest
-  views overflow the flat work items until Task 7), 6 (cluster-group BVH)
+  prototype BLAS + TLAS fill, placed trees and rocks drawn), 6
+  (cluster-group BVH), 7 (GPU BVH traversal; every tree drawn as
+  clusters, ~11.5 ms of raster at the forest edge until the far field)
   done, reviewed, pushed.
 - Quality pass step 1: sky dithering, summer haze default (AOD 0.10,
   scale height 0.5 km), terrain march lifted above its own cell (contour
@@ -81,7 +82,7 @@ Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
 
 ## Next after that
 
-M2a Tasks 7 (GPU BVH traversal), 8 (voxel far-field prototype: stop and
+M2a Tasks 8 (voxel far-field prototype: stop and
 show the user its gates; option B is the fallback), 9 (far-field
 completion), 10-11 (mid-range impostors), 12 (gate: forest views
 <= 16.7 ms with shadows). Far field decided 2026-11-20

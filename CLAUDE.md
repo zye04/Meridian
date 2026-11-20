@@ -71,11 +71,13 @@ clean = Bruneton's very clean defaults, for A/B).
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
-geometry), per list: chunks, work items, clusters, terrain nodes.
+geometry), per list: chunks, work items, clusters, terrain nodes, bvh
+nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
-(placement cells visible), `placed N`
+(placement cells visible), `bvh nodes N` (cluster group BVH nodes the
+traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, taa, exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -91,12 +93,10 @@ sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
 --sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
 0`; float precision far out, at the crop's corner (ground 1286.5 m),
 `7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
-Laplacian with the still's). Placed forests (seed 1; until M2a Task 7
-the work-item list overflows at wide forest views, so most trees are
-missing from the raster there while all cast shadows): forest edge
+Laplacian with the still's). Placed forests (seed 1): forest edge
 `600 1205.6 -400 -1.55 0.02`; forest interior `85 1158.6 -53 -1.55
-0.25` (fits the lists); forest overview `700 1450 -400 -1.55 -0.5`;
-canopy from 40 m above `85 1200 -53 -1.55 -1.2` (fits the lists); a
+0.25`; forest overview `700 1450 -400 -1.55 -0.5`;
+canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
 placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
 the summit ridge at ~1.5 km: the open view toward the summit.
 `--scatter N` places N random Poly Haven models and imported Megaplants
@@ -188,7 +188,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            and scan.comp (exclusive scan) run at load;
                            tlas_fill.comp writes the placed TLAS records.
                            cell_cull.comp: placement cells -> instance
-                           chunks for cull.comp
+                           chunks for cull.comp -> BVH seeds for
+                           cluster_traverse.comp -> work items for
+                           cluster_cull.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten), ktx2.cpp (shared encoder)
@@ -213,9 +215,15 @@ last frame, frustum (displayed box) and the layers' draw distance; emits
 chunks of up to 64 consecutive instance ids; the hand-placed instances
 are chunks too) -> early cull (cull.comp, one workgroup per chunk, phase
 0: instances visible last frame, frustum test (placed: the prototype's
-sphere and draw distance) only, emit work items of up to 64 clusters per
-(instance, mesh); then cluster_cull.comp,
-dispatched indirectly: Nanite LOD cut + frustum test + occlusion against
+sphere and draw distance) only, seeding (instance, level root) for each
+DAG level of each mesh whose LOD band can hold the cut) -> traverse
+(cluster_traverse.comp, breadth-first over each level's cluster group
+BVH, one indirect dispatch per BVH depth over ping-pong node queues: a
+node is skipped when its LOD bounds rule out every cluster below or it
+is outside the frustum; one occluded by last frame's pyramid is queued
+for phase 1's traversal; leaves emit work items of their group's
+clusters) -> cull clusters (cluster_cull.comp, dispatched indirectly:
+Nanite LOD cut + frustum test + occlusion against
 last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
 single/double-sided) -> atmosphere LUTs
@@ -229,8 +237,10 @@ cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
 cull (cell cull phase 1: every cell against frustum + pyramid, writing
 cell visibility; then every instance of the emitted chunks against
 frustum + pyramid; the newly visible
-go through the cluster cull, and phase 0's queued clusters are retested
-against the new pyramid; writes the per-instance visibility buffer) ->
+and phase 0's queued nodes go through the traversal (nodes tested against
+the new pyramid) and the cluster cull, and phase 0's queued clusters are
+retested against the new pyramid; writes the per-instance visibility
+buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
 to front, mesh.vert) -> TAA resolve
 (compute) -> luminance histogram + exposure adaptation (compute) -> AgX
@@ -356,9 +366,11 @@ account for that.
   with meshoptimizer; the first load after a change prints "Building
   clusters" and rewrites it (an unwritable cache only warns). The cache
   also stores each mesh's per-DAG-level group BVH (`nodes`, `levels`;
-  version 3, so older caches rebuild once). `selectClustersBvh` is the
-  CPU reference for the GPU traversal: it must select exactly the clusters
-  `lodVisible` accepts.
+  version 3, so older caches rebuild once), uploaded to a shared node
+  pool (`ClusterNodeInfo`, children rebased into the node or cluster
+  pool) and level table. `selectClustersBvh` is the CPU reference for the
+  GPU traversal (cull.comp's level band, cluster_traverse.comp's node
+  test): it must select exactly the clusters `lodVisible` accepts.
 - Deferred work and known issues are tracked in `docs/backlog.md`: add a
   row for anything deferred, remove it in the commit that resolves it.
 - Known gaps: blended instances are drawn at full detail with no culling
@@ -374,10 +386,10 @@ account for that.
   slopes the smooth shading normal lights dimly; the terrain's detail
   displacement (+-0.3 m, near the camera) casts no shadows (the march tests
   the bilinear heightfield); the sunset view (3 degree sun) makes the march
-  cost ~1.15 ms; shadow rays are limited to 20 km; the flat work items
-  (every cluster of every DAG level per (instance, mesh)) overflow at wide
-  forest views, so most trees are missing from the raster there (M2a
-  Task 7's BVH traversal fixes it); placed instances stand on the bilinear
+  cost ~1.15 ms; shadow rays are limited to 20 km; every placed tree is
+  rasterized as clusters (no impostors or far field yet), so wide forest
+  views spend ~10-11.5 ms in the early scene pass (28.8M triangles at the
+  forest edge, 46.6M at the overview); placed instances stand on the bilinear
   heightfield while distant CDLOD levels draw ridges up to a few meters
   lower (accepted for impostor range, numbers in decisions.md); the terrain quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.

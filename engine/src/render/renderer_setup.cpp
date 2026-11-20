@@ -677,6 +677,10 @@ void Renderer::Impl::createScene() {
   meshTable = createBuffer(kMaxMeshes * sizeof(MeshInfo), kTableUsage, 0);
   clusterPool = createBuffer(VkDeviceSize{kMaxClusters} * sizeof(ClusterInfo),
                              kTableUsage, 0);
+  clusterNodePool = createBuffer(VkDeviceSize{kMaxClusterNodes} * sizeof(ClusterNodeInfo),
+                                 kTableUsage, 0);
+  clusterLevelPool = createBuffer(VkDeviceSize{kMaxClusterLevels} * sizeof(ClusterLevelGpu),
+                                  kTableUsage, 0);
   clusterVertexPool = createBuffer(
       VkDeviceSize{kClusterVertexCapacity} * sizeof(uint32_t), kTableUsage, 0);
   clusterTrianglePool = createBuffer(
@@ -688,6 +692,8 @@ void Renderer::Impl::createScene() {
   constexpr VkBufferUsageFlags kListUsage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   chunks = createBuffer(VkDeviceSize{2} * kMaxChunks * 2 * sizeof(uint32_t), kListUsage, 0);
+  nodeQueues = createBuffer(VkDeviceSize{3} * kMaxTraversalNodes * 2 * sizeof(uint32_t),
+                           kListUsage, 0);
   workItems = createBuffer(VkDeviceSize{2} * kMaxWorkItems * 2 * sizeof(uint32_t),
                            kListUsage, 0);
   drawLists = createBuffer(VkDeviceSize{2 * kDrawBuckets} * kMaxDrawnClusters * 2 *
@@ -786,6 +792,7 @@ void Renderer::Impl::createPipelines() {
         "vkCreatePipelineLayout");
   cellCullPipeline = createComputePipeline(dev, "cell_cull.comp", cullLayout);
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
+  clusterTraversePipeline = createComputePipeline(dev, "cluster_traverse.comp", cullLayout);
   clusterCullPipeline = createComputePipeline(dev, "cluster_cull.comp", cullLayout);
 
   VkPushConstantRange terrainPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -997,6 +1004,7 @@ Renderer::~Renderer() {
         &impl_->instanceTable, &impl_->workItems, &impl_->drawLists, &impl_->drawCounters,
         &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
+        &impl_->clusterNodePool, &impl_->clusterLevelPool, &impl_->nodeQueues,
         &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
         &impl_->terrainPyramid, &impl_->placedInstances, &impl_->cells, &impl_->chunks,
         &impl_->prototypeTable, &impl_->prototypeMeshTable, &impl_->tlasRecords}) {
@@ -1016,6 +1024,7 @@ Renderer::~Renderer() {
   vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
   vkDestroyPipeline(dev, impl_->cellCullPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->clusterTraversePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->clusterCullPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipeline(dev, impl_->taaPipeline, nullptr);

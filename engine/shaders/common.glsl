@@ -60,10 +60,15 @@ struct MeshInfo {
     // Cluster draw list (see cluster_cull.comp); kDrawBucketBlended is drawn from
     // the CPU, sorted back to front.
     uint drawBucket;
-    // Its cluster LOD hierarchy (none for blended meshes).
+    // Its cluster LOD hierarchy (none for blended meshes) and that
+    // hierarchy's DAG levels (ClusterLevelBuffer).
     uint firstCluster;
     uint clusterCount;
+    uint firstLevel;
+    uint levelCount;
     uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 layout(buffer_reference, std430) readonly buffer MeshBuffer {
@@ -99,6 +104,40 @@ layout(buffer_reference, std430) readonly buffer ClusterBuffer {
     ClusterInfo clusters[];
 };
 
+// A node of a BVH over one DAG level's cluster groups. Must match
+// ClusterNodeInfo in C++ (see meridian::ClusterBvhNode). Leaves' children
+// are clusters, inner nodes' children nodes.
+struct ClusterNodeInfo {
+    // Encloses the LOD spheres of every cluster below, with their largest
+    // self error.
+    vec3 lodCenter;
+    float lodRadius;
+    // Encloses the culling spheres of every cluster below.
+    vec3 boundsCenter;
+    float boundsRadius;
+    float lodError;
+    uint firstChild;
+    uint childCount;
+    uint leaf;
+};
+
+layout(buffer_reference, std430) readonly buffer ClusterNodeBuffer {
+    ClusterNodeInfo nodes[];
+};
+
+// One DAG level of a mesh. Must match ClusterLevelGpu in C++ (see
+// meridian::ClusterLevelInfo).
+struct ClusterLevelGpu {
+    uint rootNode;
+    float minError;
+    float maxError;
+    float minGroupRadius;
+};
+
+layout(buffer_reference, std430) readonly buffer ClusterLevelBuffer {
+    ClusterLevelGpu levels[];
+};
+
 layout(buffer_reference, std430) readonly buffer ClusterVertexBuffer {
     uint vertices[];
 };
@@ -109,7 +148,7 @@ layout(buffer_reference, std430) readonly buffer ClusterTriangleBuffer {
 
 // Culled clusters, kDrawBuckets lists per culling phase of
 // kMaxDrawnClusters entries each: (instance, cluster).
-const uint kMaxDrawnClusters = 1u << 20;
+const uint kMaxDrawnClusters = 1u << 21;
 
 layout(buffer_reference, std430) buffer DrawListBuffer {
     uvec2 entries[];
@@ -352,6 +391,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     float cellDrawDistance;
     float cellMargin;
     uint pad3;
+    ClusterNodeBuffer clusterNodes;
+    ClusterLevelBuffer clusterLevels;
 };
 
 // Largest axis scale of a transform: a conservative bound under

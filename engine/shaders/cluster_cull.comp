@@ -4,8 +4,9 @@
 #include "common.glsl"
 #include "cull.glsl"
 
-// Cluster culling and LOD selection, one workgroup per work item and one
-// thread per cluster. A cluster is drawn when Nanite's cut rule picks it
+// Cluster culling and LOD selection, one workgroup per work item (a group
+// of clusters a BVH leaf reached, cluster_traverse.comp) and one thread per
+// cluster. A cluster is drawn when Nanite's cut rule picks it
 // (its coarser replacement's error is over the threshold on screen, its own
 // is at or under), it is in the view frustum and not occluded. Occlusion
 // follows Nanite's two passes: phase 0 tests against last frame's depth
@@ -14,16 +15,6 @@
 // the draw list of their mesh's bucket for mesh.mesh.
 
 layout(local_size_x = 64) in;
-
-// Simplification error in pixels of LOD bounds already in world space
-// (clusterlod's estimate; must match meridian::projectedErrorPixels).
-float projectedError(vec3 center, float radius, float error) {
-    SceneBuffer scene = cull.scene;
-    float distance = max(length(center - scene.cameraPosition) - radius,
-                         scene.nearPlane);
-    return error / distance * abs(scene.projectionScale.y) * 0.5 /
-           scene.inverseResolution.y;
-}
 
 void draw(uint instanceIndex, uint clusterIndex, ClusterInfo cluster) {
     MeshInfo mesh = cull.scene.meshes.meshes[cluster.mesh];

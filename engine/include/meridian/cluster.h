@@ -79,7 +79,7 @@ ClusterLod buildClusterLod(const MeshData &mesh);
 // Simplification error in pixels on a screen `screenHeight` pixels tall,
 // for bounds already placed in world space and uniformly scaled by `scale`
 // (projY: projection[1][1]). Ignores perspective distortion (clusterlod's
-// estimate). Must match cluster_cull.comp.
+// estimate). Must match projectedError in cull.glsl.
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
                            float projY, float nearPlane, float screenHeight);
 
