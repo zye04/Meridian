@@ -73,8 +73,7 @@ for model in rock_moss_set_01 rock_moss_set_02 boulder_01 namaqualand_boulder_04
       (.include | to_entries[] | "\(.key) \(.value.url)")')
 done
 
-for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_01 \
-    rocky_trail dirt_floor mossy_rock; do
+for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_01; do
   # Maps can live in different directories, so take each one's own URL.
   while read -r url; do
     download "${url%/*}" "$root/assets/source/textures/$texture" "${url##*/}"
