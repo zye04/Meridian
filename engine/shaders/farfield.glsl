@@ -90,6 +90,16 @@ struct FarField {
     uint pyramidOffsets[16];
 };
 
+layout(buffer_reference, std430) readonly buffer FarFieldBuffer {
+    FarField field;
+};
+
+// The far switch (cell_cull.comp): a cell draws its voxels instead of its
+// trees once its tallest tree projects under kFarSwitchPixels, at the
+// coarsest level whose voxel projects to at most kFarLevelPixels.
+const float kFarSwitchPixels = 6.0;
+const float kFarLevelPixels = 1.0;
+
 // One occupied template voxel. Must match FarTemplateVoxel in farfield.h.
 struct FarTemplateVoxel {
     vec3 center;

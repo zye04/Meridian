@@ -309,12 +309,17 @@ struct SceneData {
   // far instances' bounds reach past their cell horizontally.
   float cellDrawDistance = 0.0f;
   float cellMargin = 0.0f;
-  uint32_t pad3 = 0;
+  // Whether farField is set: cells past the far switch draw their voxels.
+  uint32_t farFieldEnabled = 0;
   // Every mesh's cluster group BVH nodes and DAG levels.
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
+  // The far field (GpuFarField) and the list of far cells the cell cull
+  // appends for voxel.mesh (cell | level << 30, one per cell).
+  VkDeviceAddress farField = 0;
+  VkDeviceAddress farCellList = 0;
 };
-static_assert(sizeof(SceneData) == 1056);
+static_assert(sizeof(SceneData) == 1072);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -432,8 +437,12 @@ struct DrawCounters {
   // workgroup per 64 nodes) and node count.
   uint32_t traverseDispatch[2][kBvhDepths][3];
   uint32_t traverseCount[2][kBvhDepths];
+  // vkCmdDrawMeshTasksIndirectEXT arguments for the far cells, one voxel.mesh
+  // workgroup per cell (x counts the far cells drawn).
+  uint32_t farTasks[3];
+  uint32_t pad2;
 };
-static_assert(sizeof(DrawCounters) == (52 + 8 * kBvhDepths) * 4);
+static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -449,6 +458,7 @@ static_assert(offsetof(DrawCounters, drops) == 45 * 4);
 static_assert(offsetof(DrawCounters, bvhNodes) == 50 * 4);
 static_assert(offsetof(DrawCounters, traverseDispatch) == 52 * 4);
 static_assert(offsetof(DrawCounters, traverseCount) == (52 + 6 * kBvhDepths) * 4);
+static_assert(offsetof(DrawCounters, farTasks) == (52 + 8 * kBvhDepths) * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {

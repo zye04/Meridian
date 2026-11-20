@@ -204,8 +204,9 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
 }
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
-// placed on the GPU at load (placement.h).
-void placeScenery(meridian::Renderer &renderer) {
+// placed on the GPU at load (placement.h). With farField, distant forest
+// cells are drawn as voxels (far field) instead of their trees.
+void placeScenery(meridian::Renderer &renderer, bool farField) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -263,7 +264,7 @@ void placeScenery(meridian::Renderer &renderer) {
                       {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
                        -kMaskEdge, 0.0f, 0.0f},
                       0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
-    layers[0].farField = layers[1].farField = true;
+    layers[0].farField = layers[1].farField = farField;
   }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).
@@ -313,6 +314,8 @@ struct Options {
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
   bool placement = true;
+  // Distant forest cells as voxels; off draws every tree (for A/B).
+  bool farField = true;
   bool occlusion = true;
   // Clean: Bruneton's very clean defaults (for A/B).
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
@@ -382,6 +385,10 @@ Options parseOptions(int argc, char **argv) {
                std::string(argv[i + 1]) == "off") {
       options.placement = false;
       ++i;
+    } else if (arg == "--far-field" && i + 1 < argc &&
+               std::string(argv[i + 1]) == "off") {
+      options.farField = false;
+      ++i;
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else {
@@ -389,6 +396,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, "
+                               "--far-field off, "
                                "--no-occlusion, "
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, --render-scale s, "
@@ -473,7 +481,7 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter);
   }
   if (options.placement) {
-    placeScenery(renderer);
+    placeScenery(renderer, options.farField);
   }
 
   meridian::Lighting lighting;
@@ -573,12 +581,14 @@ int main(int argc, char **argv) {
   if (!interactive) {
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, cells %u, bvh nodes %u, %u dropped by full "
+                "%u triangles, %u terrain nodes, cells %u, far cells %u, bvh nodes %u, "
+                "%u dropped by full "
                 "cull lists (chunks %u, work items %u, clusters %u, terrain nodes %u, "
                 "bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
+                renderer.drawnFarCellCount(),
                 renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
                 drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
                 renderer.placedInstanceCount(),

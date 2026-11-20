@@ -92,6 +92,7 @@ struct Renderer::Impl {
   std::array<uint32_t, 5> droppedByList{};
   uint32_t drawnTerrainNodes = 0;
   uint32_t drawnCells = 0;
+  uint32_t drawnFarCells = 0;
   uint32_t visitedBvhNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
@@ -206,6 +207,9 @@ struct Renderer::Impl {
   Buffer farPyramid;
   Buffer farPalette;
   Buffer farFieldInfo;
+  // The far cells the cell cull appends each frame (one uint per cell).
+  Buffer farCellList;
+  VkPipeline voxelPipeline = VK_NULL_HANDLE;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -333,6 +337,8 @@ struct Renderer::Impl {
                      std::span<const PlacementLayer> layers,
                      const std::vector<uint32_t> &offsets);
   void destroyFarField();
+  // Far cells as their voxels (voxel.mesh/frag), in the early scene pass.
+  void drawFarField(VkCommandBuffer cmd);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);
   void resetDrawCounters(VkCommandBuffer cmd);
   CullConstants cullConstants(const FrameData &frame, uint32_t phase) const;

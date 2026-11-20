@@ -786,6 +786,12 @@ void Renderer::Impl::createPipelines() {
   meshDesc.alphaBlend = false;
   terrainPipeline = createGraphicsPipeline(dev, meshDesc);
 
+  // Far cells' canopy boxes, back faces culled; voxel.frag writes the march's
+  // depth behind the face (conservative depth_less).
+  meshDesc.meshShader = "voxel.mesh";
+  meshDesc.fragmentShader = "voxel.frag";
+  voxelPipeline = createGraphicsPipeline(dev, meshDesc);
+
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
       VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -1086,6 +1092,7 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->voxelPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainSelectPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->terrainSelectLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);

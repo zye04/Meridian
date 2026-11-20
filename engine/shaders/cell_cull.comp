@@ -3,6 +3,7 @@
 #define MERIDIAN_CUSTOM_PUSH_CONSTANTS
 #include "common.glsl"
 #include "cull.glsl"
+#include "farfield.glsl"
 
 // Cell culling, one thread per 64 m placement cell, in both phases of the
 // instance cull (cull.comp): phase 0 takes the cells visible last frame
@@ -11,6 +12,8 @@
 // square grown by the instances' horizontal reach (cellMargin) and their
 // height range. Survivors emit their instances as chunks of up to 64 ids;
 // threads past the cells emit the hand-placed instances the same way.
+// Cells past the far switch skip their trees (the start of their run) and,
+// in phase 0, append themselves to the far cell list for voxel.mesh.
 
 layout(local_size_x = 64) in;
 
@@ -23,6 +26,37 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
         cull.chunks.chunks[first + i] =
             uvec2(firstId + i * 64u, size | (cellWasVisible ? kChunkCellWasVisible : 0u));
     }
+}
+
+// The far switch: whether the cell's tallest tree projects under
+// kFarSwitchPixels from the nearest point of its canopy box. A cell with
+// bricks but no trees (crowns reaching in from a neighbor) uses the box's
+// height. Returns how many instances to skip: its trees if far, else 0.
+// Phase 0 appends a far cell in the frustum to the far list with its level.
+uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
+    FarField field = scene.farField.field;
+    FarCell far = field.cells.cells[index];
+    if (far.top < far.bottom) {
+        return 0u;
+    }
+    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
+    vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
+    float distance = max(length(max(max(boxLo, -boxHi), vec3(0.0))), scene.nearPlane);
+    float pixelsPerMeter = abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
+    float height = far.treeCount > 0u ? far.treeHeight : far.top - far.bottom;
+    if (height * pixelsPerMeter >= kFarSwitchPixels) {
+        return 0u;
+    }
+    if (cull.phase == 0u && displayedBoxInFrustum(scene, boxLo, boxHi)) {
+        // The coarsest level whose voxel projects to at most kFarLevelPixels.
+        float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
+        uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
+                                float(kFarLevels - 1u)));
+        uint slot = atomicAdd(cull.counters.counters[kCounterFarTasks], 1u);
+        scene.farCellList.entries[slot] = index | level << 30u;
+    }
+    return far.treeCount;
 }
 
 void main() {
@@ -38,10 +72,11 @@ void main() {
         return;
     }
     Cell cell = scene.cells.cells[index];
-    if (cell.instanceCount == 0u) {
+    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
+    uint skipped = scene.farFieldEnabled != 0u ? farSwitch(scene, index, gridIndex) : 0u;
+    if (cell.instanceCount <= skipped) {
         return;
     }
-    uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
     vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize - scene.cellMargin;
     vec2 hi = lo + kCellSize + 2.0 * scene.cellMargin;
     vec3 boxLo = vec3(lo.x, cell.minY, lo.y) - scene.cameraPosition;
@@ -55,7 +90,8 @@ void main() {
     bool wasVisible = cull.visibility.visible[visibilityIndex] != 0u;
     if (cull.phase == 0u) {
         if (cull.occlusion != 0u && wasVisible && visible) {
-            emitChunks(kPlacedBase + cell.firstInstance, cell.instanceCount, true);
+            emitChunks(kPlacedBase + cell.firstInstance + skipped, cell.instanceCount - skipped,
+                       true);
         }
         return;
     }
@@ -68,6 +104,6 @@ void main() {
         return;
     }
     atomicAdd(cull.counters.counters[kCounterCells], 1u);
-    emitChunks(kPlacedBase + cell.firstInstance, cell.instanceCount,
+    emitChunks(kPlacedBase + cell.firstInstance + skipped, cell.instanceCount - skipped,
                cull.occlusion != 0u && wasVisible);
 }

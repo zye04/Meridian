@@ -83,13 +83,14 @@ foreach(source
     sky_irradiance.comp dfg_lut.comp cull.comp depth_pyramid.comp
     cluster_traverse.comp cluster_cull.comp mesh.mesh terrain_select.comp
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
-    grade_lut.comp sharpen.comp)
+    grade_lut.comp sharpen.comp voxel.mesh)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
+add_shader(voxel.frag voxel.frag ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
 add_shader(farfield_bake.comp farfield_bake.comp)

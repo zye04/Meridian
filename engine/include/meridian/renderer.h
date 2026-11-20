@@ -209,6 +209,8 @@ public:
   CullDrops droppedCullEntries() const;
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
+  // Far cells drawn as voxels in a recent frame.
+  uint32_t drawnFarCellCount() const;
   // Cluster group BVH nodes the traversal visited in a recent frame.
   uint32_t visitedBvhNodeCount() const;
 

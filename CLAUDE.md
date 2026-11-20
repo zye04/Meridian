@@ -91,10 +91,11 @@ triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
-(placement cells visible), `bvh nodes N` (cluster group BVH nodes the
+(placement cells visible), `far cells N` (cells drawn as far-field
+voxels), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, far field, pyramid, cull late, scene late, aa (the upscaler), exposure,
 tonemap; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -132,7 +133,8 @@ don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches) and `placement hash 0x...`
 (0x1c6b673748ee8f8f for seed 1 with every asset present). Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
-before and after compaction, cell margin).
+before and after compaction, cell margin). `--far-field off` draws
+every tree as clusters instead of distant forest cells as voxels (A/B).
 
 ## Testing policy (usage matters)
 

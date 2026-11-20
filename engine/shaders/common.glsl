@@ -326,6 +326,13 @@ struct Terrain {
     vec2 rockNormalY;
 };
 
+// Declared here, defined in farfield.glsl by the shaders that read it.
+layout(buffer_reference) buffer FarFieldBuffer;
+
+layout(buffer_reference, std430) buffer FarCellListBuffer {
+    uint entries[];
+};
+
 layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // All view matrices here leave out the camera translation: they take
     // positions relative to the camera (world - cameraPosition, or
@@ -392,9 +399,14 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // how far instances' bounds reach past their cell horizontally.
     float cellDrawDistance;
     float cellMargin;
-    uint pad3;
+    // Whether farField is set: cells past the far switch draw their voxels.
+    uint farFieldEnabled;
     ClusterNodeBuffer clusterNodes;
     ClusterLevelBuffer clusterLevels;
+    // The far field (farfield.glsl) and the far cells the cell cull appends
+    // for voxel.mesh: cell | level << 30, one entry per cell.
+    FarFieldBuffer farField;
+    FarCellListBuffer farCellList;
 };
 
 // Largest axis scale of a transform: a conservative bound under

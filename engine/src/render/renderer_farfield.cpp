@@ -139,9 +139,21 @@ void Renderer::Impl::destroyFarField() {
     destroyBuffer(farColumns[level]);
     destroyBuffer(farVoxels[level]);
   }
-  for (Buffer *buffer : {&farCells, &farPyramid, &farPalette, &farFieldInfo}) {
+  for (Buffer *buffer : {&farCells, &farPyramid, &farPalette, &farFieldInfo, &farCellList}) {
     destroyBuffer(*buffer);
   }
+}
+
+// After the early clusters, so the terrain and near geometry reject hidden
+// far cells by early depth testing.
+void Renderer::Impl::drawFarField(VkCommandBuffer cmd) {
+  if (farFieldInfo.buffer == VK_NULL_HANDLE) {
+    return;
+  }
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelPipeline);
+  vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
+  dispatch.cmdDrawMeshTasksIndirectEXT(cmd, drawCounters.buffer, offsetof(DrawCounters, farTasks),
+                                       1, sizeof(DrawCounters::farTasks));
 }
 
 void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
@@ -642,6 +654,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   info.cellsZ = grid.cellsZ;
   info.paletteSize = paletteSize;
   farFieldInfo = uploadStorage(&info, sizeof(info));
+  farCellList = createBuffer(VkDeviceSize{cellCount} * sizeof(uint32_t),
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                             0);
 
   VkDeviceSize resident = farCells.size + farPyramid.size + farPalette.size + farFieldInfo.size;
   for (uint32_t level = 0; level < kFarLevels; ++level) {
