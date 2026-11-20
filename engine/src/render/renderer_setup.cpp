@@ -3,7 +3,12 @@
 
 #include <meridian/window.h>
 
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <imgui.h>
+
 #include <bit>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
@@ -1232,12 +1237,49 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   impl_->createAtmosphere();
   impl_->createScene();
 
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui::StyleColorsDark();
+  // The backend's default 13 px font is tiny on a 1440p fullscreen window.
+  ImGui::GetStyle().FontSizeBase = 18.0f;
+  // The overlay draws into the sRGB swapchain, which encodes on write, but
+  // ImGui colours are already sRGB: linearize them so they come out as set.
+  for (ImVec4 &color : ImGui::GetStyle().Colors) {
+    for (float *channel : {&color.x, &color.y, &color.z}) {
+      *channel = *channel <= 0.04045f ? *channel / 12.92f
+                                      : std::pow((*channel + 0.055f) / 1.055f, 2.4f);
+    }
+  }
+  ImGui_ImplGlfw_InitForVulkan(impl_->window, true);
+  const VkFormat overlayFormat[] = {impl_->swapchain.image_format};
+  ImGui_ImplVulkan_InitInfo imguiInfo{};
+  imguiInfo.ApiVersion = VK_API_VERSION_1_3;
+  imguiInfo.Instance = impl_->instance.instance;
+  imguiInfo.PhysicalDevice = physical.value().physical_device;
+  imguiInfo.Device = impl_->device.device;
+  imguiInfo.QueueFamily = impl_->graphicsQueueFamily;
+  imguiInfo.Queue = impl_->graphicsQueue;
+  imguiInfo.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
+  imguiInfo.MinImageCount = 2;
+  imguiInfo.ImageCount = static_cast<uint32_t>(impl_->swapchainImages.size());
+  imguiInfo.UseDynamicRendering = true;
+  VkPipelineRenderingCreateInfo &rendering =
+      imguiInfo.PipelineInfoMain.PipelineRenderingCreateInfo;
+  rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachmentFormats = overlayFormat;
+  ImGui_ImplVulkan_Init(&imguiInfo);
+
   std::cout << "GPU: " << physical.value().name << "\n";
 }
 
 Renderer::~Renderer() {
   VkDevice dev = impl_->device.device;
   vkDeviceWaitIdle(dev);
+
+  ImGui_ImplVulkan_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
 
   for (GpuMesh &mesh : impl_->meshes) {
     impl_->destroyAccelerationStructure(mesh.blas);

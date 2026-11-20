@@ -105,7 +105,17 @@ struct Renderer::Impl {
   float timestampPeriodNs = 0.0f;
   float gpuFrameMs = 0.0f;
   std::array<PassTime, kMaxPassTimes> passTimes;
+  // The pass count varies with the overlay, so each slot keeps the count of
+  // the frame last recorded in it; passTimeCount is that of the frame whose
+  // times passTimes holds.
+  // Names go with the count: a toggle frame must not pair another frame's
+  // names with its times.
+  std::array<uint32_t, kFramesInFlight> slotPassCount{};
+  std::array<std::array<const char *, kMaxPassTimes>, kFramesInFlight> slotPassNames{};
   uint32_t passTimeCount = 0;
+  // beginOverlay() was called since the last draw().
+  bool overlayPending = false;
+  float cpuWaitMs = 0.0f;
   uint32_t drawnInstances = 0;
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;

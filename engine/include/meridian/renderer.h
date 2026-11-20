@@ -227,6 +227,15 @@ public:
   // adaptation. Pass a fixed step for repeatable output.
   void draw(const Camera &camera, const Lighting &lighting, float deltaSeconds);
 
+  // Starts an ImGui frame (Dear ImGui is the overlay): call it, issue the
+  // ImGui widgets, then draw(), which renders them over the tonemapped image
+  // (captures include them). Frames without a call pay nothing.
+  void beginOverlay();
+
+  // Milliseconds the last draw() spent blocked in vkWaitForFences and
+  // vkAcquireNextImageKHR, i.e. waiting on the GPU or the display.
+  float cpuWaitMs() const;
+
   // GPU time of a recent frame, measured with timestamp queries: from the
   // first to the last pass timestamp.
   float gpuFrameMs() const;

@@ -57,6 +57,17 @@ only for the run, never for builds. Examples below omit the prefix.
 
 Controls: WASD, mouse, Esc. Fly mode: Space/Ctrl up/down, 30 m/s,
 Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 1.4 m/s (Shift 5 m/s), no vertical keys.
+`G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
+sun azimuth/elevation and haze, with Save, Load, Reset and a "show built-in
+grade" A/B box. It frees the cursor and freezes the camera while open;
+changes apply at once. Save writes the grade file,
+`$XDG_CONFIG_HOME/meridian/grade.json` (default
+`~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
+names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
+`haze`), which **interactive runs load at startup** (explicit `--sun` and
+`--haze` still win); capture runs ignore it so gates stay deterministic.
+`--grade FILE` loads a grade file in any run (A/B captures of a tuned
+look); `--overlay grade` opens the panel at startup (it is in captures).
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):
@@ -109,7 +120,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
 with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), bloom, exposure,
-tonemap; they sum to the total). A
+tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
 Useful views (Napf terrain; ground 1354.2 m at the start): the default
@@ -188,7 +199,8 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            evaluatePoint: CPU reference of GPU placement,
                            PlacedInstance), grade.h (Grade, CPU
                            reference of the grade + AgX LUT bake that
-                           grade_lut.comp mirrors; Renderer::setGrade),
+                           grade_lut.comp mirrors; Renderer::setGrade;
+                           gradeToJson/gradeFromJson, the grade file),
                            upscaler.h (AaSettings, render/display rules:
                            scaledExtent, jitterPhaseCount,
                            textureMipBias), upscaler_vk.h (Upscaler,
@@ -244,6 +256,8 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cluster_traverse.comp -> work items for
                            cluster_cull.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
+game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
+                           with sun and haze (Look), G toggle
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten, leaf diffuse transmission),
                            ktx2.cpp (shared encoder)
@@ -317,7 +331,11 @@ LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
-AgX-inset colour) + +-1 LSB dither into the sRGB swapchain. Everything up
+AgX-inset colour) + +-1 LSB dither into the sRGB swapchain -> overlay
+(only after `Renderer::beginOverlay()`: ImGui drawn onto the swapchain in a
+second rendering pass, style colours linearized because the target
+encodes sRGB; no pass otherwise, so a hidden overlay costs nothing;
+captures include it). Everything up
 to the upscaler runs at the render size (`renderExtent`: depth, HDR,
 motion, depth pyramid, Halton(2,3) jitter in render pixels over
 `jitterPhaseCount` phases, material mip bias `textureMipBias`, both in

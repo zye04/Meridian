@@ -42,7 +42,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | DLSS 5 | Newest DLSS (shipped 2026-09), RTX 50 only, no Linux evidence; dev GPU is an RTX 4080 | Motion-clarity spec | When the Linux SDK carries it and an RTX 50 target exists (a version bump behind the Upscaler interface) |
 | XeSS backend | Intel's upscaler; no Linux binaries | Motion-clarity spec non-goal | When Linux binaries exist and a non-NVIDIA target needs it |
 | FSR 4 backend | Better than TAA v2 on AMD RDNA 2-4 (FidelityFX SDK 2.4, MIT, Vulkan); Linux binaries unverified | Motion-clarity spec non-goal | When a non-NVIDIA target exists |
-| Grade look tuning | The game starts with a grade tuned toward the Chlorophyll Engine frames (decisions.md, "Visible quality pass"); the engine default stays identity | Motion-clarity spec; quality pass | Final look after sky occlusion, crown AO and the ground lane's terrain |
+| Grade look tuning | The game starts with a grade tuned toward the Chlorophyll Engine frames (decisions.md, "Visible quality pass"); the engine default stays identity | Motion-clarity spec; quality pass | Final look after sky occlusion, crown AO and the ground lane's terrain; the user tunes it in game (G) and the grade file is the source |
 
 ## Geometry and vegetation
 

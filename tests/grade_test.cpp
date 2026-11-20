@@ -209,3 +209,60 @@ TEST_CASE("negative exposure recovers highlights") {
   CHECK(toExposed / count <= 0.3);
   CHECK(toUnexposed / count > 1.0);
 }
+
+TEST_CASE("the grade file round-trips every field") {
+  meridian::Grade grade;
+  grade.temperatureKelvin = 5200.5f;
+  grade.tint = -0.0123f;
+  grade.exposureEv = 0.75f;
+  grade.slope = {1.1f, 0.9f, 1.05f};
+  grade.offset = {0.01f, -0.02f, 0.003f};
+  grade.power = {0.95f, 1.0f, 1.2f};
+  grade.contrast = 1.4f;
+  grade.saturation = 0.8f;
+  grade.greens = {-12.5f, 1.15f};
+  grade.blues = {7.0f, 0.6f};
+  grade.browns = {30.0f, 1.9f};
+  const meridian::Grade back = meridian::gradeFromJson(meridian::gradeToJson(grade));
+  CHECK(back.temperatureKelvin == grade.temperatureKelvin);
+  CHECK(back.tint == grade.tint);
+  CHECK(back.exposureEv == grade.exposureEv);
+  CHECK(near(back.slope, grade.slope, 0.0f));
+  CHECK(near(back.offset, grade.offset, 0.0f));
+  CHECK(near(back.power, grade.power, 0.0f));
+  CHECK(back.contrast == grade.contrast);
+  CHECK(back.saturation == grade.saturation);
+  CHECK(back.greens.hueShiftDegrees == grade.greens.hueShiftDegrees);
+  CHECK(back.greens.saturation == grade.greens.saturation);
+  CHECK(back.blues.hueShiftDegrees == grade.blues.hueShiftDegrees);
+  CHECK(back.blues.saturation == grade.blues.saturation);
+  CHECK(back.browns.hueShiftDegrees == grade.browns.hueShiftDegrees);
+  CHECK(back.browns.saturation == grade.browns.saturation);
+}
+
+TEST_CASE("a partial grade file keeps the defaults and ignores other keys") {
+  const meridian::Grade grade = meridian::gradeFromJson(
+      R"({"haze": "summer", "contrast": 1.5, "greens": {"saturation": 1.3}})");
+  CHECK(grade.contrast == 1.5f);
+  CHECK(grade.greens.saturation == 1.3f);
+  CHECK(grade.greens.hueShiftDegrees == 0.0f);
+  CHECK(grade.saturation == 1.0f);
+  CHECK(grade.temperatureKelvin == 6504.0f);
+  CHECK(near(grade.slope, {1, 1, 1}, 0.0f));
+  CHECK(meridian::jsonString(R"({"haze": "summer"})", "haze") == "summer");
+  CHECK(!meridian::jsonNumber(R"({"a": 1})", "b"));
+}
+
+TEST_CASE("missing grade keys keep the base and non-finite numbers are rejected") {
+  meridian::Grade base;
+  base.contrast = 1.7f;
+  base.greens = {5.0f, 1.4f};
+  const meridian::Grade grade = meridian::gradeFromJson(
+      R"({"saturation": 0.5, "tint": nan, "exposureEv": inf, "slope": [1, nan, 1]})", base);
+  CHECK(grade.saturation == 0.5f);
+  CHECK(grade.contrast == 1.7f);
+  CHECK(grade.greens.hueShiftDegrees == 5.0f);
+  CHECK(grade.tint == base.tint);
+  CHECK(grade.exposureEv == base.exposureEv);
+  CHECK(near(grade.slope, base.slope, 0.0f));
+}

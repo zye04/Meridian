@@ -49,8 +49,8 @@ item 3 below is what brings them back.
    UVs into a per-species atlas region, so the cook remaps each leaf
    region onto a downloaded leaf texture; bark tiles along the branch.
    Waits on the user downloading a leaf and a bark.
-4. Runtime grading tool: ImGui panel (exposure, contrast, saturation,
-   hue ranges, white balance, sun, haze), saved to a file the game loads.
+4. Runtime grading tool: done (G panel, grade file; decisions.md,
+   "In-game overlay: Dear ImGui"). The performance overlay is next.
 5. Performance overlay (backlog row), sharing the ImGui overlay.
 6. Frame pacing (backlog row).
 

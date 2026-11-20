@@ -1836,3 +1836,26 @@ What it does (`parallaxHit`, `terrainSurface` in mesh.frag):
   budget (1.7%, 0.1393 -> 0.1369, with the terrain POM and micro
   shadows).
 - Cost: bloom pass 0.12 ms at 2560x1440 (RTX 4080, Release).
+
+## In-game overlay: Dear ImGui (2026-11-20)
+
+- **Dear ImGui 1.93.0** (FetchContent, pinned tag) with its GLFW and Vulkan
+  backends, the latter on dynamic rendering (`PipelineInfoMain`, backend-owned
+  descriptor pool, since 1.92). Immediate-mode widgets are the standard for
+  engine debug and tuning tools; no alternative was weighed beyond that.
+- **Where it draws**: after the tonemap, into the sRGB swapchain, in its own
+  `overlay` pass (a second `vkCmdBeginRendering`, load op LOAD). Hidden, the
+  game never calls `Renderer::beginOverlay()` and the pass does not exist,
+  so there is no cost. Captures include the overlay. The swapchain encodes
+  sRGB on write while ImGui colours are sRGB, so the style colours are
+  linearized once at init.
+- **Pass count**: it varies per frame now, so the timestamp readback keeps
+  the count per frame slot.
+- **Grade file**: `$XDG_CONFIG_HOME/meridian/grade.json` (default
+  `~/.config/meridian/grade.json`), one flat JSON object, field names of
+  `Grade`, vectors as `[r, g, b]`, bands nested, plus `sunAzimuthDegrees`
+  (clockwise from north, -z), `sunElevationDegrees` and `haze`. Written by
+  `gradeToJson`, read by a tiny tolerant parser (missing keys keep the
+  default). Loaded only by interactive runs, so capture gates stay
+  deterministic; `--grade FILE` loads it anywhere for A/B captures.
+  Explicit `--sun` and `--haze` win over the file.

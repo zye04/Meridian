@@ -1,8 +1,12 @@
 #include "meridian/grade.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
+#include <string>
 #include <numbers>
 #include <utility>
 
@@ -267,6 +271,177 @@ Vec3 sampleGradeLut(std::span<const std::array<float, 4>> lut, Vec3 rec709) {
     result = result + Vec3{texel[0], texel[1], texel[2]} * weight;
   }
   return result;
+}
+
+namespace {
+
+// The text after `"key":` at the top level (nested objects blanked out), or
+// empty.
+std::string_view valueOf(std::string_view json, std::string_view key) {
+  const std::string quoted = "\"" + std::string(key) + "\"";
+  size_t at = 0;
+  int depth = 0;
+  for (; at < json.size(); ++at) {
+    if (json[at] == '{' || json[at] == '[') {
+      ++depth;
+    } else if (json[at] == '}' || json[at] == ']') {
+      --depth;
+    } else if (depth == 1 && json.compare(at, quoted.size(), quoted) == 0) {
+      size_t colon = json.find_first_not_of(" \t\r\n", at + quoted.size());
+      if (colon != std::string_view::npos && json[colon] == ':') {
+        return json.substr(colon + 1);
+      }
+    }
+  }
+  return {};
+}
+
+std::optional<float> leadingNumber(std::string_view text, size_t *length = nullptr) {
+  const size_t start = text.find_first_not_of(" \t\r\n");
+  if (start == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const char *first = text.data() + start;
+  float value = 0.0f;
+  const auto [end, error] = std::from_chars(first, text.data() + text.size(), value);
+  if (error != std::errc{} || !std::isfinite(value)) {
+    return std::nullopt;
+  }
+  if (length) {
+    *length = static_cast<size_t>(end - text.data());
+  }
+  return value;
+}
+
+void readNumber(std::string_view json, std::string_view key, float &out) {
+  if (auto value = jsonNumber(json, key)) {
+    out = *value;
+  }
+}
+
+void readVec3(std::string_view json, std::string_view key, Vec3 &out) {
+  std::string_view text = valueOf(json, key);
+  const size_t open = text.find_first_not_of(" \t\r\n");
+  if (open == std::string_view::npos || text[open] != '[') {
+    return;
+  }
+  text.remove_prefix(open + 1);
+  float values[3];
+  for (float &value : values) {
+    size_t length = 0;
+    auto number = leadingNumber(text, &length);
+    if (!number) {
+      return;
+    }
+    value = *number;
+    text.remove_prefix(length);
+    const size_t next = text.find_first_not_of(" \t\r\n,");
+    text.remove_prefix(next == std::string_view::npos ? text.size() : next);
+  }
+  out = {values[0], values[1], values[2]};
+}
+
+void readBand(std::string_view json, std::string_view key, HueBand &out) {
+  const std::string_view text = valueOf(json, key);
+  const size_t open = text.find_first_not_of(" \t\r\n");
+  if (open == std::string_view::npos || text[open] != '{') {
+    return;
+  }
+  const std::string_view body = text.substr(open, text.find('}', open) - open + 1);
+  readNumber(body, "hueShiftDegrees", out.hueShiftDegrees);
+  readNumber(body, "saturation", out.saturation);
+}
+
+} // namespace
+
+std::optional<float> jsonNumber(std::string_view json, std::string_view key) {
+  return leadingNumber(valueOf(json, key));
+}
+
+std::optional<std::string> jsonString(std::string_view json, std::string_view key) {
+  std::string_view text = valueOf(json, key);
+  const size_t open = text.find_first_not_of(" \t\r\n");
+  if (open == std::string_view::npos || text[open] != '"') {
+    return std::nullopt;
+  }
+  text.remove_prefix(open + 1);
+  const size_t close = text.find('"');
+  if (close == std::string_view::npos) {
+    return std::nullopt;
+  }
+  return std::string(text.substr(0, close));
+}
+
+namespace {
+
+void appendNumber(std::string &out, float value) {
+  char text[32];
+  out.append(text, std::to_chars(text, text + sizeof(text), value).ptr);
+}
+
+void appendVec3(std::string &out, const char *key, Vec3 v) {
+  out += "  \"";
+  out += key;
+  out += "\": [";
+  appendNumber(out, v.x);
+  out += ", ";
+  appendNumber(out, v.y);
+  out += ", ";
+  appendNumber(out, v.z);
+  out += "],\n";
+}
+
+void appendBand(std::string &out, const char *key, const HueBand &band, bool last) {
+  out += "  \"";
+  out += key;
+  out += "\": {\"hueShiftDegrees\": ";
+  appendNumber(out, band.hueShiftDegrees);
+  out += ", \"saturation\": ";
+  appendNumber(out, band.saturation);
+  out += last ? "}\n" : "},\n";
+}
+
+void appendField(std::string &out, const char *key, float value) {
+  out += "  \"";
+  out += key;
+  out += "\": ";
+  appendNumber(out, value);
+  out += ",\n";
+}
+
+} // namespace
+
+std::string gradeToJson(const Grade &g) {
+  std::string out = "{\n";
+  appendField(out, "temperatureKelvin", g.temperatureKelvin);
+  appendField(out, "tint", g.tint);
+  appendField(out, "exposureEv", g.exposureEv);
+  appendVec3(out, "slope", g.slope);
+  appendVec3(out, "offset", g.offset);
+  appendVec3(out, "power", g.power);
+  appendField(out, "contrast", g.contrast);
+  appendField(out, "saturation", g.saturation);
+  appendBand(out, "greens", g.greens, false);
+  appendBand(out, "blues", g.blues, false);
+  appendBand(out, "browns", g.browns, true);
+  out += "}\n";
+  return out;
+}
+
+Grade gradeFromJson(std::string_view json, const Grade &base) {
+  Grade g = base;
+  readNumber(json, "temperatureKelvin", g.temperatureKelvin);
+  readNumber(json, "tint", g.tint);
+  readNumber(json, "exposureEv", g.exposureEv);
+  readVec3(json, "slope", g.slope);
+  readVec3(json, "offset", g.offset);
+  readVec3(json, "power", g.power);
+  readNumber(json, "contrast", g.contrast);
+  readNumber(json, "saturation", g.saturation);
+  readBand(json, "greens", g.greens);
+  readBand(json, "blues", g.blues);
+  readBand(json, "browns", g.browns);
+  return g;
 }
 
 } // namespace meridian

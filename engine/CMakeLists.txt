@@ -30,8 +30,26 @@ FetchContent_Declare(meshoptimizer
     GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
     GIT_TAG v1.0
     SYSTEM)
+# Dear ImGui: the in-game overlay. It has no CMake; the library is built here.
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.93.0
+    GIT_SHALLOW TRUE
+    SYSTEM)
 FetchContent_MakeAvailable(vk-bootstrap VulkanMemoryAllocator basis_universal
-                           fastgltf mikktspace meshoptimizer)
+                           fastgltf mikktspace meshoptimizer imgui)
+
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends)
+target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
+target_compile_options(imgui PRIVATE -w)
 
 add_library(mikktspace STATIC ${mikktspace_SOURCE_DIR}/mikktspace.c)
 target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
@@ -121,6 +139,7 @@ add_dependencies(meridian shaders)
 target_include_directories(meridian PUBLIC include)
 target_compile_features(meridian PUBLIC cxx_std_20)
 target_compile_definitions(meridian PRIVATE MERIDIAN_SHADER_DIR="${SHADER_DIR}")
+target_link_libraries(meridian PUBLIC imgui)
 target_link_libraries(meridian PRIVATE
     glfw
     Vulkan::Vulkan

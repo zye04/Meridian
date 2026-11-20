@@ -1,10 +1,14 @@
 #include "renderer_impl.h"
 
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <basisu_enc.h>
+#include <imgui.h>
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -423,6 +427,15 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
+void Renderer::beginOverlay() {
+  ImGui_ImplVulkan_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+  impl_->overlayPending = true;
+}
+
+float Renderer::cpuWaitMs() const { return impl_->cpuWaitMs; }
+
 float Renderer::gpuFrameMs() const { return impl_->gpuFrameMs; }
 
 std::span<const PassTime> Renderer::gpuPassTimes() const {
@@ -504,7 +517,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   int width = 0;
   int height = 0;
   impl_->windowSize->framebufferSize(width, height);
+  // An early return still has to close the ImGui frame beginOverlay() opened.
+  auto abandonOverlay = [&] {
+    if (impl_->overlayPending) {
+      impl_->overlayPending = false;
+      ImGui::EndFrame();
+    }
+  };
   if (width == 0 || height == 0) {
+    abandonOverlay();
     return;
   }
 
@@ -521,25 +542,30 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   const uint32_t frameSlot =
       static_cast<uint32_t>(impl_->frameNumber % kFramesInFlight);
   FrameData &frame = impl_->frames[frameSlot];
+  const auto waitStart = std::chrono::steady_clock::now();
   check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
         "vkWaitForFences");
+  const auto fenceDone = std::chrono::steady_clock::now();
 
   // Once each slot has been submitted, the fence guarantees its previous
   // timestamps are written.
   uint64_t timestamps[kMaxPassTimes + 1] = {};
-  const uint32_t timestampCount = impl_->passTimeCount + 1;
+  const uint32_t slotPasses = impl_->slotPassCount[frameSlot];
+  const uint32_t timestampCount = slotPasses + 1;
   if (impl_->frameNumber >= kFramesInFlight &&
       vkGetQueryPoolResults(dev, impl_->timestampPool,
                             frameSlot * (kMaxPassTimes + 1), timestampCount,
                             sizeof(timestamps), timestamps, sizeof(uint64_t),
                             VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
     const float msPerTick = impl_->timestampPeriodNs * 1e-6f;
-    for (uint32_t i = 0; i < impl_->passTimeCount; ++i) {
+    impl_->passTimeCount = slotPasses;
+    for (uint32_t i = 0; i < slotPasses; ++i) {
+      impl_->passTimes[i].name = impl_->slotPassNames[frameSlot][i];
       impl_->passTimes[i].ms =
           static_cast<float>(timestamps[i + 1] - timestamps[i]) * msPerTick;
     }
     impl_->gpuFrameMs =
-        static_cast<float>(timestamps[impl_->passTimeCount] - timestamps[0]) *
+        static_cast<float>(timestamps[slotPasses] - timestamps[0]) *
         msPerTick;
   }
   if (impl_->frameNumber >= kFramesInFlight) {
@@ -565,11 +591,17 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
 
   uint32_t imageIndex = 0;
+  const auto acquireStart = std::chrono::steady_clock::now();
   VkResult acquired = vkAcquireNextImageKHR(
       dev, impl_->swapchain.swapchain, UINT64_MAX, frame.imageAvailable,
       VK_NULL_HANDLE, &imageIndex);
+  const auto acquireDone = std::chrono::steady_clock::now();
+  impl_->cpuWaitMs = std::chrono::duration<float, std::milli>(
+                         (fenceDone - waitStart) + (acquireDone - acquireStart))
+                         .count();
   if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
     impl_->swapchainOutOfDate = true;
+    abandonOverlay();
     return;
   }
   if (acquired != VK_SUBOPTIMAL_KHR) {
@@ -702,7 +734,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     if (passCount == kMaxPassTimes) {
       throw std::runtime_error("more passes than kMaxPassTimes");
     }
-    impl_->passTimes[passCount].name = name;
+    impl_->slotPassNames[frameSlot][passCount] = name;
     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                          impl_->timestampPool, firstQuery + ++passCount);
   };
@@ -1206,7 +1238,24 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
   endPass("tonemap");
-  impl_->passTimeCount = passCount;
+
+  if (impl_->overlayPending) {
+    impl_->overlayPending = false;
+    ImGui::Render();
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    swapchainAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    vkCmdBeginRendering(cmd, &tonemapRendering);
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+    vkCmdEndRendering(cmd);
+    endPass("overlay");
+  } else {
+    ImGui::GetIO().ClearEventsQueue();
+  }
+  impl_->slotPassCount[frameSlot] = passCount;
 
   // Optional capture: copy the finished frame into a CPU-readable buffer.
   // A .pfm capture takes the linear HDR image the tonemap pass read instead.

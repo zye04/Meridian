@@ -1,4 +1,4 @@
-add_executable(game src/main.cpp)
+add_executable(game src/main.cpp src/overlay.cpp)
 target_link_libraries(game PRIVATE meridian)
 target_compile_definitions(game PRIVATE MERIDIAN_ASSET_DIR="${CMAKE_SOURCE_DIR}/assets")
 set(game_runtime_files ${CMAKE_CURRENT_SOURCE_DIR}/credits.txt)

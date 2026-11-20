@@ -1,3 +1,5 @@
+#include "overlay.h"
+
 #include <meridian/model.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
@@ -31,6 +33,14 @@ constexpr float kMaxPitch = 1.55f;
 constexpr float kWalkSpeed = 1.4f;
 constexpr float kWalkSprintSpeed = 5.0f;
 constexpr float kEyeHeight = 1.7f;
+
+// A starting look toward the Chlorophyll Engine frames
+// (assets/reference/chlorophyll): AgX alone is flat and desaturated for
+// daylight foliage, and the cooked leaf colour leans blue.
+const meridian::Grade kStartingGrade{
+    .contrast = 1.4f,
+    .saturation = 1.4f,
+    .greens = {.hueShiftDegrees = -12.0f, .saturation = 1.15f}};
 
 // walkOn: the eye follows the ground at eye height, WASD stays horizontal.
 void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
@@ -333,11 +343,27 @@ meridian::Atmosphere summerHaze(float opticalDepth, float scaleHeight) {
   return atmosphere;
 }
 
+meridian::Atmosphere atmosphereFor(Haze haze) {
+  switch (haze) {
+  case Haze::Summer:
+    return summerHaze(0.10f, 0.5f);
+  case Haze::SummerHazy:
+    return summerHaze(0.2f, 1.5f);
+  case Haze::Clean:
+    break;
+  }
+  return {};
+}
+
 // Command-line options for deterministic, automated runs, e.g.
 //   game --camera 1119 4354 -431 -1.55 -0.35 --sun 0.5 0.55 -0.4 --capture out.png
 struct Options {
   std::optional<meridian::Camera> camera;
   std::optional<meridian::Vec3> sunDirection;
+  // Grade file (see overlay.h) to load in any run; interactive runs also
+  // load the default one.
+  std::optional<std::filesystem::path> gradePath;
+  bool overlayGrade = false;
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::pair<float, float>> cameraAngularVelocity;
@@ -351,8 +377,8 @@ struct Options {
   bool trees = false;
   bool occlusion = true;
   meridian::Bloom bloom;
-  // Clean: Bruneton's very clean defaults (for A/B).
-  enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
+  // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
+  std::optional<Haze> haze;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
   // DLSS (DLAA + Ray Reconstruction) unless --aa taa; falls back to Super
@@ -398,6 +424,13 @@ Options parseOptions(int argc, char **argv) {
     } else if (arg == "--camera-angular-velocity") {
       const float yawRate = number(i);
       options.cameraAngularVelocity = {yawRate, number(i)};
+    } else if (arg == "--grade" && i + 1 < argc) {
+      options.gradePath = argv[++i];
+    } else if (arg == "--overlay" && i + 1 < argc) {
+      if (std::string_view(argv[++i]) != "grade") {
+        throw std::runtime_error("--overlay takes grade");
+      }
+      options.overlayGrade = true;
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
@@ -405,11 +438,11 @@ Options parseOptions(int argc, char **argv) {
     } else if (arg == "--haze" && i + 1 < argc) {
       const std::string haze = argv[++i];
       if (haze == "clean") {
-        options.haze = Options::Haze::Clean;
+        options.haze = Haze::Clean;
       } else if (haze == "summer") {
-        options.haze = Options::Haze::Summer;
+        options.haze = Haze::Summer;
       } else if (haze == "summer-hazy") {
-        options.haze = Options::Haze::SummerHazy;
+        options.haze = Haze::SummerHazy;
       } else {
         throw std::runtime_error("--haze takes clean, summer or summer-hazy");
       }
@@ -479,7 +512,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, --trees, "
                                "--no-occlusion, "
-                               "--haze clean|summer|summer-hazy, "
+                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
@@ -534,12 +567,8 @@ int main(int argc, char **argv) {
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setBloom(options.bloom);
   renderer.setLodErrorPixels(options.lodError);
-  // A starting look toward the Chlorophyll Engine frames
-  // (assets/reference/chlorophyll): AgX alone is flat and desaturated for
-  // daylight foliage, and the cooked leaf colour leans blue.
-  renderer.setGrade({.contrast = 1.4f,
-                     .saturation = 1.4f,
-                     .greens = {.hueShiftDegrees = -12.0f, .saturation = 1.15f}});
+  renderer.setGrade(kStartingGrade);
+
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
   const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";
   meridian::Heightfield terrain;
@@ -632,13 +661,38 @@ int main(int argc, char **argv) {
   }
 
   meridian::Lighting lighting;
-  if (options.haze == Options::Haze::Summer) {
-    lighting.atmosphere = summerHaze(0.10f, 0.5f);
-  } else if (options.haze == Options::Haze::SummerHazy) {
-    lighting.atmosphere = summerHaze(0.2f, 1.5f);
-  }
+  lighting.atmosphere = atmosphereFor(options.haze.value_or(Haze::Summer));
   if (options.sunDirection) {
     lighting.sunDirection = *options.sunDirection;
+  }
+  // CLI and defaults are the built-in look; the grade file (interactive runs
+  // and --grade) overrides it except for an explicit --sun or --haze.
+  Look builtIn = lookWithSun(lighting.sunDirection, options.haze.value_or(Haze::Summer));
+  builtIn.grade = kStartingGrade;
+  Look look = builtIn;
+  const std::filesystem::path gradePath = options.gradePath.value_or(defaultLookPath());
+  if (options.gradePath || interactive) {
+    if (auto loaded = loadLook(gradePath, builtIn)) {
+      look = *loaded;
+      if (options.sunDirection) {
+        look.sunAzimuthDegrees = builtIn.sunAzimuthDegrees;
+        look.sunElevationDegrees = builtIn.sunElevationDegrees;
+      } else {
+        lighting.sunDirection = sunDirection(look.sunAzimuthDegrees, look.sunElevationDegrees);
+      }
+      if (options.haze) {
+        look.haze = *options.haze;
+      } else {
+        lighting.atmosphere = atmosphereFor(look.haze);
+      }
+      renderer.setGrade(look.grade);
+    } else if (options.gradePath) {
+      throw std::runtime_error("cannot read grade file " + options.gradePath->string());
+    }
+  }
+  GradePanel gradePanel(builtIn, look, gradePath);
+  if (options.overlayGrade) {
+    gradePanel.setVisible(window, true);
   }
   meridian::Camera camera = start;
   camera.position = ground(0.0f, 0.0f) + meridian::Vec3{0.0f, 1.7f, 0.0f};
@@ -691,13 +745,16 @@ int main(int argc, char **argv) {
     }
 
     if (interactive) {
+      gradePanel.handleToggle(window);
       const bool fDown = window.isKeyDown(meridian::Key::F);
-      if (fDown && !fWasDown) {
+      if (fDown && !fWasDown && !gradePanel.visible()) {
         walking = !walking;
       }
       fWasDown = fDown;
-      updateFlyCamera(camera, window, deltaSeconds,
-                      walking ? &terrain : nullptr);
+      if (!gradePanel.visible()) {
+        updateFlyCamera(camera, window, deltaSeconds,
+                        walking ? &terrain : nullptr);
+      }
     }
     ++totalFrames;
     scriptAngles(options.frames - totalFrames);
@@ -708,6 +765,18 @@ int main(int argc, char **argv) {
     }
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
+    }
+    if (gradePanel.visible()) {
+      renderer.beginOverlay();
+      const GradePanel::Changes changes = gradePanel.draw();
+      if (changes.grade) {
+        renderer.setGrade(gradePanel.grade());
+      }
+      if (changes.lighting) {
+        lighting.sunDirection = sunDirection(gradePanel.look().sunAzimuthDegrees,
+                                             gradePanel.look().sunElevationDegrees);
+        lighting.atmosphere = atmosphereFor(gradePanel.look().haze);
+      }
     }
     renderer.draw(camera, lighting, interactive ? deltaSeconds : kScriptedStep);
 

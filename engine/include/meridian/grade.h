@@ -2,7 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "meridian/math/vec3.h"
@@ -58,5 +61,16 @@ std::vector<std::array<float, 4>> bakeGradeLut(const Grade &grade);
 
 // The tonemap's lookup: inset, shaper, trilinear.
 Vec3 sampleGradeLut(std::span<const std::array<float, 4>> lut, Vec3 rec709);
+
+// The grade file: a flat, human-readable JSON object, one key per line, the
+// C++ field names (vectors as [r, g, b], bands as nested objects). Missing
+// or malformed keys keep the base's value, so a partial file is valid; other keys
+// (the game's sun and haze) are ignored here and read with the helpers below,
+// which look a top-level key up in a JSON object text.
+std::string gradeToJson(const Grade &grade);
+// Keys missing from `json` keep `base`'s values.
+Grade gradeFromJson(std::string_view json, const Grade &base = Grade{});
+std::optional<float> jsonNumber(std::string_view json, std::string_view key);
+std::optional<std::string> jsonString(std::string_view json, std::string_view key);
 
 } // namespace meridian
