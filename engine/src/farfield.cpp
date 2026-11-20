@@ -4,6 +4,7 @@
 #include <meridian/farfield.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -40,12 +41,42 @@ uint32_t voxelAt(const FarFieldCpu &field, uint32_t level, const BrickColumn &co
   if (k < 0 || k >= static_cast<int32_t>(columnBrickCount(column) * kBrickEdge)) {
     return 0;
   }
-  const size_t brick = column.firstBrick + static_cast<uint32_t>(k) / kBrickEdge;
+  const uint32_t brick = column.firstBrick + static_cast<uint32_t>(k) / kBrickEdge;
   const uint32_t local = (i & 3) + 4 * ((k & 3) + 4 * (j & 3));
-  return field.voxels[level][brick * kBrickVoxels + local];
+  return farBrickVoxel(field.voxels[level].data(), brick, local);
 }
 
 } // namespace
+
+uint32_t farBrickVoxel(const uint32_t *pool, uint32_t brick, uint32_t local) {
+  const uint32_t *header = pool + size_t{brick} * kBrickHeaderWords;
+  const uint32_t mask = header[local < 32 ? 0 : 1], bit = local & 31;
+  if (!(mask >> bit & 1)) {
+    return 0;
+  }
+  const uint32_t below = mask & ((1u << bit) - 1);
+  return pool[header[2] + (local < 32 ? 0 : static_cast<uint32_t>(std::popcount(header[0]))) +
+              static_cast<uint32_t>(std::popcount(below))];
+}
+
+std::vector<uint32_t> compactFarBricks(std::span<const uint32_t> dense) {
+  const size_t bricks = dense.size() / kBrickVoxels;
+  std::vector<uint32_t> pool(bricks * kBrickHeaderWords, 0);
+  for (size_t b = 0; b < bricks; ++b) {
+    uint32_t mask[2] = {0, 0};
+    const size_t first = pool.size();
+    for (uint32_t i = 0; i < kBrickVoxels; ++i) {
+      if (dense[b * kBrickVoxels + i] != 0) {
+        mask[i / 32] |= 1u << (i % 32);
+        pool.push_back(dense[b * kBrickVoxels + i]);
+      }
+    }
+    pool[b * kBrickHeaderWords] = mask[0];
+    pool[b * kBrickHeaderWords + 1] = mask[1];
+    pool[b * kBrickHeaderWords + 2] = static_cast<uint32_t>(first);
+  }
+  return pool;
+}
 
 uint32_t packVoxel(float extinction, Vec3 normal, uint8_t albedoIndex) {
   const float l1 = std::abs(normal.x) + std::abs(normal.y) + std::abs(normal.z);
@@ -179,13 +210,33 @@ std::vector<BrickColumn> farBrickColumns(std::span<const uint32_t> loHi, uint32_
     const uint32_t count = (hi - lo) / unitsPerBrick + 1;
     if (lo > 0xFFFF || count > 0xFFFF ||
         uint64_t{brickTotal} + count >
-            std::numeric_limits<uint32_t>::max() / (kBrickVoxels * kFarChannels)) {
+            std::numeric_limits<uint32_t>::max() / (kBrickVoxels + kBrickHeaderWords)) {
       throw std::runtime_error("far field column out of range");
     }
     columns[c] = makeBrickColumn(brickTotal, lo, count);
     brickTotal += count;
   }
   return columns;
+}
+
+std::vector<uint32_t> farSliceRows(std::span<const BrickColumn> columns, uint32_t level,
+                                   uint32_t cellsX, uint32_t cellsZ, uint64_t maxBricks) {
+  const size_t perRow = size_t{cellsX} * farColumnsPerCell(level) * farColumnsPerCell(level);
+  std::vector<uint32_t> rows = {0};
+  uint64_t bricks = 0;
+  for (uint32_t z = 0; z < cellsZ; ++z) {
+    uint64_t row = 0;
+    for (size_t c = z * perRow; c < (z + 1) * perRow; ++c) {
+      row += columnBrickCount(columns[c]);
+    }
+    if (bricks > 0 && bricks + row > maxBricks) {
+      rows.push_back(z);
+      bricks = 0;
+    }
+    bricks += row;
+  }
+  rows.push_back(cellsZ);
+  return rows;
 }
 
 float farFixedScale(float maxExtinction, float scaleMin, float scaleMax,
@@ -202,7 +253,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
                           std::span<const Vec3> palette, std::span<const DecodedInstance> instances,
                           const std::array<float, kFarLevels> &fixedScale,
                           std::array<double, kFarLevels> *extinctionSums,
-                          std::array<int64_t, kFarLevels> *largestSums) {
+                          std::array<int64_t, kFarLevels> *largestSums, uint32_t sliceRows) {
   FarFieldCpu field;
   field.origin = {grid.originX, grid.heightBase, grid.originZ};
   field.cellsX = grid.cellsX;
@@ -259,100 +310,130 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
       }
     }
 
-    // Accumulation: each template voxel's extinction (times scale^3, the
-    // density a scaled copy keeps) goes trilinearly to the 8 nearest world
-    // voxel centers, vertically on its column's own lattice.
-    // 64-bit here, so largestSums sees what the GPU's u32 sums would wrap;
-    // packing reads them as the GPU does.
-    std::vector<int64_t> acc(size_t{bricks} * kBrickVoxels * kFarChannels, 0);
-    for (const DecodedInstance &instance : instances) {
-      const FarTemplate *tmpl = levelTemplate(instance);
-      if (!tmpl) {
-        continue;
+    // Slices of cell rows: each accumulates and packs the bricks of its
+    // rows only (they are consecutive: bricks follow the columns' order),
+    // deposits outside the slice clipped. Integer sums are order
+    // independent, so the pool is the same for any slicing.
+    const size_t columnsPerRow = size_t{grid.cellsX} * n * n;
+    std::vector<uint32_t> rowFirstBrick(size_t{grid.cellsZ} + 1, 0);
+    for (uint32_t z = 0; z < grid.cellsZ; ++z) {
+      rowFirstBrick[z + 1] = rowFirstBrick[z];
+      for (size_t c = z * columnsPerRow; c < (z + 1) * columnsPerRow; ++c) {
+        rowFirstBrick[z + 1] += columnBrickCount(field.columns[level][c]);
       }
-      const float s = instance.scale;
-      for (const FarTemplateVoxel &tv : tmpl->voxels) {
-        const Vec3 p = rotateByQuaternion(instance.rotation, tv.center * s) + instance.position;
-        const float value = tv.extinction * (s * s * s);
-        const Vec3 normal = rotateByQuaternion(instance.rotation, tv.normal);
-        const Vec3 albedo = palette[tv.albedo];
-        const float fx = (p.x - grid.originX) * inverseV - 0.5f;
-        const float fz = (p.z - grid.originZ) * inverseV - 0.5f;
-        const float ix = std::floor(fx), iz = std::floor(fz);
-        const float wx = fx - ix, wz = fz - iz;
-        for (int32_t dz = 0; dz < 2; ++dz) {
-          for (int32_t dx = 0; dx < 2; ++dx) {
-            const float wh = (dx ? wx : 1.0f - wx) * (dz ? wz : 1.0f - wz);
-            const int32_t i = static_cast<int32_t>(ix) + dx, j = static_cast<int32_t>(iz) + dz;
-            if (wh <= 0.0f || i < 0 || j < 0 || i >= int32_t(columnsX * kBrickEdge) ||
-                j >= int32_t(columnsZ * kBrickEdge)) {
-              continue;
-            }
-            const BrickColumn &column =
-                field.columns[level][farColumnIndex(grid.cellsX, level, i / 4, j / 4)];
-            const float base = grid.heightBase + columnBaseHeight(column) * kFarHeightUnit;
-            const float fy = (p.y - base) * inverseV - 0.5f;
-            const float ky = std::floor(fy);
-            const float wy = fy - ky;
-            for (int32_t dy = 0; dy < 2; ++dy) {
-              const float m = value * (wh * (dy ? wy : 1.0f - wy));
-              const int32_t q = fixedPoint(m * scale);
-              const int32_t k = static_cast<int32_t>(ky) + dy;
-              if (q <= 0 || k < 0 || k >= int32_t(columnBrickCount(column) * kBrickEdge)) {
+    }
+    field.brickCount[level] = bricks;
+    field.voxels[level].assign(size_t{bricks} * kBrickHeaderWords, 0);
+    int64_t largest = 0;
+    double sum = 0.0;
+    for (uint32_t r0 = 0; r0 < grid.cellsZ; r0 += sliceRows ? sliceRows : grid.cellsZ) {
+      const uint32_t r1 = std::min(r0 + (sliceRows ? sliceRows : grid.cellsZ), grid.cellsZ);
+      const uint32_t b0 = rowFirstBrick[r0], b1 = rowFirstBrick[r1];
+      // Accumulation: each template voxel's extinction (times scale^3, the
+      // density a scaled copy keeps) goes trilinearly to the 8 nearest world
+      // voxel centers, vertically on its column's own lattice.
+      // 64-bit here, so largestSums sees what the GPU's u32 sums would wrap;
+      // packing reads them as the GPU does.
+      std::vector<int64_t> acc(size_t{b1 - b0} * kBrickVoxels * kFarChannels, 0);
+      for (const DecodedInstance &instance : instances) {
+        const FarTemplate *tmpl = levelTemplate(instance);
+        if (!tmpl) {
+          continue;
+        }
+        const float s = instance.scale;
+        for (const FarTemplateVoxel &tv : tmpl->voxels) {
+          const Vec3 p = rotateByQuaternion(instance.rotation, tv.center * s) + instance.position;
+          const float value = tv.extinction * (s * s * s);
+          const Vec3 normal = rotateByQuaternion(instance.rotation, tv.normal);
+          const Vec3 albedo = palette[tv.albedo];
+          const float fx = (p.x - grid.originX) * inverseV - 0.5f;
+          const float fz = (p.z - grid.originZ) * inverseV - 0.5f;
+          const float ix = std::floor(fx), iz = std::floor(fz);
+          const float wx = fx - ix, wz = fz - iz;
+          for (int32_t dz = 0; dz < 2; ++dz) {
+            for (int32_t dx = 0; dx < 2; ++dx) {
+              const float wh = (dx ? wx : 1.0f - wx) * (dz ? wz : 1.0f - wz);
+              const int32_t i = static_cast<int32_t>(ix) + dx, j = static_cast<int32_t>(iz) + dz;
+              if (wh <= 0.0f || i < 0 || j < 0 || i >= int32_t(columnsX * kBrickEdge) ||
+                  j >= int32_t(columnsZ * kBrickEdge)) {
                 continue;
               }
-              const size_t brick = column.firstBrick + k / 4;
-              const uint32_t local = (i & 3) + 4 * ((k & 3) + 4 * (j & 3));
-              int64_t *a = &acc[(brick * kBrickVoxels + local) * kFarChannels];
-              a[0] += q;
-              a[1] += fixedPoint(m * normal.x * scale);
-              a[2] += fixedPoint(m * normal.y * scale);
-              a[3] += fixedPoint(m * normal.z * scale);
-              a[4] += fixedPoint(m * albedo.x * scale);
-              a[5] += fixedPoint(m * albedo.y * scale);
-              a[6] += fixedPoint(m * albedo.z * scale);
+              const auto row = static_cast<uint32_t>(j) / (n * kBrickEdge);
+              if (row < r0 || row >= r1) {
+                continue;
+              }
+              const BrickColumn &column =
+                  field.columns[level][farColumnIndex(grid.cellsX, level, i / 4, j / 4)];
+              const float base = grid.heightBase + columnBaseHeight(column) * kFarHeightUnit;
+              const float fy = (p.y - base) * inverseV - 0.5f;
+              const float ky = std::floor(fy);
+              const float wy = fy - ky;
+              for (int32_t dy = 0; dy < 2; ++dy) {
+                const float m = value * (wh * (dy ? wy : 1.0f - wy));
+                const int32_t q = fixedPoint(m * scale);
+                const int32_t k = static_cast<int32_t>(ky) + dy;
+                if (q <= 0 || k < 0 || k >= int32_t(columnBrickCount(column) * kBrickEdge)) {
+                  continue;
+                }
+                const size_t brick = column.firstBrick + k / 4 - b0;
+                const uint32_t local = (i & 3) + 4 * ((k & 3) + 4 * (j & 3));
+                int64_t *a = &acc[(brick * kBrickVoxels + local) * kFarChannels];
+                a[0] += q;
+                a[1] += fixedPoint(m * normal.x * scale);
+                a[2] += fixedPoint(m * normal.y * scale);
+                a[3] += fixedPoint(m * normal.z * scale);
+                a[4] += fixedPoint(m * albedo.x * scale);
+                a[5] += fixedPoint(m * albedo.y * scale);
+                a[6] += fixedPoint(m * albedo.z * scale);
+              }
             }
           }
         }
       }
-    }
 
-    // Pack.
-    field.voxels[level].assign(size_t{bricks} * kBrickVoxels, 0);
-    if (largestSums) {
-      int64_t largest = 0;
+      // Pack.
       for (int64_t value : acc) {
         largest = std::max(largest, value < 0 ? -value : value);
       }
-      (*largestSums)[level] = largest;
-    }
-    double sum = 0.0;
-    for (size_t voxel = 0; voxel < field.voxels[level].size(); ++voxel) {
-      uint32_t a[kFarChannels];
-      for (uint32_t c = 0; c < kFarChannels; ++c) {
-        a[c] = static_cast<uint32_t>(acc[voxel * kFarChannels + c]);
-      }
-      if (a[0] == 0) {
-        continue;
-      }
-      sum += static_cast<double>(a[0]) / scale;
-      const float e = static_cast<float>(a[0]);
-      Vec3 normal{static_cast<float>(static_cast<int32_t>(a[1])),
-                  static_cast<float>(static_cast<int32_t>(a[2])),
-                  static_cast<float>(static_cast<int32_t>(a[3]))};
-      normal = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
-      const Vec3 albedo{static_cast<float>(a[4]) / e, static_cast<float>(a[5]) / e,
-                        static_cast<float>(a[6]) / e};
-      uint32_t best = 0;
-      float bestDistance = 1e30f;
-      for (uint32_t entry = 0; entry < palette.size(); ++entry) {
-        const Vec3 d = palette[entry] - albedo;
-        if (dot(d, d) < bestDistance) {
-          bestDistance = dot(d, d);
-          best = entry;
+      for (uint32_t brick = b0; brick < b1; ++brick) {
+        uint32_t mask[2] = {0, 0};
+        const size_t first = field.voxels[level].size();
+        for (uint32_t local = 0; local < kBrickVoxels; ++local) {
+          const size_t voxel = size_t{brick - b0} * kBrickVoxels + local;
+          uint32_t a[kFarChannels];
+          for (uint32_t c = 0; c < kFarChannels; ++c) {
+            a[c] = static_cast<uint32_t>(acc[voxel * kFarChannels + c]);
+          }
+          if (a[0] == 0) {
+            continue;
+          }
+          sum += static_cast<double>(a[0]) / scale;
+          const float e = static_cast<float>(a[0]);
+          Vec3 normal{static_cast<float>(static_cast<int32_t>(a[1])),
+                      static_cast<float>(static_cast<int32_t>(a[2])),
+                      static_cast<float>(static_cast<int32_t>(a[3]))};
+          normal = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
+          const Vec3 albedo{static_cast<float>(a[4]) / e, static_cast<float>(a[5]) / e,
+                            static_cast<float>(a[6]) / e};
+          uint32_t best = 0;
+          float bestDistance = 1e30f;
+          for (uint32_t entry = 0; entry < palette.size(); ++entry) {
+            const Vec3 d = palette[entry] - albedo;
+            if (dot(d, d) < bestDistance) {
+              bestDistance = dot(d, d);
+              best = entry;
+            }
+          }
+          mask[local / 32] |= 1u << (local % 32);
+          field.voxels[level].push_back(packVoxel(e / scale, normal, static_cast<uint8_t>(best)));
         }
+        field.voxels[level][size_t{brick} * kBrickHeaderWords] = mask[0];
+        field.voxels[level][size_t{brick} * kBrickHeaderWords + 1] = mask[1];
+        field.voxels[level][size_t{brick} * kBrickHeaderWords + 2] = static_cast<uint32_t>(first);
       }
-      field.voxels[level][voxel] = packVoxel(e / scale, normal, static_cast<uint8_t>(best));
+    }
+    if (largestSums) {
+      (*largestSums)[level] = largest;
     }
     if (extinctionSums) {
       (*extinctionSums)[level] = sum * v * v * v;

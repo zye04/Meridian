@@ -994,6 +994,24 @@ foliage that survives simplification).
   views; far shadows cost no more than the TLAS path; shadow pairs for
   the user; coverage of each prototype's voxels within 5% of its
   ray-traced full-detail BLAS.
+- **Compact bricks, sliced splat** (Task 9): a level's bricks are one u32
+  pool, a 3-word header per brick (64-bit occupancy mask, pool index of
+  the first occupied voxel), then the occupied voxels in brick order;
+  voxel i = `pool[firstVoxel + bitCount(mask & ((1 << i) - 1))]`
+  (`farBrickVoxel`). Bricks with no occupied voxel keep their slot with
+  mask 0 (12 B each) rather than leaving holes in the columns' brick runs:
+  11.9% of L0 slots, ~3 MB, against re-trimming columns. The splat runs
+  in slices of whole cell rows, each at most 1 GiB of accumulators
+  (`farSliceRows`); a slice reads only the instance rows within the
+  instances' reach, clips deposits to its rows, counts and scans the
+  occupied voxels (mask pass, CPU prefix of the masks, pack pass), and
+  keeps its voxels in a chunk copied into the level's pool at the end, so
+  the pool is bit-identical for any slicing. Measured (Release, 1440p,
+  `--trees --rr off`, 3.74M placed): resident 702 -> 394 MiB, load peak
+  3937 -> 1257 MiB (both gates pass), splat 238 -> 299 ms; far field pass
+  +0.1-0.4 ms (ridge 2.95 -> 3.32, high overview 10.87 -> 11.18, sunset
+  10.28 -> 11.22: the rank lookup's extra loads), which the far shadow map
+  and the far-cell raster address.
 - **Build on the player's hardware:** prototype templates come from ray
   queries against each prototype's full-detail BLAS (three-axis pass
   fractions calibrate extinction against what RT shadows trace). The

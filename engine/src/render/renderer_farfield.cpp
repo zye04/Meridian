@@ -12,6 +12,7 @@
 #include <meridian/placement.h>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -31,6 +32,10 @@ constexpr double kMiB = 1.0 / (1 << 20);
 // tree's lowest voxels can reach below its origin by half a voxel (8 m at
 // L2) plus its sink depth.
 constexpr float kFarBaseMargin = 32.0f;
+// A splat slice's accumulators stay within this many bytes.
+constexpr VkDeviceSize kFarSliceBytes = VkDeviceSize{1} << 30;
+constexpr uint64_t kFarSliceBricks =
+    kFarSliceBytes / (kBrickVoxels * kFarChannels * sizeof(uint32_t));
 
 // Dispatch dimensions for `groups` workgroups (x at most 65535).
 std::array<uint32_t, 2> groups2d(uint64_t groups) {
@@ -96,8 +101,10 @@ void checkFarField(const FarFieldGrid &grid, uint32_t ring,
             continue;
           }
           for (uint32_t i = 0; i < columnBrickCount(g) * kBrickVoxels; ++i) {
-            const uint32_t a = voxels[level][size_t{g.firstBrick} * kBrickVoxels + i];
-            const uint32_t b = cpu.voxels[level][size_t{c.firstBrick} * kBrickVoxels + i];
+            const uint32_t a =
+                farBrickVoxel(voxels[level], g.firstBrick + i / kBrickVoxels, i % kBrickVoxels);
+            const uint32_t b = farBrickVoxel(cpu.voxels[level].data(),
+                                             c.firstBrick + i / kBrickVoxels, i % kBrickVoxels);
             const auto byte = [](uint32_t v, uint32_t k) {
               return static_cast<int32_t>((v >> (8 * k)) & 0xFF);
             };
@@ -496,6 +503,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   VkPipeline occupancyPipeline = createComputePipeline(dev, "farfield_occupancy.comp", splatLayout);
   VkPipeline accumulatePipeline =
       createComputePipeline(dev, "farfield_accumulate.comp", splatLayout);
+  VkPipeline maskPipeline = createComputePipeline(dev, "farfield_mask.comp", splatLayout);
   VkPipeline packPipeline = createComputePipeline(dev, "farfield_pack.comp", splatLayout);
 
   FarSplatConstants constants;
@@ -510,13 +518,28 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   constants.cellsX = grid.cellsX;
   constants.cellsZ = grid.cellsZ;
   constants.paletteSize = paletteSize;
+  const auto layerCount = static_cast<uint32_t>(layers.size());
+  // Instances are in cell order, so a slice of cell rows needs only the
+  // rows within the instances' reach (one more row as margin).
+  const auto instancesFromRow = [&](uint32_t row) {
+    return offsets[size_t{std::min(row, grid.cellsZ)} * grid.cellsX * layerCount];
+  };
 
   std::array<std::vector<BrickColumn>, kFarLevels> columns;
-  std::array<uint32_t, kFarLevels> brickCounts{}, occupiedColumns{};
+  std::array<uint32_t, kFarLevels> brickCounts{}, occupiedColumns{}, sliceCounts{};
+  std::array<uint64_t, kFarLevels> poolWords{};
   std::array<double, kFarLevels> splatMs{};
   std::vector<float> cellBottom(cellCount, std::numeric_limits<float>::max());
   std::vector<float> cellTop(cellCount, -std::numeric_limits<float>::max());
   VkDeviceSize peakTransient = 0, peakAllocated = 0;
+  const auto samplePeak = [&](VkDeviceSize transient) {
+    peakTransient = std::max(peakTransient, transient);
+    VmaTotalStatistics stats;
+    vmaCalculateStatistics(allocator, &stats);
+    peakAllocated = std::max(peakAllocated, stats.total.statistics.blockBytes);
+  };
+  const VkDeviceSize fixedTransient =
+      templateBuffer.size + templateVoxelBuffer.size + cellData.size + readback.size;
   const auto *mapped = static_cast<const uint32_t *>(readback.mapped);
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     const auto start = Clock::now();
@@ -551,6 +574,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     });
     check(vmaInvalidateAllocation(allocator, readback.allocation, 0, VK_WHOLE_SIZE),
           "vmaInvalidateAllocation");
+    destroyBuffer(occupancy);
     std::vector<uint32_t> loHi(columnCount * 2);
     for (size_t c = 0; c < columnCount; ++c) {
       loHi[2 * c] = mapped[2 * c];
@@ -562,58 +586,175 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
         cellTop[cell] = std::max(cellTop[cell], grid.heightBase + loHi[2 * c + 1] * kFarHeightUnit);
       }
     }
-    uint32_t &bricks = brickCounts[level];
-    columns[level] = farBrickColumns(loHi, level, bricks);
+    uint32_t &brickTotal = brickCounts[level];
+    columns[level] = farBrickColumns(loHi, level, brickTotal);
     for (const BrickColumn &column : columns[level]) {
       occupiedColumns[level] += columnBrickCount(column) > 0 ? 1 : 0;
     }
-    const VkDeviceSize accumulatorBytes =
-        VkDeviceSize{bricks} * kBrickVoxels * kFarChannels * sizeof(uint32_t);
-    if (accumulatorBytes > maxBufferSize) {
-      throw std::runtime_error("far field accumulators exceed the largest buffer");
-    }
     farColumns[level] =
         uploadStorage(columns[level].data(), columns[level].size() * sizeof(BrickColumn));
-    farVoxels[level] = createBuffer(
-        std::max<VkDeviceSize>(VkDeviceSize{bricks} * kBrickVoxels * sizeof(uint32_t), 4), kUsage,
-        0);
-    Buffer accumulators = createBuffer(std::max<VkDeviceSize>(accumulatorBytes, 4), kUsage, 0);
-    peakTransient =
-        std::max(peakTransient, occupancyBytes + accumulators.size + templateBuffer.size +
-                                    templateVoxelBuffer.size + cellData.size);
-    VmaTotalStatistics stats;
-    vmaCalculateStatistics(allocator, &stats);
-    peakAllocated = std::max(peakAllocated, stats.total.statistics.blockBytes);
+
+    // Slices of cell rows, each with its own accumulators.
+    const std::vector<uint32_t> rows =
+        farSliceRows(columns[level], level, grid.cellsX, grid.cellsZ, kFarSliceBricks);
+    const size_t columnsPerRow = size_t{grid.cellsX} * n * n;
+    std::vector<uint32_t> sliceBricks(rows.size() - 1, 0);
+    uint32_t maxSliceBricks = 0;
+    for (size_t sl = 0; sl + 1 < rows.size(); ++sl) {
+      for (size_t c = rows[sl] * columnsPerRow; c < rows[sl + 1] * columnsPerRow; ++c) {
+        sliceBricks[sl] += columnBrickCount(columns[level][c]);
+      }
+      maxSliceBricks = std::max(maxSliceBricks, sliceBricks[sl]);
+    }
+    sliceCounts[level] = static_cast<uint32_t>(sliceBricks.size());
+    const VkDeviceSize maxAccumulatorBytes =
+        VkDeviceSize{maxSliceBricks} * kBrickVoxels * kFarChannels * sizeof(uint32_t);
+    if (maxAccumulatorBytes > maxBufferSize ||
+        VkDeviceSize{maxSliceBricks} * kBrickVoxels * kFarChannels > UINT32_MAX) {
+      throw std::runtime_error("far field accumulators exceed the largest buffer");
+    }
+    Buffer accumulators = createBuffer(std::max<VkDeviceSize>(maxAccumulatorBytes, 4), kUsage, 0);
+    Buffer headers = createBuffer(
+        std::max<VkDeviceSize>(VkDeviceSize{maxSliceBricks} * sizeof(BrickHeader), 4), kUsage,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    auto *headerWords = static_cast<uint32_t *>(headers.mapped);
     constants.columns = farColumns[level].address;
     constants.accumulators = accumulators.address;
-    constants.voxels = farVoxels[level].address;
-    submitNow([&](VkCommandBuffer cmd) {
-      vkCmdFillBuffer(cmd, accumulators.buffer, 0, VK_WHOLE_SIZE, 0);
-      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulatePipeline);
-      vkCmdPushConstants(cmd, splatLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
-                         &constants);
-      const auto instanceGroups = groups2d(placedCount);
-      vkCmdDispatch(cmd, instanceGroups[0], instanceGroups[1], 1);
-      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-      FarSplatConstants pack = constants;
-      pack.count = bricks * kBrickVoxels;
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, packPipeline);
-      vkCmdPushConstants(cmd, splatLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pack), &pack);
-      const auto brickGroups = groups2d(bricks); // one workgroup per brick
-      vkCmdDispatch(cmd, brickGroups[0], brickGroups[1], 1);
-      memoryBarrier(
-          cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-          VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
-    });
+    constants.headers = headers.address;
+
+    // The level's headers (firstVoxel absolute in the pool) and, per slice,
+    // its occupied voxels.
+    std::vector<uint32_t> poolHeaders(size_t{brickTotal} * kBrickHeaderWords, 0);
+    std::vector<Buffer> chunks;
+    std::vector<uint64_t> chunkWords;
+    uint64_t voxelTotal = 0;
+    uint32_t firstBrick = 0;
+    VkDeviceSize chunkBytes = 0;
+    for (size_t sl = 0; sl + 1 < rows.size(); ++sl) {
+      const uint32_t count = sliceBricks[sl];
+      if (count == 0) {
+        continue;
+      }
+      constants.firstBrick = firstBrick;
+      constants.rowBegin = rows[sl];
+      constants.rowEnd = rows[sl + 1];
+      const uint32_t rowA = rows[sl] > ring + 1 ? rows[sl] - ring - 1 : 0;
+      const uint32_t firstInstance = instancesFromRow(rowA);
+      const uint32_t instanceCount = instancesFromRow(rows[sl + 1] + ring + 1) - firstInstance;
+      FarSplatConstants accumulate = constants;
+      accumulate.placed =
+          placedInstances.address + VkDeviceSize{firstInstance} * sizeof(PlacedInstance);
+      accumulate.count = instanceCount;
+      FarSplatConstants perBrick = constants;
+      perBrick.count = count;
+      samplePeak(fixedTransient + accumulators.size + headers.size + chunkBytes);
+      submitNow([&](VkCommandBuffer cmd) {
+        vkCmdFillBuffer(cmd, accumulators.buffer, 0,
+                        VkDeviceSize{count} * kBrickVoxels * kFarChannels * sizeof(uint32_t), 0);
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        if (instanceCount > 0) {
+          vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulatePipeline);
+          vkCmdPushConstants(cmd, splatLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(accumulate),
+                             &accumulate);
+          const auto instanceGroups = groups2d(instanceCount);
+          vkCmdDispatch(cmd, instanceGroups[0], instanceGroups[1], 1);
+          memoryBarrier(
+              cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        }
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, maskPipeline);
+        vkCmdPushConstants(cmd, splatLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(perBrick),
+                           &perBrick);
+        const auto brickGroups = groups2d(count); // one workgroup per brick
+        vkCmdDispatch(cmd, brickGroups[0], brickGroups[1], 1);
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                      VK_ACCESS_2_HOST_READ_BIT);
+      });
+      check(vmaInvalidateAllocation(allocator, headers.allocation, 0, VK_WHOLE_SIZE),
+            "vmaInvalidateAllocation");
+      // Scan the occupied counts: firstVoxel relative to this slice's voxels
+      // for the pack, absolute (after every header) in the level's pool.
+      uint32_t sliceVoxels = 0;
+      for (uint32_t b = 0; b < count; ++b) {
+        const uint32_t lo = headerWords[b * kBrickHeaderWords];
+        const uint32_t hi = headerWords[b * kBrickHeaderWords + 1];
+        uint32_t *out = &poolHeaders[size_t{firstBrick + b} * kBrickHeaderWords];
+        out[0] = lo;
+        out[1] = hi;
+        out[2] = static_cast<uint32_t>(size_t{brickTotal} * kBrickHeaderWords + voxelTotal +
+                                       sliceVoxels);
+        headerWords[b * kBrickHeaderWords + 2] = sliceVoxels;
+        sliceVoxels += static_cast<uint32_t>(std::popcount(lo) + std::popcount(hi));
+      }
+      check(vmaFlushAllocation(allocator, headers.allocation, 0, VK_WHOLE_SIZE),
+            "vmaFlushAllocation");
+      if (sliceVoxels > 0) {
+        Buffer chunk = createBuffer(VkDeviceSize{sliceVoxels} * sizeof(uint32_t), kUsage, 0);
+        perBrick.voxels = chunk.address;
+        submitNow([&](VkCommandBuffer cmd) {
+          vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, packPipeline);
+          vkCmdPushConstants(cmd, splatLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(perBrick),
+                             &perBrick);
+          const auto brickGroups = groups2d(count);
+          vkCmdDispatch(cmd, brickGroups[0], brickGroups[1], 1);
+          memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                        VK_ACCESS_2_TRANSFER_READ_BIT);
+        });
+        chunkBytes += chunk.size;
+        chunks.push_back(chunk);
+        chunkWords.push_back(sliceVoxels);
+      }
+      voxelTotal += sliceVoxels;
+      firstBrick += count;
+    }
     destroyBuffer(accumulators);
-    destroyBuffer(occupancy);
+    destroyBuffer(headers);
+
+    // The pool: every header, then the slices' voxels in order.
+    poolWords[level] = size_t{brickTotal} * kBrickHeaderWords + voxelTotal;
+    if (poolWords[level] > UINT32_MAX || poolWords[level] * sizeof(uint32_t) > maxBufferSize) {
+      throw std::runtime_error("far field bricks exceed the largest buffer");
+    }
+    farVoxels[level] =
+        createBuffer(std::max<VkDeviceSize>(poolWords[level] * sizeof(uint32_t), 4), kUsage, 0);
+    Buffer headerUpload;
+    if (brickTotal > 0) {
+      headerUpload = createBuffer(poolHeaders.size() * sizeof(uint32_t),
+                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                  VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                      VMA_ALLOCATION_CREATE_MAPPED_BIT);
+      std::memcpy(headerUpload.mapped, poolHeaders.data(), headerUpload.size);
+      check(vmaFlushAllocation(allocator, headerUpload.allocation, 0, VK_WHOLE_SIZE),
+            "vmaFlushAllocation");
+    }
+    samplePeak(fixedTransient + chunkBytes + headerUpload.size);
+    submitNow([&](VkCommandBuffer cmd) {
+      if (brickTotal > 0) {
+        const VkBufferCopy copy{0, 0, poolHeaders.size() * sizeof(uint32_t)};
+        vkCmdCopyBuffer(cmd, headerUpload.buffer, farVoxels[level].buffer, 1, &copy);
+      }
+      VkDeviceSize at = poolHeaders.size() * sizeof(uint32_t);
+      for (size_t i = 0; i < chunks.size(); ++i) {
+        const VkBufferCopy copy{0, at, chunkWords[i] * sizeof(uint32_t)};
+        vkCmdCopyBuffer(cmd, chunks[i].buffer, farVoxels[level].buffer, 1, &copy);
+        at += copy.size;
+      }
+      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    });
+    for (Buffer &chunk : chunks) {
+      destroyBuffer(chunk);
+    }
+    if (brickTotal > 0) {
+      destroyBuffer(headerUpload);
+    }
     splatMs[level] = msSince(start);
   }
 
@@ -627,7 +768,6 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   check(vmaInvalidateAllocation(allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");
   const uint32_t lostDeposits = mapped[cellCount];
-  const auto layerCount = static_cast<uint32_t>(layers.size());
   std::vector<FarCell> farCellData(cellCount);
   uint32_t treeCells = 0;
   for (uint32_t c = 0; c < cellCount; ++c) {
@@ -644,6 +784,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   destroyBuffer(cellData);
   vkDestroyPipeline(dev, occupancyPipeline, nullptr);
   vkDestroyPipeline(dev, accumulatePipeline, nullptr);
+  vkDestroyPipeline(dev, maskPipeline, nullptr);
   vkDestroyPipeline(dev, packPipeline, nullptr);
   vkDestroyPipelineLayout(dev, splatLayout, nullptr);
   farCells = uploadStorage(farCellData.data(), farCellData.size() * sizeof(FarCell));
@@ -699,18 +840,24 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   }
   peakTransient = std::max(peakTransient, bakeTlasBytes);
   const double splatTotal = splatMs[0] + splatMs[1] + splatMs[2];
-  std::printf("Far field: bricks L0/L1/L2 %u/%u/%u in %u/%u/%u columns, %u cells with "
-              "trees; resident %.0f MiB "
-              "(voxels %.0f/%.0f/%.0f, columns %.0f/%.0f/%.0f); peak transient %.0f "
+  const auto voxelsIn = [&](uint32_t level) {
+    return static_cast<unsigned long long>(poolWords[level] -
+                                           uint64_t{brickCounts[level]} * kBrickHeaderWords);
+  };
+  std::printf("Far field: bricks L0/L1/L2 %u/%u/%u (occupied voxels %llu/%llu/%llu) in "
+              "%u/%u/%u columns, %u cells with trees, splat slices %u/%u/%u; resident "
+              "%.0f MiB "
+              "(bricks %.0f/%.0f/%.0f, columns %.0f/%.0f/%.0f); peak transient %.0f "
               "MiB, "
               "device memory allocated at peak %.0f MiB; bake %.0f ms, splat %.0f ms "
               "(L0/L1/L2 %.0f/%.0f/%.0f), total %.0f ms; %u lost deposits\n",
-              brickCounts[0], brickCounts[1], brickCounts[2], occupiedColumns[0],
-              occupiedColumns[1], occupiedColumns[2], treeCells, resident * kMiB,
-              farVoxels[0].size * kMiB, farVoxels[1].size * kMiB, farVoxels[2].size * kMiB,
-              farColumns[0].size * kMiB, farColumns[1].size * kMiB, farColumns[2].size * kMiB,
-              peakTransient * kMiB, peakAllocated * kMiB, bakeMs, splatTotal, splatMs[0],
-              splatMs[1], splatMs[2], msSince(loadStart), lostDeposits);
+              brickCounts[0], brickCounts[1], brickCounts[2], voxelsIn(0), voxelsIn(1), voxelsIn(2),
+              occupiedColumns[0], occupiedColumns[1], occupiedColumns[2], treeCells, sliceCounts[0],
+              sliceCounts[1], sliceCounts[2], resident * kMiB, farVoxels[0].size * kMiB,
+              farVoxels[1].size * kMiB, farVoxels[2].size * kMiB, farColumns[0].size * kMiB,
+              farColumns[1].size * kMiB, farColumns[2].size * kMiB, peakTransient * kMiB,
+              peakAllocated * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
+              msSince(loadStart), lostDeposits);
 
   destroyBuffer(templateBuffer);
   destroyBuffer(templateVoxelBuffer);
@@ -758,10 +905,9 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     for (uint32_t level = 0; level < kFarLevels; ++level) {
       uint64_t empty = 0, occupied = 0;
       for (uint32_t brick = 0; brick < brickCounts[level]; ++brick) {
-        uint32_t count = 0;
-        for (uint32_t v = 0; v < kBrickVoxels; ++v) {
-          count += voxels[level][size_t{brick} * kBrickVoxels + v] != 0 ? 1 : 0;
-        }
+        const uint32_t *header = voxels[level] + size_t{brick} * kBrickHeaderWords;
+        const auto count =
+            static_cast<uint32_t>(std::popcount(header[0]) + std::popcount(header[1]));
         empty += count == 0 ? 1 : 0;
         occupied += count;
       }
@@ -783,8 +929,8 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     cpu.heightBase = grid.heightBase;
     for (uint32_t level = 0; level < kFarLevels; ++level) {
       cpu.columns[level] = columns[level];
-      cpu.voxels[level].assign(voxels[level],
-                               voxels[level] + size_t{brickCounts[level]} * kBrickVoxels);
+      cpu.voxels[level].assign(voxels[level], voxels[level] + poolWords[level]);
+      cpu.brickCount[level] = brickCounts[level];
     }
     destroyBuffer(check);
     const std::vector<std::array<float, 8>> rays = farCheckRays(grid, farCellData);
@@ -820,7 +966,8 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       largest = std::max(largest, std::abs(gpu[i] - expected));
       partial += expected > 1e-3f && expected < 0.999f ? 1 : 0;
     }
-    std::printf("far field ray check: %u rays (%u partly transmitted) compared with the CPU "
+    std::printf("far field ray check: %u rays (%u partly transmitted) compared "
+                "with the CPU "
                 "replica, max difference %.2g\n",
                 rayCount, partial, largest);
     vkDestroyPipeline(dev, checkPipeline, nullptr);

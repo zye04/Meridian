@@ -5,7 +5,7 @@
 #include "farfield.glsl"
 
 // The far-field splat at load, one level at a time (renderer_farfield.cpp),
-// in three variants that mirror splatFarField in farfield.cpp operation for
+// in four variants that mirror splatFarField in farfield.cpp operation for
 // operation (precise: no fused multiply-adds the CPU doesn't do):
 // FARFIELD_OCCUPANCY (one thread per placed instance, 2D dispatch): each column an
 //   instance's template can reach takes the min of the instances' low
@@ -15,7 +15,14 @@
 // FARFIELD_ACCUMULATE (one workgroup per placed instance): every template
 //   voxel goes trilinearly into the 8 nearest voxels of the allocated
 //   bricks, as fixed-point sums (order-independent).
-// FARFIELD_PACK (one thread per voxel): the sums to a packed voxel.
+//   Each slice of placement cell rows (rowBegin, rowEnd) is accumulated and
+//   packed on its own: deposits to other rows are skipped, accumulator
+//   bricks count from firstBrick.
+// FARFIELD_MASK (one workgroup per brick of the slice): the occupancy mask
+//   (extinction sum non-zero) into the brick's header.
+// FARFIELD_PACK (one workgroup per brick, a thread per voxel): the occupied
+//   voxels' sums to packed voxels at their rank in the brick (the CPU
+//   wrote each header's firstVoxel, relative to the slice's voxels).
 
 layout(local_size_x = 64) in;
 
@@ -36,6 +43,8 @@ layout(push_constant) uniform FarSplatConstants {
     // Per cell: the tallest tree's height (float bits); then the deposits
     // that missed their column (must stay 0).
     UintBuffer cellData;
+    // Mask, pack: per brick (maskLo, maskHi, firstVoxel).
+    UintBuffer headers;
     float originX;
     float originZ;
     float heightBase;
@@ -43,9 +52,12 @@ layout(push_constant) uniform FarSplatConstants {
     uint cellsX;
     uint cellsZ;
     uint level;
-    // Placed instances (occupancy, accumulate) or voxels (pack).
+    // Placed instances (occupancy, accumulate) or bricks (mask, pack).
     uint count;
     uint paletteSize;
+    uint firstBrick;
+    uint rowBegin;
+    uint rowEnd;
 } pc;
 
 vec3 rotated(vec4 q, vec3 v) {
@@ -148,6 +160,10 @@ void main() {
                 if (wh <= 0.0 || i < 0 || j < 0 || i >= voxelsXZ.x || j >= voxelsXZ.y) {
                     continue;
                 }
+                if (uint(j) / (farColumnsPerCell(pc.level) * kBrickEdge) < pc.rowBegin ||
+                    uint(j) / (farColumnsPerCell(pc.level) * kBrickEdge) >= pc.rowEnd) {
+                    continue;
+                }
                 uvec2 column = pc.columns.columns[farColumnIndex(pc.cellsX, pc.level,
                                                                  uint(i) / 4u, uint(j) / 4u)];
                 precise float base = pc.heightBase + float(columnBaseHeight(column)) *
@@ -166,7 +182,7 @@ void main() {
                         atomicAdd(pc.cellData.values[pc.cellsX * pc.cellsZ], 1u);
                         continue;
                     }
-                    uint brick = column.x + uint(k) / 4u;
+                    uint brick = column.x + uint(k) / 4u - pc.firstBrick;
                     uint a = (brick * kBrickVoxels + brickVoxelIndex(uint(i), uint(k), uint(j))) *
                              kFarChannels;
                     atomicAdd(pc.accumulators.values[a], uint(quantized));
@@ -189,18 +205,47 @@ void main() {
 }
 #endif
 
+#ifdef FARFIELD_MASK
+shared uint sharedMask[2];
+
+void main() {
+    uint brick = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    if (brick >= pc.count) {
+        return;
+    }
+    uint i = gl_LocalInvocationID.x;
+    if (i < 2u) {
+        sharedMask[i] = 0u;
+    }
+    memoryBarrierShared();
+    barrier();
+    if (pc.accumulators.values[(brick * kBrickVoxels + i) * kFarChannels] != 0u) {
+        atomicOr(sharedMask[i >> 5u], 1u << (i & 31u));
+    }
+    memoryBarrierShared();
+    barrier();
+    if (i < 2u) {
+        pc.headers.values[brick * kBrickHeaderWords + i] = sharedMask[i];
+    }
+}
+#endif
+
 #ifdef FARFIELD_PACK
 void main() {
-    uint index = gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u) + gl_GlobalInvocationID.x;
-    if (index >= pc.count) {
+    uint brick = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    if (brick >= pc.count) {
         return;
     }
-    uint a = index * kFarChannels;
+    uint i = gl_LocalInvocationID.x;
+    uint a = (brick * kBrickVoxels + i) * kFarChannels;
     uint extinction = pc.accumulators.values[a];
     if (extinction == 0u) {
-        pc.voxels.voxels[index] = 0u;
         return;
     }
+    uint header = brick * kBrickHeaderWords;
+    uint maskLo = pc.headers.values[header], maskHi = pc.headers.values[header + 1u];
+    uint rank = i < 32u ? bitCount(maskLo & ((1u << i) - 1u))
+                        : bitCount(maskLo) + bitCount(maskHi & ((1u << (i - 32u)) - 1u));
     float e = float(extinction);
     vec3 normal = vec3(int(pc.accumulators.values[a + 1u]), int(pc.accumulators.values[a + 2u]),
                        int(pc.accumulators.values[a + 3u]));
@@ -216,6 +261,7 @@ void main() {
             best = entry;
         }
     }
-    pc.voxels.voxels[index] = packVoxel(e / pc.fixedScale, normal, best);
+    pc.voxels.voxels[pc.headers.values[header + 2u] + rank] =
+        packVoxel(e / pc.fixedScale, normal, best);
 }
 #endif

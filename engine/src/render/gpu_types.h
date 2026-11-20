@@ -804,6 +804,7 @@ struct FarSplatConstants {
   VkDeviceAddress voxels = 0;
   VkDeviceAddress palette = 0;
   VkDeviceAddress cellData = 0;
+  VkDeviceAddress headers = 0;
   float originX = 0.0f;
   float originZ = 0.0f;
   float heightBase = 0.0f;
@@ -813,9 +814,11 @@ struct FarSplatConstants {
   uint32_t level = 0;
   uint32_t count = 0;
   uint32_t paletteSize = 0;
-  uint32_t pad = 0;
+  uint32_t firstBrick = 0;
+  uint32_t rowBegin = 0;
+  uint32_t rowEnd = 0;
 };
-static_assert(sizeof(FarSplatConstants) == 104);
+static_assert(sizeof(FarSplatConstants) == 120);
 
 // Must match the push constants in farfield_check.comp (Debug).
 struct FarCheckConstants {

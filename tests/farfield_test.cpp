@@ -70,8 +70,11 @@ double templateSum(const FarTemplate &tmpl, float voxelSize) {
 double packedSum(const FarFieldCpu &field, uint32_t level) {
   double sum = 0.0;
   const double volume = std::pow(double{field.voxelSize[level]}, 3.0);
-  for (uint32_t v : field.voxels[level]) {
-    sum += unpackVoxel(v).extinction * volume;
+  for (uint32_t i = 0; i < field.brickCount[level] * kBrickVoxels; ++i) {
+    sum +=
+        unpackVoxel(farBrickVoxel(field.voxels[level].data(), i / kBrickVoxels, i % kBrickVoxels))
+            .extinction *
+        volume;
   }
   return sum;
 }
@@ -337,4 +340,89 @@ TEST_CASE("farFieldTransmittanceCpu matches a brute-force march") {
   const std::vector<uint8_t> all(size_t{grid.cellsX} * grid.cellsZ, 1);
   CHECK(farFieldTransmittanceCpu(field, rays[0].origin, rays[0].direction, 0.0f, 1270.0f, &all) ==
         1.0f);
+}
+
+TEST_CASE("Compact bricks return the dense brick's voxels") {
+  // Randomized fill: empty, full, and in between, on both mask halves.
+  const uint32_t fills[] = {0, 64, 1, 63, 20, 32, 33, 5, 50, 0, 64, 31};
+  std::vector<uint32_t> dense;
+  uint32_t seed = 7;
+  for (uint32_t fill : fills) {
+    const size_t first = dense.size();
+    dense.resize(first + kBrickVoxels, 0);
+    for (uint32_t placed = 0; placed < fill;) {
+      const uint32_t i = static_cast<uint32_t>(hash01(seed++) * kBrickVoxels);
+      if (dense[first + i] == 0) {
+        dense[first + i] = 1 + static_cast<uint32_t>(hash01(seed++) * 4e9f);
+        ++placed;
+      }
+    }
+  }
+  const std::vector<uint32_t> pool = compactFarBricks(dense);
+  const uint32_t bricks = static_cast<uint32_t>(dense.size() / kBrickVoxels);
+  uint32_t occupied = 0;
+  for (uint32_t b = 0; b < bricks; ++b) {
+    for (uint32_t i = 0; i < kBrickVoxels; ++i) {
+      CAPTURE(b);
+      CAPTURE(i);
+      CHECK(farBrickVoxel(pool.data(), b, i) == dense[size_t{b} * kBrickVoxels + i]);
+      occupied += dense[size_t{b} * kBrickVoxels + i] != 0 ? 1 : 0;
+    }
+  }
+  CHECK(pool.size() == size_t{bricks} * kBrickHeaderWords + occupied);
+}
+
+TEST_CASE("The sliced splat equals the unsliced splat bit for bit") {
+  const FarTemplates tree = filterFarTemplate(treeGrid());
+  const std::array<float, kFarLevels> scales = productionScales(tree);
+  // Crowns overlapping each other and the cell-row boundaries (z = 64, 128).
+  std::vector<DecodedInstance> stand;
+  for (uint32_t i = 0; i < 400; ++i) {
+    stand.push_back(instanceAt({10.0f + 200.0f * hash01(4 * i), 300.0f + 3.0f * hash01(4 * i + 3),
+                                10.0f + 200.0f * hash01(4 * i + 1)},
+                               {0, 1, 0}, 6.283f * hash01(4 * i + 3), 0.8f + 0.5f * hash01(i)));
+  }
+  for (const float z : {63.0f, 64.0f, 127.5f}) {
+    stand.push_back(instanceAt({100.0f, 301.0f, z}, {0, 1, 0}, 0.3f, 1.2f));
+  }
+  const FarFieldGrid grid{0.0f, 0.0f, 250.0f, 4, 4};
+  std::array<double, kFarLevels> sums{};
+  std::array<int64_t, kFarLevels> largest{};
+  const FarFieldCpu whole =
+      splatFarField(grid, {&tree, 1}, kPalette, stand, scales, &sums, &largest);
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    CHECK(whole.brickCount[level] > 0);
+  }
+  for (const uint32_t rows : {1u, 2u, 3u}) {
+    std::array<double, kFarLevels> slicedSums{};
+    std::array<int64_t, kFarLevels> slicedLargest{};
+    const FarFieldCpu sliced =
+        splatFarField(grid, {&tree, 1}, kPalette, stand, scales, &slicedSums, &slicedLargest, rows);
+    for (uint32_t level = 0; level < kFarLevels; ++level) {
+      CAPTURE(rows);
+      CAPTURE(level);
+      CHECK(sliced.voxels[level] == whole.voxels[level]);
+      CHECK(sliced.brickCount[level] == whole.brickCount[level]);
+      CHECK(slicedSums[level] == sums[level]);
+      CHECK(slicedLargest[level] == largest[level]);
+      for (size_t c = 0; c < whole.columns[level].size(); ++c) {
+        CHECK(sliced.columns[level][c].firstBrick == whole.columns[level][c].firstBrick);
+        CHECK(sliced.columns[level][c].heightAndCount == whole.columns[level][c].heightAndCount);
+      }
+    }
+  }
+}
+
+TEST_CASE("Slice rows keep each slice within the brick budget") {
+  // Level 2: one column per cell; rows of 3 cells with 2, 5, 1, 9 bricks.
+  std::vector<BrickColumn> columns;
+  for (const uint32_t bricks : {2u, 5u, 1u, 9u}) {
+    for (uint32_t x = 0; x < 3; ++x) {
+      columns.push_back(makeBrickColumn(0, 0, x == 0 ? bricks : 0));
+    }
+  }
+  CHECK(farSliceRows(columns, 2, 3, 4, 100) == std::vector<uint32_t>{0, 4});
+  CHECK(farSliceRows(columns, 2, 3, 4, 7) == std::vector<uint32_t>{0, 2, 3, 4});
+  // A row over the budget is its own slice.
+  CHECK(farSliceRows(columns, 2, 3, 4, 4) == std::vector<uint32_t>{0, 1, 2, 3, 4});
 }

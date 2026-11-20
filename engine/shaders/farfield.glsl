@@ -54,9 +54,13 @@ uint brickVoxelIndex(uint x, uint k, uint z) {
     return (x & 3u) + 4u * ((k & 3u) + 4u * (z & 3u));
 }
 
+// A level's brick pool: a header per brick (maskLo, maskHi, firstVoxel), then
+// the occupied voxels. Must match BrickHeader and farBrickVoxel in farfield.h.
 layout(buffer_reference, std430) buffer FarVoxelBuffer {
     uint voxels[];
 };
+
+const uint kBrickHeaderWords = 3u;
 
 // Must match FarCell in gpu_types.h.
 struct FarCell {
@@ -101,6 +105,22 @@ struct FarField {
 layout(buffer_reference, std430) readonly buffer FarFieldBuffer {
     FarField field;
 };
+
+// Voxel `local` (brickVoxelIndex) of a brick; 0 where unoccupied.
+uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) {
+    uint header = brick * kBrickHeaderWords;
+    uint upper = local >> 5u;
+    uint mask = farField.field.voxels[level].voxels[header + upper];
+    uint bit = local & 31u;
+    if (((mask >> bit) & 1u) == 0u) {
+        return 0u;
+    }
+    uint rank = bitCount(mask & ((1u << bit) - 1u));
+    if (upper != 0u) {
+        rank += bitCount(farField.field.voxels[level].voxels[header]);
+    }
+    return farField.field.voxels[level].voxels[farField.field.voxels[level].voxels[header + 2u] + rank];
+}
 
 // The far switch (cell_cull.comp): a cell draws its voxels instead of its
 // trees once its tallest tree projects under kFarSwitchPixels, at the
@@ -223,9 +243,9 @@ float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
         if (a < b) {
             float layerEnd = (base + float(k + max(stepY, 0)) * v - origin.y) * inverseY;
             float end = min(layerEnd, b);
-            uint packed = farField.field.voxels[level].voxels[
-                (firstBrick + uint(k) / kBrickEdge) * kBrickVoxels +
-                brickVoxelIndex(uint(voxel.x), uint(k), uint(voxel.y))];
+            uint packed = farBrickVoxel(farField, level,
+                                        firstBrick + uint(k) / kBrickEdge,
+                                        brickVoxelIndex(uint(voxel.x), uint(k), uint(voxel.y)));
             float extinction = voxelExtinction(packed);
             float segment = extinction * max(end - a, 0.0);
             if (opticalDepth + segment >= limit) {

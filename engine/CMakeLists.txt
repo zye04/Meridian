@@ -121,6 +121,7 @@ add_shader(bloom.comp bloom_composite.comp BLOOM_COMPOSITE)
 add_shader(farfield_bake.comp farfield_bake.comp)
 add_shader(farfield_splat.comp farfield_occupancy.comp FARFIELD_OCCUPANCY)
 add_shader(farfield_splat.comp farfield_accumulate.comp FARFIELD_ACCUMULATE)
+add_shader(farfield_splat.comp farfield_mask.comp FARFIELD_MASK)
 add_shader(farfield_splat.comp farfield_pack.comp FARFIELD_PACK)
 add_shader(farfield_check.comp farfield_check.comp)
 

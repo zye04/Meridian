@@ -63,11 +63,28 @@ constexpr BrickColumn makeBrickColumn(uint32_t firstBrick, uint32_t baseHeight,
 constexpr uint32_t columnBaseHeight(BrickColumn column) { return column.heightAndCount & 0xFFFF; }
 constexpr uint32_t columnBrickCount(BrickColumn column) { return column.heightAndCount >> 16; }
 
+// A level's bricks are compact: one pool of u32, first a BrickHeader per
+// brick (kBrickHeaderWords each, in brick order), then the occupied (non-zero)
+// voxels of every brick in index order. maskLo / maskHi: bit i of the 64
+// voxel indices is set where the voxel is occupied; firstVoxel: the pool
+// index of the brick's first occupied voxel. Voxel i of brick b is
+// pool[firstVoxel + bitCount(mask & ((1 << i) - 1))] if its bit is set, else
+// 0 (farBrickVoxel). Must match the pool reads in farfield.glsl.
+struct BrickHeader {
+  uint32_t maskLo, maskHi, firstVoxel;
+};
+static_assert(sizeof(BrickHeader) == 12);
+constexpr uint32_t kBrickHeaderWords = 3;
+uint32_t farBrickVoxel(const uint32_t *pool, uint32_t brick, uint32_t local);
+// The pool of dense bricks (kBrickVoxels voxels each).
+std::vector<uint32_t> compactFarBricks(std::span<const uint32_t> dense);
+
 // The far field over the placement grid. columns[level]: cell-major (cells
 // row-major from the north-west, like the Cell table), then the cell's
-// columns row-major. voxels[level]: kBrickVoxels per brick. cellTop and
-// cellBottom: the canopy's extent per cell over all levels (bottom > top
-// when empty). origin: the grid's north-west corner at heightBase.
+// columns row-major. voxels[level]: the level's brick pool, brickCount[level]
+// bricks. cellTop and cellBottom: the canopy's extent per cell over all
+// levels (bottom > top when empty). origin: the grid's north-west corner at
+// heightBase.
 struct FarFieldCpu {
   Vec3 origin;
   uint32_t cellsX = 0, cellsZ = 0;
@@ -75,6 +92,7 @@ struct FarFieldCpu {
   float voxelSize[kFarLevels] = {kFarVoxelSize[0], kFarVoxelSize[1], kFarVoxelSize[2]};
   std::vector<BrickColumn> columns[kFarLevels];
   std::vector<uint32_t> voxels[kFarLevels];
+  uint32_t brickCount[kFarLevels] = {};
   std::vector<float> cellTop, cellBottom;
 };
 
@@ -132,6 +150,12 @@ FarFootprint farFootprint(const FarFieldGrid &grid, uint32_t level, const FarTem
 // to columns with consecutive bricks; adds their bricks to brickTotal.
 std::vector<BrickColumn> farBrickColumns(std::span<const uint32_t> loHi, uint32_t level,
                                          uint32_t &brickTotal);
+// The splat runs in slices of placement cell rows [rows[i], rows[i + 1]) so
+// one slice's accumulators (kBrickVoxels x kFarChannels u32 per brick) stay
+// within maxBricks bricks (a single row over it is its own slice). Returns
+// the boundaries, 0 and columns.size() / columns per row at the ends.
+std::vector<uint32_t> farSliceRows(std::span<const BrickColumn> columns, uint32_t level,
+                                   uint32_t cellsX, uint32_t cellsZ, uint64_t maxBricks);
 // Accumulation is fixed point (order-independent): 7 u32 per voxel
 // (extinction, normal xyz, albedo rgb, each times extinction). The scale
 // (units per 1/m) keeps the worst case below 2^31: instancesPerVoxel
@@ -144,12 +168,14 @@ float farFixedScale(float maxExtinction, float scaleMin, float scaleMax,
 // far field). If given, per level: extinctionSums, the accumulated
 // extinction times voxel volume before packing; largestSums, the largest
 // |accumulator| of any channel, summed without wrapping (the GPU's u32 sums
-// are only valid below 2^31).
+// are only valid below 2^31). sliceRows: cell rows per slice (0: one
+// slice); the result is identical for every value.
 FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates> templates,
                           std::span<const Vec3> palette, std::span<const DecodedInstance> instances,
                           const std::array<float, kFarLevels> &fixedScale,
                           std::array<double, kFarLevels> *extinctionSums = nullptr,
-                          std::array<int64_t, kFarLevels> *largestSums = nullptr);
+                          std::array<int64_t, kFarLevels> *largestSums = nullptr,
+                          uint32_t sliceRows = 0);
 
 // Extinction (1/m) at a world position, at one level; 0 outside the bricks.
 float farFieldExtinction(const FarFieldCpu &field, uint32_t level, Vec3 position);
