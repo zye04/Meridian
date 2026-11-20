@@ -1,0 +1,110 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+
+// Screen-space contact shadows for the sun, after the scene passes, when
+// the whole frame's depth exists. The scene pass wrote each pixel's sun
+// radiance separately; where a short march toward the sun hits the depth
+// buffer, the occluded part of that radiance is subtracted from the HDR
+// colour (ambient stays).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthImage;
+layout(set = 0, binding = 1) uniform sampler2D sunLightImage;
+layout(set = 0, binding = 2, rgba16f) uniform image2D hdrImage;
+
+// Must match ContactShadowConstants in C++.
+layout(push_constant) uniform ContactShadowConstants {
+    SceneBuffer scene;
+    ivec2 size;
+} pc;
+
+const int kSteps = 16;
+// Ray length (m) grows with distance: pixels are coarser there.
+const float kRayLengthPerMeter = 0.03;
+const float kMinRayLength = 0.25;
+const float kMaxRayLength = 1.5;
+// An occluder counts when the scene is in front of the sample by more than
+// the bias (self-shadowing from depth quantisation) and less than the
+// thickness (so distant foreground doesn't shadow what is behind it).
+const float kBias = 0.01;
+const float kBiasPerMeter = 0.002;
+const float kThickness = 0.3;
+const float kThicknessPerMeter = 0.01;
+const float kFadeStart = 40.0;
+const float kFadeEnd = 60.0;
+
+// Distance along the view axis for a reverse-Z, infinite-far depth.
+float viewDistance(float depth) {
+    return pc.scene.nearPlane / depth;
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, pc.size))) {
+        return;
+    }
+    float depth = texelFetch(depthImage, pixel, 0).r;
+    vec3 sunLight = texelFetch(sunLightImage, pixel, 0).rgb;
+    if (depth == 0.0 || max(sunLight.r, max(sunLight.g, sunLight.b)) == 0.0) {
+        return;
+    }
+    float distance = viewDistance(depth);
+    float fade = 1.0 - clamp((distance - kFadeStart) / (kFadeEnd - kFadeStart), 0.0, 1.0);
+    if (fade == 0.0) {
+        return;
+    }
+
+    mat4 inverseViewProjection = inverse(pc.scene.viewProjection);
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(pc.size);
+    vec4 world = inverseViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec3 start = world.xyz / world.w;
+
+    float jitter;
+    if (pc.scene.whiteNoise != 0u) {
+        jitter = float(pcg3d(uvec3(uvec2(pixel), pc.scene.frameIndex)).z >> 8u) *
+                 (1.0 / 16777216.0);
+    } else {
+        // Offset from the sun-disk sample's noise in mesh.frag.
+        jitter = interleavedGradientNoise(vec2(pixel) + vec2(47.0, 13.0), pc.scene.frameIndex);
+    }
+
+    float rayLength = clamp(kRayLengthPerMeter * distance, kMinRayLength, kMaxRayLength);
+    // A grazing surface changes depth by more than the bias across one
+    // pixel; the march compares against texel centres, so add that slope.
+    float slope = max(abs(viewDistance(texelFetch(depthImage, min(pixel + ivec2(1, 0), pc.size - 1), 0).r) - distance),
+                      abs(viewDistance(texelFetch(depthImage, min(pixel + ivec2(0, 1), pc.size - 1), 0).r) - distance));
+    float bias = kBias + kBiasPerMeter * distance + min(slope, kThickness);
+    float thickness = kThickness + kThicknessPerMeter * distance;
+    bool occluded = false;
+    for (int i = 0; i < kSteps && !occluded; ++i) {
+        float t = (float(i) + jitter) / float(kSteps) * rayLength;
+        vec3 position = start + pc.scene.sunDirection * t;
+        vec4 clip = pc.scene.viewProjection * vec4(position, 1.0);
+        if (clip.w <= 0.0) {
+            break;
+        }
+        vec2 sampleUv = clip.xy / clip.w * 0.5 + 0.5;
+        if (any(lessThan(sampleUv, vec2(0.0))) || any(greaterThanEqual(sampleUv, vec2(1.0)))) {
+            break;
+        }
+        ivec2 sampleTexel = ivec2(sampleUv * vec2(pc.size));
+        if (sampleTexel == pixel) {
+            continue;
+        }
+        float sceneDepth = texelFetch(depthImage, sampleTexel, 0).r;
+        float sampleDistance = clip.w;
+        float sceneDistance = sceneDepth == 0.0 ? 1e30 : viewDistance(sceneDepth);
+        float gap = sampleDistance - sceneDistance;
+        occluded = gap > bias && gap < thickness;
+    }
+    if (!occluded) {
+        return;
+    }
+
+    vec4 color = imageLoad(hdrImage, pixel);
+    color.rgb = max(color.rgb - sunLight * fade, vec3(0.0));
+    imageStore(hdrImage, pixel, color);
+}

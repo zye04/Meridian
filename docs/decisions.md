@@ -1744,6 +1744,36 @@ restores the previous behaviour exactly (2645325 instances, hash
   view, `--sun 0.9 0.25 -0.4`: 10.4/255 mean darker, 9-19% in sRGB per
   band; normalised, 4.8/255 with crevice detail kept, contact shadows
   included). Ambient AO keeps the raw value. Meshes keep the raw AO.
+- **Contact shadows**: a compute pass (`contact_shadows.comp`) after the late
+  scene pass and before the upscaler. Shading is forward: when a fragment
+  shades, the depth buffer is incomplete (early-pass objects shade before
+  the late ones), and last frame's reprojected depth would lag and ghost
+  and needs a depth copy. With the complete depth the pass marches 16 steps
+  toward the sun over `clamp(0.03 d, 0.25, 1.5)` m (d the view distance),
+  start jittered per pixel (IGN, or pcg3d white noise under Ray
+  Reconstruction, as the sun sample), in displayed space (the curvature
+  warp is negligible over 1.5 m). A sample is occluded when the scene is in
+  front of it by more than `0.01 + 0.002 d` m plus the depth step to the
+  next pixel (a grazing surface's own slope) and less than
+  `0.3 + 0.01 d` m; the effect fades from 1 at 40 m to 0 at 60 m. Binary
+  per pixel per frame; the upscaler accumulates the jitter. To remove
+  exactly the sun, the scene pass writes each pixel's exposed sun radiance
+  (after haze and the RT, terrain and micro shadows, so the result is
+  multiplicative with them) into an RGBA16F attachment (8 B/pixel;
+  B10G11R11 rounds up by up to 1.6% and would remove more sun than the
+  pixel got, tinting the shadow), and the pass subtracts the occluded part from the HDR colour, ambient
+  untouched. Limits: screen-space only (off-screen or hidden occluders are
+  invisible); the thickness is a heuristic; only geometry that writes depth
+  casts (blended surfaces don't cast; one in front scales the sun behind it
+  by its transmittance in the attachment, blend ZERO / ONE_MINUS_SRC_ALPHA,
+  so glass doesn't darken; the POM terrain's relief
+  doesn't cast, as POM writes no pixel depth offset; its own sun march
+  self-shadows it); normal-map relief is the micro shadows' job.
+  Sources: Bend Studio, "Screen Space Shadows" (Graham Aldridge, SIGGRAPH
+  2023 Advances, open source),
+  https://www.bendstudio.com/blog/inside-bend-screen-space-shadows/; Unreal
+  Engine contact shadows,
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/contact-shadows-in-unreal-engine
 
 ## Terrain parallax occlusion mapping (2026-11-20)
 

@@ -72,7 +72,8 @@ void Renderer::Impl::createSwapchain() {
   createDepthPyramid();
   hdr = createRenderImage(kHdrFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_USAGE_SAMPLED_BIT |
+                        VK_IMAGE_USAGE_STORAGE_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT);
   motion = createRenderImage(kMotionFormat,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
@@ -82,6 +83,25 @@ void Renderer::Impl::createSwapchain() {
                                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                            VK_IMAGE_USAGE_SAMPLED_BIT,
                                        VK_IMAGE_ASPECT_COLOR_BIT);
+  sunLight = createRenderImage(kSunLightFormat,
+                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                   VK_IMAGE_USAGE_SAMPLED_BIT,
+                               VK_IMAGE_ASPECT_COLOR_BIT);
+  const VkDescriptorImageInfo contactInfos[3] = {
+      {nearestSampler, depth.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {nearestSampler, sunLight.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {VK_NULL_HANDLE, hdr.view, VK_IMAGE_LAYOUT_GENERAL}};
+  VkWriteDescriptorSet contactWrites[3]{};
+  for (uint32_t b = 0; b < 3; ++b) {
+    contactWrites[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    contactWrites[b].dstSet = contactSet;
+    contactWrites[b].dstBinding = b;
+    contactWrites[b].descriptorCount = 1;
+    contactWrites[b].descriptorType = b < 2 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                            : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    contactWrites[b].pImageInfo = &contactInfos[b];
+  }
+  vkUpdateDescriptorSets(device.device, 3, contactWrites, 0, nullptr);
   // DLSS clears the output when its history resets (TRANSFER_DST).
   output = createDisplayImage(kHdrFormat,
                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -325,6 +345,7 @@ void Renderer::Impl::destroySwapchain() {
   destroyImage(specularAlbedo);
   destroyImage(diffuseAlbedo);
   destroyImage(output);
+  destroyImage(sunLight);
   destroyImage(transparencyMask);
   destroyImage(motion);
   destroyImage(hdr);
@@ -514,14 +535,25 @@ void Renderer::Impl::createDescriptors() {
   check(vkCreateDescriptorSetLayout(dev, &pyramidLayoutInfo, nullptr, &cullSetLayout),
         "vkCreateDescriptorSetLayout");
 
-  // One set per pyramid level, plus the culling pass's.
+  VkDescriptorSetLayoutBinding contactBindings[3]{};
+  for (uint32_t b = 0; b < 3; ++b) {
+    contactBindings[b] = pyramidBindings[b == 2 ? 1 : 0];
+    contactBindings[b].binding = b;
+  }
+  pyramidLayoutInfo.bindingCount = 3;
+  pyramidLayoutInfo.pBindings = contactBindings;
+  check(vkCreateDescriptorSetLayout(dev, &pyramidLayoutInfo, nullptr,
+                                    &contactSetLayout),
+        "vkCreateDescriptorSetLayout");
+
+  // One set per pyramid level, plus the culling pass's and contact shadows'.
   VkDescriptorPoolSize pyramidPoolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPyramidLevels + 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kMaxPyramidLevels},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxPyramidLevels + 3},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kMaxPyramidLevels + 1},
   };
   VkDescriptorPoolCreateInfo pyramidPoolInfo{};
   pyramidPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pyramidPoolInfo.maxSets = kMaxPyramidLevels + 1;
+  pyramidPoolInfo.maxSets = kMaxPyramidLevels + 2;
   pyramidPoolInfo.poolSizeCount = 2;
   pyramidPoolInfo.pPoolSizes = pyramidPoolSizes;
   check(vkCreateDescriptorPool(dev, &pyramidPoolInfo, nullptr, &pyramidPool),
@@ -538,6 +570,9 @@ void Renderer::Impl::createDescriptors() {
   pyramidAlloc.descriptorSetCount = 1;
   pyramidAlloc.pSetLayouts = &cullSetLayout;
   check(vkAllocateDescriptorSets(dev, &pyramidAlloc, &cullSet),
+        "vkAllocateDescriptorSets");
+  pyramidAlloc.pSetLayouts = &contactSetLayout;
+  check(vkAllocateDescriptorSets(dev, &pyramidAlloc, &contactSet),
         "vkAllocateDescriptorSets");
 
   // Must match post.glsl.
@@ -931,7 +966,8 @@ void Renderer::Impl::createPipelines() {
 
   const VkFormat sceneFormats[] = {kHdrFormat,    kMotionFormat,
                                    kTransparencyMaskFormat, kAlbedoFormat,
-                                   kAlbedoFormat, kNormalRoughnessFormat};
+                                   kAlbedoFormat, kNormalRoughnessFormat,
+                                   kSunLightFormat};
   // Opaque and masked geometry is drawn as culled clusters (mesh shader),
   // blended geometry as whole meshes from the CPU (vertex shader).
   PipelineDesc meshDesc{.meshShader = "mesh.mesh",
@@ -1018,6 +1054,18 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &pyramidLayoutInfo, nullptr, &pyramidLayout),
         "vkCreatePipelineLayout");
   pyramidPipeline = createComputePipeline(dev, "depth_pyramid.comp", pyramidLayout);
+
+  VkPushConstantRange contactPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                       sizeof(ContactShadowConstants)};
+  VkPipelineLayoutCreateInfo contactLayoutInfo{};
+  contactLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  contactLayoutInfo.setLayoutCount = 1;
+  contactLayoutInfo.pSetLayouts = &contactSetLayout;
+  contactLayoutInfo.pushConstantRangeCount = 1;
+  contactLayoutInfo.pPushConstantRanges = &contactPushRange;
+  check(vkCreatePipelineLayout(dev, &contactLayoutInfo, nullptr, &contactLayout),
+        "vkCreatePipelineLayout");
+  contactPipeline = createComputePipeline(dev, "contact_shadows.comp", contactLayout);
   histogramPipeline =
       createComputePipeline(dev, "histogram.comp", postLayout);
   exposurePipeline = createComputePipeline(dev, "exposure.comp", postLayout);
@@ -1313,6 +1361,8 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->bloomCompositePipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->bloomLayout, nullptr);
   vkDestroyPipeline(dev, impl_->histogramPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->contactPipeline, nullptr);
+  vkDestroyPipelineLayout(dev, impl_->contactLayout, nullptr);
   vkDestroyPipeline(dev, impl_->pyramidPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->pyramidLayout, nullptr);
   vkDestroyPipeline(dev, impl_->cellCullPipeline, nullptr);
@@ -1372,6 +1422,7 @@ Renderer::~Renderer() {
   vkDestroyDescriptorPool(dev, impl_->pyramidPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->pyramidSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->cullSetLayout, nullptr);
+  vkDestroyDescriptorSetLayout(dev, impl_->contactSetLayout, nullptr);
   vkDestroySampler(dev, impl_->minSampler, nullptr);
   vkDestroyDescriptorPool(dev, impl_->descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->atmosphereSetLayout, nullptr);

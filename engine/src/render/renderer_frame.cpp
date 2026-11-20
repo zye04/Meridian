@@ -826,12 +826,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // The HDR and depth images are shared by both frames in flight, so each
   // barrier also waits for the previous frame's use of the image.
   const bool guides = impl_->diffuseAlbedo.image != VK_NULL_HANDLE;
-  std::array<VkImage, 6> colorTargets = {
-      impl_->hdr.image,           impl_->motion.image,
-      impl_->transparencyMask.image, impl_->diffuseAlbedo.image,
-      impl_->specularAlbedo.image, impl_->normalRoughness.image};
-  const size_t colorTargetCount = guides ? colorTargets.size() : 3;
-  for (VkImage target : std::span(colorTargets.data(), colorTargetCount)) {
+  std::vector<VkImage> colorTargets = {
+      impl_->hdr.image, impl_->motion.image, impl_->transparencyMask.image,
+      impl_->sunLight.image};
+  if (guides) {
+    colorTargets.insert(colorTargets.end(),
+                        {impl_->diffuseAlbedo.image, impl_->specularAlbedo.image,
+                         impl_->normalRoughness.image});
+  }
+  for (VkImage target : colorTargets) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -888,6 +891,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   maskAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   maskAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
+  VkRenderingAttachmentInfo sunLightAttachment{};
+  sunLightAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  sunLightAttachment.imageView = impl_->sunLight.view;
+  sunLightAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  sunLightAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  sunLightAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
   // A null view discards the writes when the upscaler wants no guides.
   auto guideAttachment = [&](const Image &image) {
     VkRenderingAttachmentInfo attachment{};
@@ -904,7 +914,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
       maskAttachment,
       guideAttachment(impl_->diffuseAlbedo),
       guideAttachment(impl_->specularAlbedo),
-      guideAttachment(impl_->normalRoughness)};
+      guideAttachment(impl_->normalRoughness),
+      sunLightAttachment};
   sceneRendering.colorAttachmentCount = std::size(sceneAttachments);
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
@@ -1010,9 +1021,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdEndRendering(cmd);
   endPass("scene late");
 
-  // --- Upscaler: render-sized scene -> display-sized output.
+  // --- Contact shadows: the full depth exists now; subtract the sun's
+  // radiance where a short march toward the sun hits it.
 
-  for (VkImage target : std::span(colorTargets.data(), colorTargetCount)) {
+  for (VkImage target : colorTargets) {
+    if (target == impl_->hdr.image) {
+      continue;
+    }
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1021,12 +1036,40 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
   }
+  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, kDepthStages,
                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  ContactShadowConstants contactPush;
+  contactPush.sceneBuffer = scenePush.sceneBuffer;
+  contactPush.size[0] = static_cast<int32_t>(renderExtent.width);
+  contactPush.size[1] = static_cast<int32_t>(renderExtent.height);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactPipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, impl_->contactLayout,
+                          0, 1, &impl_->contactSet, 0, nullptr);
+  vkCmdPushConstants(cmd, impl_->contactLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                     sizeof(contactPush), &contactPush);
+  vkCmdDispatch(cmd, (renderExtent.width + 7) / 8, (renderExtent.height + 7) / 8, 1);
+  transitionImage(cmd, {impl_->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+  endPass("contact shadows");
+
+  // --- Upscaler: render-sized scene -> display-sized output.
 
   // The output is shared by both frames in flight: the previous frame's
   // upscaler must be done writing it, and its histogram, tonemap and capture

@@ -63,6 +63,8 @@ struct Renderer::Impl {
   Image hdr;
   Image motion;
   Image transparencyMask;
+  // Scene attachment 6: the sun radiance already in hdr (contact shadows).
+  Image sunLight;
   // Only created when the upscaler wants guides (Ray Reconstruction).
   Image diffuseAlbedo;
   Image specularAlbedo;
@@ -145,6 +147,12 @@ struct Renderer::Impl {
   VkDescriptorSetLayout cullSetLayout = VK_NULL_HANDLE;
   // The depth pyramid, sampled through minSampler.
   VkDescriptorSet cullSet = VK_NULL_HANDLE;
+  // Contact shadows: set 0 = depth, sun light, HDR (storage); rewritten
+  // with the swapchain's images.
+  VkDescriptorSetLayout contactSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSet contactSet = VK_NULL_HANDLE;
+  VkPipelineLayout contactLayout = VK_NULL_HANDLE;
+  VkPipeline contactPipeline = VK_NULL_HANDLE;
   // Blended instances sorted back to front each frame (reused storage).
   std::vector<std::pair<float, uint32_t>> blendedDraws;
 

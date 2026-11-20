@@ -136,7 +136,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, cull cells, cull early, traverse, cull clusters, atmosphere, scene early, pyramid, cull late, scene late, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -268,6 +268,8 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            (PLACEMENT_COUNT / PLACEMENT_WRITE variants)
                            and scan.comp (exclusive scan) run at load;
                            tlas_fill.comp writes the placed TLAS records.
+                           contact_shadows.comp: screen-space sun
+                           shadows after the late scene pass.
                            cell_cull.comp: placement cells -> instance
                            chunks for cull.comp -> BVH seeds for
                            cluster_traverse.comp -> work items for
@@ -317,7 +319,8 @@ single/double-sided) -> atmosphere LUTs
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
 Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
-world normal + roughness; null views unless the upscaler wants them) + D32 depth
+world normal + roughness; null views unless the upscaler wants them) + RGBA16F sun light (the
+sun's exposed radiance, for contact shadows) + D32 depth
 (sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
@@ -330,7 +333,12 @@ the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
 buffer) ->
 late scene pass (load; late lists, then blended instances CPU-sorted back
-to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
+to front, mesh.vert) -> contact shadows (contact_shadows.comp: with the
+complete depth, a 16-step march toward the sun over 0.25-1.5 m; where it
+hits the depth buffer, the pixel's exposed sun radiance (scene attachment
+6, written by mesh.frag: the sun branch after haze, pre-exposed; 0 for sky
+and blended surfaces) is subtracted from the HDR colour, so ambient stays;
+faded out between 40 and 60 m) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask (and the guides
 when `wantsGuides()`) in SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
@@ -434,7 +442,7 @@ barriers account for that.
   so don't switch that sampler to mirrored; and its RG16_SNORM normal map with a mirrored-repeat sampler); post layout set 0 = upscaler output
   (`resolved`), grade LUT sampled and as storage (one set); TaaUpscaler
   set 0 = HDR, motion, history read/write, output (two ping-pong sets,
-  shared by taa.comp and sharpen.comp); pyramid layout set 0 = source + destination level (one
+  shared by taa.comp and sharpen.comp); contact shadows layout set 0 = depth, sun light, HDR (storage); pyramid layout set 0 = source + destination level (one
   set per level); cull layout set 0 = depth pyramid (min sampler).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0

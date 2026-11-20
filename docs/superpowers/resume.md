@@ -54,6 +54,12 @@ item 3 below is what brings them back.
 5. Performance overlay: done (F3, F4 CSV, `--benchmark`; same entry).
 6. Frame pacing (backlog row).
 
+Shadows lane (done 2026-11-20): micro shadows from material AO on the
+direct sun (terrain AO relative to each layer's mean) and screen-space
+contact shadows in a compute pass after the late scene pass (decisions.md
+"Micro and contact shadows"); next for it: the backlog row (soft penumbra,
+wavefront march, terrain terminator).
+
 Bloom lane (done 2026-11-20): sun glare as an energy-conserving
 multi-scale bloom (decisions.md "Sun glare"); next for it: two sliders in
 the grading panel once the overlay is on main (backlog row).

@@ -36,6 +36,11 @@ layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 #endif
+// The sun's exposed radiance in outColor (after haze, pre-exposed): the
+// contact shadow pass removes the occluded part of it. A blended surface
+// scales what is behind it by its transmittance (alpha) and adds none of
+// its own, so glass never darkens.
+layout(location = 6) out vec4 outSunLight;
 
 const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
@@ -50,25 +55,6 @@ const float kMinPerceptualRoughness = 0.045;
 vec3 worldPosition;
 
 // ---------------------------------------------------------------- Shadows
-
-// Interleaved gradient noise (Jimenez 2014), shifted every frame so the
-// temporal resolve averages successive samples.
-float interleavedGradientNoise(vec2 pixel, uint frame) {
-    pixel += 5.588238 * float(frame % 64u);
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
-}
-
-uvec3 pcg3d(uvec3 v) {
-    v = v * 1664525u + 1013904223u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    v ^= v >> 16u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    return v;
-}
 
 // Picks a direction inside the sun's disk. One ray per pixel per frame;
 // accumulated over frames this gives penumbrae that widen with distance from
@@ -954,6 +940,7 @@ void main() {
     // its diffuse with alpha but keeps its full reflection.
     vec3 diffuseLight = vec3(0.0);
     vec3 specularLight = vec3(0.0);
+    vec3 sunRadiance = vec3(0.0);
     float NoL = clamp(dot(N, L), 0.0, 1.0);
 #ifdef TERRAIN
     // A coarse LOD triangle can face away from the sun where the
@@ -980,6 +967,7 @@ void main() {
                                         s.sunShadow);
         diffuseLight = diffuseColor / kPi * sunLight;
         specularLight = specular * sunLight;
+        sunRadiance = diffuseLight + specularLight;
     }
 #ifndef TERRAIN
     bool leaf = material.diffuseTransmission > 0.0;
@@ -1037,6 +1025,7 @@ void main() {
     vec4 haze = textureLod(aerialPerspectiveLut,
                            vec3(gl_FragCoord.xy * pc.scene.inverseResolution, w), 0.0);
     luminance = luminance * mix(1.0, haze.a, weight) + haze.rgb * (weight * coverage);
+    sunRadiance *= mix(1.0, haze.a, weight);
 
     // Emissive is already in physical units (cd/m^2), not relative to the sun.
     vec3 exposed = luminance * pc.scene.sunIlluminance + s.emissive;
@@ -1047,9 +1036,11 @@ void main() {
     outMotion = previousUv - currentUv;
 #ifdef ALPHA_BLEND
     outTransparency = coverage;
+    outSunLight = vec4(0.0, 0.0, 0.0, coverage);
 #else
     outDiffuseAlbedo = vec4(diffuseColor, 1.0);
     outSpecularAlbedo = vec4(mix(dfg.xxx, dfg.yyy, f0), 1.0);
     outNormalRoughness = vec4(N, perceptualRoughness);
+    outSunLight = vec4(sunRadiance * pc.scene.sunIlluminance * pc.scene.exposure.exposure, 1.0);
 #endif
 }

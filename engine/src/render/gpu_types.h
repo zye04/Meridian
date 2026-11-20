@@ -33,6 +33,10 @@ constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 // Screen-space motion vectors for temporal anti-aliasing (and later DLSS).
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 constexpr VkFormat kTransparencyMaskFormat = VK_FORMAT_R8_UNORM;
+// The sun's exposed radiance per pixel, for the contact shadow pass.
+// RGBA16F, not B10G11R11: rounding up in the packed format would remove
+// more sun than the pixel got and tint the contact shadow.
+constexpr VkFormat kSunLightFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 // Ray Reconstruction guides: diffuse and specular albedo, world normal +
 // perceptual roughness.
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -554,6 +558,13 @@ struct ScanConstants {
   uint32_t pad = 0;
 };
 static_assert(sizeof(ScanConstants) == 16);
+
+// Must match ContactShadowConstants in contact_shadows.comp.
+struct ContactShadowConstants {
+  VkDeviceAddress sceneBuffer = 0;
+  int32_t size[2] = {};
+};
+static_assert(sizeof(ContactShadowConstants) == 16);
 
 // Must match depth_pyramid.comp.
 struct PyramidConstants {

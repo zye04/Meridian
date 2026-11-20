@@ -10,6 +10,7 @@ layout(location = 1) out vec2 outMotion;
 layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
+layout(location = 6) out vec4 outSunLight;
 
 // Keeps the sun disk inside FP16 range after pre-exposure.
 const float kMaxExposedLuminance = 60000.0;
@@ -45,5 +46,6 @@ void main() {
     outDiffuseAlbedo = vec4(0.5, 0.5, 0.5, 1.0);
     outSpecularAlbedo = vec4(0.0);
     outNormalRoughness = vec4(0.0);
+    outSunLight = vec4(0.0);
     outMotion = (previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5;
 }

@@ -182,6 +182,20 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
       mask.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
       mask.alphaBlendOp = VK_BLEND_OP_MAX;
     }
+    // Attachment 6, the sun light: the surface behind shows through by
+    // (1 - coverage), and so does its sun.
+    if (blendAttachments.size() > 6) {
+      VkPipelineColorBlendAttachmentState &sun = blendAttachments[6];
+      sun.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                           VK_COLOR_COMPONENT_B_BIT;
+      sun.blendEnable = VK_TRUE;
+      sun.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+      sun.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      sun.colorBlendOp = VK_BLEND_OP_ADD;
+      sun.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+      sun.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      sun.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
   } else if (blendAttachments.size() > 2) {
     blendAttachments[2].colorWriteMask = 0;
   }
