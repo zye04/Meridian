@@ -40,7 +40,7 @@ cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
 ctest --test-dir build                           # or ./build/tests/tests
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
-python3 -I tools/image-gates.py ratio motion.png still.png   # laplacian|ratio|shimmer|ssim|diff
+python3 -I tools/image-gates.py laplacian motion.png   # laplacian|ratio|shimmer|ssim|diff
 tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate table, GPU passes
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
@@ -71,9 +71,10 @@ A `.pfm` capture path writes the linear HDR image the tonemap reads
 Motion sharpness: add `--camera-velocity X Y Z` (m/s) and/or
 `--camera-angular-velocity YAW PITCH` (rad/s), fixed 1/60 s steps ending at
 `--camera`, and compare with the still capture of the same view:
-`python3 -I tools/image-gates.py ratio motion.png still.png` (Laplacian
-std ratio; also `laplacian`, `shimmer`, `ssim`, `diff`). The whole motion
-gate set runs with `tools/motion-gates.sh BUILD OUT [game args]`
+`python3 -I tools/image-gates.py laplacian motion.png` (Laplacian std:
+the gate is the motion frame's absolute sharpness, minimums anchored to
+TAA v2; `ratio` is the informational motion/still column; also
+`shimmer`, `ssim`, `diff`). The whole motion gate set runs with `tools/motion-gates.sh BUILD OUT [game args]`
 (`GPU_RUNS=5` adds per-pass GPU medians).
 
 `--haze clean|summer|summer-hazy` picks the aerosol (default summer:
@@ -81,17 +82,17 @@ Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
-`--aa taa|dlss` picks the upscaler: TAA (default) or DLSS (falls back to
-TAA with the log line `DLSS unavailable: <reason>; using TAA` when NGX
-reports no Super Resolution). `--rr on|off` (default off: it fails
-the motion gates, decisions.md) picks Ray Reconstruction under DLSS
+`--aa dlss|taa` picks the upscaler: DLSS (default; falls back to TAA
+with the log line `DLSS unavailable: <reason>; using TAA` when NGX
+reports no Super Resolution). `--rr on|off` (default on: RR removes the
+ray-traced shadow shimmer, decisions.md) picks Ray Reconstruction under DLSS
 (preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super
-Resolution with `DLSS Ray Reconstruction unavailable; using Super
+Resolution DLAA with `DLSS Ray Reconstruction unavailable; using Super
 Resolution`). `--dlss-mode dlaa|quality|balanced|performance` (default
-quality under RR, dlaa otherwise) and `--dlss-preset E|F|J|K|L|M` (Super
+dlaa; RR DLAA is ~4.7 ms at 1440p) and `--dlss-preset E|F|J|K|L|M` (Super
 Resolution only; default: M for DLAA, Quality and Balanced, NGX's own
 for Performance, `defaultPreset` in dlss.cpp; A/B override) set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
-at the display size times S for TAA; DLSS picks its own render size.
+at the display size times S for TAA (`--aa taa`); DLSS picks its own render size.
 Startup prints `Render WxH, display WxH, jitter phases N, mip bias B,
 DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
 310.9.16, Super Resolution ..., Ray Reconstruction ... (preset F)`.

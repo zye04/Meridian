@@ -111,13 +111,14 @@ assets themselves. Order:
   Status line has the next steps). On main: gate tools, grading (CPU
   reference + GPU LUT bake), render/display split, transparency mask,
   Upscaler interface, TAA v2 (forward 5 m/s 0.94, 0.17 ms at 1440p).
-  DLSS module (Task 1.3) on main: TAA v2 stays the default, DLSS 4.5
-  (DLAA preset M) is opt-in with `--aa dlss` (decided 2026-11-20, see
-  decisions.md). Guide buffers and the `whiteNoise` field (Task 1.4) and
-  Ray Reconstruction (Task 1.5: preset F, opt-in `--rr on`, it fails the
-  motion gates; Quality 2.35 ms, DLAA 4.71 ms) are on main. Next: 3.2a
-  -> 3.2b (the shadow denoiser also runs under DLSS SR), Task 4 sweep,
-  Task 5 final review.
+  DLSS module (Task 1.3), guide buffers and the `whiteNoise` field (Task
+  1.4) and Ray Reconstruction (Task 1.5) are on main. Default since
+  2026-11-20: DLSS DLAA + RR preset F (4.71 ms at 1440p; fallbacks SR
+  DLAA preset M, then TAA v2); the Laplacian gates are absolute motion
+  sharpness (decisions.md, "DLSS DLAA with Ray Reconstruction is the
+  default"); fullscreen startup builds one swapchain. Next: 3.2a -> 3.2b
+  (shadow denoiser, fallback paths only), Task 4 sweep, Task 5 final
+  review.
   The clouds branch must follow the plan's clouds rebase checklist
   (cloud targets sized from `renderExtent`, transparency mask, white
   noise under Ray Reconstruction). Ledger:

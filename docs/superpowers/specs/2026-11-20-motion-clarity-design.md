@@ -14,7 +14,9 @@ The user's goal is "absolutely no smear while moving", with no more
 shimmer or shadow noise than the gates below allow (dropping temporal
 accumulation would bring far more).
 
-Gate, at eye height moving forward at 5 m/s:
+Gate, at eye height moving forward at 5 m/s (the original definition, a
+Laplacian motion/still ratio >= 0.85, was replaced 2026-11-20 by the
+motion frame's absolute Laplacian, see Gates):
 
 | | Laplacian motion/still |
 |---|---|
@@ -179,11 +181,13 @@ hash via FetchContent, and the version is verified at fetch time.
   `libnvidia-ngx-dlss*.so`);
   Streamline is Windows-only.
 
-**Modes.** `--aa taa|dlss`; the default is taa (decided 2026-11-20: DLAA
-preset M costs 2.36 ms at 1440p vs the 1.0 ms slot), dlss falls back to
-taa when NGX reports no Super Resolution. `--dlss-mode dlaa|quality|balanced|performance`, with
-default dlaa (quality under RR). `--rr on|off`, default off (opt-in: RR fails the motion gates, decision 3). The
-SR preset defaults to M for DLAA, Quality and Balanced.
+**Modes.** `--aa dlss|taa`; the default is dlss with Ray Reconstruction
+(decided 2026-11-20, user: RR removes the shadow shimmer; optimise from
+the most demanding configuration down), falling back to SR DLAA preset M
+when RR is unavailable and to TAA v2 when NGX reports no Super
+Resolution. `--dlss-mode dlaa|quality|balanced|performance`, default
+dlaa. `--rr on|off`, default on (decision 3). The SR preset defaults to
+M for DLAA, Quality and Balanced.
 
 **Out of scope** (backlog rows):
 - DLSS 5: RTX 50 only, no Linux evidence, and the dev GPU is an RTX 4080.
@@ -232,21 +236,23 @@ SR preset defaults to M for DLAA, Quality and Balanced.
 
 ### 3. Ray Reconstruction first, for shadows and AO
 
-Outcome (Task 1.5, measured): RR is opt-in (`--rr on`). It removes the
+Outcome (Task 1.5, measured; default since 2026-11-20): RR removes the
 shadow and foliage shimmer (beech crown/shadow 0.59/0.41 in Quality vs
-TAA's 2.35/1.97) but fails the motion gates in both modes (forward 5
-ground 0.71 Quality / 0.79 DLAA; DLAA costs 4.71 ms, Quality 2.35 ms at
-1440p), so `--aa dlss` stays SR DLAA and the fallback denoiser (decision
-4) runs under SR too. Numbers: decisions.md, "Ray Reconstruction
-backend". RR uses preset F, the newest model in SDK 310.9.16, pinned
+TAA's 2.35/1.97). It failed the original motion/still ratio gate in both
+modes (forward 5 ground 0.71 Quality / 0.79 DLAA; DLAA costs 4.71 ms,
+Quality 2.35 ms at 1440p) only because its stills are much sharper than
+TAA's; under the absolute-sharpness gate it passes. The fallback denoiser
+(decision 4) serves `--aa taa` and `--rr off`. Numbers: decisions.md,
+"Ray Reconstruction backend" and "DLSS DLAA with Ray Reconstruction is
+the default". RR uses preset F, the newest model in SDK 310.9.16, pinned
 explicitly (user requirement). The design below is what it implements.
 - Its input is the full noisy lit colour: raw 1-ray visibility times the
   sun, not pre-blurred. AO today is material/terrain AO, which is not
   stochastic; a future stochastic AO feeds RR the same way.
 - RR's guide never names direct-light shadows. That RR denoises them in a
   hybrid renderer is an inference, so the shadow gates decide it.
-  - If the gates fail, the fallback denoiser (decision 4) also runs under
-    SR, and RR stays opt-in.
+  - Resolved: the shadow gates pass under RR (crown/shadow 1.41/0.35
+    DLAA); the fallback denoiser (decision 4) is fallback-only.
 - Mode: DLAA if it fits the budget. NVIDIA publishes only Performance-mode
   numbers (1.80 ms at 1440p on an RTX 4080); DLAA is estimated at 4-7 ms
   and must be measured.
@@ -384,13 +390,13 @@ The capture drift fix landed in b6432cf. Gate scripts live in `tools/`
 
 | gate | view | minimum | stretch | today |
 |---|---|---|---|---|
-| Laplacian motion/still, forward 5 m/s | ground | >= 0.85 (every path) | >= 0.95 | 0.50 |
-| same, sideways 5 m/s | ground | >= 0.95 | >= 0.98 | 0.92 |
-| same, forward 5 m/s | beech | >= 0.85 | >= 0.95 | 0.68 |
-| same, pitch 0.02 rad/s | ground | >= 0.85 | >= 0.95 | 0.71 |
+| Laplacian std of the motion frame, forward 5 m/s (absolute; ratio informational) | ground | >= 0.10 (TAA v2 0.114) | | |
+| same, sideways 5 m/s | ground | >= 0.10 (0.118) | | |
+| same, forward 5 m/s | beech | >= 0.20 (0.226) | | |
+| same, pitch 0.02 rad/s | ground | >= 0.09 (0.108) | | |
 | shimmer crown / shadow (/255) | beech | <= 2.0 / 2.0 | <= 1.0 / 1.0 | 2.0 / 1.5 |
 | SSIM motion vs still, forward 5 | ground | >= 0.98 | | 0.95 |
-| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.18 (TAA, 1080p); DLAA preset M 2.36 (1440p): measured miss; TAA v2 stays the default, DLSS is opt-in |
+| AA slot GPU ms, SR/DLAA | 1440p | <= 1.0 | | 0.18 (TAA, 1080p); DLAA preset M 2.36 (1440p): measured miss, accepted: the default is RR DLAA (4.71 ms) |
 | AA slot GPU ms, RR | 1440p | <= 3.0 (else Quality mode) | | n/a |
 | TAA v2 + shadow denoiser GPU ms | 1440p | <= 0.9 | | 0.18 (1080p) |
 | grade + tonemap GPU ms | 1440p | <= 0.08 | | 0.06 (1080p) |

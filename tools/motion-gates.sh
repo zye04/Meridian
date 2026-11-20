@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Motion-clarity gates. Usage: tools/motion-gates.sh BUILD OUT [game args...]
-# GPU_RUNS=5 repeats the ground still and prints per-pass medians.
+# Thresholds: MIN_* env vars override. GPU_RUNS=5 repeats the ground still and prints per-pass medians.
 set -u
 build=$1; out=$2; shift 2
 extra=("$@")
@@ -40,16 +40,26 @@ if [ -n "${GPU_RUNS:-}" ] && [ "$GPU_RUNS" -gt 1 ]; then
   for i in $(seq 2 "$GPU_RUNS"); do run ground_still_$i "$ground"; done
 fi
 
-row() { printf "%-34s %8s %8s  %s\n" "$@"; }
+row() { printf "%-30s %8s %8s  %-6s %s\n" "$@"; }
 cmp_ge() { python3 -c "import sys;print('pass' if float(sys.argv[1])>=float(sys.argv[2]) else 'FAIL')" "$1" "$2"; }
 cmp_le() { python3 -c "import sys;print('pass' if float(sys.argv[1])<=float(sys.argv[2]) else 'FAIL')" "$1" "$2"; }
 val() { awk '{print $2}'; }
 
-row gate value minimum result
-v=$($gates ratio "$out/ground_fwd.png" "$out/ground_still.png" | val); row "laplacian fwd5 ground" "$v" ">=0.85" "$(cmp_ge "$v" 0.85)"
-v=$($gates ratio "$out/ground_side.png" "$out/ground_still.png" | val); row "laplacian side5 ground" "$v" ">=0.95" "$(cmp_ge "$v" 0.95)"
-v=$($gates ratio "$out/beech_fwd.png" "$out/beech_still.png" | val); row "laplacian fwd5 beech" "$v" ">=0.85" "$(cmp_ge "$v" 0.85)"
-v=$($gates ratio "$out/ground_pitch.png" "$out/ground_still.png" | val); row "laplacian pitch0.02 ground" "$v" ">=0.85" "$(cmp_ge "$v" 0.85)"
+# Sharpness in motion is the motion frame's own Laplacian std, thresholds
+# anchored to TAA v2 at 1440p (0.114, 0.118, 0.226, 0.108; minimum = 90% of
+# each, rounded down, docs/decisions.md); the motion/still
+# ratio is informational (a sharper still, as under Ray Reconstruction,
+# lowers it without making the motion frame worse).
+row gate value minimum result "(motion/still ratio)"
+sharp() { # label motion still minimum
+  local v r
+  v=$($gates laplacian "$out/$2.png" | val); r=$($gates ratio "$out/$2.png" "$out/$3.png" | val)
+  row "$1" "$v" ">=$4" "$(cmp_ge "$v" "$4")" "$r"
+}
+sharp "laplacian fwd5 ground" ground_fwd ground_still ${MIN_FWD_GROUND:-0.10}
+sharp "laplacian side5 ground" ground_side ground_still ${MIN_SIDE_GROUND:-0.10}
+sharp "laplacian fwd5 beech" beech_fwd beech_still ${MIN_FWD_BEECH:-0.20}
+sharp "laplacian pitch0.02 ground" ground_pitch ground_still ${MIN_PITCH_GROUND:-0.09}
 sh=$($gates shimmer "$out/beech_f120.png" "$out/beech_f121.png")
 v=$(echo "$sh" | awk '$1=="crown"{print $2}'); row "shimmer crown" "$v" "<=2.0" "$(cmp_le "$v" 2.0)"
 v=$(echo "$sh" | awk '$1=="shadow"{print $2}'); row "shimmer shadow" "$v" "<=2.0" "$(cmp_le "$v" 2.0)"

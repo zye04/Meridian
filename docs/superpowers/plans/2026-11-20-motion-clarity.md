@@ -1,7 +1,7 @@
 # Motion Clarity Implementation Plan
 
 **Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 1.4, 1.5, 3.1. Next steps:
-- Track 1: done. 1.3 on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). 1.4 (guide buffers, `whiteNoise`). 1.5 done on main: Ray Reconstruction preset F, opt-in `--rr on` (Step 4's fallback: it fails the motion gates in Quality and DLAA; shimmer passes), so 3.2b's denoiser also runs under SR.
+- Track 1: done. DLSS DLAA + Ray Reconstruction (preset F) is the default since 2026-11-20 (user decision; fallbacks RR -> SR DLAA preset M -> TAA v2), and the Laplacian gates are absolute motion sharpness, not the motion/still ratio (see Global Constraints). 1.3 DLSS module, 1.4 guide buffers + `whiteNoise`, 1.5 RR on main. Tasks 3.2a-3.2b (shadow denoiser) are fallback-only work (`--aa taa`, `--rr off`).
 - Track 2: done.
 - Track 3: 3.1 done; next 3.2a -> 3.2b.
 - After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
@@ -31,7 +31,7 @@
 - Scene colour stays pre-exposed by last frame's exposure; motion vectors stay `previous - current` in UV; reverse-Z, infinite far (sky depth 0).
 - `mesh.frag` variants are mesh, masked, blended and terrain (`TERRAIN`); double-sided is a cull state, not a variant.
 - Scene colour attachments, final layout (dynamic rendering binds `VK_NULL_HANDLE` views for unused ones, writes discarded; `maxColorAttachments` is 8): 0 HDR RGBA16F, 1 motion RG16F, 2 transparency mask R8 (1.1b), 3 diffuse albedo RGBA8, 4 specular albedo RGBA8, 5 normal+roughness RGBA16F (1.4), 6 sun-direct radiance RGBA16F, 7 sun visibility R8 (3.2a).
-- Gate thresholds (spec, copied): forward 5 ground >= 0.85 (stretch 0.95); sideways 5 ground >= 0.95 (0.98); forward 5 beech >= 0.85 (0.95); pitch 0.02 rad/s ground >= 0.85 (0.95); shimmer crown/shadow beech <= 2.0/2.0 (1.0/1.0); SSIM motion vs still forward 5 ground >= 0.98; AA slot SR/DLAA <= 1.0 ms (miss: report, continue with DLAA, the user decides on Quality); RR <= 3.0 ms (else Quality mode); TAA v2 + shadow denoiser <= 0.9 ms; grade + tonemap <= 0.08 ms; identity grade vs analytic AgX mean <= 0.3/255.
+- Gate thresholds (spec, copied): Laplacian gates are the motion frame's absolute Laplacian std at 2560x1440 (the motion/still ratio is an informational column: a sharper still, as under RR, lowers it without a worse motion frame), minimums 90% of TAA v2's measurement rounded down: forward 5 ground >= 0.10; sideways 5 ground >= 0.10; forward 5 beech >= 0.20; pitch 0.02 rad/s ground >= 0.09; shimmer crown/shadow beech <= 2.0/2.0 (1.0/1.0); SSIM motion vs still forward 5 ground >= 0.98; AA slot SR/DLAA <= 1.0 ms (miss: report, continue with DLAA, the user decides on Quality); RR <= 3.0 ms (else Quality mode); TAA v2 + shadow denoiser <= 0.9 ms; grade + tonemap <= 0.08 ms; identity grade vs analytic AgX mean <= 0.3/255.
 
 ## Review Focus
 

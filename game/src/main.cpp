@@ -352,15 +352,16 @@ struct Options {
   enum class Haze { Clean, Summer, SummerHazy } haze = Haze::Summer;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
-  // TAA unless --aa dlss; DLSS falls back to TAA when unsupported.
-  meridian::AaMethod aa = meridian::AaMethod::Taa;
-  // Unset: Quality under Ray Reconstruction (RR DLAA costs 4.7 ms at
-  // 1440p, over its 3 ms budget), else DLAA.
+  // DLSS (DLAA + Ray Reconstruction) unless --aa taa; falls back to Super
+  // Resolution DLAA, then TAA, when unsupported.
+  meridian::AaMethod aa = meridian::AaMethod::Dlss;
+  // Unset: DLAA (RR DLAA costs 4.7 ms at 1440p; optimised from the most
+  // demanding configuration down, decisions.md).
   std::optional<meridian::DlssMode> dlssMode;
   char dlssPreset = 0; // 0: the DLSS module's per-mode default
-  // Ray Reconstruction under DLSS (opt-in: it fails the motion gates,
-  // decisions.md).
-  bool rayReconstruction = false;
+  // Ray Reconstruction under DLSS: it removes the ray-traced shadow
+  // shimmer, decisions.md.
+  bool rayReconstruction = true;
   // TAA's render size over display size, in (0, 1].
   std::optional<float> renderScale;
   // Fullscreen by default: consistent size for GPU timings, and the way the
@@ -506,9 +507,22 @@ int main(int argc, char **argv) {
   // NGX finds its snippets next to the binary (copied there by the build).
   const auto upscalerProvider = meridian::dlss::createProvider(
       std::filesystem::read_symlink("/proc/self/exe").parent_path());
-  meridian::Renderer renderer(window, upscalerProvider.get());
+#endif
+  meridian::AaSettings aa{.method = options.aa,
+                          .mode = options.dlssMode.value_or(meridian::DlssMode::Dlaa),
+                          .preset = options.dlssPreset,
+                          .rayReconstruction = options.aa == meridian::AaMethod::Dlss &&
+                                               options.rayReconstruction,
+                          .renderScale = options.renderScale.value_or(1.0f)};
+#ifndef MERIDIAN_HAS_DLSS
+  if (aa.method == meridian::AaMethod::Dlss) {
+    std::printf("DLSS unavailable: built with MERIDIAN_DLSS=OFF; using TAA\n");
+  }
+#endif
+#ifdef MERIDIAN_HAS_DLSS
+  meridian::Renderer renderer(window, upscalerProvider.get(), aa);
 #else
-  meridian::Renderer renderer(window);
+  meridian::Renderer renderer(window, nullptr, aa);
 #endif
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
@@ -519,35 +533,6 @@ int main(int argc, char **argv) {
   renderer.setGrade({.contrast = 1.4f,
                      .saturation = 1.4f,
                      .greens = {.hueShiftDegrees = -12.0f, .saturation = 1.15f}});
-  meridian::AaSettings aa{.method = options.aa,
-                          .mode = options.dlssMode.value_or(options.rayReconstruction
-                                                                ? meridian::DlssMode::Quality
-                                                                : meridian::DlssMode::Dlaa),
-                          .preset = options.dlssPreset,
-                          .rayReconstruction = options.aa == meridian::AaMethod::Dlss &&
-                                               options.rayReconstruction,
-                          .renderScale = options.renderScale.value_or(1.0f)};
-  // The Renderer logs its own fallback when feature creation fails.
-  if (aa.method == meridian::AaMethod::Dlss) {
-#ifdef MERIDIAN_HAS_DLSS
-    if (aa.rayReconstruction && !upscalerProvider->supports(aa)) {
-      std::printf("DLSS Ray Reconstruction unavailable; using Super Resolution\n");
-      aa.rayReconstruction = false;
-    }
-    if (!aa.rayReconstruction && !options.dlssMode) {
-      aa.mode = meridian::DlssMode::Dlaa;
-    }
-    if (!upscalerProvider->supports(aa)) {
-      std::printf("DLSS unavailable: NGX reports no Super Resolution; using TAA\n");
-    }
-#else
-    std::printf("DLSS unavailable: built with MERIDIAN_DLSS=OFF; using TAA\n");
-#endif
-  }
-  if (aa.method != meridian::AaMethod::Taa || options.renderScale) {
-    renderer.setAntiAliasing(aa);
-  }
-
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
   const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";
   meridian::Heightfield terrain;

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <iostream>
 #include <span>
 #include <stdexcept>
 
@@ -456,17 +457,29 @@ void Renderer::setOcclusionCulling(bool enabled) {
   impl_->occlusionCulling = enabled;
 }
 
-void Renderer::setAntiAliasing(const AaSettings &settings) {
+void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
   }
-  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
-  impl_->aaSettings = settings;
-  if (settings.method == AaMethod::Dlss &&
-      !(impl_->upscalerProvider && impl_->upscalerProvider->supports(settings))) {
-    impl_->aaSettings.method = AaMethod::Taa;
-    impl_->aaSettings.rayReconstruction = false;
+  aaSettings = settings;
+  if (aaSettings.method != AaMethod::Dlss || !upscalerProvider) {
+    aaSettings.method = AaMethod::Taa;
+    aaSettings.rayReconstruction = false;
+    return;
   }
+  if (aaSettings.rayReconstruction && !upscalerProvider->supports(aaSettings)) {
+    std::cout << "DLSS Ray Reconstruction unavailable; using Super Resolution\n";
+    aaSettings.rayReconstruction = false;
+  }
+  if (!upscalerProvider->supports(aaSettings)) {
+    std::cout << "DLSS unavailable: NGX reports no Super Resolution; using TAA\n";
+    aaSettings.method = AaMethod::Taa;
+  }
+}
+
+void Renderer::setAntiAliasing(const AaSettings &settings) {
+  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+  impl_->setAaSettings(settings);
   impl_->destroySwapchain();
   impl_->createSwapchain();
 }

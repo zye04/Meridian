@@ -941,7 +941,8 @@ void Renderer::Impl::createPipelines() {
                                    .colorFormats = swapchainFormat});
 }
 
-Renderer::Renderer(Window &window, UpscalerProvider *provider)
+Renderer::Renderer(Window &window, UpscalerProvider *provider,
+                   const AaSettings &aa)
     : impl_(std::make_unique<Impl>()) {
   impl_->window = window.handle();
   impl_->upscalerProvider = provider;
@@ -1103,6 +1104,7 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider)
   impl_->timestampPeriodNs = physical.value().properties.limits.timestampPeriod;
   impl_->createFrames();
   impl_->createDescriptors();
+  impl_->setAaSettings(aa);
   impl_->createSwapchain();
   impl_->createMaterialSystem();
   impl_->createPipelines();

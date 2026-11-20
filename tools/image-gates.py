@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Image gates for motion-clarity checks. Usage:
-  image-gates.py laplacian A.png
-  image-gates.py ratio MOTION.png STILL.png
+  image-gates.py laplacian A.png   (absolute sharpness: the motion gates)
+  image-gates.py ratio MOTION.png STILL.png   (informational)
   image-gates.py shimmer A.png B.png [NAME=X0,Y0,X1,Y1 ...]   (fractions)
   image-gates.py ssim A.png B.png
   image-gates.py diff A.png B.png

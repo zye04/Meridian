@@ -176,8 +176,10 @@ struct DrawItem {
 class Renderer {
 public:
   // `provider` supplies optional upscaler backends (DLSS) and outlives the
-  // Renderer.
-  explicit Renderer(Window &window, UpscalerProvider *provider = nullptr);
+  // Renderer. `aa` is applied before the first swapchain, so the targets
+  // are built once (same fallbacks as setAntiAliasing).
+  explicit Renderer(Window &window, UpscalerProvider *provider = nullptr,
+                    const AaSettings &aa = {});
   ~Renderer();
 
   Renderer(const Renderer &) = delete;

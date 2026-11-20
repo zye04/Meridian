@@ -53,6 +53,8 @@ struct Renderer::Impl {
   // the display size. All of these images, and the upscaler, are recreated
   // with the swapchain.
   AaSettings aaSettings;
+  // Stores the settings, falling back to TAA when the provider lacks them.
+  void setAaSettings(const AaSettings &settings);
   VkExtent2D renderExtent{};
   // Render-sized.
   Image depth;

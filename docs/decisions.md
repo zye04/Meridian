@@ -1238,12 +1238,10 @@ separately linked module (`MERIDIAN_DLSS`).**
   m[1][1] = -f). Release 1080p DLAA ground still Laplacian: both negated
   0.1803, x only 0.1743, y only 0.1743, neither 0.1738; frame 120 vs 121
   mean diff 0.048 vs 0.066 (y flipped) and 0.071 (neither).
-- TAA v2 stays the default upscaler (decided 2026-11-20); DLSS 4.5
-  support is mandatory and selected with `--aa dlss`, DLAA preset M being
-  the option that passes every quality gate. The DLAA preset M `aa` pass
-  costs 2.36 ms at 1440p against the 1.0 ms slot, while TAA v2 measures
-  forward 0.94 at 0.17 ms. Re-decide the default if the DLSS cost drops
-  or the budget moves.
+- DLSS (DLAA + Ray Reconstruction) is the default (2026-11-20, "DLSS DLAA
+  with Ray Reconstruction is the default", below); `--aa taa` selects
+  TAA v2, which measures forward 0.94 at 0.17 ms. Super Resolution DLAA
+  preset M (`--rr off`) costs 2.36 ms at 1440p.
 - When DLSS is selected, the Super Resolution preset is M for DLAA, Quality and
   Balanced and NGX's own (also M) for Performance (`defaultPreset` in
   dlss.cpp); `--dlss-preset` overrides for A/B. NGX 310.9.16 defaults
@@ -1264,9 +1262,9 @@ separately linked module (`MERIDIAN_DLSS`).**
   | TAA | 0.49 | | | | | | 0.15 |
 
   Preset K (first transformer) smears forward motion like the old TAA;
-  preset M passes every motion gate. Its `aa` pass costs 2.36 ms, a measured miss of the 1.0 ms SR/DLAA slot at 1440p,
-  which is why TAA stays the default. TAA v2 measures forward 0.94 at
-  0.17 ms. Upscaled modes' ratios are against their own stills (sharper
+  preset M passes every motion gate. Its `aa` pass costs 2.36 ms at 1440p,
+  over the 1.0 ms SR/DLAA slot (the fallback when RR is unavailable).
+  TAA v2 measures forward 0.94 at 0.17 ms. Upscaled modes' ratios are against their own stills (sharper
   by the mip bias).
 - Debug builds: VK_NVX_binary_import (an NGX device extension) makes the
   driver start CUDA, which needs ASan's `protect_shadow_gap=0`; NGX leaks
@@ -1278,8 +1276,8 @@ separately linked module (`MERIDIAN_DLSS`).**
   unavailable (0xbad00004)` and one `DLSS unavailable: ...; using TAA`
   line, and renders the TAA image exactly (mean diff 0.0000/255).
 
-**Ray Reconstruction denoises the shadows, but is opt-in (Task 1.5,
-below).**
+**Ray Reconstruction denoises the shadows and is the default (Task 1.5
+and "DLSS DLAA with Ray Reconstruction is the default", below).**
 - It takes the noisy lit colour plus guides (diffuse and specular albedo,
   normal + roughness).
 - Its samples must be hashed white noise, not interleaved gradient noise.
@@ -1461,7 +1459,7 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   null views (TAA): ground 1.22 vs 1.25, beech 2.47 vs 2.44 (first set
   2.50), diff 0.0000/255.
 
-**Ray Reconstruction backend (Task 1.5): opt-in with `--rr on`, because
+**Ray Reconstruction backend (Task 1.5), measured against the then-ratio gates:
 it fails the motion gates.**
 - `DlssUpscaler` runs the DLSSD feature (`NGX_VULKAN_CREATE_DLSSD_EXT1` /
   `NGX_VULKAN_EVALUATE_DLSSD_EXT`) per the RR integration guide (SDK doc/,
@@ -1506,9 +1504,9 @@ it fails the motion gates.**
   much sharper than TAA's (ground Laplacian 0.40 Quality / 0.34 DLAA vs
   0.24) and its forward-motion frames are still sharper than TAA's (0.28
   / 0.27 vs 0.23); it loses more of its detail in motion. Inputs are not
-  tuned beyond the guide. So `--rr` defaults to off (plan Step 4's
-  opt-in); `--aa dlss` stays SR DLAA preset M, and the fallback shadow
-  denoiser (Tasks 3.2a-3.2b) also runs under SR (backlog). The TAA column
+  tuned beyond the guide. The ratio gate was dropped for absolute motion
+  sharpness and RR became the default (below); the fallback shadow
+  denoiser (Tasks 3.2a-3.2b) serves the fallback paths (backlog). The TAA column
   also misses crown shimmer and SSIM on this build (the new Megascans
   ground; Task 3.1 measured them passing before it).
 - Debug captures, RR Quality and DLAA: 0 validation errors.
@@ -1688,3 +1686,34 @@ mask is off and that ground gets the meadow layers, and `--scatter`
 excludes the saplings, `island_tree_01` and the Megaplants. `--trees`
 restores the previous behaviour exactly (2645325 instances, hash
 0x8322bae25df9e142).
+
+## DLSS DLAA with Ray Reconstruction is the default (2026-11-20)
+
+- Default: `--aa dlss --rr on --dlss-mode dlaa` (preset F), 4.7 ms for the
+  `aa` pass at 1440p. Fallbacks, each logged once at startup: RR
+  unavailable -> Super Resolution DLAA preset M (`DLSS Ray Reconstruction
+  unavailable; using Super Resolution`); DLSS unavailable or
+  `MERIDIAN_DLSS=OFF` -> TAA v2 (`DLSS unavailable: <reason>; using TAA`).
+  `--aa taa` and `--rr off` select the fallbacks.
+- Why: user decision. RR removes the ray-traced shadow shimmer (beech
+  crown 1.41 vs TAA 2.41 /255, shadow 0.35 vs 1.76), which the denoiser
+  fallback (Tasks 3.2a-3.2b) is only a stand-in for. Optimise from the
+  most demanding configuration downwards: the 4.7 ms is the budget to
+  win back, not a reason to default to the cheap path.
+- Motion gate redefined: the motion/still Laplacian ratio penalised RR
+  for having much sharper stills (0.40 vs TAA 0.24) while its motion
+  frames are as sharp or sharper. The gate is now the motion frame's own
+  Laplacian std (`image-gates.py laplacian`), minimum 90% of TAA v2's
+  value at 2560x1440, rounded down: forward 5 ground 0.10 (TAA 0.114),
+  sideways 5 ground 0.10 (0.118), forward 5 beech 0.20 (0.226), pitch 0.02
+  ground 0.09 (0.108). The ratio is printed as an informational column;
+  shimmer and SSIM gates are unchanged.
+- Measured at 2560x1440 (Release, `--placement off`): RR laplacian 0.130 /
+  0.145 / 0.214 / 0.129 (ratio 0.84 / 0.94 / 0.86 / 0.84), crown/shadow
+  1.41 / 0.35, SSIM 0.984, all pass. TAA v2: 0.114 / 0.118 / 0.226 /
+  0.108 (ratio 0.94 / 0.97 / 1.02 / 0.89), crown/shadow 2.41 / 1.76 (crown
+  fails), SSIM 0.980 (fails 0.98 by 0.0004). RR is 5% below TAA on the
+  beech forward frame and above it on the ground views.
+- Startup: `Renderer` takes the `AaSettings` in its constructor (the
+  DLSS support fallbacks run there), so the swapchain, render targets and
+  upscaler are built once at startup, not again for `setAntiAliasing`.
