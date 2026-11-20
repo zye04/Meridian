@@ -295,7 +295,7 @@ else
     fi
     rm -rf "$out.part"
     mkdir -p "$out.part"
-    for map in "BaseColor base_color color" "Opacity opacity data" "Translucency translucency data" \
+    for map in "BaseColor base_color color" "Opacity opacity opacity" "Translucency translucency data" \
         "Roughness roughness data" "Normal normal normal"; do
       read -r suffix name usage <<<"$map"
       "$cook" --texture "$(find "$extract" -iname "*_2K_${suffix}.jpg")" \

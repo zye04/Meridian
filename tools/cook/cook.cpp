@@ -267,6 +267,7 @@ void bakeNodeTransform(fastgltf::Asset &asset) {
 // node per variant's LOD 0, side by side (the engine builds its own LODs).
 struct PlantImages {
   std::map<size_t, basisu::image> replaced;
+  std::set<size_t> masks; // base color images whose alpha is the alpha-test mask
 };
 
 PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &directory) {
@@ -322,6 +323,7 @@ PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &d
     }
     result.replaced[*orImage] = std::move(ort);
     result.replaced[*colorImage] = std::move(color);
+    result.masks.insert(*colorImage);
     const float factor = opaque ? static_cast<float>(translucency / opaque) : 0.0f;
     m.occlusionTexture.reset();
     m.pbrData.metallicFactor = 0.0f;
@@ -344,6 +346,35 @@ PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &d
       m.normalTexture.reset();
       m.occlusionTexture.reset();
     }
+  }
+  // The billboard's textures were the last ones: drop them so no reference
+  // is left to files that aren't cooked with the model.
+  const auto textureUsed = [&](size_t t) {
+    for (const fastgltf::Material &m : asset.materials) {
+      for (const auto *info :
+           {&m.pbrData.baseColorTexture, &m.pbrData.metallicRoughnessTexture}) {
+        if (*info && (*info)->textureIndex == t) {
+          return true;
+        }
+      }
+      if ((m.normalTexture && m.normalTexture->textureIndex == t) ||
+          (m.occlusionTexture && m.occlusionTexture->textureIndex == t) ||
+          (m.emissiveTexture && m.emissiveTexture->textureIndex == t)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  while (!asset.textures.empty() && !textureUsed(asset.textures.size() - 1)) {
+    asset.textures.pop_back();
+  }
+  const auto imageUsed = [&](size_t i) {
+    return std::any_of(asset.textures.begin(), asset.textures.end(),
+                       [&](const fastgltf::Texture &t) { return t.imageIndex == i; });
+  };
+  while (!asset.images.empty() && !imageUsed(asset.images.size() - 1) &&
+         !result.replaced.contains(asset.images.size() - 1)) {
+    asset.images.pop_back();
   }
   return result;
 }
@@ -501,7 +532,8 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
     if (!decoded.has_alpha()) {
       opaqueImages.insert(index);
     }
-    std::vector<uint8_t> ktx2 = encodeKtx2(decoded, usage, jobPool);
+    std::vector<uint8_t> ktx2 =
+        encodeKtx2(decoded, usage, jobPool, plantImages.masks.contains(index) ? 3 : -1);
 
     fastgltf::sources::Vector encoded;
     encoded.bytes.resize(ktx2.size());
@@ -565,10 +597,11 @@ void cook(const std::filesystem::path &input, const std::filesystem::path &outpu
 }
 
 void cookTexture(const std::filesystem::path &input,
-                 const std::filesystem::path &output, Usage usage) {
+                 const std::filesystem::path &output, Usage usage, int coverageChannel) {
   basisu::basisu_encoder_init();
   basisu::job_pool jobPool(std::max(1u, std::thread::hardware_concurrency()));
-  const std::vector<uint8_t> ktx2 = encodeKtx2(decode(readFile(input)), usage, jobPool);
+  const std::vector<uint8_t> ktx2 =
+      encodeKtx2(decode(readFile(input)), usage, jobPool, coverageChannel);
   if (output.has_parent_path()) {
     std::filesystem::create_directories(output.parent_path());
   }
@@ -610,7 +643,8 @@ void cookHeightfield(const std::filesystem::path &input, uint32_t width,
 
 int main(int argc, char **argv) {
   const std::map<std::string, Usage> usages = {
-      {"color", Usage::Color}, {"data", Usage::Data}, {"normal", Usage::Normal}};
+      {"color", Usage::Color}, {"data", Usage::Data}, {"normal", Usage::Normal},
+      {"opacity", Usage::Data}};
   const bool texture = argc == 5 && std::strcmp(argv[1], "--texture") == 0 &&
                        usages.contains(argv[4]);
   if (argc == 7 && std::strcmp(argv[1], "--heightfield") == 0) {
@@ -654,7 +688,8 @@ int main(int argc, char **argv) {
   }
   try {
     if (texture) {
-      cookTexture(argv[2], argv[3], usages.at(argv[4]));
+      cookTexture(argv[2], argv[3], usages.at(argv[4]),
+                  std::strcmp(argv[4], "opacity") == 0 ? 0 : -1);
     } else {
       cook(argv[1], argv[2]);
     }

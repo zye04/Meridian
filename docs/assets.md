@@ -78,6 +78,11 @@ and the translucency in B, cooked as data).
 - Normals are OpenGL (green up): over the billboards' opaque texels the
   mean G is 0.5 to 0.9 (side views, leaves face up), the same pipeline as
   the ground surfaces. The cook leaves them as they are.
+- Alpha-test coverage is preserved down the mip chain (each mip's mask
+  rescaled so the share of texels above 0.5 matches mip 0), for the
+  plants' base color alpha and the atlases' `opacity`; masked plants don't
+  thin out with distance. Billboard textures are not referenced by the
+  glTF.
 - The meshes carry no normals (the loader doesn't compute them: they
   render black), so the cook adds smooth area-weighted ones. One material
   each.
