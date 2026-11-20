@@ -488,7 +488,9 @@ struct SceneData {
   // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
   // far field instead of the TLAS's far-field trees (needs farField).
   uint32_t voxelFarShadows = 0;
-  uint32_t pad6 = 0;
+  // GI (gi.glsl): 0 off, 1 probes; the probe buffer (GpuGiHeader + probes).
+  uint32_t giMode = 0;
+  VkDeviceAddress gi = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -498,6 +500,7 @@ static_assert(offsetof(SceneData, previousWind) == 1944);
 static_assert(offsetof(SceneData, weather) == 1992);
 static_assert(offsetof(SceneData, clouds) == 2032);
 static_assert(offsetof(SceneData, farField) == 2192);
+static_assert(offsetof(SceneData, gi) == 2216);
 static_assert(sizeof(SceneData) == 2224);
 
 // Must match MeshInfo in common.glsl.
@@ -1008,6 +1011,22 @@ struct GradeConstants {
   VkDeviceAddress grade = 0;
 };
 static_assert(sizeof(GradeConstants) == 8);
+
+// Must match GiBuffer's header in gi.glsl: per probe level the window's
+// first column, spacing and slice base; the frame; 1 to retrace every
+// probe without history. The probes (64 B each) follow.
+struct GpuGiLevel {
+  int32_t originX = 0, originZ = 0;
+  float spacing = 0.0f, sliceBase = 0.0f;
+};
+struct GpuGiHeader {
+  GpuGiLevel levels[5];
+  uint32_t frame = 0;
+  uint32_t reset = 0;
+  uint32_t pad0 = 0, pad1 = 0;
+};
+static_assert(sizeof(GpuGiHeader) == 96);
+constexpr VkDeviceSize kGiProbeBytes = 64;
 
 // Must match the push_constant block in the shaders.
 struct PushConstants {

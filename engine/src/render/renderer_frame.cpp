@@ -800,6 +800,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.farField = impl_->farFieldInfo.address;
   scene.farCellList = impl_->farCellList.address;
   scene.voxelFarShadows = scene.farFieldEnabled != 0 && impl_->voxelFarShadows ? 1 : 0;
+  if (impl_->giMode != GiMode::Off && impl_->giBuffer.buffer == VK_NULL_HANDLE) {
+    impl_->createGi();
+  }
+  scene.giMode = impl_->giMode == GiMode::Off ? 0 : 1;
+  scene.gi = impl_->giBuffer.address;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -954,6 +959,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDispatch(cmd, 1, 1, 1);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   endPass("weather");
+
+  // --- GI probes (the sky capture and irradiance above are their sky).
+  if (impl_->giMode != GiMode::Off) {
+    impl_->drawGiProbes(cmd, camera.position, scene.frameIndex);
+    endPass("gi probes");
+  }
 
   // --- Scene pass: shade into the HDR target.
 

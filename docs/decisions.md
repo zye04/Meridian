@@ -3017,3 +3017,18 @@ off|probes|hybrid` (default off until the look is accepted).
   al., Lumen, SIGGRAPH 2022 Advances; Majercik et al. 2019 (DDGI, JCGT
   8(2)); Godot SDFGI and HDDAGI (PR #86267, probe traces 2.43 -> 0.93 ms
   on a GTX 1650); AMD FidelityFX Brixelizer GI; Tevs et al. 2008.
+- **First version (`--gi probes`, 2026-11-20):** probes in a plain storage
+  buffer (96 B header + 64 B per probe, stamped with the world column they
+  were traced for, so a scrolled-in slot or a teleport retraces instead of
+  showing stale light) and sampled with manual trilinear filtering in
+  `giSample`, instead of the spec's 3D textures (no descriptors to add).
+  The column base is the terrain under the probe, not the column's
+  maximum (the maximum floated coarse levels' probes above slope
+  receivers: sky leak). Ground hits: fixed meadow albedo (0.06, 0.09,
+  0.03) lit by the sun with the terrain march, far-field trees within
+  300 m and the cloud shadow, plus the sky irradiance; no ground cache or
+  multi-bounce yet. Measured (Release, 2560x1440, `--placement off`,
+  DLSS SR DLAA): `gi probes` 1.00 ms open view, 1.33-1.36 low sun, 1.38
+  sunset; scene early +0.1-0.3 ms; low-sun shadow/sunlit ground
+  luminance 0.118 -> 0.143. With `--trees` (forest interior, RR) 2.96 ms
+  and the forest turns blue (backlog).

@@ -111,6 +111,8 @@ struct ForestMask {
 // soil on ridges and the slopes below rock; forest path at forest edges and
 // forest floor inside (the forest mask); gravel in channels; scree at the
 // foot of rock; rock on cliffs. Flat ground above the snow line is snow.
+enum class GiMode { Off, Probes };
+
 enum class TerrainRole { Grass, Clover, Mud, Soil, ForestPath, ForestFloor, Gravel, Scree, Rock, Count };
 constexpr int kMaxTerrainLayers = 16;
 
@@ -307,6 +309,11 @@ public:
   // forests as the far field's voxels; off traces every tree in the TLAS
   // (for A/B comparisons). Needs a far field (setPlacement).
   void setVoxelFarShadows(bool enabled);
+
+  // Global illumination (docs/superpowers/specs/2026-11-20-gi-design.md):
+  // Off by default; Probes lights ambient from the terrain-following probe
+  // clipmap traced against the heightfield and the far field.
+  void setGiMode(GiMode mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

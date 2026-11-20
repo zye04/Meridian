@@ -518,6 +518,7 @@ struct Options {
   // Distant forest cells as voxels; off draws every tree (for A/B).
   bool farField = true;
   bool voxelFarShadows = true;
+  bool gi = false;
   bool occlusion = true;
   std::optional<meridian::Bloom> bloom;
   std::optional<meridian::Effects> effects;
@@ -684,6 +685,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--far-shadows takes tlas or voxel");
       }
       options.voxelFarShadows = mode == "voxel";
+    } else if (arg == "--gi" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "off" && mode != "probes") {
+        throw std::runtime_error("--gi takes off or probes");
+      }
+      options.gi = mode == "probes";
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -708,7 +715,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --trees, --no-occlusion, "
-                               "--far-field off, --far-shadows tlas|voxel, "
+                               "--far-field off, --far-shadows tlas|voxel, --gi off|probes, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -783,6 +790,7 @@ int main(int argc, char **argv) {
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
+  renderer.setGiMode(options.gi ? meridian::GiMode::Probes : meridian::GiMode::Off);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
   renderer.setCloudsEnabled(options.clouds);

@@ -454,6 +454,8 @@ layout(buffer_reference, std430) readonly buffer StreamCoordBuffer {
 
 // Declared here, defined in farfield.glsl by the shaders that read it.
 layout(buffer_reference) buffer FarFieldBuffer;
+// Defined in gi.glsl.
+layout(buffer_reference) buffer GiBuffer;
 
 layout(buffer_reference, std430) buffer FarCellListBuffer {
     uint entries[];
@@ -561,7 +563,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
     // far field instead of the TLAS's far-field trees.
     uint voxelFarShadows;
-    uint pad6;
+    // GI (gi.glsl): 0 off, 1 probes.
+    uint giMode;
+    GiBuffer gi;
 };
 
 // Largest axis scale of a transform: a conservative bound under

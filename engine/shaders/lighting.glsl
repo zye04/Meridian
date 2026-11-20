@@ -8,6 +8,7 @@
 #include "farfield.glsl"
 #include "weather.glsl"
 #include "clouds.glsl"
+#include "gi.glsl"
 
 const float kGroundAlbedo = 0.1;
 const float kMinPerceptualRoughness = 0.045;
@@ -180,6 +181,8 @@ struct Shading {
     // reaching it.
     vec3 position;
     vec3 sunAtSurface;
+    // The flat world position (GI probes).
+    vec3 worldPosition;
     // Diffuse and specular are kept apart: a blended surface (glass) fades
     // its diffuse with alpha but keeps its full reflection.
     vec3 diffuseLight;
@@ -209,6 +212,7 @@ Shading beginShading(Surface s, vec3 relativePosition) {
         pc.scene.cameraPosition + displayedPosition(pc.scene, relativePosition).xyz);
     float height = length(sh.position);
     vec3 up = sh.position / height;
+    sh.worldPosition = pc.scene.cameraPosition + relativePosition;
     sh.sunAtSurface = transmittanceToSun(height, dot(up, sh.L)) *
                       cloudShadow(relativePosition + pc.scene.cameraPosition);
 
@@ -243,9 +247,15 @@ void addAmbientLight(inout Shading sh, float occlusion) {
         kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
     vec3 diffuseIrradiance = mix(groundIrradiance, skyIrradiance, sh.N.y * 0.5 + 0.5);
     vec3 R = reflect(-sh.V, sh.N);
+    vec3 roughIrradiance = skyIrradiance;
+    if (pc.scene.giMode != 0u) {
+        GiSample gi = giSample(sh.worldPosition, sh.N);
+        diffuseIrradiance = giIrradiance(gi, sh.N, diffuseIrradiance);
+        roughIrradiance = giIrradiance(gi, R, skyIrradiance);
+    }
     vec4 cloudsInR = skyCaptureAt(R);
     vec3 skyRadiance =
-        mix(skyLuminance(sh.position, R) * cloudsInR.a + cloudsInR.rgb, skyIrradiance / kPi, sh.a);
+        mix(skyLuminance(sh.position, R) * cloudsInR.a + cloudsInR.rgb, roughIrradiance / kPi, sh.a);
     vec3 specularReflectance = mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0) * sh.energyCompensation;
     float specularOcclusion = specularAmbientOcclusion(sh.NoV, occlusion, sh.a);
     sh.diffuseLight += sh.diffuseColor / kPi * diffuseIrradiance *

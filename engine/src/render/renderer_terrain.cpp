@@ -251,6 +251,7 @@ void Renderer::Impl::buildTerrainNormals(const Heightfield &field) {
 }
 
 void Renderer::setTerrain(const Heightfield &field) {
+  impl_->giReset = true;
   const std::vector<HeightPyramidLevel> levels = buildHeightPyramid(field);
   // Levels >= 1 go to the GPU (level 0 is the samples themselves).
   if (levels.size() - 1 >= kMaxHeightPyramidLevels) {

@@ -171,7 +171,7 @@ They also print drawn terrain nodes (2048 triangles each), `cells N`
 voxels), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -260,6 +260,14 @@ every tree as clusters instead of distant forest cells as voxels (A/B).
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and march the far field's voxels instead; `tlas` traces every
 tree for every receiver (A/B; also what `--far-field off` does).
+`--gi off|probes` (default off, until the look is accepted): `probes`
+lights the ambient term from global-illumination probes (spec
+`docs/superpowers/specs/2026-11-20-gi-design.md`): a camera-centred
+clipmap (5 levels, 2-32 m columns, 48^2 columns x 8 slices above the
+terrain under each column), traced in compute against the heightfield
+pyramid (`terrainRayDistance`) and, with `--trees`, the far-field voxels;
+ground hits are a fixed meadow albedo lit by the sun (terrain, tree and
+cloud shadow), misses the sky-view LUT + sky capture. No ray tracing.
 
 ## Testing policy (usage matters)
 
@@ -305,7 +313,9 @@ engine/include/meridian/   public API: renderer.h (Renderer, Lighting,
                            provider), weather.h (WeatherState,
                            presets, Weather: blend, wind integral,
                            history, stateAt; windVelocityAt;
-                           cloudShadowBasis, Beer shadow texel), window.h,
+                           cloudShadowBasis, Beer shadow texel), gi.h
+                           (GI clipmap constants, slice mapping, SH L1:
+                           the CPU reference of gi.glsl), window.h,
                            math/{vec3,mat4}.h
 engine/dlss/               meridian_dlss (MERIDIAN_DLSS, default ON):
                            dlss.h (createProvider, attribution),
@@ -347,6 +357,8 @@ engine/src/render/         renderer internals:
                            printAmbient, cloud march targets and
                            histories (quarter/half res) and the cloud
                            pass (march, resolve, composite)
+  renderer_gi.cpp          GI probe buffer, clipmap windows per frame,
+                           the probe trace dispatch
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -386,7 +398,11 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cloud_shadow_blur.comp, clouds_march.comp,
                            clouds_resolve.comp, clouds_composite.comp,
                            clouds_temporal.glsl (their push constants,
-                           cloud reprojection)
+                           cloud reprojection).
+                           gi.glsl: probe buffer layout, clipmap
+                           indexing, giSample/giIrradiance (the ambient
+                           hook in lighting.glsl); gi_probes.comp traces
+                           the probes.
 game/src/main.cpp          scene setup, fly camera, CLI options
 game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
                            with sun, haze and bloom (Look), G toggle
@@ -455,7 +471,10 @@ from the camera into a 64^2 octahedral map (cloud luminance + haze,
 transmittance; one texel of every 2x2 block per frame, all when the
 history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
 clouds over it integrated into the scene's ambient irradiance, and the
-LUT alone into the clear-sky irradiance that lights the clouds) -> early scene
+LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
+(only with `--gi probes`: gi_probes.comp, one 64-ray workgroup per probe
+that is stale, never traced or in this frame's 1/8 (hashed over columns and
+slices); L1 SH with hysteresis 0.9; read by the scene passes) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
 Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
 world normal + roughness; null views unless the upscaler wants them) + RGBA16F sun light (the
@@ -558,6 +577,11 @@ barriers account for that.
   frameIndex) (`pcg3d`, common.glsl) instead of interleaved gradient noise.
   The cloud march keeps interleaved gradient noise: its own resolve
   integrates it, and RR sees only the resolved clouds.
+- GI probes (`SceneData.giMode`, `gi`: the probe buffer, a 96 B header of
+  per-level windows + 64 B probes, toroidal by world column, each stamped
+  with the column it was traced for): `addAmbientLight` takes the diffuse
+  and rough-specular irradiance from `giSample`/`giIrradiance` when giMode
+  is 1, blending to the analytic sky + ground term outside the clipmap.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the

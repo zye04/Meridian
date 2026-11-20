@@ -980,6 +980,9 @@ void main() {
         vec3 groundIrradiance =
             kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
         vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -sh.N.y * 0.5 + 0.5);
+        if (pc.scene.giMode != 0u) {
+            backIrradiance = giIrradiance(giSample(sh.worldPosition, -sh.N), -sh.N, backIrradiance);
+        }
         sh.diffuseLight += sh.diffuseColor / kPi * backIrradiance * material.diffuseTransmission *
                            multiBounceOcclusion(s.occlusion, sh.diffuseColor);
     }

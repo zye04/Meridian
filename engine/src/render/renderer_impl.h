@@ -138,6 +138,11 @@ struct Renderer::Impl {
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
   bool voxelFarShadows = true;
+  GiMode giMode = GiMode::Off;
+  // The GI probe table (gi.glsl), created on the first frame with GI on.
+  Buffer giBuffer;
+  VkPipeline giProbesPipeline = VK_NULL_HANDLE;
+  bool giReset = true;
 
   VkCommandPool uploadPool = VK_NULL_HANDLE;
   VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
@@ -431,6 +436,9 @@ struct Renderer::Impl {
   void computeDfgLut();
   void createClouds();
   void destroyClouds();
+  void createGi();
+  void destroyGi();
+  void drawGiProbes(VkCommandBuffer cmd, Vec3 cameraPosition, uint32_t frameIndex);
   void placeWeatherMap(Vec3 cameraPosition);
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
   void placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection);

@@ -22,7 +22,8 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Shadows too dark (needle ground ~11% of sunlit in two measured views; real ~10-20%) | Shadows at the dark end of real | Shadow investigation 2026-11-20 | Haze profile and bounce light (rows below) |
 | Haze anchored at sea level | Ridges (1.35 km) sit above most of the aerosol: less sky light up high, thin haze from above | Shadow investigation; haze tuning | Engine: aerosol layer from the valley floor / layered profile with a sharp top |
 | Distant hills violet | Brown placeholder terrain albedo under blue haze: far-band OKLCh hue 277 vs 242 with a mid-green ground (reference 236-252); fix = green ground cover / vegetation albedo | Motion-clarity haze investigation | Real terrain albedo (M3 meadow) |
-| Bounce light / GI | No light bounced from the ground or between surfaces | Shadow investigation | Later (GI milestone not yet planned) |
+| Bounce light / GI: first version only (`--gi probes`, default off) | Ground hits use a fixed meadow albedo; no ground radiance cache, albedo feedback or multi-bounce; no screen-space pass (`hybrid`); probes 1.0-1.4 ms (spec 0.7) | GI lane, 2026-11-20 | Rest of `docs/superpowers/plans/2026-11-20-gi.md` (Tasks 5-8) |
+| GI with `--trees`: forest interiors turn blue and the probes cost ~3 ms | The far-field voxels barely occlude the sky for probes under the canopy, so the sky dominates the ambient; the far-field march per probe ray is the cost | GI lane, 2026-11-20 | Canopy occlusion for probes (check farFieldTransmittance near the camera, a canopy term), cheaper tree traces |
 | Cloud occlusion of ambient | Dropped from M4: it double-darkened with the cloud-dimmed sky capture | M4 clouds spec | Revisit with GI |
 | RT reflections | No reflections beyond the specular from the sky | M2b spec non-goal | Later (with a denoiser) |
 | Sky occlusion | Forest interiors and under-canopy too bright from the sky | Roadmap | M2b sky visibility |
