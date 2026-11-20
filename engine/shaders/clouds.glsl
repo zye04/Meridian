@@ -20,12 +20,12 @@ const float kCoverageEdge = 0.15;
 // Detail erosion: how far curl noise displaces the detail lookup (m) and how
 // much of the base shape the detail can carve away (stratus, cumulus).
 const float kCurlDistortion = 150.0;
-const vec2 kDetailErosion = vec2(0.5, 0.35);
-// The shape cut (stratus, cumulus): profile x shape below it is clear air.
+const vec2 kDetailErosion = vec2(0.5, 0.6);
+// The shape cut (stratus, cumulus): thinning x shape below it is clear air.
 // It carves the gaps and rounds the cumulus tops (the profile thins
 // upward); low for stratus so overcast stays a nearly continuous sheet.
 // Coverage multiplies the result (thresholded once, in the map).
-const vec2 kShapeCut = vec2(0.1, 0.35);
+const vec2 kShapeCut = vec2(0.1, 0.6);
 // The base shape's range, stretched to [0, 1]: the dilated Perlin-Worley
 // spans only about 0.78-0.92 (measured: 6% below 0.8, median 0.84, 4%
 // above 0.9), too little contrast to carve gaps on its own.
@@ -34,7 +34,13 @@ const vec2 kShapeRange = vec2(0.78, 0.92);
 // shape so overcast reads as a continuous sheet (gaps only where the
 // profile thins at its top and bottom and the detail erodes it), while
 // mixed types keep holes.
-const float kStratusShapeFloor = 0.6;
+const float kStratusShapeFloor = 0.4;
+// Vertical frequency of the base shape over its horizontal one: cells
+// wider than tall, so cumulus spread into flat-based loaves.
+const float kShapeSquash = 2.0;
+// Scales the eroded shape before it saturates at 1: cores reach the full
+// extinction and edges sharpen.
+const float kDensityGain = 3.0;
 // Extinction (1/m) at density 1.
 const float kCloudExtinction = 0.06;
 
@@ -184,12 +190,15 @@ vec2 cloudLayer(float type, float coverage) {
     return vec2(mix(c.stratusBottom, c.cumulusBottom, t), mix(c.stratusTop, cumulusTop, t));
 }
 
-// Density by normalized height in the layer: stratus a slab with soft
-// edges, cumulus a flat base rising fast and thinning toward the top.
-float cloudProfile(float type, float h) {
-    float stratus = smoothstep(0.0, 0.15, h) * (1.0 - smoothstep(0.7, 1.0, h));
-    float cumulus = smoothstep(0.0, 0.07, h) * (1.0 - smoothstep(0.3, 1.0, h));
-    return mix(stratus, cumulus, clamp(type, 0.0, 1.0));
+// The vertical profile by normalized height in the layer: x the base ramp,
+// applied after the shape cut so every cloud starts at the same height
+// (flat bases); y the thinning toward the top, applied before the cut so
+// clouds narrow upward (rounded tops). Stratus a slab with soft edges,
+// cumulus a sharp base and a long taper.
+vec2 cloudProfile(float type, float h) {
+    float t = clamp(type, 0.0, 1.0);
+    return vec2(smoothstep(0.0, mix(0.15, 0.07, t), h),
+                1.0 - smoothstep(mix(0.7, 0.3, t), 1.0, h));
 }
 
 // Cloud density in [0, 1] (the march scales it to extinction) at world xz
@@ -214,15 +223,16 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     heightFraction = h;
     Clouds c = pc.scene.clouds;
     vec3 p = vec3(world.x - c.windOffset.x, world.y, world.z - c.windOffset.y);
-    vec4 base = textureLod(textures3D[c.baseNoise], p / c.baseNoisePeriod, lod);
+    vec3 shapePoint = vec3(p.x, p.y * kShapeSquash, p.z);
+    vec4 base = textureLod(textures3D[c.baseNoise], shapePoint / c.baseNoisePeriod, lod);
     float worley = dot(base.gba, vec3(0.625, 0.25, 0.125));
     float shape = remap(base.r, worley - 1.0, 1.0, 0.0, 1.0);
     shape = clamp(remap(shape, kShapeRange.x, kShapeRange.y, 0.0, 1.0), 0.0, 1.0);
     float type = clamp(weather.g, 0.0, 1.0);
     shape = mix(shape, 1.0, kStratusShapeFloor * (1.0 - type));
     float cut = mix(kShapeCut.x, kShapeCut.y, type);
-    float cloud = coverage * clamp(remap(cloudProfile(weather.g, h) * shape, cut, 1.0, 0.0, 1.0),
-                                   0.0, 1.0);
+    vec2 profile = cloudProfile(weather.g, h);
+    float cloud = coverage * profile.x * clamp(remap(profile.y * shape, cut, 1.0, 0.0, 1.0), 0.0, 1.0);
     if (cloud <= 0.0) {
         return 0.0;
     }
@@ -234,7 +244,7 @@ float cloudDensity(vec3 world, float lod, out float heightFraction) {
     // eroded more throughout.
     float billow = type * clamp(h * 4.0, 0.0, 1.0);
     float erosion = mix(detail, 1.0 - detail, billow) * mix(kDetailErosion.x, kDetailErosion.y, type);
-    return clamp(remap(cloud, erosion, 1.0, 0.0, 1.0), 0.0, 1.0);
+    return clamp(remap(cloud, erosion, 1.0, 0.0, 1.0) * kDensityGain, 0.0, 1.0);
 }
 
 float cloudDensity(vec3 world, float lod) {
@@ -284,50 +294,62 @@ float cloudShadowMap(vec3 world, out float weight) {
     return exp(-min(texel.b, texel.g * max(0.0, depth - texel.r * 1000.0)));
 }
 
-// Beyond the shadow map: the mean transmittance under the coarse weather.
-// One crossing of coverage R passes 1 - k R, read where the sun ray
-// crosses the middle of the layer (the weather map inside its window, its
-// analytic fallback beyond); sky with coverage R is cloudy over only part
-// of its area (the shape cut and erosion carve gaps), so k = 1 - a type^p,
-// fitted to the shadow map's mean transmittance (decisions.md). A low sun's
-// ray runs S = layer height / tan(elevation) through the layer and crosses
-// about S / L independent clouds: the rest pass the regional mean, the
-// local state's mean coverage (weatherFromNoise's soft threshold over an
-// about uniform noise), so the fallback darkens with the map toward the
-// horizon. 1 above the layer.
-const vec2 kCloudShadowFallbackFit = vec2(0.53, 3.5); // a, p
+// Beyond the shadow map: the mean transmittance under the coarse weather,
+// through the local layer (cloudLayer of the local state). One crossing of
+// coverage R passes 1 - k R, read where the sun ray crosses the middle of
+// the layer (the weather map inside its window, its analytic fallback
+// beyond); sky with coverage R is cloudy over only part of its area (the
+// shape cut and erosion carve gaps), so k = 1 - a type^p, fitted to the
+// shadow map's mean transmittance (decisions.md). A low sun's ray runs S =
+// layer height / tan(elevation) through the layer and crosses about S / L
+// independent clouds: the rest pass the regional mean, the local state's
+// mean coverage (weatherFromNoise's soft threshold over an about uniform
+// noise), so the fallback darkens with the map toward the horizon.
+// marched: world is a cloud sample whose own cloud the march's sun steps
+// already crossed, so only the regional mean over the rest of the path
+// applies. 1 above the layer.
+const vec2 kCloudShadowFallbackFit = vec2(0.72, 2.6); // a, p
 const float kCloudShadowCrossingLength = 5500.0;
 
-float cloudShadowFallback(vec3 world) {
-    Clouds c = pc.scene.clouds;
-    float top = max(c.stratusTop, c.cumulusTop);
-    if (world.y >= top) {
+float cloudShadowFallback(vec3 world, bool marched) {
+    WeatherSample here = weatherAt(pc.scene, vec3(world.x, 0.0, world.z));
+    vec2 layer = cloudLayer(here.type, here.coverage);
+    if (world.y >= layer.y) {
         return 1.0;
     }
     vec3 sun = pc.scene.sunDirection;
-    float bottom = max(min(c.stratusBottom, c.cumulusBottom), world.y);
+    float bottom = max(layer.x, world.y);
     float sunHeight = max(sun.y, kCloudShadowSunFade.x);
-    float middle = 0.5 * (bottom + top);
+    float middle = 0.5 * (bottom + layer.y);
     vec2 xz = world.xz + sun.xz * ((middle - world.y) / sunHeight);
-    vec4 weather = weatherMapAt(vec3(xz.x, middle, xz.y));
-    float k = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(weather.g, 0.0, 1.0), kCloudShadowFallbackFit.y);
-    float crossings = (top - bottom) * length(sun.xz) / (sunHeight * kCloudShadowCrossingLength);
+    float crossings = (layer.y - bottom) * length(sun.xz) / (sunHeight * kCloudShadowCrossingLength);
     WeatherSample local = weatherAt(pc.scene, vec3(xz.x, 0.0, xz.y));
     float meanCoverage = clamp(local.coverage * (1.0 + kCoverageEdge) - 0.5 * kCoverageEdge, 0.0, 1.0);
     float meanK = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(local.type, 0.0, 1.0), kCloudShadowFallbackFit.y);
     // pow is undefined for 0^0 (overcast at a high sun).
-    return (1.0 - k * weather.r) * pow(max(1.0 - meanK * meanCoverage, 1e-6), max(0.0, crossings - 1.0));
+    float regional = max(1.0 - meanK * meanCoverage, 1e-6);
+    if (marched) {
+        return pow(regional, crossings);
+    }
+    vec4 weather = weatherMapAt(vec3(xz.x, middle, xz.y));
+    float k = 1.0 - kCloudShadowFallbackFit.x * pow(clamp(weather.g, 0.0, 1.0), kCloudShadowFallbackFit.y);
+    return (1.0 - k * weather.r) * pow(regional, max(0.0, crossings - 1.0));
 }
 
 // Sun transmittance through the clouds at world (flat, m): the shadow map
 // near the camera, blended into the fallback beyond it; 1 with clouds off.
-float cloudShadow(vec3 world) {
+// marched: as cloudShadowFallback's.
+float cloudShadow(vec3 world, bool marched) {
     if (pc.scene.clouds.shadowSize <= 0.0) {
         return 1.0;
     }
     float weight;
     float shadow = cloudShadowMap(world, weight);
-    return weight >= 1.0 ? shadow : mix(cloudShadowFallback(world), shadow, weight);
+    return weight >= 1.0 ? shadow : mix(cloudShadowFallback(world, marched), shadow, weight);
+}
+
+float cloudShadow(vec3 world) {
+    return cloudShadow(world, false);
 }
 
 // Octahedral map of the unit sphere (y up): the upper hemisphere fills the

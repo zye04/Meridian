@@ -547,7 +547,9 @@ void Renderer::setWeather(const Weather &weather) {
   // The layer at the camera, as cloudLayer (clouds.glsl) with the tallest
   // towers; from last frame's position (cameraInCloudLayer's margin covers
   // the lag).
-  const float type = std::clamp(weather.stateAt(impl_->previousCameraPosition).type, 0.0f, 1.0f);
+  const WeatherState here = weather.stateAt(impl_->previousCameraPosition);
+  const float type = std::clamp(here.type, 0.0f, 1.0f);
+  clouds.groundCoverage = here.coverage;
   impl_->cameraCloudLayer[0] = std::lerp(kStratusBottom, kCumulusBottom, type);
   impl_->cameraCloudLayer[1] = std::lerp(kStratusTop, kCumulusTop, type);
 
