@@ -764,7 +764,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // The HDR and depth images are shared by both frames in flight, so each
   // barrier also waits for the previous frame's use of the image.
-  for (VkImage target : {impl_->hdr.image, impl_->motion.image}) {
+  for (VkImage target : {impl_->hdr.image, impl_->motion.image,
+                          impl_->transparencyMask.image}) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -813,9 +814,17 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   motionAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   motionAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-  const VkRenderingAttachmentInfo sceneAttachments[] = {hdrAttachment,
-                                                        motionAttachment};
-  sceneRendering.colorAttachmentCount = 2;
+  // Flags blended pixels for the upscaler; nothing else writes it.
+  VkRenderingAttachmentInfo maskAttachment{};
+  maskAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  maskAttachment.imageView = impl_->transparencyMask.view;
+  maskAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  maskAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  maskAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+  const VkRenderingAttachmentInfo sceneAttachments[] = {
+      hdrAttachment, motionAttachment, maskAttachment};
+  sceneRendering.colorAttachmentCount = 3;
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
@@ -883,9 +892,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-  VkRenderingAttachmentInfo lateAttachments[] = {hdrAttachment, motionAttachment};
-  lateAttachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-  lateAttachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  VkRenderingAttachmentInfo lateAttachments[] = {hdrAttachment, motionAttachment,
+                                                 maskAttachment};
+  for (VkRenderingAttachmentInfo &attachment : lateAttachments) {
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  }
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   // Nothing reads depth after the late pass.
   depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -921,7 +932,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // --- Temporal resolve: scene color + history -> new history.
 
-  for (VkImage target : {impl_->hdr.image, impl_->motion.image}) {
+  for (VkImage target : {impl_->hdr.image, impl_->motion.image,
+                          impl_->transparencyMask.image}) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

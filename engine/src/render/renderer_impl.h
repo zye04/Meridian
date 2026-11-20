@@ -54,6 +54,7 @@ struct Renderer::Impl {
   Image depth;
   Image hdr;
   Image motion;
+  Image transparencyMask;
   // Display-sized temporal anti-aliasing history, ping-ponged: each frame
   // reads one and writes the other. Always in VK_IMAGE_LAYOUT_GENERAL.
   std::array<Image, 2> history;

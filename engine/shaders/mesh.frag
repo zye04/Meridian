@@ -23,6 +23,10 @@ layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
 // last frame's (the convention DLSS also uses).
 layout(location = 1) out vec2 outMotion;
+#ifdef ALPHA_BLEND
+// Transparency mask for the upscaler: blended coverage, blended with MAX.
+layout(location = 2) out float outTransparency;
+#endif
 
 const float kShadowRayBias = 0.05;
 const float kShadowRayLength = 20000.0;
@@ -738,4 +742,7 @@ void main() {
     vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;
     outMotion = previousUv - currentUv;
+#ifdef ALPHA_BLEND
+    outTransparency = coverage;
+#endif
 }

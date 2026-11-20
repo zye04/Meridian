@@ -1267,3 +1267,15 @@ the display size** (DLSS programming guide).
 **The reference's motion/still ratio is about 0.9** (0.8-1.0, low
 confidence), estimated from the YouTube video. Gates: forward 5 m/s
 >= 0.85 minimum, >= 0.95 stretch, on every path.
+
+**A transparency mask flags blended pixels for DLSS.**
+- R8_UNORM, render-sized, scene attachment 2: the blended pipeline writes
+  its `coverage` with blend op MAX (the most covering surface wins); every
+  other scene pipeline (mesh, masked, terrain, sky) has write mask 0 for
+  it. Cleared to 0 in the early pass, loaded in the late pass.
+- Alpha-tested (masked) geometry is not flagged: it is opaque per pixel.
+- The depth buffer needs no transparent-pixel fix: it clears to 0 (reverse-Z
+  far) and the sky pipeline has no depth test and so writes none, while
+  blended surfaces write no depth.
+- Clouds, when they exist, write this mask too.
+- Consumed by `UpscalerFrame.transparencyMask` (the DLSS module).

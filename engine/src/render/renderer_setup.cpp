@@ -54,6 +54,10 @@ void Renderer::Impl::createSwapchain() {
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                            VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT);
+  transparencyMask = createRenderImage(kTransparencyMaskFormat,
+                                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                           VK_IMAGE_USAGE_SAMPLED_BIT,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
   for (Image &image : history) {
     image = createDisplayImage(kHdrFormat,
                         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -177,6 +181,7 @@ void Renderer::Impl::destroySwapchain() {
   for (Image &image : history) {
     destroyImage(image);
   }
+  destroyImage(transparencyMask);
   destroyImage(motion);
   destroyImage(hdr);
   for (VkImageView view : depthPyramidLevels) {
@@ -772,7 +777,8 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &sceneLayoutInfo, nullptr, &sceneLayout),
         "vkCreatePipelineLayout");
 
-  const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat};
+  const VkFormat sceneFormats[] = {kHdrFormat, kMotionFormat,
+                                   kTransparencyMaskFormat};
   // Opaque and masked geometry is drawn as culled clusters (mesh shader),
   // blended geometry as whole meshes from the CPU (vertex shader).
   PipelineDesc meshDesc{.meshShader = "mesh.mesh",
@@ -915,7 +921,8 @@ Renderer::Renderer(Window &window) : impl_(std::make_unique<Impl>()) {
 
   VkPhysicalDeviceFeatures features{};
   features.samplerAnisotropy = VK_TRUE;
-  // Blended surfaces blend color but leave motion vectors untouched.
+  // Blended surfaces blend color and the transparency mask differently
+  // from the other attachments, which they leave untouched.
   features.independentBlend = VK_TRUE;
   // The terrain normal map (RG16_SNORM) is written from a compute shader.
   features.shaderStorageImageExtendedFormats = VK_TRUE;

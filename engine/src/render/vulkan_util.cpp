@@ -166,9 +166,24 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
     color.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     color.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     color.alphaBlendOp = VK_BLEND_OP_ADD;
+    // Attachment 1 (motion) stays untouched; attachment 2 is the
+    // transparency mask, the most covering blended surface wins.
     for (size_t i = 1; i < blendAttachments.size(); ++i) {
       blendAttachments[i].colorWriteMask = 0;
     }
+    if (blendAttachments.size() > 2) {
+      VkPipelineColorBlendAttachmentState &mask = blendAttachments[2];
+      mask.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+      mask.blendEnable = VK_TRUE;
+      mask.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+      mask.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+      mask.colorBlendOp = VK_BLEND_OP_MAX;
+      mask.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      mask.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      mask.alphaBlendOp = VK_BLEND_OP_MAX;
+    }
+  } else if (blendAttachments.size() > 2) {
+    blendAttachments[2].colorWriteMask = 0;
   }
 
   VkPipelineColorBlendStateCreateInfo colorBlend{};

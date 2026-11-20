@@ -244,8 +244,8 @@ for a retest; fills 4 cluster draw lists: opaque/masked x
 single/double-sided) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective, sky irradiance every frame) -> early scene
-pass into HDR RGBA16F + RG16F motion + D32 depth (sky fullscreen, then
-the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
+pass into HDR RGBA16F + RG16F motion + R8 transparency mask + D32 depth
+(sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
@@ -287,6 +287,9 @@ them, and barriers account for that.
   and pass that between stages, culling included. World positions are
   rebuilt only where they are needed (textures, shadow rays, atmosphere).
 - Motion vectors: UV units, `previous - current` (the DLSS convention).
+- Transparency mask: scene attachment 2 (R8, render-sized, cleared to 0
+  in the early pass); only the blended pipeline writes it (coverage,
+  blend op MAX), all others have write mask 0. Clouds will write it too.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the
