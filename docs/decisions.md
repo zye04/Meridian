@@ -2548,7 +2548,8 @@ The photos' tops measure 5.9-13x the sky beside them and their bases
   stair-step on small distant clouds (backlog).
 - **Catmull-Rom upsample overshoot:** clamping to the central 2x2 range
   changed the sunset-from-above view by MAE 1.4e-4 with no visible ring
-  removed, so the composite is unchanged.
+  removed, so the composite is unchanged. Superseded by "Cloud blue
+  fringes" below.
   - Hillaire, Physically Based Sky, Atmosphere and Cloud Rendering in Frostbite (2016, §5): https://media.contentapi.ea.com/content/dam/eacom/frostbite/files/s2016_pbs_frostbite_sky_clouds.pdf
   - Wrenninge, Kulla, Lundqvist, Oz: The Great and Volumetric (2013, multiple-scattering octaves): https://fpsunflower.github.io/ckulla/data/oz_volumes.pdf
   - Schneider, The Real-time Volumetric Cloudscapes of Horizon Zero Dawn (2015): https://www.advances.realtimerendering.com/s2015/The%20Real-time%20Volumetric%20Cloudscapes%20of%20Horizon%20-%20Zero%20Dawn%20-%20ARTR.pdf
@@ -2902,3 +2903,21 @@ horizon) broke into dashes, under RR, TAA and DLSS SR alike.
   a 1 rad/s turn unchanged (midday 0.0192, low sun 0.0176 -> 0.0175);
   still frame 0.0199 -> 0.0188 and drifting-cloud crop 0.0292 -> 0.0282
   (the stair-steps' edges gone). `clouds` ms unchanged (1.3-1.4).
+
+## Cloud blue fringes (2026-11-20)
+
+User report: blue dashed outlines along cloud undersides. Seen from above
+at sunset (`1119 5500 -431 -1.55 -0.2 --sun -0.998 0.05 0.03 --weather
+broken`) as saturated dark-blue texels where a lit cloud top meets the
+dark underside of a cloud behind it. Both Catmull-Rom filters overshoot
+there: the composite's 4x4 upsample, and the resolve's history after the
+variance clip (a box of mean +- 2 sigma reaches below zero at such
+edges). A channel below zero was clamped on its own, which left the
+blue one.
+
+- **Choice:** the composite clamps its Catmull-Rom result to the range of
+  the central 2x2 texels (where it uses Catmull-Rom; the bilateral
+  bilinear fallback can't overshoot), and the resolve clamps the history
+  to >= 0 after the clip instead of before it. The fringes are gone in the
+  view above; flicker and turn sharpness as in "Cloud march sub-texel
+  jitter" (measured with both).

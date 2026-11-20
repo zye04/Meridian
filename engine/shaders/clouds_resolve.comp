@@ -129,8 +129,11 @@ void main() {
 
     vec4 sigma = sqrt(max(meanSquared / count - mean * mean, 0.0));
     vec4 history = sampleCatmullRom(previousUv, vec2(size));
-    history = vec4(max(history.rgb, 0.0), clamp(history.a, 0.0, 1.0));
+    // The box can reach below zero at high-contrast edges: clamping after
+    // the clip keeps a dim channel from going negative, which the composite
+    // clamps per channel, leaving saturated (blue) texels.
     history = clipToBox(history, mean - kVarianceGamma * sigma, mean + kVarianceGamma * sigma);
+    history = vec4(max(history.rgb, 0.0), clamp(history.a, 0.0, 1.0));
 
     // History depth: the gathered texels weighted bilinearly and by opacity
     // (gather order: (0,1), (1,1), (1,0), (0,0)).

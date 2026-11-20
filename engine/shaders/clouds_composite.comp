@@ -95,12 +95,24 @@ void main() {
     depthSum = 0.0;
     depthWeight = 0.0;
     disagreed = false;
+    // Catmull-Rom's negative lobes overshoot at sharp edges (a lit cloud
+    // top over a dark underside): per channel below zero, then clamped,
+    // that left saturated blue texels. Clamping to the central 2x2 range
+    // keeps the result between its neighbors.
+    vec4 lowest = vec4(1e30);
+    vec4 highest = vec4(-1e30);
     for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 4; ++x) {
-            accumulate(clamp(base + ivec2(x - 1, y - 1), ivec2(0), lowSize - 1), wx[x] * wy[y],
-                       sceneDistance);
+            ivec2 texel = clamp(base + ivec2(x - 1, y - 1), ivec2(0), lowSize - 1);
+            accumulate(texel, wx[x] * wy[y], sceneDistance);
+            if (x >= 1 && x <= 2 && y >= 1 && y <= 2) {
+                vec4 c = imageLoad(resolvedColor, texel);
+                lowest = min(lowest, c);
+                highest = max(highest, c);
+            }
         }
     }
+    bool ringClamp = !disagreed;
     if (disagreed) {
         cloudSum = vec4(0.0);
         weightSum = 0.0;
@@ -130,6 +142,9 @@ void main() {
         return;
     }
     vec4 cloud = cloudSum / weightSum;
+    if (ringClamp) {
+        cloud = clamp(cloud, lowest, highest);
+    }
     cloud = vec4(max(cloud.rgb, 0.0), clamp(cloud.a, 0.0, 1.0));
     vec4 background = imageLoad(hdr, pixel);
     imageStore(hdr, pixel, vec4(cloud.rgb + background.rgb * cloud.a, background.a));
