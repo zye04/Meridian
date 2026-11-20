@@ -1,5 +1,7 @@
 #include "renderer_impl.h"
 
+#include <meridian/placement.h>
+
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -332,11 +334,43 @@ TextureId Renderer::uploadTexture(const TextureData &texture) {
 }
 
 void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
-  impl_->terrain.layers[0] = toGpu(material.soil);
-  impl_->terrain.layers[1] = toGpu(material.needles);
-  impl_->terrain.layers[2] = toGpu(material.rock);
-  impl_->terrain.snowLine = material.snowLine;
-  impl_->terrain.enabled = 1;
+  size_t total = 0;
+  for (const std::vector<TerrainLayer> &variants : material.layers) {
+    if (variants.empty()) {
+      throw std::runtime_error("terrain material: every role needs a layer");
+    }
+    total += variants.size();
+  }
+  if (total > static_cast<size_t>(kMaxTerrainLayers)) {
+    throw std::runtime_error("terrain material: more than kMaxTerrainLayers layers");
+  }
+  if (material.forest.frequency > 0.0f && material.forest.edge <= 0.0f) {
+    throw std::runtime_error("terrain material: the forest mask's edge must be positive");
+  }
+  GpuTerrain &terrain = impl_->terrain;
+  uint32_t count = 0;
+  for (int role = 0; role < kTerrainRoles; ++role) {
+    const std::vector<TerrainLayer> &variants = material.layers[role];
+    terrain.roles[role] = count | static_cast<uint32_t>(variants.size()) << 8;
+    for (const TerrainLayer &layer : variants) {
+      terrain.layers[count++] = toGpu(layer);
+    }
+  }
+  terrain.layerCount = count;
+  terrain.forestMaskPeriod = 0;
+  if (material.forest.frequency > 0.0f) {
+    DensityRule rule{};
+    rule.maskFrequency = material.forest.frequency;
+    rule.maskThreshold = material.forest.threshold;
+    rule.maskEdge = material.forest.edge;
+    const PlacementRule mask = placementRule(impl_->heightfield, rule);
+    terrain.forestMaskPeriod = mask.maskPeriod;
+    terrain.forestMaskLo = mask.maskLo;
+    terrain.forestMaskHi = mask.maskHi;
+    terrain.forestMaskSeed = material.forest.seed;
+  }
+  terrain.snowLine = material.snowLine;
+  terrain.enabled = 1;
 }
 
 MaterialId Renderer::createMaterial(const MaterialData &material) {

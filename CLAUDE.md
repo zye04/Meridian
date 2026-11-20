@@ -136,13 +136,14 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 so without the Megaplants trees the same seed places different content
 and these views differ.
 The game places forests, lone trees and rocks over the whole Napf at load
-(`placeScenery` in main.cpp; ~2.9M instances),
+(`placeScenery` in main.cpp; ~2.6M instances),
 which loads the Megaplants trees and rocks as prototypes: Debug startup
-~95 s, Release ~9.4 s. `--placement off` skips it (Debug ~18 s, Release
-~2.3 s; heightfield pyramid and normal map); use it for captures that
+~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
+heightfield pyramid, normal map and transcoding the terrain's 4K
+textures, ~8.7 s of it); use it for captures that
 don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches) and `placement hash 0x...`
-(0xd351c07523b05a0c for seed 1 with every asset present). Loading
+(0x8322bae25df9e142 for seed 1 with every asset present). Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin).
 
@@ -445,13 +446,16 @@ barriers account for that.
   "© swisstopo". The heightfield maps crop center = origin, east = +x,
   north = -z; outside the grid indices mirror (MIRRORED_REPEAT).
 - `assets/` is git-ignored. Re-create it with `tools/fetch-sample-assets.sh`
-  (needs `jq`); once the project is built it also cooks every model and the
-  terrain layers (`assets/terrain/<id>/*.ktx2`). Loading the Poly Haven
+  (needs `jq`); once the project is built it also cooks every model, and,
+  given the Megascans downloads directory, the terrain layers
+  (`assets/terrain/<id>/*.ktx2`; without them the terrain is procedural). Loading the Poly Haven
   models prints UBSan shift warnings from inside MikkTSpace (third-party
   code, not ours).
-- Megascans trees, the Fab cliff and their import tools:
+- Megascans trees, ground surfaces, the Fab cliff and their import tools:
   `docs/assets.md`. The rock placement layer and the terrain material's
-  rock blend share `kRockNormalY` (renderer.h).
+  rock blend share `kRockNormalY` (renderer.h); the forest layers and the
+  material's forest floor share the forest mask (`kMaskFrequency`...,
+  main.cpp; `forestMask` in mesh.frag runs placement.glsl's mask).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building

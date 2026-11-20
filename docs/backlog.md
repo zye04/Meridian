@@ -67,7 +67,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
-| Ground reads as desert (rock on most steep slopes, no grass) | Biggest realism gap | User feedback | M3 meadow + terrain material |
+| Terrain textures add ~8.7 s to Release startup | 30 4K UASTC transcodes at load | G1 terrain material | Transcode in parallel or cache BC7 |
 | Grid pattern and two-tone patches on rock at distance; rock not hex-tiled | Visible repetition | User screenshots; known gap before the backlog | M3 terrain material |
 | Detail displacement (+-0.3 m) casts no shadows | Missing micro-shadows near the camera | M1 Task 5 | Later |
 | Residual contour shadow bands at grazing sun | Neighbor-cell relief under smooth normals | Shadow investigation | Accepted; revisit with shadow denoiser |

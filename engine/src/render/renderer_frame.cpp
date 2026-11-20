@@ -617,12 +617,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.atmosphere = toGpu(lighting.atmosphere);
   scene.terrain = impl_->terrain;
   if (impl_->terrain.enabled) {
-    for (int i = 0; i < 3; ++i) {
+    const uint32_t firstRock = scene.terrain.roles[static_cast<int>(TerrainRole::Rock)] & 0xFFu;
+    for (uint32_t i = 0; i < scene.terrain.layerCount; ++i) {
       GpuTerrainLayer &layer = scene.terrain.layers[i];
       const double period = kTerrainWrapTiles * static_cast<double>(layer.tileSize);
-      // Soil and needles (0, 1) are hex-tiled; rock is triplanar.
+      // Rock (the last role) is triplanar; the rest are hex-tiled.
       const double periodZ =
-          i < 2 ? kTerrainHexWrapRows * std::sqrt(3.0) / 4.0 * layer.tileSize : period;
+          i < firstRock ? kTerrainHexWrapRows * std::sqrt(3.0) / 4.0 * layer.tileSize : period;
       layer.offset[0] = wrapAround(camera.position.x, period);
       layer.offset[1] = wrapAround(camera.position.y, period);
       layer.offset[2] = wrapAround(camera.position.z, periodZ);

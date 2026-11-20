@@ -8,8 +8,6 @@
 # - Forest rocks, litter and small plants as glTF, to cook with meridian-cook.
 # - One film-weight tree (island_tree_01, 1.6M triangles) for virtualized
 #   geometry.
-# - Ground textures as JPEG (base color, OpenGL normal, AO/roughness/metal,
-#   height).
 # From swisstopo swissALTI3D (open government data, free use with the
 # attribution "© swisstopo"): the 2 m elevation tiles of the Napf region,
 # E 2631..2645, N 1198..1212 (LV95 km, 15 x 15 tiles), mosaicked and cooked
@@ -19,7 +17,8 @@
 # directory holding the tree_*_usd.zip downloads as the first argument to
 # import variant A of each through tools/usd2gltf and meridian-cook --tree.
 # The same directory may hold Megascans rock downloads (*_ue_high.zip, Fab):
-# the massive sandstone cliff is cooked for placement.
+# the massive sandstone cliff is cooked for placement; and the ground
+# surfaces (*_4k_ue_high.zip) for the terrain material.
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
 megaplants="${1:-}"
@@ -71,14 +70,6 @@ for model in rock_moss_set_01 rock_moss_set_02 boulder_01 namaqualand_boulder_04
   done < <(polyhaven_files "$model" | jq -r '.gltf["2k"].gltf |
       "\(.url | split("/")[-1]) \(.url)",
       (.include | to_entries[] | "\(.key) \(.value.url)")')
-done
-
-for texture in forest_ground_04 forest_leaves_04 rock_face_03 brown_mud_leaves_01; do
-  # Maps can live in different directories, so take each one's own URL.
-  while read -r url; do
-    download "${url%/*}" "$root/assets/source/textures/$texture" "${url##*/}"
-  done < <(polyhaven_files "$texture" |
-      jq -r '.Diffuse, .nor_gl, .arm, .Displacement | .["2k"].jpg.url')
 done
 
 bark="$root/assets/source/textures/Bark012"
@@ -140,18 +131,6 @@ if [[ ! -d "$root/assets/AlphaBlendModeTest" ]]; then
   "$cook" "$root/assets/source/AlphaBlendModeTest/AlphaBlendModeTest.gltf" \
     "$root/assets/AlphaBlendModeTest"
 fi
-
-# Terrain layers: one KTX2 per map, as the game loads them.
-for texture in forest_ground_04 forest_leaves_04 rock_face_03; do
-  source="$root/assets/source/textures/$texture/$texture"
-  dest="$root/assets/terrain/$texture"
-  for map in "diff base_color color" "nor_gl normal normal" "arm arm data" \
-      "disp height data"; do
-    read -r suffix name usage <<<"$map"
-    [[ -f "$dest/$name.ktx2" ]] ||
-      "$cook" --texture "${source}_${suffix}_2k.jpg" "$dest/$name.ktx2" "$usage"
-  done
-done
 
 # Napf heightfield (page [0] of each tile; the rest are overviews): rows north to south, tiles west to east, float32 meters.
 if [[ ! -f "$root/assets/terrain/napf.height" ]]; then
@@ -229,14 +208,20 @@ else
   done
 
   # Megascans ground surfaces for the terrain material (Fab *_4k_ue_high.zip,
-  # same directory): the 4K maps downscaled to 2K, then cooked like the
-  # Poly Haven layers. ORM is AO/roughness/metal, the same packing as ARM;
-  # the normal maps are OpenGL (green up), checked against the height maps.
-  for id in uncut_grass_oilpt20 wild_grass_pjwgw0 forest_floor_xdfddec soil_mud_olsetpp0 \
-      gravel_on_soil_rmsigwp0 rock_cliff_tg1mcgbl; do
+  # same directory; docs/assets.md has the roles and the ones left out):
+  # base color and normal at the full 4K, ARM and height downscaled to 2K
+  # (their detail matters less; half the memory). ORM is AO/roughness/metal,
+  # the same packing as Poly Haven's ARM; the normal maps are OpenGL (green
+  # up), checked against the height maps. layered_rock_vl0fdhdo has no
+  # height map: its luminance stands in. albedo.txt holds the base color's
+  # mean linear RGB, which the game matches to its category's.
+  for id in uncut_grass_oilpt20 wild_grass_pjwgw0 lawn_grass_sbykrmp0 clover_vlzlbjon \
+      forest_floor_sfjmafua forest_floor_xdfddec forest_path_ugsnfawlw soil_dirt_pjusf0 \
+      soil_dirt_peioh0 soil_mud_olsetpp0 gravel_on_soil_rmrk3sp0 gravel_on_soil_rmsigwp0 \
+      rock_cliff_tg1mcgbl layered_rock_cliff_thficeas layered_rock_vl0fdhdo; do
     zip="$megaplants/${id}_4k_ue_high.zip"
     dest="$root/assets/terrain/$id"
-    [[ -f "$zip" && ! -f "$dest/height.ktx2" ]] || continue
+    [[ -f "$zip" && ! -f "$dest/albedo.txt" ]] || continue
     extract="$megascans/_extract/${id}_4k_ue_high"
     if [[ ! -d "$extract" ]]; then
       rm -rf "$extract.part"
@@ -246,12 +231,20 @@ else
     fi
     staging="$megascans/_terrain/$id"
     mkdir -p "$staging" "$dest"
-    for map in "B base_color color" "N normal normal" "ORM arm data" "H height data"; do
-      read -r suffix name usage <<<"$map"
+    for map in "B base_color color 4096" "N normal normal 4096" "ORM arm data 2048" \
+        "H height data 2048"; do
+      read -r suffix name usage size <<<"$map"
       png="$(find "$extract/Textures" -maxdepth 1 -iname "*_4K_${suffix}.png" | head -n 1)"
-      magick "$png" -resize 2048x2048 "$staging/$name.png"
+      if [[ -n "$png" ]]; then
+        magick "$png" -resize "${size}x${size}" "$staging/$name.png"
+      else
+        magick "$staging/base_color.png" -colorspace Gray -auto-level -resize "${size}x${size}" \
+          "$staging/$name.png"
+      fi
       "$cook" --texture "$staging/$name.png" "$dest/$name.ktx2" "$usage"
     done
+    magick "$staging/base_color.png" -colorspace RGB -scale 1x1\! \
+      -format '%[fx:r] %[fx:g] %[fx:b]\n' info: > "$dest/albedo.txt"
   done
 fi
 

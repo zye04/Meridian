@@ -8,11 +8,13 @@
 #include <meridian/texture.h>
 #include <meridian/upscaler.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace meridian {
 
@@ -81,19 +83,41 @@ struct TerrainLayer {
   // How much of the AO map applies, as glTF's occlusion strength: lower it
   // where the base color already carries the cavities' darkness.
   float occlusionStrength = 1.0f;
+  // Multiplies the base color: matches the layer's mean color to its
+  // neighbours' without touching its detail or contrast.
+  float albedoScale[3] = {1.0f, 1.0f, 1.0f};
 };
 
 // The ground turns to rock as the terrain normal's y falls from
-// kRockNormalY[1] (26 degrees) to kRockNormalY[0] (41 degrees). Placement
-// rules that follow rock (boulders) use the same values.
-constexpr float kRockNormalY[2] = {0.75f, 0.9f};
+// kRockNormalY[1] (48 degrees) to kRockNormalY[0] (58 degrees): rock only
+// on cliffs (5% of the Napf is steeper than 48 degrees at 2 m, 1% than 58).
+// Placement rules that follow rock (boulders) use the same values.
+constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 
-// Flat ground mixes soil and needles; steep slopes are rock; flat ground
-// above the snow line is snow.
+// The forest placement layer's mask (its DensityRule's maskFrequency,
+// maskThreshold, maskEdge) and the placement seed. The forest floor follows
+// the same noise, so floor and trees agree. frequency 0: no forest floor.
+struct ForestMask {
+  float frequency = 0.0f;
+  float threshold = 0.0f;
+  float edge = 0.0f;
+  uint32_t seed = 0;
+};
+
+// Where each terrain layer goes (mesh.frag, terrainSurface): meadow grass
+// on open ground; clover in damp flat hollows; mud in valley bottoms; worn
+// soil on ridges and the slopes below rock; forest path at forest edges and
+// forest floor inside (the forest mask); gravel in channels; scree at the
+// foot of rock; rock on cliffs. Flat ground above the snow line is snow.
+enum class TerrainRole { Grass, Clover, Mud, Soil, ForestPath, ForestFloor, Gravel, Scree, Rock, Count };
+constexpr int kMaxTerrainLayers = 16;
+
 struct TerrainMaterial {
-  TerrainLayer soil;
-  TerrainLayer needles;
-  TerrainLayer rock;
+  // Variants per role, at least one each, kMaxTerrainLayers in all; a
+  // large-scale noise picks one per region. Rock is triplanar, the rest
+  // hex-tiled top-down projections.
+  std::array<std::vector<TerrainLayer>, static_cast<size_t>(TerrainRole::Count)> layers;
+  ForestMask forest;
   // Meters above sea level; snow fades in over the 40 m above it.
   float snowLine = 4000.0f;
 };

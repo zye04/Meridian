@@ -1590,3 +1590,63 @@ for variety. The old mix (beech 0.4, oak 0.25, maple 0.2, saplings
   25.3); start view 18.2M -> 19.0M triangles, 5.63 -> 5.87 ms. The cost
   is the beech's 4M triangles at near range; the leaf LOD work and the
   far field address it.
+
+## Terrain material: Megascans ground by role (2026-11-20)
+
+The ground read as brown desert: Poly Haven soil and needle litter on all
+flat ground and rock from 26 degrees. The look target (Chlorophyll Engine
+frames, `assets/reference/chlorophyll/`) is bright green meadow, forest
+floor under trees, rock only on cliffs.
+
+- **Surfaces by what they show, not their names** (contact sheet:
+  `.superpowers/ground-assets/contact-sheet.png` in the lane's worktree;
+  roles in docs/assets.md). 15 of the 17 Megascans surfaces downloaded;
+  dropped: `wild_grass_sfknaeoa` (very dark olive, a third of the other
+  grasses' luminance, big dark blotches that repeat) and
+  `rough_sandstone_rock_xi4uccxjw` (flat saturated orange, low relief,
+  off the Napf's palette, 2x1 m).
+- **Roles, stacked bottom to top with height blends** (`TerrainRole`,
+  `terrainSurface` in mesh.frag): grass (3 variants), clover (flat
+  hollows), mud (flat valley bottoms), soil (2; ridges and the ~7 degrees
+  below rock, in patches), forest path (the forest mask's outer edge),
+  forest floor (2; inside the forest mask), gravel (channels), scree (the
+  foot of rock), rock (3, triplanar). Several variants per role: a ~200 m
+  noise picks one per region and height-blends the next near its border,
+  instead of blending every layer everywhere (cost).
+- **Inputs:** slope from the per-pixel normal; curvature as the Laplacian
+  of height over ~24 m from the normal map's divergence (4 extra fetches;
+  Napf flat ground's 10th/90th percentiles about -0.02/+0.017 per m); the
+  forest mask is placement.glsl's integer noise at the pixel (bit-exact
+  with the trees', so floor and trees agree; 0 outside the crop, where
+  nothing is placed); ~5 m noise perturbs every weight so borders are
+  irregular; the Mishkinis height blend keeps stones above soil and grass
+  filling hollows.
+- **Rock only on cliffs:** `kRockNormalY` 48 -> 58 degrees (was 26 -> 41).
+  At 2 m, 38% of the Napf is steeper than 30 degrees, 12% than 42, 5% than
+  48, 1% than 58. Boulders follow the same values, so there are fewer
+  (placed 2.92M -> 2.65M).
+- **Colour matching:** the cook writes each base color's mean linear RGB
+  (`albedo.txt`); the game scales each layer 85% of the way (in log) to
+  its role's target mean, a uniform per-channel scale that keeps the
+  texture's detail and contrast and a hint of its own tint. On top, ~400 m
+  and ~160 m noise varies brightness (+-15%) and hue (+-5% red/blue), so
+  no stretch of one layer looks uniform.
+- **Resolution:** base color and normal at the scans' full 4K, ARM and
+  height at 2K. Texel density: 2 m tiles 0.49 mm, 1 m 0.24 mm, 0.39 m
+  gravel 0.1 mm, 3 m rock 0.73 mm per texel.
+- **Normal maps:** the Megascans UE exports here are OpenGL (green up), as
+  checked by correlating each map with its height map's gradient
+  (+0.6 to +0.95), so no conversion. `layered_rock_vl0fdhdo` has no
+  height map; its luminance (auto-levelled) stands in for the blends.
+- **Cost** (Release, 2560x1440, `--placement off` so scene early is the
+  terrain, 3 runs): full-ground start view 1.27 -> 1.53 ms, open view
+  1.22 -> 1.33, high overview 2.76 -> 3.22. The first version cost 2.5x:
+  `sampleRole` indexed `layers[]` of a local copy of `Terrain` with a
+  dynamic index, which spills the whole struct to scratch memory; reading
+  `pc.scene.terrain.layers[i]` straight from the buffer fixed it.
+  Unrolling the role loop was slower (more live registers).
+- **Memory and load:** device memory 3779 -> 4472 MiB (the textures
+  ~+755 MiB; fewer boulders saved ~60 MiB of TLAS), about 53 MiB per
+  layer (BC7 after transcoding: 4K with mips 21 MiB, 2K 5.3 MiB). Release
+  startup with `--placement off` 2.2 -> 10.9 s, the 30 4K UASTC textures'
+  transcode (backlog).

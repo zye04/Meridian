@@ -180,15 +180,16 @@ struct GpuTerrainLayer {
   // The camera position wrapped by the layer's period (renderer_frame.cpp).
   float offset[3] = {};
   float occlusionStrength = 1.0f;
+  float albedoScale[3] = {1.0f, 1.0f, 1.0f};
 };
-static_assert(sizeof(GpuTerrainLayer) == 36);
+static_assert(sizeof(GpuTerrainLayer) == 48);
 
 // Terrain texture coordinates (mesh.frag) are the camera-relative position
 // plus the camera position wrapped by a period, so they stay small and
 // precise anywhere on the map. Layers repeat every kTerrainWrapTiles tiles;
 // along z, the hex-tiled layers repeat every kTerrainHexWrapRows rows of
 // hex cells (sqrt(3)/4 tiles each, so 256.3 tiles), since no whole number
-// of tiles is a whole number of rows. The soil/needles mix noise repeats
+// of tiles is a whole number of rows. The ground's mix noise repeats
 // every kTerrainNoiseWrap meters.
 // Must match kHexCellsPerRepeat, kHexWrapColumns, kHexWrapRows,
 // kNoiseCell and kNoiseWrapCells in mesh.frag.
@@ -202,8 +203,8 @@ constexpr double kTerrainNoiseWrap = kTerrainNoiseCell * kTerrainNoiseWrapCells;
 static_assert(kTerrainHexWrapColumns == kTerrainHexCellsPerRepeat * kTerrainWrapTiles);
 static_assert(kTerrainHexWrapRows % 2 == 0,
               "a period along z is the hex lattice step (-rows / 2, rows)");
-static_assert(kTerrainNoiseWrapCells * 27 % 10 == 0,
-              "the mix noise's 2.7x octave needs a whole number of cells per wrap");
+static_assert(kTerrainNoiseWrapCells % 10 == 0,
+              "mesh.frag's noise octaves at 0.1x to 8x need whole cells per wrap");
 
 // CDLOD terrain quadtree (terrain.glsl): level 0 nodes are 16 m, 32x32
 // quads of 0.5 m; each level doubles. The root covers 1049 km around the
@@ -222,9 +223,14 @@ constexpr uint32_t kMaxTerrainNodes = 8192;
 constexpr uint32_t kTerrainTasksPerNode = 16;
 constexpr uint32_t kMaxHeightPyramidLevels = 16;
 
-// Must match Terrain in common.glsl. Layers: soil, needles, rock.
+// Must match Terrain in common.glsl. Layers grouped by TerrainRole, in
+// role order; rock (triplanar) last.
+constexpr int kTerrainRoles = static_cast<int>(TerrainRole::Count);
 struct GpuTerrain {
-  GpuTerrainLayer layers[3];
+  GpuTerrainLayer layers[kMaxTerrainLayers];
+  // Per TerrainRole: its first layer | variant count << 8.
+  uint32_t roles[kTerrainRoles] = {};
+  uint32_t layerCount = 0;
   // A TerrainMaterial is set (procedural colors otherwise).
   uint32_t enabled = 0;
   float snowLine = TerrainMaterial{}.snowLine;
@@ -250,12 +256,20 @@ struct GpuTerrain {
   // The camera's x/z wrapped by kTerrainNoiseWrap.
   float noiseOffset[2] = {};
   float rockNormalY[2] = {kRockNormalY[0], kRockNormalY[1]};
+  // The trees' ramp over the forest mask noise (placement.glsl, the forest
+  // rule's maskPeriod; 0 = no forest floor).
+  uint32_t forestMaskPeriod = 0;
+  int32_t forestMaskLo = 0;
+  int32_t forestMaskHi = 0;
+  uint32_t forestMaskSeed = 0;
+  uint32_t padding[2] = {}; // keeps the next SceneData member 16-byte aligned
 };
-static_assert(sizeof(GpuTerrain) == 256);
+static_assert(sizeof(GpuTerrain) == 976);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
-          layer.height.index, layer.tileSize, {}, layer.occlusionStrength};
+          layer.height.index, layer.tileSize, {}, layer.occlusionStrength,
+          {layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]}};
 }
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
@@ -318,7 +332,7 @@ struct SceneData {
   VkDeviceAddress clusterNodes = 0;
   VkDeviceAddress clusterLevels = 0;
 };
-static_assert(sizeof(SceneData) == 1056);
+static_assert(sizeof(SceneData) == 1776);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

@@ -285,6 +285,7 @@ struct TerrainLayer {
     // The camera position wrapped by the layer's period (renderer_frame.cpp).
     float offset[3];
     float occlusionStrength;
+    float albedoScale[3];
 };
 
 layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
@@ -296,9 +297,13 @@ layout(buffer_reference, std430) buffer TerrainNodeBuffer {
     uvec2 nodes[];
 };
 
-// Must match GpuTerrain in C++. Layers: soil, needles, rock.
+// Must match GpuTerrain in C++.
 struct Terrain {
-    TerrainLayer layers[3];
+    // Grouped by role (TerrainRole), rock last.
+    TerrainLayer layers[16];
+    // Per role: its first layer | variant count << 8.
+    uint roles[9];
+    uint layerCount;
     // A TerrainMaterial is set (procedural colors otherwise).
     uint enabled;
     float snowLine;
@@ -325,6 +330,13 @@ struct Terrain {
     vec2 noiseOffset;
     // Ground turns to rock from normal.y = y down to x (kRockNormalY).
     vec2 rockNormalY;
+    // The trees' ramp over the forest mask noise (placement.glsl; period
+    // 0 = no forest floor).
+    uint forestMaskPeriod;
+    int forestMaskLo;
+    int forestMaskHi;
+    uint forestMaskSeed;
+    uint padding[2];
 };
 
 layout(buffer_reference, std430) readonly buffer SceneBuffer {

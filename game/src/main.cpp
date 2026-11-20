@@ -80,14 +80,18 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
   }
 }
 
-// Loads one cooked Poly Haven ground texture set from assets/terrain/<id>/.
-// Returns nothing (after saying which file) if any map is missing.
-std::optional<meridian::TerrainLayer>
-loadTerrainLayer(meridian::Renderer &renderer, const char *id, float tileSize) {
+// Loads one cooked ground texture set from assets/terrain/<id>/, its base
+// color scaled from its mean (albedo.txt, linear RGB) 85% of the way to
+// `target`, so neighbouring layers match and a hint of each one's own tint
+// stays. Returns nothing (after saying which file) if any file is missing.
+std::optional<meridian::TerrainLayer> loadTerrainLayer(meridian::Renderer &renderer,
+                                                       const char *id, float tileSize,
+                                                       meridian::Vec3 target) {
   const auto directory = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / id;
-  const char *names[] = {"base_color", "normal", "arm", "height"};
+  const char *names[] = {"base_color.ktx2", "normal.ktx2", "arm.ktx2", "height.ktx2",
+                         "albedo.txt"};
   for (const char *name : names) {
-    const auto path = directory / (std::string(name) + ".ktx2");
+    const auto path = directory / name;
     if (!std::filesystem::exists(path)) {
       std::printf("Missing %s; terrain stays procedural (see "
                   "tools/fetch-sample-assets.sh)\n",
@@ -105,6 +109,15 @@ loadTerrainLayer(meridian::Renderer &renderer, const char *id, float tileSize) {
   layer.arm = load("arm", meridian::ColorSpace::Linear);
   layer.height = load("height", meridian::ColorSpace::Linear);
   layer.tileSize = tileSize;
+  float mean[3] = {};
+  if (FILE *file = std::fopen((directory / "albedo.txt").c_str(), "r")) {
+    const int read = std::fscanf(file, "%f %f %f", &mean[0], &mean[1], &mean[2]);
+    std::fclose(file);
+    const float wanted[3] = {target.x, target.y, target.z};
+    for (int c = 0; c < 3 && read == 3; ++c) {
+      layer.albedoScale[c] = std::pow(wanted[c] / std::max(mean[c], 1e-3f), 0.85f);
+    }
+  }
   return layer;
 }
 
@@ -207,6 +220,11 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
   return added;
 }
 
+// One mask: the forest inside it, lone trees in its exact complement; the
+// terrain material's forest floor follows it too. kPlacementSeed seeds it.
+constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEdge = 0.08f;
+constexpr uint32_t kPlacementSeed = 1;
+
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h).
 void placeScenery(meridian::Renderer &renderer) {
@@ -258,8 +276,6 @@ void placeScenery(meridian::Renderer &renderer) {
   }
 
   std::vector<PlacementLayer> layers;
-  // One mask: the forest inside it, lone trees in its exact complement.
-  constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEdge = 0.08f;
   if (!forest.empty()) {
     layers.push_back({1, forest, 6.0f,
                       {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold,
@@ -284,7 +300,7 @@ void placeScenery(meridian::Renderer &renderer) {
     std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
     return;
   }
-  renderer.setPlacement(prototypes, layers, 1);
+  renderer.setPlacement(prototypes, layers, kPlacementSeed);
 }
 
 // Summer aerosol over the Swiss Plateau and the Napf, from the boundary
@@ -528,19 +544,51 @@ int main(int argc, char **argv) {
     terrain = meridian::generateHeightfield({});
   }
   renderer.setTerrain(terrain);
-  // Tile sizes are the scans' real-world sizes.
-  const auto soil = loadTerrainLayer(renderer, "forest_ground_04", 3.15f);
-  auto needles = soil ? loadTerrainLayer(renderer, "forest_leaves_04", 1.5f)
-                      : std::nullopt;
-  // Its AO map follows the darkness already in its base color (correlation
-  // 0.55), so at full strength the gaps between needles count twice.
-  if (needles) {
-    needles->occlusionStrength = 0.5f;
+  // Megascans surfaces (docs/assets.md has what each one shows and why it
+  // got its role): per role, the variants with their real-world tile sizes,
+  // and the mean linear color they are matched to.
+  using meridian::TerrainRole;
+  struct Role {
+    TerrainRole role;
+    meridian::Vec3 target;
+    std::vector<std::pair<const char *, float>> variants;
+  };
+  const Role roles[] = {
+      {TerrainRole::Grass,
+       {0.085f, 0.12f, 0.024f},
+       {{"uncut_grass_oilpt20", 2.0f}, {"wild_grass_pjwgw0", 1.0f}, {"lawn_grass_sbykrmp0", 0.41f}}},
+      {TerrainRole::Clover, {0.06f, 0.111f, 0.028f}, {{"clover_vlzlbjon", 1.5f}}},
+      {TerrainRole::Mud, {0.07f, 0.046f, 0.021f}, {{"soil_mud_olsetpp0", 0.88f}}},
+      {TerrainRole::Soil,
+       {0.13f, 0.095f, 0.05f},
+       {{"soil_dirt_pjusf0", 1.0f}, {"soil_dirt_peioh0", 1.0f}}},
+      {TerrainRole::ForestPath, {0.08f, 0.06f, 0.035f}, {{"forest_path_ugsnfawlw", 2.0f}}},
+      {TerrainRole::ForestFloor,
+       {0.05f, 0.05f, 0.016f},
+       {{"forest_floor_sfjmafua", 2.0f}, {"forest_floor_xdfddec", 2.0f}}},
+      {TerrainRole::Gravel, {0.13f, 0.1f, 0.07f}, {{"gravel_on_soil_rmsigwp0", 0.39f}}},
+      {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f}}},
+      {TerrainRole::Rock,
+       {0.13f, 0.108f, 0.085f},
+       {{"rock_cliff_tg1mcgbl", 2.0f},
+        {"layered_rock_cliff_thficeas", 2.0f},
+        {"layered_rock_vl0fdhdo", 3.0f}}},
+  };
+  meridian::TerrainMaterial material;
+  material.forest = {kMaskFrequency, kMaskThreshold, kMaskEdge, kPlacementSeed};
+  bool layersLoaded = true;
+  for (const Role &role : roles) {
+    for (const auto &[id, tileSize] : role.variants) {
+      auto layer = layersLoaded ? loadTerrainLayer(renderer, id, tileSize, role.target)
+                                : std::nullopt;
+      layersLoaded = layer.has_value();
+      if (layer) {
+        material.layers[static_cast<size_t>(role.role)].push_back(*layer);
+      }
+    }
   }
-  const auto rock = needles ? loadTerrainLayer(renderer, "rock_face_03", 2.7f)
-                            : std::nullopt;
-  if (rock) {
-    renderer.setTerrainMaterial({*soil, *needles, *rock});
+  if (layersLoaded) {
+    renderer.setTerrainMaterial(material);
   }
 
   // The start: a gentle ridge top (slope under 15 degrees within 20 m)

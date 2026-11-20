@@ -5,6 +5,9 @@
 #include "atmosphere.glsl"
 #include "material.glsl"
 #include "terrain.glsl"
+#ifdef TERRAIN
+#include "placement.glsl"
+#endif
 
 layout(location = 0) in vec3 inRelativePosition;
 layout(location = 1) in vec3 inNormal;
@@ -419,6 +422,7 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
     texel.normal = normalize(mat3(t, cross(normal, t), normal) * n);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
+    texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
     return texel;
 }
 
@@ -467,6 +471,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     nz = vec3(nz.xy + normal.xy, abs(normal.z) * nz.z * axisSign.z);
     texel.normal = normalize(nx.zyx * blend.x + ny.xzy * blend.y + nz.xyz * blend.z);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
+    texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
     return texel;
 }
 
@@ -500,11 +505,85 @@ float valueNoise(vec2 p, int period, uint seed) {
                f.y);
 }
 
-// The soil/needles mix noise's cell (m) and its wrap in cells; must match
-// gpu_types.h. The 2.7x octave wraps every 270 cells.
+// The ground's noise cell (m) and its wrap in cells; must match
+// gpu_types.h. Every octave's scale divides or multiplies the wrap evenly.
 const float kNoiseCell = 40.0;
 const int kNoiseWrapCells = 100;
 
+// Value noise in kNoiseCell units at `scale` cells per cell (scale * 100
+// must be a whole number).
+float groundNoise(vec2 p, float scale, uint seed) {
+    return valueNoise(p * scale, int(round(float(kNoiseWrapCells) * scale)), seed);
+}
+
+// The forest mask noise (placement.glsl, bit-exact with the trees') at this
+// pixel, 0..1; -1 without a forest or outside the heightfield's crop, where
+// nothing is placed.
+float forestMask(Terrain terrain) {
+    vec2 halfSize = 0.5 * (vec2(terrain.width, terrain.height) - 1.0) * terrain.spacing;
+    if (terrain.forestMaskPeriod == 0u || any(greaterThan(abs(worldPosition.xz), halfSize))) {
+        return -1.0;
+    }
+    ivec2 p = ivec2(round(worldPosition.xz * 65536.0));
+    return float(placementFbm16(uint(p.x) ^ 0x80000000u, uint(p.y) ^ 0x80000000u,
+                                terrain.forestMaskPeriod, kPlacementMaskOctaves,
+                                terrain.forestMaskSeed ^ kPlacementMaskSalt)) / 65535.0;
+}
+
+// Laplacian of the ground height (1/m) over ~24 m, from the normal map's
+// divergence: > 0 in hollows and valley bottoms, < 0 on ridges. On the
+// Napf's ground under 12 degrees the 10th/90th percentiles are about
+// -0.02/+0.017 (at 12 m steps from the 2 m data).
+float groundCurvature(Terrain terrain) {
+    const float kStep = 12.0;
+    vec2 size = vec2(float(terrain.width), float(terrain.height));
+    vec2 uv = (worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
+    vec2 d = kStep / terrain.spacing / size;
+    uint t = terrain.normalTexture;
+    float lod = log2(kStep / terrain.spacing);
+    float dx = textureLod(textures[t], uv + vec2(d.x, 0.0), lod).r -
+               textureLod(textures[t], uv - vec2(d.x, 0.0), lod).r;
+    float dz = textureLod(textures[t], uv + vec2(0.0, d.y), lod).g -
+               textureLod(textures[t], uv - vec2(0.0, d.y), lod).g;
+    return -(dx + dz) / (2.0 * kStep);
+}
+
+// b over a by height (heightBlend); a is skipped while hasA is false.
+TerrainTexel overlay(TerrainTexel a, bool hasA, TerrainTexel b, float t) {
+    return hasA ? mixTexels(a, b, heightBlend(a.height, b.height, t)) : b;
+}
+
+// One of a role's variants per region, picked by ~200 m noise; near a
+// border the next variant is height-blended in. Layers are read straight
+// from the scene buffer: indexing a local copy of Terrain with a dynamic
+// index spills the whole struct to scratch memory (2-3x the terrain's cost).
+TerrainTexel sampleRole(uint role, vec2 p, vec3 normal, vec3 dpdx, vec3 dpdy) {
+    uint first = pc.scene.terrain.roles[role] & 0xFFu;
+    uint count = pc.scene.terrain.roles[role] >> 8u;
+    bool triplanar = role == 8u;
+    float n = clamp((groundNoise(p, 0.2, 30u + role) - 0.2) / 0.6, 0.0, 0.9999) * float(count);
+    uint i = uint(n);
+    float t = i + 1u < count ? smoothstep(0.8, 1.0, fract(n)) : 0.0;
+    TerrainTexel texel;
+    if (t < 1.0) {
+        TerrainLayer layer = pc.scene.terrain.layers[first + i];
+        texel = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
+                          : samplePlanar(layer, normal, dpdx, dpdy);
+    }
+    if (t > 0.0) {
+        TerrainLayer layer = pc.scene.terrain.layers[first + i + 1u];
+        TerrainTexel next = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
+                                      : samplePlanar(layer, normal, dpdx, dpdy);
+        texel = overlay(texel, t < 1.0, next, t);
+    }
+    return texel;
+}
+
+// Each role's weight from the ground's shape, the forest mask and noise,
+// stacked bottom to top in TerrainRole order (grass at the bottom, rock on
+// top) with height blends; ~5 m edge noise makes the borders irregular. A
+// role is only sampled where it shows: weight above 0 and nothing above it
+// at full weight.
 Surface terrainSurface(vec3 normal) {
     const vec3 kSnow = vec3(0.80, 0.82, 0.85);
     vec3 dpdx = dFdx(inRelativePosition);
@@ -512,29 +591,54 @@ Surface terrainSurface(vec3 normal) {
     Terrain terrain = pc.scene.terrain;
 
     vec2 p = (inRelativePosition.xz + terrain.noiseOffset) / kNoiseCell;
-    float noise = 0.65 * valueNoise(p, kNoiseWrapCells, 19u) +
-                  0.35 * valueNoise(p * 2.7, kNoiseWrapCells * 27 / 10, 20u);
-    float needles = smoothstep(0.45, 0.55, noise);
+    float edge = (groundNoise(p, 8.0, 23u) - 0.5) * 0.5;
+    float patches = groundNoise(p, 2.0, 21u);
+    float curvature = groundCurvature(terrain);
+    float flatGround = smoothstep(0.93, 0.98, normal.y);
+    float belowRock = 1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.08,
+                                       normal.y);
     float rock = 1.0 - smoothstep(terrain.rockNormalY.x, terrain.rockNormalY.y, normal.y);
 
-    TerrainTexel ground;
-    if (rock < 1.0) {
-        if (needles <= 0.0) {
-            ground = samplePlanar(terrain.layers[0], normal, dpdx, dpdy);
-        } else if (needles >= 1.0) {
-            ground = samplePlanar(terrain.layers[1], normal, dpdx, dpdy);
-        } else {
-            TerrainTexel soil = samplePlanar(terrain.layers[0], normal, dpdx, dpdy);
-            TerrainTexel litter = samplePlanar(terrain.layers[1], normal, dpdx, dpdy);
-            ground = mixTexels(soil, litter, heightBlend(soil.height, litter.height, needles));
+    float w[9];
+    w[0] = 1.0;
+    w[1] = flatGround * smoothstep(0.006, 0.015, curvature + edge * 0.01) * smoothstep(0.45, 0.6, patches);
+    w[2] = flatGround * smoothstep(0.02, 0.04, curvature + edge * 0.02);
+    w[3] = max(belowRock, smoothstep(0.03, 0.06, -curvature + edge * 0.02)) *
+           smoothstep(0.45, 0.6, patches + edge * 0.5);
+    float m = forestMask(terrain);
+    float lo = float(terrain.forestMaskLo) / 65535.0;
+    float d = float(terrain.forestMaskHi - terrain.forestMaskLo) / 65535.0;
+    // Path over the outer half of the trees' ramp (sparse outer trees),
+    // floor from its middle in, under the canopy.
+    w[4] = m < 0.0 ? 0.0 : smoothstep(lo - 0.25 * d, lo + 0.25 * d, m + edge * d);
+    w[5] = m < 0.0 ? 0.0 : smoothstep(lo + 0.4 * d, lo + d, m + edge * d);
+    w[6] = (1.0 - flatGround) * smoothstep(0.045, 0.08, curvature + edge * 0.03);
+    w[7] = (1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.04, normal.y)) *
+           smoothstep(0.3, 0.5, patches + edge);
+    w[8] = rock;
+
+    int start = 0;
+    for (int r = 8; r > 0; --r) {
+        if (w[r] >= 1.0) {
+            start = r;
+            break;
         }
     }
-    if (rock > 0.0) {
-        TerrainTexel cliff = sampleTriplanar(terrain.layers[2], normal, dpdx, dpdy);
-        ground = rock >= 1.0 ? cliff
-                             : mixTexels(ground, cliff,
-                                         heightBlend(ground.height, cliff.height, rock));
+    TerrainTexel ground;
+    bool has = false;
+    for (int r = start; r < 9; ++r) {
+        float t = clamp(w[r], 0.0, 1.0);
+        if (t > 0.0) {
+            ground = overlay(ground, has, sampleRole(uint(r), p, normal, dpdx, dpdy), t);
+            has = true;
+        }
     }
+
+    // Large-scale brightness and hue variation (~400 m and ~160 m), so no
+    // stretch of one layer looks uniform.
+    float macro = 0.6 * groundNoise(p, 0.1, 24u) + 0.4 * groundNoise(p, 0.25, 25u);
+    float hue = groundNoise(p, 0.25, 26u) - 0.5;
+    ground.baseColor *= (0.85 + 0.3 * macro) * vec3(1.0 + 0.1 * hue, 1.0, 1.0 - 0.1 * hue);
 
     Surface s;
     s.baseColor = ground.baseColor;
