@@ -84,6 +84,8 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Debug startup ~95 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
 | Ground material costs ~1.1-1.4 ms on steep slopes | Budget | M1 | M5 |
 | Renderer constructor leaks partial Vulkan state on throw | Robustness | Known gap before the backlog | Later |
+| Frame pacing: present timing (`VK_EXT_present_timing`, fallback `VK_KHR_present_wait`/`present_id`), a refresh-locked limiter that sleeps before input (Reflex-style, `VK_NV_low_latency2`), hitch removal (pipeline compiles, uploads, TLAS rebuilds off the frame) | Smooth delivery and good 0.1%/1%/5% lows, not just average FPS; flip-metering-like behaviour | User, 2026-11-20 | After the performance overlay; research current practice and NVIDIA/Wayland support first |
+| Performance overlay: FPS, CPU and GPU frame ms, per-pass GPU ms, frame-time / present-interval graph, AVG / 0.1% / 1% / 5% lows / max over a window or a recorded run, CSV benchmark dump | See and prove pacing and cost in game; lanes can report pacing next to GPU ms | User, 2026-11-20 | After the runtime grading tool (shares its ImGui overlay) |
 
 ## Content and assets
 

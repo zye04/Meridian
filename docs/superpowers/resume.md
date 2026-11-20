@@ -34,6 +34,22 @@ backlog rows; docs state current truth only).
 Reports to the user: "status" = running and waiting work only;
 "overview" = what is done.
 
+## Queue after the running lanes (user, 2026-11-20)
+
+In order, each one only when the user says go:
+
+1. Parallax occlusion mapping on the terrain (after the ground lane G1):
+   height maps, faded out by ~10-20 m, cheap self-shadowing.
+2. Grass and flowers (the downloaded Megascans grass meshes and flowers).
+3. Leaf and bark textures for the Megaplants trees: the USD leaves have
+   UVs into a per-species atlas region, so the cook remaps each leaf
+   region onto a downloaded leaf texture; bark tiles along the branch.
+   Waits on the user downloading a leaf and a bark.
+4. Runtime grading tool: ImGui panel (exposure, contrast, saturation,
+   hue ranges, white balance, sun, haze), saved to a file the game loads.
+5. Performance overlay (backlog row), sharing the ImGui overlay.
+6. Frame pacing (backlog row).
+
 ## Priority for the next window (user review, 2026-11-20)
 
 The user played main in Release and judged it "absolutely terrible".
