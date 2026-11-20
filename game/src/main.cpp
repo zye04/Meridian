@@ -425,7 +425,8 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
     std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
     return;
   }
-  renderer.setPlacement(prototypes, layers, kPlacementSeed);
+  renderer.setPlacement(prototypes, layers, kPlacementSeed,
+                     std::filesystem::path(MERIDIAN_ASSET_DIR) / "placement-cache");
 }
 
 // Summer aerosol over the Swiss Plateau and the Napf, from the boundary

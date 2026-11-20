@@ -2,9 +2,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <numbers>
 #include <stdexcept>
 
@@ -214,6 +218,32 @@ int64_t torusDistance2(uint32_t a, uint32_t b) {
   return wx * wx + wz * wz;
 }
 
+// Best-candidate sampling is quadratic in the point count; past
+// kMaxCandidates the dense (streamed) layers' patterns would take minutes to
+// build.
+constexpr uint32_t kCandidatesPerPoint = 8;
+constexpr uint32_t kMaxCandidates = 512;
+// Bump when makeDitherPattern's output changes for the same constants (the
+// hash, the distance metric, the tie rule).
+constexpr uint32_t kPatternCacheVersion = 1;
+constexpr char kPatternCacheMagic[4] = {'M', 'D', 'P', 'C'};
+
+struct PatternCacheHeader {
+  char magic[4];
+  uint32_t version, seed, count, candidatesPerPoint, maxCandidates;
+};
+
+PatternCacheHeader patternCacheHeader(uint32_t seed, uint32_t count) {
+  PatternCacheHeader h{};
+  std::memcpy(h.magic, kPatternCacheMagic, sizeof(h.magic));
+  h.version = kPatternCacheVersion;
+  h.seed = seed;
+  h.count = count;
+  h.candidatesPerPoint = kCandidatesPerPoint;
+  h.maxCandidates = kMaxCandidates;
+  return h;
+}
+
 } // namespace
 
 uint32_t placementHash(uint32_t a, uint32_t b, uint32_t c) {
@@ -235,10 +265,6 @@ uint32_t placementHash(uint32_t a, uint32_t b, uint32_t c) {
 // point count, so every prefix is a blue-noise set and its rank is the
 // threshold.
 DitherPattern makeDitherPattern(uint32_t seed, uint32_t count) {
-  constexpr uint32_t kCandidatesPerPoint = 8;
-  // Best-candidate sampling is quadratic in the point count; past this the
-  // dense (streamed) layers' patterns would take minutes to build.
-  constexpr uint32_t kMaxCandidates = 512;
   DitherPattern pattern;
   pattern.points.reserve(count);
   pattern.thresholds.reserve(count);
@@ -292,6 +318,76 @@ DitherPattern makeDitherPattern(uint32_t seed, uint32_t count) {
     buckets[static_cast<size_t>(bz * grid + bx)].push_back(i);
     pattern.points.push_back(chosen);
     pattern.thresholds.push_back(static_cast<uint16_t>((uint64_t{i} << 16) / count));
+  }
+  return pattern;
+}
+
+bool writeDitherPatternCache(const std::filesystem::path &file, uint32_t seed,
+                             const DitherPattern &pattern) {
+  const auto count = static_cast<uint32_t>(pattern.points.size());
+  const PatternCacheHeader header = patternCacheHeader(seed, count);
+  // Written aside and renamed, so a parallel run never reads a partial file.
+  std::filesystem::path temp = file;
+  temp += ".tmp" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char *>(&header), sizeof(header));
+  out.write(reinterpret_cast<const char *>(pattern.points.data()),
+            static_cast<std::streamsize>(count * sizeof(uint32_t)));
+  out.close();
+  std::error_code error;
+  if (out) {
+    std::filesystem::rename(temp, file, error);
+  }
+  if (!out || error) {
+    std::filesystem::remove(temp, error);
+    return false;
+  }
+  return true;
+}
+
+std::optional<DitherPattern> readDitherPatternCache(const std::filesystem::path &file,
+                                                    uint32_t seed, uint32_t count) {
+  std::error_code error;
+  const uint64_t size = std::filesystem::file_size(file, error);
+  const PatternCacheHeader want = patternCacheHeader(seed, count);
+  if (error || size != sizeof(want) + uint64_t{count} * sizeof(uint32_t)) {
+    return std::nullopt;
+  }
+  std::ifstream in(file, std::ios::binary);
+  PatternCacheHeader got{};
+  in.read(reinterpret_cast<char *>(&got), sizeof(got));
+  if (!in || std::memcmp(&got, &want, sizeof(got)) != 0) {
+    return std::nullopt;
+  }
+  DitherPattern pattern;
+  pattern.points.resize(count);
+  in.read(reinterpret_cast<char *>(pattern.points.data()),
+          static_cast<std::streamsize>(count * sizeof(uint32_t)));
+  if (!in) {
+    return std::nullopt;
+  }
+  pattern.thresholds.reserve(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    pattern.thresholds.push_back(static_cast<uint16_t>((uint64_t{i} << 16) / count));
+  }
+  return pattern;
+}
+
+DitherPattern cachedDitherPattern(uint32_t seed, uint32_t count,
+                                  const std::filesystem::path &cacheDir) {
+  if (cacheDir.empty()) {
+    return makeDitherPattern(seed, count);
+  }
+  const std::filesystem::path file =
+      cacheDir / ("dither-" + std::to_string(seed) + "-" + std::to_string(count) + ".bin");
+  if (auto cached = readDitherPatternCache(file, seed, count)) {
+    return std::move(*cached);
+  }
+  DitherPattern pattern = makeDitherPattern(seed, count);
+  std::error_code error;
+  std::filesystem::create_directories(cacheDir, error);
+  if (error || !writeDitherPatternCache(file, seed, pattern)) {
+    std::fprintf(stderr, "Warning: cannot write %s\n", file.string().c_str());
   }
   return pattern;
 }

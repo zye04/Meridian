@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <numeric>
 
 using namespace meridian;
@@ -74,6 +76,48 @@ TEST_CASE("makeDitherPattern is deterministic and ranks every point once") {
   std::sort(sorted.begin(), sorted.end());
   CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
   CHECK(sorted.back() < 65535);
+}
+
+TEST_CASE("the dither pattern cache round-trips and rejects any mismatch") {
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / "meridian-pattern-cache-test";
+  std::filesystem::remove_all(dir);
+  const DitherPattern made = makeDitherPattern(5, 300);
+
+  const DitherPattern first = cachedDitherPattern(5, 300, dir);
+  const std::filesystem::path file = dir / "dither-5-300.bin";
+  REQUIRE(std::filesystem::exists(file));
+  const auto read = readDitherPatternCache(file, 5, 300);
+  REQUIRE(read.has_value());
+  CHECK(first.points == made.points);
+  CHECK(read->points == made.points);
+  CHECK(read->thresholds == made.thresholds);
+  CHECK(cachedDitherPattern(5, 300, dir).points == made.points);
+
+  CHECK_FALSE(readDitherPatternCache(file, 6, 300).has_value());
+  CHECK_FALSE(readDitherPatternCache(file, 5, 301).has_value());
+  CHECK_FALSE(readDitherPatternCache(dir / "missing.bin", 5, 300).has_value());
+
+  // A changed version (bytes 4..7) or constant reads as a miss and is rebuilt.
+  for (const std::streamoff offset : {4, 16, 20}) {
+    std::fstream f(file, std::ios::in | std::ios::out | std::ios::binary);
+    f.seekp(offset);
+    f.put('\x7f');
+    f.close();
+    CHECK_FALSE(readDitherPatternCache(file, 5, 300).has_value());
+    CHECK(cachedDitherPattern(5, 300, dir).points == made.points);
+    CHECK(readDitherPatternCache(file, 5, 300).has_value());
+  }
+
+  // A truncated file is a miss.
+  std::filesystem::resize_file(file, std::filesystem::file_size(file) - 4);
+  CHECK_FALSE(readDitherPatternCache(file, 5, 300).has_value());
+
+  // An unwritable cache (a file where the directory should be) only warns.
+  const std::filesystem::path blocker = dir / "blocker";
+  std::ofstream(blocker).put('x');
+  CHECK(cachedDitherPattern(5, 300, blocker).points == made.points);
+  std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("every threshold prefix of the dither pattern stays even") {

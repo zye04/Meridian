@@ -225,9 +225,11 @@ public:
   // Places the layers' prototypes over the terrain (call after setTerrain)
   // on the GPU, deterministically: placement.h's evaluatePoint is the CPU
   // reference. The result replaces any earlier placement. Prototype indices
-  // in the layers index `prototypes`.
+  // in the layers index `prototypes`. patternCache: a directory for the
+  // layers' dither patterns (placement.h, cachedDitherPattern); empty = none.
   void setPlacement(std::span<const Prototype> prototypes,
-                    std::span<const PlacementLayer> layers, uint32_t seed);
+                    std::span<const PlacementLayer> layers, uint32_t seed,
+                    const std::filesystem::path &patternCache = {});
   uint32_t placedInstanceCount() const;
   // Streamed placement (PlacementLayer::streamFullDensity): its layers,
   // window (cells per side), ring size (instances) and the instances live

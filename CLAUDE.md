@@ -238,8 +238,9 @@ main.cpp; 21281 instances), poppies, goldenrod and ferns (~500k
 together), streamed meadow layers around the camera (a short grass mat,
 seed-head tufts in patches, hawkbit drifts (grasses and hawkbit graded
 by `Prototype::tint`), clover: ring ~4.2M slots,
-~1.1M live; building their dense dither patterns adds ~8 s to Release
-and ~45 s to Debug startup), plus forests and lone trees with `--trees`
+~1.1M live; building their dense dither patterns adds ~10 s to Release
+and ~59 s to Debug startup on the first run only: the patterns are cached,
+see Gotchas), plus forests and lone trees with `--trees`
 (~2.65M instances), which loads the rocks (and with `--trees` the
 Megaplants trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
@@ -249,7 +250,7 @@ don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
-trees, every asset present). Capture runs print `streamed: L layers,
+trees, 0xe73211868a49a82f with `--trees`, every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
@@ -711,6 +712,14 @@ barriers account for that.
   rock blend share `kRockNormalY` (renderer.h); the forest layers and the
   material's forest floor share the forest mask (`kMaskFrequency`...,
   main.cpp; `forestMask` in mesh.frag runs placement.glsl's mask).
+- Dither patterns are cached in `assets/placement-cache/dither-<layer
+  id>-<points>.bin` (`cachedDitherPattern`, placement.h; the game passes
+  the directory to `setPlacement`): header = magic, format version, seed,
+  count, kCandidatesPerPoint, kMaxCandidates; any mismatch or a short file
+  rebuilds and rewrites it (an unwritable cache only warns). Bump
+  `kPatternCacheVersion` (placement.cpp) when `makeDitherPattern`'s output
+  changes for the same constants (e.g. `placementHash`). Warm startup
+  spends ~0.1 s there (Release ~10 s and Debug ~59 s cold).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
   with meshoptimizer; the first load after a change prints "Building

@@ -2812,3 +2812,20 @@ materials are unchanged. Contact shadows already act on grass (any depth):
 the A/B at the open view shows clear grass-on-grass shadows, so the march
 is unchanged (0.09 ms). The bust still shadows the grass through the TLAS
 and the terrain march.
+
+## Dither pattern disk cache (M3, 2026-11-20)
+
+The dense streamed layers' best-candidate patterns cost ~10 s Release and
+~59 s Debug at every startup ("Placed ... in N ms"). They are pure functions
+of (layer id, point count, the algorithm's constants), so each is cached as
+`assets/placement-cache/dither-<id>-<count>.bin`, like the `.clusters`
+cache: header with magic, format version, seed, count, candidates per point
+and the candidate cap, then the points (thresholds follow from the rank, so
+they are not stored). Any header mismatch or wrong size is a miss; a miss
+rebuilds and rewrites through a temp file and a rename (parallel runs never
+read a partial file); an unwritable directory warns. The directory is passed
+to `Renderer::setPlacement` (the engine has no asset root of its own; the game
+uses `MERIDIAN_ASSET_DIR`), empty = no cache. Alternative rejected: a
+cheaper algorithm, which would change every placed object's identity.
+Result: Placed 10.5 s -> 63 ms Release, 58.9 s -> 128 ms Debug; placement
+hash 0x341d51799d224d3c, placement and stream checks 0 mismatches.

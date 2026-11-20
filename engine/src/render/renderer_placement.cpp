@@ -192,7 +192,7 @@ struct PlacementTables {
 };
 
 PlacementTables buildTables(const Heightfield &field, std::span<const PlacementLayer> layers,
-                            size_t prototypeCount) {
+                            size_t prototypeCount, const std::filesystem::path &patternCache) {
   PlacementTables t;
   for (const PlacementLayer &layer : layers) {
     const std::vector<uint32_t> thresholds = prototypeThresholds(layer);
@@ -207,7 +207,7 @@ PlacementTables buildTables(const Heightfield &field, std::span<const PlacementL
       t.picks.insert(t.picks.end(), {thresholds[i], layer.prototypes[i].first});
     }
     // Fixed per layer id: the pattern is part of a placed object's identity.
-    t.patterns.push_back(makeDitherPattern(layer.id, ditherPointCount(layer.footprint)));
+    t.patterns.push_back(cachedDitherPattern(layer.id, ditherPointCount(layer.footprint), patternCache));
     gpu.firstPoint = static_cast<uint32_t>(t.points.size() / 2);
     gpu.pointCount = static_cast<uint32_t>(t.patterns.back().points.size());
     for (uint32_t p = 0; p < gpu.pointCount; ++p) {
@@ -226,7 +226,8 @@ PlacementTables buildTables(const Heightfield &field, std::span<const PlacementL
 } // namespace
 
 void Renderer::setPlacement(std::span<const Prototype> prototypes,
-                            std::span<const PlacementLayer> allLayers, uint32_t seed) {
+                            std::span<const PlacementLayer> allLayers, uint32_t seed,
+                          const std::filesystem::path &patternCache) {
   Impl &r = *impl_;
   const Heightfield &field = r.heightfield;
   if (field.samples.empty()) {
@@ -253,7 +254,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   const auto layerCount = static_cast<uint32_t>(layers.size());
   const uint32_t cellCount = grid.columns * grid.rows;
 
-  PlacementTables tables = buildTables(field, layers, prototypes.size());
+  PlacementTables tables = buildTables(field, layers, prototypes.size(), patternCache);
   const std::vector<DitherPattern> &patterns = tables.patterns;
   // Far-field layers first (FarCell::treeCount counts the start of each
   // cell's run), and their prototypes in no other layer.
@@ -327,7 +328,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   // the largest draw distance plus the bounds' reach past a cell.
   Impl::Stream next;
   if (!streamList.empty()) {
-    PlacementTables streamTables = buildTables(field, streamList, prototypes.size());
+    PlacementTables streamTables = buildTables(field, streamList, prototypes.size(), patternCache);
     float radius = 0.0f;
     std::vector<float> layerTable;
     for (const PlacementLayer &layer : streamList) {

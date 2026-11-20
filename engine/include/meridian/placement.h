@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -78,6 +79,17 @@ struct DitherPattern {
   std::vector<uint16_t> thresholds; // keep a point iff threshold < density
 };
 DitherPattern makeDitherPattern(uint32_t seed, uint32_t count);
+// The pattern cache: one file per (seed, count), keyed by the algorithm's
+// constants and a format version; any mismatch reads as nullopt. Only the
+// points are stored, the thresholds follow from the rank.
+bool writeDitherPatternCache(const std::filesystem::path &file, uint32_t seed,
+                             const DitherPattern &pattern);
+std::optional<DitherPattern> readDitherPatternCache(const std::filesystem::path &file,
+                                                    uint32_t seed, uint32_t count);
+// makeDitherPattern through the cache in cacheDir (empty: no cache); a miss
+// rebuilds and rewrites, an unwritable directory only warns.
+DitherPattern cachedDitherPattern(uint32_t seed, uint32_t count,
+                                  const std::filesystem::path &cacheDir);
 // Points per cell-sized tile for a footprint.
 uint32_t ditherPointCount(float footprint);
 
