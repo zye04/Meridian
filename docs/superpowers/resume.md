@@ -23,10 +23,9 @@ reviewer). The orchestrator:
 Open branches, in the proposed order (the user may reorder):
 
 1. `wip/m2a-task5` (M2a Task 5): verify, review, squash, merge.
-2. `wip/quality-shadows`: finish per-layer AO strength, review, merge.
-3. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
+2. `clouds` (M4): rebase onto main, finish Task 5's fix round, then
    Tasks 6-8, final review, merge.
-4. Then M2a Tasks 7-12 and the rest under "Next after that".
+3. Then M2a Tasks 7-12 and the rest under "Next after that".
 
 The clouds branch touches the same frame and shading files as the other
 two (`renderer_frame.cpp`, `mesh.frag`, `tonemap.frag`, `gpu_types.h`),
@@ -41,6 +40,8 @@ so rebasing it after each merge keeps conflicts small.
 - Quality pass step 1: sky dithering, summer haze default (AOD 0.10,
   scale height 0.5 km), terrain march lifted above its own cell (contour
   bands at grazing sun).
+- Quality pass AO: multi-bounce AO + specular occlusion, per-layer terrain
+  AO strength (needle layer 0.5); shadowed needle ground ~11% of sunlit.
 - `docs/backlog.md`: everything deferred.
 
 ## In progress (WIP branches on origin, not reviewed)
@@ -51,11 +52,6 @@ so rebasing it after each merge keeps conflicts small.
   commit. Carried items for Task 5: ridge capture backing the ground-fit
   decision (trees at 1-2 km); keep the moss rock sets' authored offsets;
   Task 5 is exempt from the 0-drop rule (work items overflow until Task 7).
-- `wip/quality-shadows`: commit 8e530ab (multi-bounce AO + specular
-  occlusion, complete, needs review) and 1c56eb8 (per-layer terrain AO
-  strength, unfinished; may contain a temporary luminance debug view).
-  Goal: shadowed ground 10-20% of sunlit (now ~6%). Next: finish
-  per-layer AO strength (forest_leaves_04 at 0.5), measure, review, merge.
 - `clouds`: M4 clouds, see below.
 
 ## Where clouds stopped

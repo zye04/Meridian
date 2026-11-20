@@ -417,8 +417,13 @@ int main(int argc, char **argv) {
   renderer.setTerrain(terrain);
   // Tile sizes are the scans' real-world sizes.
   const auto soil = loadTerrainLayer(renderer, "forest_ground_04", 3.15f);
-  const auto needles = soil ? loadTerrainLayer(renderer, "forest_leaves_04", 1.5f)
-                            : std::nullopt;
+  auto needles = soil ? loadTerrainLayer(renderer, "forest_leaves_04", 1.5f)
+                      : std::nullopt;
+  // Its AO map follows the darkness already in its base color (correlation
+  // 0.55), so at full strength the gaps between needles count twice.
+  if (needles) {
+    needles->occlusionStrength = 0.5f;
+  }
   const auto rock = needles ? loadTerrainLayer(renderer, "rock_face_03", 2.7f)
                             : std::nullopt;
   if (rock) {

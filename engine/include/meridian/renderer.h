@@ -72,6 +72,9 @@ struct TerrainLayer {
   TextureId arm; // ambient occlusion, roughness, metalness
   TextureId height;
   float tileSize = 2.0f; // meters per texture repeat
+  // How much of the AO map applies, as glTF's occlusion strength: lower it
+  // where the base color already carries the cavities' darkness.
+  float occlusionStrength = 1.0f;
 };
 
 // The ground turns to rock as the terrain normal's y falls from

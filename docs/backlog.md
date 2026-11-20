@@ -13,7 +13,7 @@ roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 | Shadow denoiser | Soft RT sun shadows use 1 ray/pixel accumulated by TAA; leaf shadows shimmer in motion | User screenshots 2026-11-20 | Quality pass step 2 (spec pending) |
 | Leaf translucency (light through leaves) | Canopies read dull and dark; tree shadows too dark | M2a spec non-goal; user feedback | After M2b sky visibility |
 | Leaf textures (venation, normal, translucency maps) | Megaplants USD ships flat leaf colors only | Task 2 import; user feedback | Content, with leaf translucency |
-| Shadows too dark (6-7.5% of sunlit vs ~10-20%) | Unrealistic black shadows | Shadow investigation 2026-11-20 | Multi-bounce AO in progress; rest below |
+| Shadows too dark (needle ground ~11% of sunlit in two measured views; real ~10-20%) | Shadows at the dark end of real | Shadow investigation 2026-11-20 | Haze profile and bounce light (rows below) |
 | Haze anchored at sea level | Ridges (1.35 km) sit above most of the aerosol: less sky light up high, thin haze from above | Shadow investigation; haze tuning | Engine: aerosol layer from the valley floor / layered profile with a sharp top |
 | Bounce light / GI | No light bounced from the ground or between surfaces | Shadow investigation | Later (GI milestone not yet planned) |
 | Cloud occlusion of ambient | Dropped from M4: it double-darkened with the cloud-dimmed sky capture | M4 clouds spec | Revisit with GI |

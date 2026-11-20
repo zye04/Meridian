@@ -386,6 +386,7 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     vec3 n = normalize(vec3(-derivative, 1.0));
     vec3 t = normalize(vec3(1, 0, 0) - normal * normal.x);
     texel.normal = normalize(mat3(t, cross(normal, t), normal) * n);
+    texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     return texel;
 }
 
@@ -433,6 +434,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     ny = vec3(ny.xy + normal.xz, abs(normal.y) * ny.z * axisSign.y);
     nz = vec3(nz.xy + normal.xy, abs(normal.z) * nz.z * axisSign.z);
     texel.normal = normalize(nx.zyx * blend.x + ny.xzy * blend.y + nz.xyz * blend.z);
+    texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     return texel;
 }
 

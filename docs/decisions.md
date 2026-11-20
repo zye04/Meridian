@@ -181,9 +181,18 @@ sources. Check here before re-researching a topic.
     needle ground, `--placement off --scatter 100 --camera 1115.47 1375
     -429.72 1.223 -0.5`, default sun, summer haze): the effect is small at
     these albedos (0.12-0.16; the fit turns AO 0.6 into 0.63), 9.0% ->
-    9.2% of the sunlit luminance. Real shadows are 10-20%; the rest of the
-    gap is the leaf-litter AO, the haze's height profile and missing bounce
-    light.
+    9.2% of the sunlit luminance.
+  - **Per-layer strength:** `TerrainLayer::occlusionStrength` scales a
+    layer's AO map as glTF's occlusion strength does for materials
+    (`mix(1, ao, strength)`). The game sets the needle layer to 0.5 and
+    keeps the others at 1. Its AO repeats the darkness already in its base
+    color (r = 0.55; soil 0.02), so at full strength each gap is darkened
+    twice. Halving it removes roughly the duplicated part and keeps the
+    cavities' directional effect on the sky light. Same view: 10.8%
+    (strength 0 would give 12.3%); at eye height (`--camera 1115.47 1356.6
+    -429.72 1.223 -0.3`) 9.5% -> 11.4% against plain AO at full strength.
+    No GPU time change. Real shadows are 10-20%; the rest of the gap is the
+    haze's height profile and missing bounce light (backlog).
   - Jimenez, Wu, Pesce, Jarabo, "Practical Real-Time Strategies for
     Accurate Indirect Occlusion", SIGGRAPH 2016 course:
     https://research.activision.com/publications/archives/practical-real-time-strategies-for-accurate-indirect-occlusion

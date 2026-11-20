@@ -161,8 +161,9 @@ struct GpuTerrainLayer {
   float tileSize = 0.0f;
   // The camera position wrapped by the layer's period (renderer_frame.cpp).
   float offset[3] = {};
+  float occlusionStrength = 1.0f;
 };
-static_assert(sizeof(GpuTerrainLayer) == 32);
+static_assert(sizeof(GpuTerrainLayer) == 36);
 
 // Terrain texture coordinates (mesh.frag) are the camera-relative position
 // plus the camera position wrapped by a period, so they stay small and
@@ -232,11 +233,11 @@ struct GpuTerrain {
   float noiseOffset[2] = {};
   float rockNormalY[2] = {kRockNormalY[0], kRockNormalY[1]};
 };
-static_assert(sizeof(GpuTerrain) == 240);
+static_assert(sizeof(GpuTerrain) == 256);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
-          layer.height.index, layer.tileSize};
+          layer.height.index, layer.tileSize, {}, layer.occlusionStrength};
 }
 
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
@@ -287,7 +288,7 @@ struct SceneData {
   int32_t cellGrid[2] = {};
   uint32_t cellGridSize[2] = {};
 };
-static_assert(sizeof(SceneData) == 992);
+static_assert(sizeof(SceneData) == 1008);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
