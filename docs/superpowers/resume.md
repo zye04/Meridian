@@ -50,8 +50,8 @@ item 3 below is what brings them back.
    region onto a downloaded leaf texture; bark tiles along the branch.
    Waits on the user downloading a leaf and a bark.
 4. Runtime grading tool: done (G panel, grade file; decisions.md,
-   "In-game overlay: Dear ImGui"). The performance overlay is next.
-5. Performance overlay (backlog row), sharing the ImGui overlay.
+   "In-game overlay: Dear ImGui").
+5. Performance overlay: done (F3, F4 CSV, `--benchmark`; same entry).
 6. Frame pacing (backlog row).
 
 Bloom lane (done 2026-11-20): sun glare as an energy-conserving

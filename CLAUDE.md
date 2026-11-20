@@ -58,16 +58,33 @@ only for the run, never for builds. Examples below omit the prefix.
 Controls: WASD, mouse, Esc. Fly mode: Space/Ctrl up/down, 30 m/s,
 Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 1.4 m/s (Shift 5 m/s), no vertical keys.
 `G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
-sun azimuth/elevation and haze, with Save, Load, Reset and a "show built-in
+sun azimuth/elevation, haze and bloom (intensity, scatter), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
 `~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
 names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
-`haze`), which **interactive runs load at startup** (explicit `--sun` and
-`--haze` still win); capture runs ignore it so gates stay deterministic.
+`haze`, `bloomIntensity`, `bloomScatter`), which **interactive runs load at
+startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
 `--grade FILE` loads a grade file in any run (A/B captures of a tuned
-look); `--overlay grade` opens the panel at startup (it is in captures).
+look); `--overlay grade|perf` opens a panel at startup (it is in captures;
+repeat the flag for both).
+`F3` toggles the performance overlay (passive, top right, the cursor stays
+captured): FPS, frame / CPU / GPU ms, per-pass GPU ms, a 5 s frame-time
+graph, AVG / 0.1% / 1% / 5% low / MAX FPS over the last 10 s. x% low =
+1000 / mean of the slowest ceil(x% n) frames (`frame_stats.h`). `F4` (or its
+Record button) records every frame to `meridian-<timestamp>.csv` in the
+working directory (`frame,frame_ms,cpu_ms,gpu_ms,<one column per GPU
+pass>`; the path is relative to the cwd; frame_ms is present to present, cpu_ms is frame_ms minus the time
+blocked on fence and acquire, GPU columns are the newest finished frame,
+2 frames behind) and prints the summary on stop; a recording still
+running at exit is written too, and on a write error the run keeps it
+in memory and reports. `--benchmark SECONDS FILE.csv` (SECONDS > 0; not
+with `--capture` or the camera velocities) is a timed run with real
+frame times, static camera and no camera input (Esc still quits; the
+partial recording is written): FILE.csv is checked writable up front, 60
+warm-up frames, then SECONDS recorded; writes the CSV, prints the
+summary, exits.
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):
@@ -257,7 +274,9 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cluster_cull.comp
 game/src/main.cpp          scene setup, fly camera, CLI options
 game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
-                           with sun and haze (Look), G toggle
+                           with sun, haze and bloom (Look), G toggle
+game/src/perf_overlay.{h,cpp}  performance overlay (F3), CSV recording
+                           (F4, --benchmark); frame_stats.h: lows
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            prune, flatten, leaf diffuse transmission),
                            ktx2.cpp (shared encoder)

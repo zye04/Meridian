@@ -54,7 +54,8 @@ std::string lookToJson(const Look &look) {
   const std::string tail = ",\n  \"sunAzimuthDegrees\": " + number(look.sunAzimuthDegrees) +
                            ",\n  \"sunElevationDegrees\": " + number(look.sunElevationDegrees) +
                            ",\n  \"haze\": \"" + kHazeNames[static_cast<int>(look.haze)] +
-                           "\"\n}\n";
+                           "\",\n  \"bloomIntensity\": " + number(look.bloom.intensity) +
+                           ",\n  \"bloomScatter\": " + number(look.bloom.scatter) + "\n}\n";
   return json + tail;
 }
 
@@ -65,6 +66,9 @@ Look lookFromJson(std::string_view json, const Look &base) {
       meridian::jsonNumber(json, "sunAzimuthDegrees").value_or(base.sunAzimuthDegrees);
   look.sunElevationDegrees =
       meridian::jsonNumber(json, "sunElevationDegrees").value_or(base.sunElevationDegrees);
+  look.bloom.intensity =
+      meridian::jsonNumber(json, "bloomIntensity").value_or(base.bloom.intensity);
+  look.bloom.scatter = meridian::jsonNumber(json, "bloomScatter").value_or(base.bloom.scatter);
   if (auto haze = meridian::jsonString(json, "haze")) {
     for (int i = 0; i < 3; ++i) {
       if (*haze == kHazeNames[i]) {
@@ -151,6 +155,10 @@ GradePanel::Changes GradePanel::draw() {
     changes.lighting = true;
   }
 
+  ImGui::SeparatorText("Bloom");
+  slider("bloom intensity", look_.bloom.intensity, 0.0f, 0.1f, changes.bloom);
+  slider("bloom scatter", look_.bloom.scatter, 0.0f, 1.0f, changes.bloom);
+
   ImGui::Separator();
   changes.grade |= ImGui::Checkbox("show built-in grade", &showBuiltIn_);
   if (ImGui::Button("Save")) {
@@ -171,7 +179,7 @@ GradePanel::Changes GradePanel::draw() {
       if (reset) {
         showBuiltIn_ = false;
       }
-      changes.grade = changes.lighting = true;
+      changes.grade = changes.lighting = changes.bloom = true;
     }
     status_ = !next ? "load failed" : reset ? "reset" : "loaded";
   }

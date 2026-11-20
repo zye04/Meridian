@@ -1854,8 +1854,18 @@ What it does (`parallaxHit`, `terrainSurface` in mesh.frag):
 - **Grade file**: `$XDG_CONFIG_HOME/meridian/grade.json` (default
   `~/.config/meridian/grade.json`), one flat JSON object, field names of
   `Grade`, vectors as `[r, g, b]`, bands nested, plus `sunAzimuthDegrees`
-  (clockwise from north, -z), `sunElevationDegrees` and `haze`. Written by
+  (clockwise from north, -z), `sunElevationDegrees`, `haze`,
+  `bloomIntensity` and `bloomScatter` (Reset: 0.015 / 0.7). Written by
   `gradeToJson`, read by a tiny tolerant parser (missing keys keep the
   default). Loaded only by interactive runs, so capture gates stay
   deterministic; `--grade FILE` loads it anywhere for A/B captures.
-  Explicit `--sun` and `--haze` win over the file.
+  Explicit `--sun`, `--haze` and `--bloom` win over the file.
+- **Performance overlay**: F3, passive (no input while the cursor is
+  captured). x% low = 1000 / mean of the slowest ceil(x% n) frame times, at
+  least one frame; average = 1000 / mean frame time (not the mean of FPS);
+  max = 1000 / fastest frame (`summarizeFrameTimes`, unit tested). Frame
+  time is present to present: wall time between loop starts, so it includes
+  every stall. CPU ms = that minus `Renderer::cpuWaitMs()`. The 10 s window's
+  stats refresh 4x per second. F4 / `--benchmark` write per-frame CSV
+  (`frame,frame_ms,cpu_ms,gpu_ms,<passes>`; GPU columns are the newest
+  finished frame, 2 behind); a benchmark skips 60 warm-up frames.

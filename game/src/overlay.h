@@ -2,6 +2,7 @@
 
 #include <meridian/grade.h>
 #include <meridian/math/vec3.h>
+#include <meridian/renderer.h>
 #include <meridian/window.h>
 
 #include <filesystem>
@@ -12,13 +13,14 @@
 enum class Haze { Clean, Summer, SummerHazy };
 
 // Everything the grading panel edits: the colour grade, the sun (azimuth
-// clockwise from north, which is -z; elevation above the horizon) and the
-// aerosol.
+// clockwise from north, which is -z; elevation above the horizon), the
+// aerosol and the bloom.
 struct Look {
   meridian::Grade grade;
   float sunAzimuthDegrees = 0.0f;
   float sunElevationDegrees = 0.0f;
   Haze haze = Haze::Summer;
+  meridian::Bloom bloom;
 };
 
 meridian::Vec3 sunDirection(float azimuthDegrees, float elevationDegrees);
@@ -32,7 +34,7 @@ std::string lookToJson(const Look &look);
 Look lookFromJson(std::string_view json, const Look &base);
 std::optional<Look> loadLook(const std::filesystem::path &path, const Look &base);
 
-// G opens the panel: every grade field, the sun and the haze, with Save,
+// G opens the panel: every grade field, the sun, the haze and the bloom, with Save,
 // Load, Reset and an A/B toggle against the built-in grade. While open the
 // cursor is free and the game should not move the camera.
 class GradePanel {
@@ -49,6 +51,7 @@ public:
   struct Changes {
     bool grade = false;    // the grade() to render changed
     bool lighting = false; // the sun or the haze changed
+    bool bloom = false;    // look().bloom changed
   };
   // Issues the widgets (after Renderer::beginOverlay).
   Changes draw();

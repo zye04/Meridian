@@ -1,4 +1,7 @@
 #include "overlay.h"
+#include "perf_overlay.h"
+
+#include <fstream>
 
 #include <meridian/model.h>
 #include <meridian/placement.h>
@@ -364,6 +367,10 @@ struct Options {
   // load the default one.
   std::optional<std::filesystem::path> gradePath;
   bool overlayGrade = false;
+  bool overlayPerf = false;
+  // Timed run with real frame times and no input; the CSV goes to benchmarkPath.
+  float benchmarkSeconds = 0.0f;
+  std::filesystem::path benchmarkPath;
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::pair<float, float>> cameraAngularVelocity;
@@ -376,7 +383,7 @@ struct Options {
   // or lone-tree layers, no forest floor in the terrain material.
   bool trees = false;
   bool occlusion = true;
-  meridian::Bloom bloom;
+  std::optional<meridian::Bloom> bloom;
   // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
   std::optional<Haze> haze;
   // Largest simplification error on screen in pixels (0: full detail).
@@ -427,10 +434,17 @@ Options parseOptions(int argc, char **argv) {
     } else if (arg == "--grade" && i + 1 < argc) {
       options.gradePath = argv[++i];
     } else if (arg == "--overlay" && i + 1 < argc) {
-      if (std::string_view(argv[++i]) != "grade") {
-        throw std::runtime_error("--overlay takes grade");
+      const std::string_view panel = argv[++i];
+      if (panel != "grade" && panel != "perf") {
+        throw std::runtime_error("--overlay takes grade or perf");
       }
-      options.overlayGrade = true;
+      (panel == "grade" ? options.overlayGrade : options.overlayPerf) = true;
+    } else if (arg == "--benchmark" && i + 2 < argc) {
+      options.benchmarkSeconds = std::stof(argv[++i]);
+      if (!(options.benchmarkSeconds > 0.0f)) {
+        throw std::runtime_error("--benchmark takes seconds > 0 and a file.csv");
+      }
+      options.benchmarkPath = argv[++i];
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
@@ -447,8 +461,7 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--haze takes clean, summer or summer-hazy");
       }
     } else if (arg == "--bloom") {
-      options.bloom.intensity = number(i);
-      options.bloom.scatter = number(i);
+      options.bloom = meridian::Bloom{number(i), number(i)};
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -512,7 +525,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --scatter n, --placement off, --trees, "
                                "--no-occlusion, "
-                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade, "
+                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
@@ -521,7 +534,7 @@ Options parseOptions(int argc, char **argv) {
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
-  if (options.capturePath && options.frames == 0) {
+  if (options.capturePath && options.frames == 0 && options.benchmarkSeconds == 0.0f) {
     options.frames = 120;
   }
   if ((options.cameraVelocity || options.cameraAngularVelocity) &&
@@ -529,6 +542,12 @@ Options parseOptions(int argc, char **argv) {
     throw std::runtime_error(
         "--camera-velocity and --camera-angular-velocity need --capture or "
         "--frames");
+  }
+  if (options.benchmarkSeconds > 0.0f &&
+      (options.capturePath || options.cameraVelocity || options.cameraAngularVelocity)) {
+    throw std::runtime_error(
+        "--benchmark can't be combined with --capture, --camera-velocity or "
+        "--camera-angular-velocity");
   }
   return options;
 }
@@ -538,7 +557,13 @@ Options parseOptions(int argc, char **argv) {
 int main(int argc, char **argv) {
   const Options options = parseOptions(argc, argv);
   // Scripted runs ignore the mouse and keyboard so results are repeatable.
-  const bool interactive = options.frames == 0;
+  const bool benchmark = options.benchmarkSeconds > 0.0f;
+  const bool interactive = options.frames == 0 && !benchmark;
+
+  if (benchmark && !std::ofstream(options.benchmarkPath, std::ios::app)) {
+    std::fprintf(stderr, "Can't write %s\n", options.benchmarkPath.c_str());
+    return 1;
+  }
 
   meridian::Window window(1280, 720, "Meridian", options.fullscreen);
 #ifdef MERIDIAN_HAS_DLSS
@@ -565,7 +590,7 @@ int main(int argc, char **argv) {
 #endif
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
-  renderer.setBloom(options.bloom);
+  renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
 
@@ -666,9 +691,10 @@ int main(int argc, char **argv) {
     lighting.sunDirection = *options.sunDirection;
   }
   // CLI and defaults are the built-in look; the grade file (interactive runs
-  // and --grade) overrides it except for an explicit --sun or --haze.
+  // and --grade) overrides it except for an explicit --sun, --haze or --bloom.
   Look builtIn = lookWithSun(lighting.sunDirection, options.haze.value_or(Haze::Summer));
   builtIn.grade = kStartingGrade;
+  builtIn.bloom = options.bloom.value_or(meridian::Bloom{});
   Look look = builtIn;
   const std::filesystem::path gradePath = options.gradePath.value_or(defaultLookPath());
   if (options.gradePath || interactive) {
@@ -685,6 +711,11 @@ int main(int argc, char **argv) {
       } else {
         lighting.atmosphere = atmosphereFor(look.haze);
       }
+      if (options.bloom) {
+        look.bloom = *options.bloom;
+      } else {
+        renderer.setBloom(look.bloom);
+      }
       renderer.setGrade(look.grade);
     } else if (options.gradePath) {
       throw std::runtime_error("cannot read grade file " + options.gradePath->string());
@@ -694,6 +725,8 @@ int main(int argc, char **argv) {
   if (options.overlayGrade) {
     gradePanel.setVisible(window, true);
   }
+  PerfOverlay perf;
+  perf.setVisible(options.overlayPerf);
   meridian::Camera camera = start;
   camera.position = ground(0.0f, 0.0f) + meridian::Vec3{0.0f, 1.7f, 0.0f};
   if (options.camera) {
@@ -701,6 +734,7 @@ int main(int argc, char **argv) {
   }
   // Scripted runs (motion and exposure) use a fixed step so they repeat
   // exactly.
+  constexpr int kBenchmarkWarmupFrames = 60;
   constexpr float kScriptedStep = 1.0f / 60.0f;
   const meridian::Vec3 scriptedEnd = camera.position;
   const float scriptedYaw = camera.yaw;
@@ -729,10 +763,14 @@ int main(int argc, char **argv) {
   int totalFrames = 0;
   bool walking = false;
   bool fWasDown = false;
+  bool benchmarkDone = false;
+  bool benchmarkWritten = true;
+  Clock::time_point benchmarkStart;
 
   while (!window.shouldClose() &&
-         (interactive || totalFrames < options.frames)) {
+         (interactive || (benchmark ? !benchmarkDone : totalFrames < options.frames))) {
     auto now = Clock::now();
+    const float frameMs = std::chrono::duration<float, std::milli>(now - lastFrame).count();
     // Clamped so a long stall (loading, dragging the window) doesn't
     // teleport the camera.
     float deltaSeconds =
@@ -743,9 +781,23 @@ int main(int argc, char **argv) {
     if (window.isKeyDown(meridian::Key::Escape)) {
       window.close();
     }
+    if (totalFrames > 0) { // the first frame's time is loading
+      perf.addFrame(frameMs, renderer);
+      // Measure after pipelines and exposure have settled.
+      if (benchmark && !perf.recording() && totalFrames == kBenchmarkWarmupFrames) {
+        perf.startRecording();
+        benchmarkStart = now;
+      } else if (benchmark && perf.recording() &&
+                 std::chrono::duration<float>(now - benchmarkStart).count() >=
+                     options.benchmarkSeconds) {
+        benchmarkWritten = perf.stopRecording(options.benchmarkPath);
+        benchmarkDone = true;
+      }
+    }
 
     if (interactive) {
       gradePanel.handleToggle(window);
+      perf.handleKeys(window);
       const bool fDown = window.isKeyDown(meridian::Key::F);
       if (fDown && !fWasDown && !gradePanel.visible()) {
         walking = !walking;
@@ -766,19 +818,27 @@ int main(int argc, char **argv) {
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
     }
-    if (gradePanel.visible()) {
+    if (gradePanel.visible() || perf.visible()) {
       renderer.beginOverlay();
-      const GradePanel::Changes changes = gradePanel.draw();
-      if (changes.grade) {
-        renderer.setGrade(gradePanel.grade());
+      if (gradePanel.visible()) {
+        const GradePanel::Changes changes = gradePanel.draw();
+        if (changes.grade) {
+          renderer.setGrade(gradePanel.grade());
+        }
+        if (changes.lighting) {
+          lighting.sunDirection = sunDirection(gradePanel.look().sunAzimuthDegrees,
+                                               gradePanel.look().sunElevationDegrees);
+          lighting.atmosphere = atmosphereFor(gradePanel.look().haze);
+        }
+        if (changes.bloom) {
+          renderer.setBloom(gradePanel.look().bloom);
+        }
       }
-      if (changes.lighting) {
-        lighting.sunDirection = sunDirection(gradePanel.look().sunAzimuthDegrees,
-                                             gradePanel.look().sunElevationDegrees);
-        lighting.atmosphere = atmosphereFor(gradePanel.look().haze);
+      if (perf.visible()) {
+        perf.draw(gradePanel.visible());
       }
     }
-    renderer.draw(camera, lighting, interactive ? deltaSeconds : kScriptedStep);
+    renderer.draw(camera, lighting, interactive || benchmark ? deltaSeconds : kScriptedStep);
 
     ++frames;
     gpuMsSum += renderer.gpuFrameMs();
@@ -792,6 +852,10 @@ int main(int argc, char **argv) {
       gpuMsSum = 0.0f;
       fpsStart = now;
     }
+  }
+
+  if (perf.recording()) { // Esc or window close mid-recording
+    benchmarkWritten = perf.stopRecording(benchmark ? options.benchmarkPath : std::filesystem::path{});
   }
 
   if (!interactive) {
@@ -815,5 +879,5 @@ int main(int argc, char **argv) {
     }
     std::printf("\n");
   }
-  return renderer.validationErrorCount() == 0 ? 0 : 1;
+  return renderer.validationErrorCount() == 0 && benchmarkWritten ? 0 : 1;
 }
