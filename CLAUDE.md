@@ -311,7 +311,8 @@ account for that.
   on the bilinear heightfield, the march also above their cell's corners
   over the shading normal's plane (`terrainCellAbovePlane`, so a cell
   never shadows itself where the smooth normal faces the sun). Pyramid
-  level 0 bounds each bilinear cell.
+  level 0 bounds each bilinear cell. The quadtree root is level 16 (~524 km
+  half-size), covering the horizon up to ~20 km altitude.
 - Any struct in `gpu_types.h` marked "must match" mirrors a declaration in
   `shaders/common.glsl`, `post.glsl` or `exposure.glsl` (or the shader it
   names: `GpuPlacementLayer`/`PlacementConstants` in placement.comp,
@@ -371,29 +372,5 @@ account for that.
   pool) and level table. `selectClustersBvh` is the CPU reference for the
   GPU traversal (cull.comp's level band, cluster_traverse.comp's node
   test): it must select exactly the clusters `lodVisible` accepts.
-- Deferred work and known issues are tracked in `docs/backlog.md`: add a
-  row for anything deferred, remove it in the commit that resolves it.
-- Known gaps: blended instances are drawn at full detail with no culling
-  (every instance, every frame; harmless while no scattered model is
-  blended); masked-geometry RT shadows are not visually verified yet; TAA
-  history isn't rescaled on exposure change; TAA smears in motion (eye-height
-  ground view at 5 m/s keeps only 48% of the still image's Laplacian
-  sharpness); distant rock repeats (not hex-tiled); the Renderer constructor
-  leaks partial Vulkan state if it throws; shadowed needle ground gets
-  ~11% of the sunlit luminance (real sunny days 10-20%; haze profile, no
-  bounce light; decisions.md "Material AO"); near the terrain's
-  terminator, neighboring 2 m cells can still cast jagged shadows onto
-  slopes the smooth shading normal lights dimly; the terrain's detail
-  displacement (+-0.3 m, near the camera) casts no shadows (the march tests
-  the bilinear heightfield); the sunset view (3 degree sun) makes the march
-  cost ~1.15 ms; shadow rays are limited to 20 km; every placed tree is
-  rasterized as clusters (no impostors or far field yet), so wide forest
-  views spend ~10-11.5 ms in the early scene pass (28.8M triangles at the
-  forest edge, 46.6M at the overview); placed instances stand on the bilinear
-  heightfield while distant CDLOD levels draw ridges up to a few meters
-  lower (accepted for impostor range, numbers in decisions.md); the terrain quadtree root is level 16 (~524 km
-  half-size), covering the horizon up to ~20 km altitude.
-  RT shadows trace full-detail BLAS while the raster draws LOD
-  clusters; shadow rays start the cluster's simplification error above the
-  surface to avoid acne (virtualized geometry slice 2 traces the clusters
-  themselves).
+- Known issues and deferred work live in `docs/backlog.md`, not here: add
+  a row for anything deferred, remove it in the commit that resolves it.

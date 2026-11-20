@@ -176,7 +176,7 @@ The clouds work but look wrong against real photos: grey instead of white, smoke
 ### Task 8: Measurement and wrap-up
 
 **Files:**
-- Modify: `docs/decisions.md`, `CLAUDE.md` (Known gaps: precipitation, wet surfaces, lightning, fog banks/valley mist, light shafts, cumulonimbus are later milestones; no local cloud occlusion of ambient until GI)
+- Modify: `docs/decisions.md`, `docs/backlog.md` (rows: precipitation, wet surfaces, lightning, fog banks/valley mist, light shafts, cumulonimbus are later milestones; no local cloud occlusion of ambient until GI)
 
 - [ ] **Step 1:** Release build in the scratchpad; under the GPU lock, median of 5 at 2560x1440: `"weather"` + `"clouds"` ms at the ground view (`fair`, `overcast`), the above-layer view, and the inside-layer view; frame totals. Over ~1 ms (or 2 ms inside): stop and report numbers and levers to the user.
 - [ ] **Step 2:** Sweep CLAUDE.md, decisions.md and the specs for statements this milestone made stale (sky irradiance from the sky-view LUT alone, "no clouds", the frame order, the roadmap's M4 description where it conflicts with the approved spec: report roadmap conflicts to the user instead of editing it).

@@ -120,7 +120,7 @@ Open until M2a Task 8 reports (user, 2026-11-20): the voxel far field may replac
 ### Task 7: Milestone measurement, gate and wrap-up
 
 **Files:**
-- Modify: `docs/decisions.md`, `CLAUDE.md` (Known gaps: leaf transmission next; remaining gap to ~7.7 ms)
+- Modify: `docs/decisions.md`, `docs/backlog.md` (rows: leaf transmission next; remaining gap to ~7.7 ms)
 
 - [ ] **Step 1:** Release (under the GPU lock), 2560x1440, median of 5 at the four views (interior, forest edge with low sun, ridge, near/mid boundary): per-pass ms, sun shadow + sky visibility total, frame vs M2a's frame and vs ~7.7 ms.
 - [ ] **Step 2:** Over 16.7 ms anywhere: apply levers in order (checkerboard sky rays; smaller near radius; smaller mid radius), re-measuring after each; report every visible quality cost to the user with before/after captures.
