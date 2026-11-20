@@ -25,9 +25,9 @@ const vec2 kDiffuse = vec2(0.8, 0.75 * (1.0 - 0.6));
 const vec2 kAmbientBottom = vec2(0.35, 0.05);
 const float kMaxDistance = 300000.0;
 const float kOpaque = 0.01;
-// Sun march: steps doubling from kLightStep (5 steps cover 1.2 km).
-const int kLightSteps = 5;
-const float kLightStep = 40.0;
+// Sun march: steps doubling from kLightStep (6 steps cover 1.26 km).
+const int kLightSteps = 6;
+const float kLightStep = 20.0;
 
 // Roots (near, far) of a ray from the camera (altitude h, direction with
 // vertical component dy) against the sphere at altitude a, in m. Written to
