@@ -434,11 +434,55 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     return texel;
 }
 
+// One hex-tiled side projection of the triplanar rock (same weights as
+// samplePlanar). n is in the map's frame: u across, green up the image.
+void sampleHexSide(TerrainLayer layer, vec2 uv, vec2 dx, vec2 dy, out vec3 color, out vec2 arm,
+                   out float height, out vec3 n) {
+    HexTiles tiles = hexTiles(uv, dx, dy);
+    vec3 colors[3];
+    vec3 luminance;
+    for (int i = 0; i < 3; ++i) {
+        colors[i] = sampleGrad(layer.baseColor, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rgb;
+        luminance[i] = dot(colors[i], vec3(0.299, 0.587, 0.114));
+    }
+    vec3 w = mix(vec3(1.0), luminance, kHexFallOffContrast) *
+             pow(tiles.barycentric, vec3(kHexExponent));
+    w /= w.x + w.y + w.z;
+    w *= step(0.02, w);
+    w /= w.x + w.y + w.z;
+
+    color = colors[0] * w.x + colors[1] * w.y + colors[2] * w.z;
+    arm = vec2(0.0);
+    height = 0.0;
+    vec2 derivative = vec2(0.0);
+    for (int i = 0; i < 3; ++i) {
+        if (w[i] == 0.0) {
+            continue;
+        }
+        arm += sampleGrad(layer.arm, tiles.uv[i], tiles.dx[i], tiles.dy[i]).rg * w[i];
+        height += sampleGrad(layer.height, tiles.uv[i], tiles.dx[i], tiles.dy[i]).r * w[i];
+        vec3 tn = sampleGrad(layer.normal, tiles.uv[i], tiles.dx[i], tiles.dy[i]).xyz * 2.0 - 1.0;
+        // The tiles rotate in (u, v); the map's green points along -v.
+        tn.y = -tn.y;
+        derivative += (normalToDerivative(tn) * tiles.rotation[i]) * w[i];
+    }
+    derivative *= normalFade(tiles.dx[0], tiles.dy[0]);
+    vec3 nv = normalize(vec3(-derivative, 1.0));
+    n = vec3(nv.x, -nv.y, nv.z);
+}
+
 // Triplanar projection with the Whiteout normal blend and per-side handedness
-// correction (Ben Golus, "Normal Mapping for a Triplanar Shader").
-TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy) {
-    float scale = 1.0 / layer.tileSize;
+// correction (Ben Golus, "Normal Mapping for a Triplanar Shader"). The sides
+// are hex-tiled so cliffs show no tile grid; the top keeps plain tiles with a
+// 4x macro sample far away (its uv, (x, z), doesn't match the hex row
+// period). `scaleMul` must be a whole number: it scales the uv, and the
+// wrapped offsets stay seamless only for whole multiples of the hex period.
+TerrainTexel sampleTriplanar(TerrainLayer layer, float scaleMul, vec3 normal, vec3 dpdx,
+                             vec3 dpdy) {
+    float scale = scaleMul / layer.tileSize;
     vec3 blend = pow(abs(normal), vec3(4.0));
+    blend /= blend.x + blend.y + blend.z;
+    blend *= step(0.01, blend);
     blend /= blend.x + blend.y + blend.z;
     vec3 axisSign = vec3(normal.x < 0.0 ? -1.0 : 1.0, normal.y < 0.0 ? -1.0 : 1.0,
                          normal.z < 0.0 ? -1.0 : 1.0);
@@ -458,27 +502,40 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dp
     texel.baseColor = vec3(0.0);
     texel.occlusionRoughness = vec2(0.0);
     texel.height = 0.0;
-    vec3 tangentNormals[3];
+    vec3 tangentNormals[3] = vec3[3](vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
     for (int axis = 0; axis < 3; ++axis) {
+        if (blend[axis] == 0.0) {
+            continue;
+        }
         vec2 uv = uvs[axis] * flip[axis] * scale;
         vec2 dx = dxs[axis] * flip[axis] * scale;
         vec2 dy = dys[axis] * flip[axis] * scale;
-        vec3 color = sampleGrad(layer.baseColor, uv, dx, dy).rgb;
-        // Far away a cliff's tiles repeat as a grid: the base color mixes in
-        // the same texture at 4x the tile size (a whole number of repeats per
-        // wrap period), and the tile-sized bumps of the normal map fade
-        // sooner than on the hex-tiled layers.
-        float far = smoothstep(0.01, 0.06, max(length(dx), length(dy)));
-        if (far > 0.0) {
-            vec3 macro = sampleGrad(layer.baseColor, uv * 0.25 + 0.5, dx * 0.25, dy * 0.25).rgb;
-            color = mix(color, macro, 0.7 * far);
+        vec3 color;
+        vec2 arm;
+        float height;
+        vec3 n;
+        if (axis == 1) {
+            color = sampleGrad(layer.baseColor, uv, dx, dy).rgb;
+            // Far away the top's tiles repeat as a grid: the base color mixes
+            // in the same texture at 4x the tile size (a whole number of
+            // repeats per wrap period), and the tile-sized bumps of the
+            // normal map fade sooner than on the hex-tiled layers.
+            float far = smoothstep(0.01, 0.06, max(length(dx), length(dy)));
+            if (far > 0.0) {
+                vec3 macro = sampleGrad(layer.baseColor, uv * 0.25 + 0.5, dx * 0.25, dy * 0.25).rgb;
+                color = mix(color, macro, 0.7 * far);
+            }
+            arm = sampleGrad(layer.arm, uv, dx, dy).rg;
+            height = sampleGrad(layer.height, uv, dx, dy).r;
+            n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
+            n.xy *= 1.0 - far;
+        } else {
+            sampleHexSide(layer, uv, dx, dy, color, arm, height, n);
         }
         texel.baseColor += color * blend[axis];
-        texel.occlusionRoughness += sampleGrad(layer.arm, uv, dx, dy).rg * blend[axis];
-        texel.height += sampleGrad(layer.height, uv, dx, dy).r * blend[axis];
-        vec3 n = sampleGrad(layer.normal, uv, dx, dy).xyz * 2.0 - 1.0;
+        texel.occlusionRoughness += arm * blend[axis];
+        texel.height += height * blend[axis];
         n.x *= flip[axis].x;
-        n.xy *= 1.0 - far;
         tangentNormals[axis] = n;
     }
     vec3 nx = tangentNormals[0];
@@ -582,6 +639,30 @@ uint roleVariant(uint role, vec2 p, out float t) {
     return first + i;
 }
 
+// Rock's two variants cross-fade over ~40 m noise, so both show within one
+// cliff; the second is sampled at twice the scale so their features never
+// line up.
+float rockVariantBlend(vec2 p) {
+    return smoothstep(0.3, 0.7, groundNoise(p, 1.0, 38u));
+}
+
+// Strata bands (brightness and a slight warm/cool shift along a warped
+// height) and moss in the dark crevices and on the ledges of the rock.
+void weatherRock(inout TerrainTexel texel, vec2 p) {
+    float warp = (groundNoise(p, 1.0, 39u) - 0.5) * 24.0 + (groundNoise(p, 4.0, 40u) - 0.5) * 4.0;
+    float y = worldPosition.y + warp;
+    float band = 0.6 * sin(y * (6.2831853 / 17.0)) + 0.4 * sin(y * (6.2831853 / 6.3) + 1.7);
+    texel.baseColor *= 1.0 + 0.1 * band;
+    texel.baseColor *= 1.0 + 0.04 * band * vec3(1.0, 0.0, -1.0);
+
+    float hollow = 1.0 - smoothstep(0.3, 0.6, texel.occlusionRoughness.x);
+    float ledge = 0.7 * smoothstep(0.3, 0.6, texel.normal.y);
+    float patches = smoothstep(0.35, 0.65, groundNoise(p, 4.0, 41u));
+    float moss = 0.6 * max(hollow, ledge) * patches;
+    texel.baseColor = mix(texel.baseColor, vec3(0.05, 0.07, 0.03), moss);
+    texel.occlusionRoughness.y = mix(texel.occlusionRoughness.y, 1.0, moss);
+}
+
 // Near a variant border the next one is height-blended in. Layers are read
 // straight from the scene buffer: indexing a local copy of Terrain with a
 // dynamic index spills the whole struct to scratch memory (2-3x the
@@ -589,18 +670,27 @@ uint roleVariant(uint role, vec2 p, out float t) {
 TerrainTexel sampleRole(uint role, vec2 p, vec3 normal, vec3 dpdx, vec3 dpdy) {
     bool triplanar = role == 8u;
     float t;
-    uint index = roleVariant(role, p, t);
+    uint index;
+    if (triplanar) {
+        index = pc.scene.terrain.roles[role] & 0xFFu;
+        t = rockVariantBlend(p);
+    } else {
+        index = roleVariant(role, p, t);
+    }
     TerrainTexel texel;
     if (t < 1.0) {
         TerrainLayer layer = pc.scene.terrain.layers[index];
-        texel = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
+        texel = triplanar ? sampleTriplanar(layer, 1.0, normal, dpdx, dpdy)
                           : samplePlanar(layer, normal, dpdx, dpdy);
     }
     if (t > 0.0) {
         TerrainLayer layer = pc.scene.terrain.layers[index + 1u];
-        TerrainTexel next = triplanar ? sampleTriplanar(layer, normal, dpdx, dpdy)
+        TerrainTexel next = triplanar ? sampleTriplanar(layer, 2.0, normal, dpdx, dpdy)
                                       : samplePlanar(layer, normal, dpdx, dpdy);
         texel = overlay(texel, t < 1.0, next, t);
+    }
+    if (triplanar) {
+        weatherRock(texel, p);
     }
     return texel;
 }

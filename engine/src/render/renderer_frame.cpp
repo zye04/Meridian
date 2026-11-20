@@ -634,12 +634,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     for (uint32_t i = 0; i < scene.terrain.layerCount; ++i) {
       GpuTerrainLayer &layer = scene.terrain.layers[i];
       const double period = kTerrainWrapTiles * static_cast<double>(layer.tileSize);
-      // Rock (the last role) is triplanar; the rest are hex-tiled.
-      const double periodZ =
-          i < firstRock ? kTerrainHexWrapRows * std::sqrt(3.0) / 4.0 * layer.tileSize : period;
+      // Planar layers are hex-tiled over (x, z): columns along x repeat
+      // every `period`, rows along z every hex row period (256.3 tiles).
+      // Rock (the last role) is triplanar with hex-tiled sides, whose u is x
+      // or z (columns) and whose v is y (rows).
+      const double rowPeriod = kTerrainHexWrapRows * std::sqrt(3.0) / 4.0 * layer.tileSize;
+      const bool rock = i >= firstRock;
       layer.offset[0] = wrapAround(camera.position.x, period);
-      layer.offset[1] = wrapAround(camera.position.y, period);
-      layer.offset[2] = wrapAround(camera.position.z, periodZ);
+      layer.offset[1] = wrapAround(camera.position.y, rock ? rowPeriod : period);
+      layer.offset[2] = wrapAround(camera.position.z, rock ? period : rowPeriod);
     }
     scene.terrain.noiseOffset[0] = wrapAround(camera.position.x, kTerrainNoiseWrap);
     scene.terrain.noiseOffset[1] = wrapAround(camera.position.z, kTerrainNoiseWrap);
