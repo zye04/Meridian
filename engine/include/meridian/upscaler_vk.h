@@ -24,11 +24,12 @@ struct UpscalerImage {
 // SHADER_READ_ONLY_OPTIMAL, `output` in GENERAL; earlier accesses to all of
 // them are complete. Backends write `output` from compute shaders, and the
 // caller makes those writes visible to what follows. Guide images
-// (albedos, normal + roughness) are null until the renderer produces them.
+// (albedos, normal + roughness, specular hit distance) are null unless the
+// backend wantsGuides().
 struct UpscalerFrame {
   VkCommandBuffer cmd = VK_NULL_HANDLE;
   UpscalerImage color, depth, motion, transparencyMask, diffuseAlbedo,
-      specularAlbedo, normalRoughness, output;
+      specularAlbedo, normalRoughness, specularHitDistance, output;
   // Render pixels. The projection gets 2 * jitter / renderSize added to
   // m[2][0] and m[2][1]; with w = -z_view and Vulkan's y-down framebuffer,
   // the image moves by -jitter pixels in x and y, so each pixel samples the

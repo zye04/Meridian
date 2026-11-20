@@ -83,14 +83,18 @@ clean = Bruneton's very clean defaults, for A/B).
 
 `--aa taa|dlss` picks the upscaler: TAA (default) or DLSS (falls back to
 TAA with the log line `DLSS unavailable: <reason>; using TAA` when NGX
-reports no Super Resolution). `--dlss-mode dlaa|quality|balanced|performance` (default dlaa)
-and `--dlss-preset E|F|J|K|L|M` (default: M for DLAA, Quality and Balanced,
-NGX's own for Performance, `defaultPreset` in dlss.cpp; A/B override)
-set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
+reports no Super Resolution). `--rr on|off` (default off: it fails
+the motion gates, decisions.md) picks Ray Reconstruction under DLSS
+(preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super
+Resolution with `DLSS Ray Reconstruction unavailable; using Super
+Resolution`). `--dlss-mode dlaa|quality|balanced|performance` (default
+quality under RR, dlaa otherwise) and `--dlss-preset E|F|J|K|L|M` (Super
+Resolution only; default: M for DLAA, Quality and Balanced, NGX's own
+for Performance, `defaultPreset` in dlss.cpp; A/B override) set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
 at the display size times S for TAA; DLSS picks its own render size.
 Startup prints `Render WxH, display WxH, jitter phases N, mip bias B,
-DLSS|TAA` and, with the DLSS module, `DLSS: Super Resolution ..., Ray
-Reconstruction ...`.
+DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
+310.9.16, Super Resolution ..., Ray Reconstruction ... (preset F)`.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--no-occlusion` draws everything in the frustum
@@ -286,7 +290,8 @@ to front, mesh.vert) -> upscaler (`Upscaler::evaluate` with an
 `UpscalerFrame`: colour, depth, motion, transparency mask (and the guides
 when `wantsGuides()`) in SHADER_READ_ONLY, jitter, unjittered matrices, reset; writes the
 display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
-`NGX_VULKAN_EVALUATE_DLSS_EXT`) or `TaaUpscaler`: taa.comp, which writes
+`NGX_VULKAN_EVALUATE_DLSS_EXT`, or `NGX_VULKAN_EVALUATE_DLSSD_EXT` under
+Ray Reconstruction) or `TaaUpscaler`: taa.comp, which writes
 its resolve to its own history (pre-exposed, so rescaled by
 `ExposureState` exposure / previousExposure), then sharpen.comp, which
 writes `output` from it (CAS; a copy at sharpness 0, today's setting),
@@ -329,11 +334,13 @@ barriers account for that.
   (the DFG pre-integrated `mix(dfg.x, dfg.y, f0)`), 5 normal RGBA16F (world
   `N`, facing the viewer on double-sided surfaces) with perceptual roughness
   in alpha; 6-7 are reserved. Sky writes 0.5 / 0 / 0; the blended pipeline
-  masks 3-5 off. The guide images exist only when the upscaler
-  `wantsGuides()`; otherwise those views are null and the writes are
+  masks 3-5 off. The guide images (plus a render-sized R16F specular hit
+  distance cleared to 65504, the guide's sky value: no ray-traced
+  reflections) exist only when the upscaler `wantsGuides()` (Ray
+  Reconstruction); otherwise those views are null and the writes are
   discarded (device extension `VK_EXT_dynamic_rendering_unused_attachments`).
-- `SceneData.whiteNoise` (`Renderer::Impl::whiteNoise`, 0 today, nothing
-  sets it): at 1 the sun-disk sample uses a PCG3D hash of (pixel,
+- `SceneData.whiteNoise` (1 under Ray Reconstruction, else 0): at 1 the
+  sun-disk sample uses a PCG3D hash of (pixel,
   frameIndex) instead of interleaved gradient noise.
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by

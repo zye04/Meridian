@@ -1278,7 +1278,8 @@ separately linked module (`MERIDIAN_DLSS`).**
   unavailable (0xbad00004)` and one `DLSS unavailable: ...; using TAA`
   line, and renders the TAA image exactly (mean diff 0.0000/255).
 
-**Ray Reconstruction first, for the shadows and AO.**
+**Ray Reconstruction denoises the shadows, but is opt-in (Task 1.5,
+below).**
 - It takes the noisy lit colour plus guides (diffuse and specular albedo,
   normal + roughness).
 - Its samples must be hashed white noise, not interleaved gradient noise.
@@ -1448,8 +1449,8 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   functions and white noise (PCG: Jarzynski and Olano 2020, JCGT 9(3)).
   IGN is a deliberately structured spatial pattern, which TAA integrates
   but RR does not expect. AO is not stochastic, so only the sun sample
-  changes. `whiteNoise` is 0 today and nothing sets it; 0 leaves TAA
-  output unchanged.
+  changes. `whiteNoise` is 1 exactly when Ray Reconstruction runs; 0
+  leaves TAA output unchanged.
 - Measured (Release, 2560x1440, TAA, `--scatter 100` beech, frames
   120/121, island_tree_01.old assets because the recooked island_tree_01
   fails to load, see backlog): shimmer crown/shadow 1.71/1.51 with IGN,
@@ -1459,6 +1460,58 @@ confidence), estimated from the YouTube video. Gates: forward 5 m/s
   median): ground +0.14 ms (1.39 vs 1.25), beech +0.14 ms (2 runs). With
   null views (TAA): ground 1.22 vs 1.25, beech 2.47 vs 2.44 (first set
   2.50), diff 0.0000/255.
+
+**Ray Reconstruction backend (Task 1.5): opt-in with `--rr on`, because
+it fails the motion gates.**
+- `DlssUpscaler` runs the DLSSD feature (`NGX_VULKAN_CREATE_DLSSD_EXT1` /
+  `NGX_VULKAN_EVALUATE_DLSSD_EXT`) per the RR integration guide (SDK doc/,
+  rev. 08): noisy pre-exposed colour, diffuse/specular albedo, world-space
+  normals with roughness packed in alpha (`Roughness_Mode_Packed`),
+  hardware depth, motion vectors, camera-relative unjittered
+  `worldToView` / `viewToClip` (column-major `M v` is NGX's row-major
+  `v M^T`, so `Mat4` passes as is), IsHDR | MVLowRes | DepthInverted, no
+  exposure input (guide 3.7), the SR path's jitter sign, a render-sized
+  R16F specular hit distance cleared to 65504 (the guide's sky value:
+  every specular lobe reflects the sky or the sun, nothing is ray-traced
+  in reflection), render size from the DLSSD optimal-settings callback
+  (guide 5.5), at least 32 jitter phases, and `whiteNoise` = 1.
+- Version: SDK 310.9.16 is the newest NVIDIA/DLSS release
+  (`git ls-remote --tags`, 2026-11-20); it ships
+  `libnvidia-ngx-dlssd.so.310.9.16`, copied next to the binary. Preset F
+  is pinned explicitly (`kRayReconstructionPreset`): the newest RR model
+  in that SDK ("Default model RR2", nvsdk_ngx_defs_dlssd.h; added in guide
+  rev. 08, June 2026, "the latest preset - F"), so an OTA default change
+  can't swap it silently. The guide recommends the default preset; F is
+  pinned because the user requires the newest model (deviation from the
+  plan's "NGX's default RR preset"). Startup prints
+  `DLSS: SDK 310.9.16, ..., Ray Reconstruction available (preset F)`.
+- Cost (Release, 2560x1440, `aa` median of 5, ground; beech the same
+  within 0.02 ms): RR DLAA 4.71 ms, over the 3.0 ms slot, so RR's mode
+  defaults to Quality (1707x960): 2.35 ms.
+- Gates (Release, 2560x1440, `tools/motion-gates.sh`, `--placement off`;
+  TAA v2 on the same build for reference):
+
+  | gate | RR Quality | RR DLAA | TAA v2 |
+  |---|---|---|---|
+  | forward 5 ground >= 0.85 | 0.711 | 0.791 | 0.944 |
+  | sideways 5 ground >= 0.95 | 0.925 | 0.896 | 0.995 |
+  | forward 5 beech >= 0.85 | 0.845 | 0.864 | 1.020 |
+  | pitch 0.02 ground >= 0.85 | 0.726 | 0.835 | 0.878 |
+  | shimmer crown <= 2.0 | 0.59 | 1.38 | 2.35 |
+  | shimmer shadow <= 2.0 | 0.41 | 0.46 | 1.97 |
+  | SSIM forward 5 ground >= 0.98 | 0.958 | 0.983 | 0.978 |
+
+- RR removes the shadow and foliage shimmer (3-5x below TAA), but fails
+  the motion ratios in both modes. The ratio is relative: RR's stills are
+  much sharper than TAA's (ground Laplacian 0.40 Quality / 0.34 DLAA vs
+  0.24) and its forward-motion frames are still sharper than TAA's (0.28
+  / 0.27 vs 0.23); it loses more of its detail in motion. Inputs are not
+  tuned beyond the guide. So `--rr` defaults to off (plan Step 4's
+  opt-in); `--aa dlss` stays SR DLAA preset M, and the fallback shadow
+  denoiser (Tasks 3.2a-3.2b) also runs under SR (backlog). The TAA column
+  also misses crown shimmer and SSIM on this build (the new Megascans
+  ground; Task 3.1 measured them passing before it).
+- Debug captures, RR Quality and DLAA: 0 validation errors.
 
 ## Visible quality pass (2026-11-20)
 

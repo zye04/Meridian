@@ -63,7 +63,7 @@ struct Renderer::Impl {
   Image diffuseAlbedo;
   Image specularAlbedo;
   Image normalRoughness;
-  uint32_t whiteNoise = 0;
+  Image specularHitDistance;
   // Display-sized: the upscaler's output, read by the exposure histogram,
   // the tonemap and .pfm captures. Always in VK_IMAGE_LAYOUT_GENERAL.
   Image output;

@@ -52,6 +52,7 @@ void Renderer::Impl::createSwapchain() {
     } catch (const std::runtime_error &error) {
       std::cout << "DLSS unavailable: " << error.what() << "; using TAA\n";
       aaSettings.method = AaMethod::Taa;
+      aaSettings.rayReconstruction = false;
     }
   }
   const bool dlss = aaSettings.method == AaMethod::Dlss;
@@ -101,6 +102,31 @@ void Renderer::Impl::createSwapchain() {
                                        VK_IMAGE_ASPECT_COLOR_BIT);
     normalRoughness = createRenderImage(kNormalRoughnessFormat, kGuideUsage,
                                         VK_IMAGE_ASPECT_COLOR_BIT);
+    // Every specular lobe reflects the sky or the sun (no ray-traced
+    // reflections), so the hit distance is the guide's "sky" value everywhere.
+    specularHitDistance = createRenderImage(
+        kHitDistanceFormat,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
+    submitNow([&](VkCommandBuffer cmd) {
+      transitionImage(cmd, {specularHitDistance.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_PIPELINE_STAGE_2_NONE, 0,
+                            VK_PIPELINE_STAGE_2_CLEAR_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT});
+      const VkClearColorValue far{{65504.0f, 0.0f, 0.0f, 0.0f}};
+      const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdClearColorImage(cmd, specularHitDistance.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &far, 1, &range);
+      transitionImage(cmd, {specularHitDistance.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                            VK_PIPELINE_STAGE_2_CLEAR_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+    });
   }
   historyValid = false;
 
@@ -125,7 +151,9 @@ void Renderer::Impl::createSwapchain() {
             << display.width << "x" << display.height << ", jitter phases "
             << jitterPhaseCount(render, display, aaSettings.rayReconstruction)
             << ", mip bias " << textureMipBias(render, display) << ", "
-            << (dlss ? "DLSS" : "TAA") << "\n";
+            << (dlss ? (aaSettings.rayReconstruction ? "DLSS Ray Reconstruction" : "DLSS")
+                     : "TAA")
+            << "\n";
 }
 
 void Renderer::Impl::createDepthPyramid() {
@@ -194,6 +222,7 @@ void Renderer::Impl::createDepthPyramid() {
 
 void Renderer::Impl::destroySwapchain() {
   upscaler.reset();
+  destroyImage(specularHitDistance);
   destroyImage(normalRoughness);
   destroyImage(specularAlbedo);
   destroyImage(diffuseAlbedo);

@@ -3,6 +3,8 @@
 #include <nvsdk_ngx_defs_dlssd.h>
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_helpers_vk.h>
+// After nvsdk_ngx_helpers_vk.h, whose types it uses without including it.
+#include <nvsdk_ngx_helpers_dlssd_vk.h>
 #include <nvsdk_ngx_vk.h>
 
 #include <cstdio>
@@ -87,6 +89,26 @@ char defaultPreset(DlssMode mode) {
   return mode == DlssMode::Performance ? 0 : 'M';
 }
 
+const char *rayReconstructionPresetParameter(DlssMode mode) {
+  switch (mode) {
+  case DlssMode::Dlaa:
+    return NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA;
+  case DlssMode::Quality:
+    return NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality;
+  case DlssMode::Balanced:
+    return NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced;
+  case DlssMode::Performance:
+    return NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance;
+  }
+  return NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA;
+}
+
+// The newest Ray Reconstruction model SDK 310.9.16 offers, preset F (RR
+// integration guide rev. 08, June 2026: "the latest preset - F"), pinned
+// rather than NGX's default so an OTA update can't silently change it.
+// Re-check on every SDK bump (decisions.md).
+constexpr char kRayReconstructionPreset = 'F';
+
 NVSDK_NGX_Resource_VK resource(const UpscalerImage &image, VkImageAspectFlags aspect,
                                bool readWrite) {
   return NVSDK_NGX_Create_ImageView_Resource_VK(
@@ -96,13 +118,18 @@ NVSDK_NGX_Resource_VK resource(const UpscalerImage &image, VkImageAspectFlags as
 
 class DlssUpscaler final : public Upscaler {
 public:
-  DlssUpscaler(NVSDK_NGX_Handle *feature, NVSDK_NGX_Parameter *parameters)
-      : feature_(feature), parameters_(parameters) {}
+  DlssUpscaler(NVSDK_NGX_Handle *feature, NVSDK_NGX_Parameter *parameters,
+               bool rayReconstruction)
+      : feature_(feature), parameters_(parameters), rayReconstruction_(rayReconstruction) {}
   ~DlssUpscaler() override { NVSDK_NGX_VULKAN_ReleaseFeature(feature_); }
   DlssUpscaler(const DlssUpscaler &) = delete;
   DlssUpscaler &operator=(const DlssUpscaler &) = delete;
 
   void evaluate(const UpscalerFrame &frame) override {
+    if (rayReconstruction_) {
+      evaluateRayReconstruction(frame);
+      return;
+    }
     NVSDK_NGX_Resource_VK color = resource(frame.color, VK_IMAGE_ASPECT_COLOR_BIT, false);
     NVSDK_NGX_Resource_VK output = resource(frame.output, VK_IMAGE_ASPECT_COLOR_BIT, true);
     NVSDK_NGX_Resource_VK depth = resource(frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT, false);
@@ -131,11 +158,54 @@ public:
           "DLSS evaluate");
   }
 
-  bool wantsGuides() const override { return false; }
+  bool wantsGuides() const override { return rayReconstruction_; }
 
 private:
+  // Inputs per the RR integration guide: noisy pre-exposed colour, world-space
+  // normals with roughness packed in alpha, hardware depth and the
+  // camera-relative matrices (column-major M * v is row-major v * M^T, the
+  // layout NGX reads). RR takes no exposure input.
+  void evaluateRayReconstruction(const UpscalerFrame &frame) {
+    NVSDK_NGX_Resource_VK color = resource(frame.color, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    NVSDK_NGX_Resource_VK output = resource(frame.output, VK_IMAGE_ASPECT_COLOR_BIT, true);
+    NVSDK_NGX_Resource_VK depth = resource(frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT, false);
+    NVSDK_NGX_Resource_VK motion = resource(frame.motion, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    NVSDK_NGX_Resource_VK diffuseAlbedo =
+        resource(frame.diffuseAlbedo, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    NVSDK_NGX_Resource_VK specularAlbedo =
+        resource(frame.specularAlbedo, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    NVSDK_NGX_Resource_VK normalRoughness =
+        resource(frame.normalRoughness, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    NVSDK_NGX_Resource_VK specularHitDistance =
+        resource(frame.specularHitDistance, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    Mat4 worldToView = frame.worldToView, viewToClip = frame.viewToClip;
+
+    NVSDK_NGX_VK_DLSSD_Eval_Params eval{};
+    eval.pInColor = &color;
+    eval.pInOutput = &output;
+    eval.pInDepth = &depth;
+    eval.pInMotionVectors = &motion;
+    eval.pInDiffuseAlbedo = &diffuseAlbedo;
+    eval.pInSpecularAlbedo = &specularAlbedo;
+    eval.pInNormals = &normalRoughness;
+    eval.pInSpecularHitDistance = &specularHitDistance;
+    eval.pInWorldToViewMatrix = &worldToView.m[0][0];
+    eval.pInViewToClipMatrix = &viewToClip.m[0][0];
+    eval.InJitterOffsetX = -frame.jitter[0];
+    eval.InJitterOffsetY = -frame.jitter[1];
+    eval.InRenderSubrectDimensions = {frame.color.extent.width, frame.color.extent.height};
+    eval.InReset = frame.reset ? 1 : 0;
+    eval.InMVScaleX = frame.motionScale[0];
+    eval.InMVScaleY = frame.motionScale[1];
+    eval.InFrameTimeDeltaInMsec = frame.frameSeconds * 1000.0f;
+    DriverLeakScope driverLeak;
+    check(NGX_VULKAN_EVALUATE_DLSSD_EXT(frame.cmd, feature_, parameters_, &eval),
+          "DLSS Ray Reconstruction evaluate");
+  }
+
   NVSDK_NGX_Handle *feature_;
   NVSDK_NGX_Parameter *parameters_;
+  bool rayReconstruction_;
 };
 
 class DlssProvider final : public UpscalerProvider {
@@ -209,8 +279,9 @@ public:
         superSampling_ ? "available"
                        : "unavailable (" +
                              resultString(static_cast<NVSDK_NGX_Result>(initResult)) + ")";
-    std::printf("DLSS: Super Resolution %s, Ray Reconstruction %s\n",
-                superSamplingStatus.c_str(), rayReconstruction_ ? "available" : "unavailable");
+    std::printf("DLSS: SDK 310.9.16, Super Resolution %s, Ray Reconstruction %s (preset %c)\n",
+                superSamplingStatus.c_str(), rayReconstruction_ ? "available" : "unavailable",
+                kRayReconstructionPreset);
   }
 
   void shutdown() override {
@@ -227,7 +298,8 @@ public:
   }
 
   bool supports(const AaSettings &settings) const override {
-    return settings.method == AaMethod::Dlss && superSampling_ && !settings.rayReconstruction;
+    return settings.method == AaMethod::Dlss &&
+           (settings.rayReconstruction ? rayReconstruction_ : superSampling_);
   }
 
   Extent renderExtent(const AaSettings &settings, Extent display) const override {
@@ -236,6 +308,26 @@ public:
     }
     unsigned width = 0, height = 0, maxWidth = 0, maxHeight = 0, minWidth = 0, minHeight = 0;
     float sharpness = 0.0f;
+    if (settings.rayReconstruction) {
+      // The SDK ships NGX_DLSSD_GET_OPTIMAL_SETTINGS for D3D and CUDA only;
+      // this is its API-independent core (RR integration guide 5.5).
+      void *callback = nullptr;
+      NVSDK_NGX_Parameter_GetVoidPointer(
+          parameters_, NVSDK_NGX_Parameter_DLSSDOptimalSettingsCallback, &callback);
+      if (!callback) {
+        throw std::runtime_error("DLSS Ray Reconstruction optimal settings unavailable");
+      }
+      NVSDK_NGX_Parameter_SetUI(parameters_, NVSDK_NGX_Parameter_Width, display.width);
+      NVSDK_NGX_Parameter_SetUI(parameters_, NVSDK_NGX_Parameter_Height, display.height);
+      NVSDK_NGX_Parameter_SetI(parameters_, NVSDK_NGX_Parameter_PerfQualityValue,
+                               perfQuality(settings.mode));
+      check(reinterpret_cast<PFN_NVSDK_NGX_DLSS_GetOptimalSettingsCallback>(callback)(
+                parameters_),
+            "DLSS Ray Reconstruction optimal settings");
+      NVSDK_NGX_Parameter_GetUI(parameters_, NVSDK_NGX_Parameter_OutWidth, &width);
+      NVSDK_NGX_Parameter_GetUI(parameters_, NVSDK_NGX_Parameter_OutHeight, &height);
+      return {width, height};
+    }
     check(NGX_DLSS_GET_OPTIMAL_SETTINGS(parameters_, display.width, display.height,
                                         perfQuality(settings.mode), &width, &height,
                                         &maxWidth, &maxHeight, &minWidth, &minHeight,
@@ -246,6 +338,9 @@ public:
 
   std::unique_ptr<Upscaler> create(const AaSettings &settings, Extent maxRender,
                                    Extent display, VkCommandBuffer cmd) override {
+    if (settings.rayReconstruction) {
+      return createRayReconstruction(settings, maxRender, display, cmd);
+    }
     // Letters map to NVSDK_NGX_DLSS_Hint_Render_Preset (A = 1); 0 keeps
     // NGX's per-mode default.
     const char preset = settings.preset ? settings.preset : defaultPreset(settings.mode);
@@ -271,10 +366,37 @@ public:
       check(NGX_VULKAN_CREATE_DLSS_EXT1(device_, cmd, 1, 1, &feature, parameters_, &params),
             "DLSS feature creation");
     }
-    return std::make_unique<DlssUpscaler>(feature, parameters_);
+    return std::make_unique<DlssUpscaler>(feature, parameters_, false);
   }
 
 private:
+  std::unique_ptr<Upscaler> createRayReconstruction(const AaSettings &settings,
+                                                    Extent maxRender, Extent display,
+                                                    VkCommandBuffer cmd) {
+    // Letters map to NVSDK_NGX_RayReconstruction_Hint_Render_Preset (A = 1).
+    NVSDK_NGX_Parameter_SetUI(parameters_, rayReconstructionPresetParameter(settings.mode),
+                              kRayReconstructionPreset - 'A' + 1);
+    NVSDK_NGX_DLSSD_Create_Params params{};
+    params.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
+    params.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed;
+    params.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_HW;
+    params.InWidth = maxRender.width;
+    params.InHeight = maxRender.height;
+    params.InTargetWidth = display.width;
+    params.InTargetHeight = display.height;
+    params.InPerfQualityValue = perfQuality(settings.mode);
+    params.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_IsHDR |
+                                  NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
+                                  NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
+    NVSDK_NGX_Handle *feature = nullptr;
+    {
+      DriverLeakScope driverLeak;
+      check(NGX_VULKAN_CREATE_DLSSD_EXT1(device_, cmd, 1, 1, &feature, parameters_, &params),
+            "DLSS Ray Reconstruction feature creation");
+    }
+    return std::make_unique<DlssUpscaler>(feature, parameters_, true);
+  }
+
   static std::vector<const char *> names(std::vector<std::string> &storage,
                                          const VkExtensionProperties *properties,
                                          uint32_t count) {

@@ -325,8 +325,13 @@ struct Options {
   float lodError = 1.0f;
   // TAA unless --aa dlss; DLSS falls back to TAA when unsupported.
   meridian::AaMethod aa = meridian::AaMethod::Taa;
-  meridian::DlssMode dlssMode = meridian::DlssMode::Dlaa;
+  // Unset: Quality under Ray Reconstruction (RR DLAA costs 4.7 ms at
+  // 1440p, over its 3 ms budget), else DLAA.
+  std::optional<meridian::DlssMode> dlssMode;
   char dlssPreset = 0; // 0: the DLSS module's per-mode default
+  // Ray Reconstruction under DLSS (opt-in: it fails the motion gates,
+  // decisions.md).
+  bool rayReconstruction = false;
   // TAA's render size over display size, in (0, 1].
   std::optional<float> renderScale;
   // Fullscreen by default: consistent size for GPU timings, and the way the
@@ -416,6 +421,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--dlss-preset takes E, F, J, K, L or M");
       }
       options.dlssPreset = preset[0];
+    } else if (arg == "--rr" && i + 1 < argc) {
+      const std::string rr = argv[++i];
+      if (rr != "on" && rr != "off") {
+        throw std::runtime_error("--rr takes on or off");
+      }
+      options.rayReconstruction = rr == "on";
     } else if (arg == "--scatter") {
       options.scatter = static_cast<int>(number(i));
     } else if (arg == "--placement" && i + 1 < argc &&
@@ -433,7 +444,7 @@ Options parseOptions(int argc, char **argv) {
                                "--haze clean|summer|summer-hazy, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
-                               "--dlss-preset E|F|J|K|L|M, "
+                               "--dlss-preset E|F|J|K|L|M, --rr on|off, "
                                "--windowed, "
                                "--capture file.png|file.pfm, --frames n)");
     }
@@ -477,13 +488,24 @@ int main(int argc, char **argv) {
   renderer.setGrade({.contrast = 1.4f,
                      .saturation = 1.4f,
                      .greens = {.hueShiftDegrees = -12.0f, .saturation = 1.15f}});
-  const meridian::AaSettings aa{.method = options.aa,
-                                .mode = options.dlssMode,
-                                .preset = options.dlssPreset,
-                                .renderScale = options.renderScale.value_or(1.0f)};
+  meridian::AaSettings aa{.method = options.aa,
+                          .mode = options.dlssMode.value_or(options.rayReconstruction
+                                                                ? meridian::DlssMode::Quality
+                                                                : meridian::DlssMode::Dlaa),
+                          .preset = options.dlssPreset,
+                          .rayReconstruction = options.aa == meridian::AaMethod::Dlss &&
+                                               options.rayReconstruction,
+                          .renderScale = options.renderScale.value_or(1.0f)};
   // The Renderer logs its own fallback when feature creation fails.
   if (aa.method == meridian::AaMethod::Dlss) {
 #ifdef MERIDIAN_HAS_DLSS
+    if (aa.rayReconstruction && !upscalerProvider->supports(aa)) {
+      std::printf("DLSS Ray Reconstruction unavailable; using Super Resolution\n");
+      aa.rayReconstruction = false;
+    }
+    if (!aa.rayReconstruction && !options.dlssMode) {
+      aa.mode = meridian::DlssMode::Dlaa;
+    }
     if (!upscalerProvider->supports(aa)) {
       std::printf("DLSS unavailable: NGX reports no Super Resolution; using TAA\n");
     }

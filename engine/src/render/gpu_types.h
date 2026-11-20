@@ -37,6 +37,7 @@ constexpr VkFormat kTransparencyMaskFormat = VK_FORMAT_R8_UNORM;
 // perceptual roughness.
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkFormat kNormalRoughnessFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr VkFormat kHitDistanceFormat = VK_FORMAT_R16_SFLOAT;
 // Exposure for the very first frame, before any histogram exists: a sunny day.
 constexpr float kInitialEv100 = 15.0f;
 // Capacities of the bindless material and texture tables.

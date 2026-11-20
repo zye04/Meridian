@@ -102,8 +102,11 @@ assets themselves. Order:
   Upscaler interface, TAA v2 (forward 5 m/s 0.94, 0.17 ms at 1440p).
   DLSS module (Task 1.3) on main: TAA v2 stays the default, DLSS 4.5
   (DLAA preset M) is opt-in with `--aa dlss` (decided 2026-11-20, see
-  decisions.md). Guide buffers and the `whiteNoise` field (Task 1.4) are on main
-  after merge. Next: 1.5, 3.2a -> 3.2b, docs sweep, final review.
+  decisions.md). Guide buffers and the `whiteNoise` field (Task 1.4) and
+  Ray Reconstruction (Task 1.5: preset F, opt-in `--rr on`, it fails the
+  motion gates; Quality 2.35 ms, DLAA 4.71 ms) are on main. Next: 3.2a
+  -> 3.2b (the shadow denoiser also runs under DLSS SR), Task 4 sweep,
+  Task 5 final review.
   The clouds branch must follow the plan's clouds rebase checklist
   (cloud targets sized from `renderExtent`, transparency mask, white
   noise under Ray Reconstruction). Ledger:

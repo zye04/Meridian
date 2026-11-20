@@ -465,6 +465,7 @@ void Renderer::setAntiAliasing(const AaSettings &settings) {
   if (settings.method == AaMethod::Dlss &&
       !(impl_->upscalerProvider && impl_->upscalerProvider->supports(settings))) {
     impl_->aaSettings.method = AaMethod::Taa;
+    impl_->aaSettings.rayReconstruction = false;
   }
   impl_->destroySwapchain();
   impl_->createSwapchain();
@@ -602,7 +603,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->previousView = view;
   impl_->previousCameraPosition = camera.position;
   scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
-  scene.whiteNoise = impl_->whiteNoise;
+  // Ray Reconstruction wants uncorrelated noise (its integration guide).
+  scene.whiteNoise = impl_->aaSettings.rayReconstruction ? 1 : 0;
   scene.sunDirection = lighting.sunDirection;
   scene.exposure = impl_->exposureBuffer.address;
   scene.sunIlluminance = lighting.sunIlluminance;
@@ -1009,6 +1011,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         upscalerImage(impl_->specularAlbedo, kAlbedoFormat, renderExtent);
     upscale.normalRoughness = upscalerImage(
         impl_->normalRoughness, kNormalRoughnessFormat, renderExtent);
+    upscale.specularHitDistance = upscalerImage(
+        impl_->specularHitDistance, kHitDistanceFormat, renderExtent);
   }
   upscale.output = upscalerImage(impl_->output, kHdrFormat, extent);
   upscale.jitter[0] = jitterX;

@@ -1,9 +1,9 @@
 # Motion Clarity Implementation Plan
 
-**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 1.4, 3.1. Next steps:
-- Track 1: 1.3 done on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). 1.4 done (guide buffers, `whiteNoise` field). Next 1.5.
+**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 1.4, 1.5, 3.1. Next steps:
+- Track 1: done. 1.3 on main (DLSS module; TAA v2 stays the default, DLSS 4.5 opt-in with `--aa dlss`, decided 2026-11-20). 1.4 (guide buffers, `whiteNoise`). 1.5 done on main: Ray Reconstruction preset F, opt-in `--rr on` (Step 4's fallback: it fails the motion gates in Quality and DLAA; shimmer passes), so 3.2b's denoiser also runs under SR.
 - Track 2: done.
-- Track 3: 3.1 done; 3.2a unblocked (1.4 done), then 3.2b.
+- Track 3: 3.1 done; next 3.2a -> 3.2b.
 - After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -223,9 +223,9 @@ The coordinator must relay this to the clouds lane; it applies whether `clouds` 
 
 **Interfaces:**
 - Consumes: 1.3 provider; 1.4 guides and `whiteNoise`; `jitterPhaseCount(..., true)` (>= 32).
-- Produces: `AaSettings.rayReconstruction` honoured; `--rr on|off`, default on whenever DLSS is selected (`--aa dlss`) and RR is available; `wantsGuides()` true for RR.
+- Produces: `AaSettings.rayReconstruction` honoured; `--rr on|off`, default on whenever DLSS is selected (`--aa dlss`) and RR is available (superseded: default off, Step 4's opt-in, see Status); `wantsGuides()` true for RR.
 
-- [ ] **Step 1:** DLSSD create/evaluate (`NGX_VULKAN_CREATE_DLSSD_EXT` / `NGX_VULKAN_EVALUATE_DLSSD_EXT`, creation inside `DriverLeakScope`): colour = full noisy lit colour, guides, roughness packed in the normal's alpha (`NVSDK_NGX_DLSS_Roughness_Mode_Packed`), hardware depth, `worldToView` / `viewToClip`, constant far specular hit distance, NGX's default RR preset; no exposure input.
+- [ ] **Step 1:** DLSSD create/evaluate (`NGX_VULKAN_CREATE_DLSSD_EXT` / `NGX_VULKAN_EVALUATE_DLSSD_EXT`, creation inside `DriverLeakScope`): colour = full noisy lit colour, guides, roughness packed in the normal's alpha (`NVSDK_NGX_DLSS_Roughness_Mode_Packed`), hardware depth, `worldToView` / `viewToClip`, constant far specular hit distance, NGX's default RR preset; no exposure input. Deviation (user requirement, 2026-11-20): preset F, the newest RR model in SDK 310.9.16 (the newest release), pinned explicitly instead of NGX's default; the motion gates failed too, which Step 4 doesn't name, so the same opt-in fallback applies (approved by the orchestrator).
 - [ ] **Step 2: Budget.** Release RR DLAA, ground + beech: `aa` ms (median of 5, scaled per Global Constraints). If > 3.0 ms: the default RR mode is Quality (0.66 scale); re-measure everything below there.
 - [ ] **Step 3: Gates.** `tools/motion-gates.sh build-release OUT --aa dlss --rr on [--dlss-mode quality]`: all motion gates, SSIM, and shimmer crown/shadow <= 2.0/2.0.
 - [ ] **Step 4: If the shadow gates fail** (crown or shadow > 2.0): `--rr` defaults to off (opt-in); the decision and numbers go in decisions.md and spec decision 3; a backlog row "SR path needs the fallback shadow denoiser" points at Task 3.2b (which then runs the denoiser under SR too). Don't tune RR inputs beyond the integration guide.

@@ -136,8 +136,8 @@ flowchart LR
   end
   C & MV & D --> UP{{Upscaler interface}}
   GB --> UP
-  UP -->|meridian_dlss: RR preset default| OUT[HDR, display resolution]
-  UP -->|meridian_dlss: SR/DLAA when RR off| OUT
+  UP -->|meridian_dlss: SR/DLAA, default| OUT[HDR, display resolution]
+  UP -->|meridian_dlss: RR, opt-in --rr on| OUT
   SUN --> SD[shadow denoiser, MIT] --> CMP[recombine] --> UP
   UP -->|TAA v2 fallback| OUT
   OUT --> SHP[sharpen, TAA v2 only]
@@ -182,7 +182,7 @@ hash via FetchContent, and the version is verified at fetch time.
 **Modes.** `--aa taa|dlss`; the default is taa (decided 2026-11-20: DLAA
 preset M costs 2.36 ms at 1440p vs the 1.0 ms slot), dlss falls back to
 taa when NGX reports no Super Resolution. `--dlss-mode dlaa|quality|balanced|performance`, with
-default dlaa. `--rr on|off`, with default on whenever `--aa dlss` is selected and RR is available. The
+default dlaa (quality under RR). `--rr on|off`, default off (opt-in: RR fails the motion gates, decision 3). The
 SR preset defaults to M for DLAA, Quality and Balanced.
 
 **Out of scope** (backlog rows):
@@ -232,7 +232,14 @@ SR preset defaults to M for DLAA, Quality and Balanced.
 
 ### 3. Ray Reconstruction first, for shadows and AO
 
-When `--aa dlss` is selected, RR is the default and replaces SR.
+Outcome (Task 1.5, measured): RR is opt-in (`--rr on`). It removes the
+shadow and foliage shimmer (beech crown/shadow 0.59/0.41 in Quality vs
+TAA's 2.35/1.97) but fails the motion gates in both modes (forward 5
+ground 0.71 Quality / 0.79 DLAA; DLAA costs 4.71 ms, Quality 2.35 ms at
+1440p), so `--aa dlss` stays SR DLAA and the fallback denoiser (decision
+4) runs under SR too. Numbers: decisions.md, "Ray Reconstruction
+backend". RR uses preset F, the newest model in SDK 310.9.16, pinned
+explicitly (user requirement). The design below is what it implements.
 - Its input is the full noisy lit colour: raw 1-ray visibility times the
   sun, not pre-blurred. AO today is material/terrain AO, which is not
   stochastic; a future stochastic AO feeds RR the same way.
