@@ -27,8 +27,32 @@ under `.superpowers/` are local and git-ignored.
   strength, unfinished; may contain a temporary luminance debug view).
   Goal: shadowed ground 10-20% of sunlit (now ~6%). Next: finish
   per-layer AO strength (forest_leaves_04 at 0.5), measure, review, merge.
-- Lane B (separate instance): M4 clouds on branch `clouds`
-  (worktree ../meridian-clouds), at its cloud look-development task.
+- Lane B (separate instance): M4 clouds, see below.
+
+## Where clouds stopped (Lane B)
+
+Branch `clouds` on origin (worktree `../meridian-clouds`), not merged.
+Plan: `docs/superpowers/plans/2026-11-19-clouds-weather.md` (8 tasks).
+
+- Tasks 1-4 done and reviewed: weather state + global wind, noise and
+  weather map, cloud march, temporal resolve + composite + cloud motion
+  vectors.
+- Task 5 (cloud shadow map): 0f7e4c1 reviewed as needs-fixes (shadow
+  lines unbounded to receivers, ~3.4 ms at a 2 degree sun; pop and ring
+  near a horizon sun; beyond-map term uncalibrated). Fix round is
+  69066dd, a labeled WIP commit: builds, tests pass, captures unfinished,
+  not reviewed. Next: finish its captures, scoped re-review, then fold
+  into one commit.
+- Then Task 6 (sky + cloud capture, ambient, time-lapse), Task 7 (cloud
+  look development against `assets/reference/clouds/`; show the user the
+  comparisons before Task 8), Task 8 (Release measurement, budget levers
+  to the user before any cut). Task 7's text is in main's plan (b9a19a1),
+  not yet on the branch: rebase `clouds` onto main first.
+- Merge: rebase onto main, final whole-branch review, fast-forward main;
+  move unresolved minors into `docs/backlog.md`.
+- Local-only: the clouds SDD ledger and look-dev notes are in
+  `../meridian-clouds/.superpowers/sdd/2026-11-19-clouds-weather/`
+  (`progress.md`, `artifacts/cloud-look-notes.md`); copy them across.
 
 ## Next after that
 
