@@ -286,6 +286,9 @@ struct Renderer::Impl {
   // blurred copy, which the bindless table holds.
   Image cloudShadowRaw;
   Image cloudShadowMap;
+  // The sky capture (RGBA16F, GENERAL): clouds around the camera,
+  // octahedral, written through the march sets (binding 9).
+  Image skyCapture;
   // Level 0 of each noise volume, for storage writes.
   std::array<VkImageView, 2> cloudNoiseLevel0{};
   VkDescriptorSetLayout cloudSetLayout = VK_NULL_HANDLE;
@@ -312,6 +315,7 @@ struct Renderer::Impl {
   VkPipeline cloudMarchPipeline = VK_NULL_HANDLE;
   VkPipeline cloudResolvePipeline = VK_NULL_HANDLE;
   VkPipeline cloudCompositePipeline = VK_NULL_HANDLE;
+  VkPipeline skyCapturePipeline = VK_NULL_HANDLE;
   bool cloudsEnabled = true;
   // The resolution last frame's history was resolved at (none yet: 2).
   uint32_t cloudHistoryResolution = 2;
@@ -343,6 +347,7 @@ struct Renderer::Impl {
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);
   void placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection);
   void drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame);
+  void drawSkyCapture(VkCommandBuffer cmd, const FrameData &frame);
   void createCloudTargets();
   void destroyCloudTargets();
   bool cameraInCloudLayer(Vec3 cameraPosition) const;

@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 
 namespace meridian {
@@ -28,7 +29,7 @@ void buildMips3d(VkCommandBuffer cmd, VkImage image, uint32_t size, uint32_t lev
   }
 }
 
-constexpr uint32_t kCloudMarchBindings = 9;
+constexpr uint32_t kCloudMarchBindings = 10;
 
 VkDescriptorType cloudMarchDescriptorType(uint32_t binding) {
   return binding == 0 || binding == 3 || binding == 4 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
@@ -69,6 +70,10 @@ void Renderer::Impl::createClouds() {
                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                          VK_IMAGE_ASPECT_COLOR_BIT);
   }
+  skyCapture = createImage(VK_FORMAT_R16G16B16A16_SFLOAT,
+                           {kSkyCaptureResolution, kSkyCaptureResolution, 1},
+                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                           VK_IMAGE_ASPECT_COLOR_BIT);
 
   const Image *volumes[] = {&cloudBaseNoise, &cloudDetailNoise};
   for (size_t i = 0; i < 2; ++i) {
@@ -95,7 +100,7 @@ void Renderer::Impl::createClouds() {
   check(vkCreateDescriptorSetLayout(dev, &setLayoutInfo, nullptr, &cloudSetLayout),
         "vkCreateDescriptorSetLayout");
   // The generator set, then one march set per resolution and parity.
-  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kCloudBindings + 4 * 6},
+  const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kCloudBindings + 4 * 7},
                                             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * 3}};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -145,7 +150,7 @@ void Renderer::Impl::createClouds() {
 
   submitNow([&](VkCommandBuffer cmd) {
     for (const Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
-                               &cloudShadowRaw, &cloudShadowMap}) {
+                               &cloudShadowRaw, &cloudShadowMap, &skyCapture}) {
       transitionImage(cmd, {image->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -167,7 +172,8 @@ void Renderer::Impl::createClouds() {
 
   // Must match clouds_march.comp, clouds_resolve.comp and
   // clouds_composite.comp: scene depth, the march targets, the history to
-  // read (color, depth) and to write, HDR and motion.
+  // read (color, depth) and to write, HDR and motion; and sky_capture.comp's
+  // capture.
   VkDescriptorSetLayoutBinding marchBindings[kCloudMarchBindings]{};
   for (uint32_t b = 0; b < kCloudMarchBindings; ++b) {
     marchBindings[b] = {b, cloudMarchDescriptorType(b), 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
@@ -195,27 +201,31 @@ void Renderer::Impl::createClouds() {
   cloudMarchPipeline = createComputePipeline(dev, "clouds_march.comp", cloudMarchLayout);
   cloudResolvePipeline = createComputePipeline(dev, "clouds_resolve.comp", cloudMarchLayout);
   cloudCompositePipeline = createComputePipeline(dev, "clouds_composite.comp", cloudMarchLayout);
+  skyCapturePipeline = createComputePipeline(dev, "sky_capture.comp", cloudMarchLayout);
   createCloudTargets();
 
-  if (textures.size() + 5 > kMaxTextures) {
+  if (textures.size() + 6 > kMaxTextures) {
     throw std::runtime_error("texture table is full");
   }
   const auto first = static_cast<uint32_t>(textures.size());
-  textures.resize(textures.size() + 5);
+  textures.resize(textures.size() + 6);
   clouds.weatherMap = first;
   clouds.baseNoise = first + 1;
   clouds.detailNoise = first + 2;
   clouds.curlNoise = first + 3;
   clouds.shadowMap = first + 4;
+  clouds.skyCapture = first + 5;
   writeTexture(clouds.weatherMap, weatherMap.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.baseNoise, cloudBaseNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.detailNoise, cloudDetailNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.curlNoise, cloudCurlNoise.view, textureSampler, VK_IMAGE_LAYOUT_GENERAL);
   writeTexture(clouds.shadowMap, cloudShadowMap.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
+  writeTexture(clouds.skyCapture, skyCapture.view, linearSampler, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 void Renderer::Impl::destroyClouds() {
   VkDevice dev = device.device;
+  vkDestroyPipeline(dev, skyCapturePipeline, nullptr);
   vkDestroyPipeline(dev, cloudCompositePipeline, nullptr);
   vkDestroyPipeline(dev, cloudResolvePipeline, nullptr);
   vkDestroyPipeline(dev, cloudMarchPipeline, nullptr);
@@ -231,7 +241,7 @@ void Renderer::Impl::destroyClouds() {
     vkDestroyImageView(dev, view, nullptr);
   }
   for (Image *image : {&cloudBaseNoise, &cloudDetailNoise, &cloudCurlNoise, &weatherMap,
-                       &cloudShadowRaw, &cloudShadowMap}) {
+                       &cloudShadowRaw, &cloudShadowMap, &skyCapture}) {
     destroyImage(*image);
   }
 }
@@ -309,6 +319,26 @@ void Renderer::Impl::drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame
   }
 }
 
+// After the cloud shadow map (the march reads it): one texel of every 2x2
+// block of the sky capture, all of them when the history resets (first
+// frame, swapchain rebuild). Any march set serves: they share the capture
+// binding.
+void Renderer::Impl::drawSkyCapture(VkCommandBuffer cmd, const FrameData &frame) {
+  const VkDescriptorSet sets[] = {atmosphereSet, materialSet, cloudMarchSets[0]};
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMarchLayout, 0, 3, sets, 0,
+                          nullptr);
+  CloudConstants push;
+  push.sceneBuffer = frame.sceneBuffer.address;
+  push.historyValid = historyValid ? 1 : 0;
+  vkCmdPushConstants(cmd, cloudMarchLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyCapturePipeline);
+  const uint32_t texels = historyValid ? kSkyCaptureResolution / 2 : kSkyCaptureResolution;
+  vkCmdDispatch(cmd, texels / 8, texels / 8, 1);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+}
+
 // Called with the swapchain (the targets follow the render size) and once the
 // march sets exist; the device is idle either way.
 void Renderer::Impl::createCloudTargets() {
@@ -351,7 +381,8 @@ void Renderer::Impl::createCloudTargets() {
           {VK_NULL_HANDLE, cloudHistory[r][i].view, VK_IMAGE_LAYOUT_GENERAL},
           {VK_NULL_HANDLE, cloudHistoryDepth[r][i].view, VK_IMAGE_LAYOUT_GENERAL},
           {VK_NULL_HANDLE, hdr.view, VK_IMAGE_LAYOUT_GENERAL},
-          {VK_NULL_HANDLE, motion.view, VK_IMAGE_LAYOUT_GENERAL}};
+          {VK_NULL_HANDLE, motion.view, VK_IMAGE_LAYOUT_GENERAL},
+          {VK_NULL_HANDLE, skyCapture.view, VK_IMAGE_LAYOUT_GENERAL}};
       VkWriteDescriptorSet writes[kCloudMarchBindings]{};
       for (uint32_t b = 0; b < kCloudMarchBindings; ++b) {
         writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -466,6 +497,32 @@ void Renderer::dumpWeatherMap(const std::filesystem::path &path) {
   impl_->destroyBuffer(readback);
   std::printf("Weather map: %u^2 texels, %.0f m from (%.1f, %.1f)\n", kSize, kWeatherMapSize,
               impl_->clouds.mapOrigin[0], impl_->clouds.mapOrigin[1]);
+}
+
+void Renderer::printAmbient() {
+  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+  Buffer readback = impl_->createBuffer(
+      sizeof(SkyIrradiance) + sizeof(ExposureState), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  impl_->submitNow([&](VkCommandBuffer cmd) {
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    const VkBufferCopy irradiance{0, 0, sizeof(SkyIrradiance)};
+    vkCmdCopyBuffer(cmd, impl_->skyIrradianceBuffer.buffer, readback.buffer, 1, &irradiance);
+    const VkBufferCopy exposure{0, sizeof(SkyIrradiance), sizeof(ExposureState)};
+    vkCmdCopyBuffer(cmd, impl_->exposureBuffer.buffer, readback.buffer, 1, &exposure);
+  });
+  check(vmaInvalidateAllocation(impl_->allocator, readback.allocation, 0, VK_WHOLE_SIZE),
+        "vmaInvalidateAllocation");
+  SkyIrradiance sky;
+  ExposureState state;
+  std::memcpy(&sky, readback.mapped, sizeof(sky));
+  std::memcpy(&state, static_cast<const char *>(readback.mapped) + sizeof(sky), sizeof(state));
+  impl_->destroyBuffer(readback);
+  std::printf("Exposure EV100 %.2f; sky irradiance (%.4f, %.4f, %.4f), clear sky (%.4f, %.4f, "
+              "%.4f) x sun\n",
+              state.ev100, sky.irradiance[0], sky.irradiance[1], sky.irradiance[2],
+              sky.clearIrradiance[0], sky.clearIrradiance[1], sky.clearIrradiance[2]);
 }
 
 } // namespace meridian
