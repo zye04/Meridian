@@ -287,6 +287,45 @@ void placeScenery(meridian::Renderer &renderer, bool trees) {
     }
   }
 
+  // Meadow accents: every variant of a Megascans plant is one prototype
+  // (equal weights); `skip` drops variants by index (heavy modelled ones).
+  const auto plant = [&](const char *id, std::initializer_list<size_t> skip = {}) {
+    std::vector<std::pair<uint32_t, float>> variants;
+    std::string path;
+    const auto dir = std::filesystem::path(MERIDIAN_ASSET_DIR) / id;
+    if (std::filesystem::is_directory(dir)) {
+      for (const auto &entry : std::filesystem::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        if (name.ends_with("_tier_1_nonUE.gltf") ||
+            (path.empty() && name.ends_with("_tier_1.gltf"))) {
+          path = std::string(id) + "/" + name;
+        }
+      }
+    }
+    if (path.empty()) {
+      std::printf("Missing %s plant; see tools/fetch-sample-assets.sh\n", id);
+      return variants;
+    }
+    size_t index = 0;
+    for (uint32_t proto : addPrototypes(renderer, prototypes, path, true)) {
+      if (std::find(skip.begin(), skip.end(), index++) == skip.end()) {
+        variants.emplace_back(proto, 1.0f);
+      }
+    }
+    return variants;
+  };
+  const auto poppy = plant("field_poppy_vmcobd0ja");
+  const auto hawkbit = plant("yellow_flower_xchjef3ia");
+  const auto goldenrod = plant("goldenrods_xg1lbfxia", {0, 1, 3});
+  const auto clover = plant("clovers_rbdjz");
+  const auto fern = plant("common_fern_rhdso");
+  std::vector<std::pair<uint32_t, float>> clumps;
+  for (const char *id : {"rough_meadow_grass_skfjj", "wild_grass_vlkhcbxia", "wild_grass_sjliz",
+                         "grass_clumps_qmbr2"}) {
+    const auto variants = plant(id);
+    clumps.insert(clumps.end(), variants.begin(), variants.end());
+  }
+
   std::vector<PlacementLayer> layers;
   if (!forest.empty()) {
     layers.push_back({1, forest, 6.0f,
@@ -307,6 +346,40 @@ void placeScenery(meridian::Renderer &renderer, bool trees) {
                       {rockStart, 90.0f, -1e9f, 1e9f, (rockFull - rockStart) / (90.0f - rockStart),
                        0.0f, 0.0f, 0.0f, 1.0f / 80.0f, 0.6f},
                       0.5f, 1.5f, Rotation::Full, 0.3f, 1500.0f});
+  }
+  // Patches come from the mask at a layer-specific frequency (a threshold,
+  // so drifts have gaps between them), clumping from the layer's cluster
+  // noise. Flat to moderate slopes only, well under the rock material's.
+  struct Patch {
+    uint32_t id;
+    const std::vector<std::pair<uint32_t, float>> &variants;
+    float footprint, slopeMax, patchFrequency, patchThreshold, clusterAmount;
+    float scaleMin, scaleMax, drawDistance;
+  };
+  for (const Patch &patch : {Patch{4, poppy, 4.0f, 25.0f, 1.0f / 37.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
+                             Patch{5, hawkbit, 4.0f, 28.0f, 1.0f / 29.0f, 0.66f, 0.5f, 0.8f, 1.2f, 150.0f},
+                             Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
+                             Patch{7, clover, 3.0f, 25.0f, 1.0f / 23.0f, 0.68f, 0.5f, 0.8f, 1.2f, 100.0f},
+                             Patch{8, clumps, 5.5f, 35.0f, 1.0f / 31.0f, 0.62f, 0.5f, 0.8f, 1.3f, 150.0f}}) {
+    if (!patch.variants.empty()) {
+      layers.push_back({patch.id, patch.variants, patch.footprint,
+                        {0.0f, patch.slopeMax, -1e9f, 1e9f, 0.4f, patch.patchFrequency,
+                         patch.patchThreshold, 0.08f, 1.0f / 6.0f, patch.clusterAmount},
+                        patch.scaleMin, patch.scaleMax, Rotation::Yaw, 0.02f, patch.drawDistance});
+    }
+  }
+  // Ferns on shaded, steeper slopes; with trees also the forest floor from
+  // its edge in (the mask ramp is one-sided, so no band along the edge).
+  if (!fern.empty()) {
+    layers.push_back({9, fern, 12.0f,
+                      {20.0f, 40.0f, -1e9f, 1e9f, 0.3f, 0.0f, 0.0f, 0.0f, 1.0f / 15.0f, 1.0f},
+                      0.8f, 1.2f, Rotation::Yaw, 0.02f, 150.0f});
+    if (trees) {
+      layers.push_back({10, fern, 12.0f,
+                        {0.0f, 40.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold - 0.05f,
+                         kMaskEdge, 1.0f / 15.0f, 0.6f},
+                        0.8f, 1.2f, Rotation::Yaw, 0.02f, 150.0f});
+    }
   }
   if (layers.empty()) {
     std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
