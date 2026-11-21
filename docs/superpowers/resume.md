@@ -1,49 +1,53 @@
-# Where work stopped (2026-11-21 ~16:30, orchestrator handoff)
+# Where work stopped (2026-11-21 evening, orchestrator handoff)
 
-Read this first when resuming, then the look-gap audit
-`docs/superpowers/specs/2026-11-21-look-gap-audit.md` (G1-G11, with the
-user's screenshots as evidence): it is the work list for the next session.
+Weekly usage was exhausted (~96%); it resets **Tuesday 2026-11-24
+05:00**. No lanes are running. Start the next session from the programme:
 
-## Direction (user, 2026-11-21)
+1. `docs/superpowers/specs/2026-11-21-chlorophyll-parity-programme-design.md`
+   (phase 0 + five pillars, rules: each frame correct on its own; cost
+   follows visible pixels; 180 fps native 1440p on the 4080 as proof).
+2. GitHub board https://github.com/users/zye04/projects/1 (issues #1-#12 =
+   audit gaps G1-G12; #13 matched views, #14 route, #15 metric).
+3. `docs/superpowers/specs/2026-11-21-look-gap-audit.md` (evidence),
+   `2026-11-21-chlorophyll-baseline.md` (graded facts), research
+   `docs/superpowers/research/2026-11-21-{A..E}-*.md`.
 
-- Native 1440p with our own TAA, no upscaler (DLSS only as `--aa dlss`,
-  an A/B). Raster everything; follow the Chlorophyll Engine's approaches
-  unless something is known to be better.
-- "Real progress and real quality", judged harshly; no time on low-value
-  work. Use the reference frames as measurement data.
-- Usage: the weekly limit was ~93% used on 2026-11-21. Don't fan out many
-  Opus lanes until it resets; the lighting overhaul (audit G2-G5, G1) waits
-  for a brainstorm + spec with the user.
+## Ready to run after the reset (in this order)
 
-## Lanes at handoff
+1. Re-run the parity route on the Megascans Trees and the 70 deg FOV:
+   `--benchmark 60 out.csv --route tools/routes/parity.route --trees`,
+   `python3 -I tools/bench-route.py` (baseline in decisions.md predates
+   both; 1% lows of ~20-26 fps = hitches to find, #14 comment).
+2. Phase 0 Task 4: G7 grey-image diagnosis (#7), plan
+   `docs/superpowers/plans/2026-11-21-phase0-trustworthy-judgment.md`.
+3. GTAO (#2): spec `2026-11-21-gtao-design.md` (draft, user to confirm 3
+   decisions) -> plan -> implement (Sonnet lanes).
+4. Materials (#12, #6): spec `2026-11-21-materials-fidelity-design.md`
+   (draft) -> plan; first the specular A/B for the silvery sheen.
+5. Matched views refined at the new FOV (#13); motion gates re-anchored at
+   70 deg (they were anchored at ~101 deg).
 
-| Lane | Worktree / branch | State |
-|---|---|---|
-| ue-trees | `../meridian-uetrees` | Running until 17:45: Black Alder export from Unreal works headless (`tools/unreal/export_trees.py` fixed, `tools/unreal/cook_ready.py`), 22 variants cooked; fixing the materials (audit G6), then European Beech (in the UE project) and all variants per layer |
-| native | `../meridian-native`, branch `native` (WIP 36c37a8) | Paused; next: 3x3 reconstruction only if sharpness holds (G9) |
-| farm | `../meridian-farM`, branch `far-m-shadow2` (WIP) | Paused; next: land the distant tree shadows (G11), far-c's two-phase occlusion of far cells |
-| gi | `../meridian-gi` | Paused; GI off by default; forest cost and motion gates open |
-| perf, clouds, look, look2, assets | done | Results in decisions.md / backlog.md |
+## Landed 2026-11-21 (afternoon)
 
-## Unreal setup (2026-11-21)
+Megascans Trees from Unreal (alder, beech, hornbeam, every variant;
+`--trees`; forest edge 16.3 ms, #10), benchmark route + ledger, resemblance
+metric (shadow/sunlit ratio 0.74 vs his 0.41: ambient too strong in
+shadows -> GTAO), configurable FOV (`--fov`, default 70 deg horizontal,
+was ~101; start view 7.9 ms at 70 vs 6.7 at 101), matched views (rough).
 
-UE 5.9.0 preview-2 at `~/Apps/UnrealEngine` with the Linux Fab and Bridge
-plugins (from unrealengine.com/linux) installed under `Engine/Plugins/`.
-Project `~/Documents/Unreal Projects/MyProject` (Python,
-EditorScriptingUtilities and GLTFExporter plugins enabled). Packs added
-via Fab: Black Alder, European Beech, Hornbeam (download was running).
-Headless export: `UnrealEditor-Cmd <uproject> -run=pythonscript
--script="<script> <args>" -unattended -nosplash -nop4 -RenderOffscreen`
-(runs beside an open editor). The material bake does nothing headless;
-textures are exported raw and mapped per slot.
+## Unreal setup
+
+UE 5.9.0 preview-2 at `~/Apps/UnrealEngine` + Linux Fab and Bridge
+plugins (`Engine/Plugins/`); project `~/Documents/Unreal Projects/MyProject`
+(Python, EditorScriptingUtilities, GLTFExporter enabled); packs: Black
+Alder, European Beech, European Hornbeam. Export/cook steps:
+docs/assets.md "Megascans Trees from Unreal".
 
 ## Decisions waiting for the user
 
-1. GI default (off until forest cost and motion gates pass).
-2. Voxel switch 2 px (kept) vs 4 px.
-3. Softer raster leaf shadow accepted for now (audit G5).
-4. The saved grade file overrides the new starting grade in interactive
-   runs: Reset + Save in the G panel to adopt it.
+1. GTAO spec's 3 decisions; materials spec's 3 decisions.
+2. GI default (off until forest cost and motion gates pass).
+3. Saved grade file overrides the starting grade (G panel Reset + Save).
 
 ---
 
