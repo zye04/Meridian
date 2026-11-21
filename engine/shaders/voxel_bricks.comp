@@ -95,7 +95,9 @@ void main() {
             vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
             vec4 sphere = displayedSphere(relative, radius);
             if (inFrustum(sphere.xyz, sphere.w)) {
-                uint sun = terrainSun(scene.cameraPosition + relative, pool, tree.x);
+                uint sun = scene.shadowView != 0u
+                               ? 1u
+                               : terrainSun(scene.cameraPosition + relative, pool, tree.x);
                 keptPool[atomicAdd(keptCount, 1u)] = pool | sun << 31;
             }
         }
@@ -123,8 +125,11 @@ void main() {
             ivec3 voxel = ivec3(coords & 0x3FFu, (coords >> 10) & 0x3FFu, coords >> 20) * 4 +
                           ivec3(i & 3u, (i >> 2) & 3u, i >> 4);
             vec3 local = info.lo + (vec3(voxel) + 0.5) * v;
-            vec3 view = normalize(toLocal * ((instance.transform * vec4(local, 1.0)).xyz -
-                                             scene.cameraPosition));
+            // A cascade looks along the sunlight.
+            vec3 view = normalize(toLocal * (scene.shadowView != 0u
+                                                 ? -scene.sunDirection
+                                                 : (instance.transform * vec4(local, 1.0)).xyz -
+                                                       scene.cameraPosition));
             float spread = abs(view.x) + abs(view.y) + abs(view.z);
             float opacity = 1.0 - exp(-extinction * v / spread);
             float noise = float(pcg3d(uvec3(tree.x, pool, i)).x) * (1.0 / 4294967296.0);

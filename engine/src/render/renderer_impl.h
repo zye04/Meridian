@@ -351,6 +351,7 @@ struct Renderer::Impl {
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
   VkPipeline voxelBandPipeline = VK_NULL_HANDLE;
   VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
+  VkPipeline voxelShadowPipeline = VK_NULL_HANDLE;
   bool voxelTrees = true;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
@@ -582,7 +583,6 @@ struct Renderer::Impl {
   void destroyStreamBuffers(Stream &stream);
   void destroyStream();
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
-  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {
     VkDeviceAddress scene;
@@ -598,6 +598,8 @@ struct Renderer::Impl {
                         const ShadowCull *shadow = nullptr);
   void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
                     const ShadowCull *shadow = nullptr);
+  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                         const ShadowCull *shadow = nullptr);
   // Raster sun shadows (renderer_shadows.cpp). plan runs on the CPU before
   // the scene upload and fills scene.sunShadows; record renders what plan chose.
   void createSunShadows();

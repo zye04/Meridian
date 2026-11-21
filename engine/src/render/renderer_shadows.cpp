@@ -74,11 +74,15 @@ void Renderer::Impl::createSunShadows() {
   desc.meshShader = "voxel.mesh";
   desc.fragmentShader = "voxel_shadow.frag";
   farShadowCasterPipeline = createGraphicsPipeline(dev, desc);
+  desc.meshShader = "voxel_shadow.mesh";
+  desc.fragmentShader = nullptr;
+  voxelShadowPipeline = createGraphicsPipeline(dev, desc);
 }
 
 void Renderer::Impl::destroySunShadows() {
   VkDevice dev = device.device;
   vkDestroyPipeline(dev, farShadowCasterPipeline, nullptr);
+  vkDestroyPipeline(dev, voxelShadowPipeline, nullptr);
   vkDestroyPipeline(dev, shadowMaskedPipeline, nullptr);
   vkDestroyPipeline(dev, shadowPipeline, nullptr);
   destroyBuffer(shadowDrawLists);
@@ -134,7 +138,11 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.drawLists = shadowDrawLists.address;
       copy.shadowView = 1;
       copy.shadowFarCells = i + 1 == kShadowCascades ? 1 : 0;
-      copy.voxelTrees = 0;
+      // Trees past the voxel switch cast as their voxels, except in the
+      // coarsest cascade, which casts far cells; voxel_shadow.mesh reads
+      // the cascade's own counters.
+      copy.voxelTrees = i + 1 < kShadowCascades ? scene.voxelTrees : 0;
+      copy.drawCounters = shadowCounters.address;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
       // Foliage is thin: at one texel its leaves simplify away and the crowns
       // shade too bright, so the near cascades keep four times the detail.
@@ -175,6 +183,7 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
     const ShadowCull cull{sceneBuffer.address, &shadowCounters};
     cullCells(cmd, frame, 1, &cull);
     cullInstances(cmd, frame, 1, &cull);
+    expandVoxelBricks(cmd, frame, 1, &cull);
     traverseClusters(cmd, frame, 1, &cull);
     cullClusters(cmd, frame, 1, &cull);
 
@@ -226,6 +235,19 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
       dispatch.cmdDrawMeshTasksIndirectEXT(cmd, shadowCounters.buffer,
                                            offsetof(DrawCounters, farTasks), 1,
                                            sizeof(DrawCounters::farTasks));
+    }
+    // Trees past the voxel switch cast as their voxels (phase 1's list; a
+    // cascade has no switch band).
+    if (protoVoxelInfo.buffer != VK_NULL_HANDLE) {
+      PushConstants push;
+      push.sceneBuffer = sceneBuffer.address;
+      push.drawList = 2;
+      vkCmdPushConstants(cmd, sceneLayout, kScenePushStages, 0, sizeof(push), &push);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelShadowPipeline);
+      dispatch.cmdDrawMeshTasksIndirectEXT(
+          cmd, shadowCounters.buffer,
+          offsetof(DrawCounters, voxelTasks) + sizeof(DrawCounters::voxelTasks[0]), 1,
+          sizeof(DrawCounters::voxelTasks[0][0]));
     }
     vkCmdEndRendering(cmd);
     transitionImage(cmd, {shadowMaps[i].image, VK_IMAGE_ASPECT_DEPTH_BIT,
