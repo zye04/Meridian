@@ -197,6 +197,22 @@ Also confirmed by these screenshots: G1 (far forest blue-grey speckle,
 known cirrus straight-line streaks (`user-10`, backlog row "Cloud look
 gaps").
 
+### G18. Fireflies and leaf sparkle in motion
+- Evidence: `user-12-motion-fireflies-leaf-sparkle.jpg`,
+  `user-13-motion-fireflies-terrain-patches.jpg` (taken while moving).
+- Seen: isolated bright white glowing dots inside tree crowns (bloomed
+  single pixels), and white sparkle on sunlit leaf tops across the
+  forest.
+- Likely: specular highlights on glossy leaves (G15: roughness / F0)
+  producing sub-pixel hot pixels that TAA and bloom amplify; possibly
+  sun-disk glints through leaf gaps. Fix the leaf material first, then
+  specular anti-aliasing and a firefly-safe bloom/TAA input clamp
+  (research E).
+
+Also in these frames: hard-edged pale grey rock-blend patches on the
+terrain (G8, terrain material), overexposed lit slopes (G7), noisy
+mid-distance crowns (G1).
+
 ## Order proposed for the next session
 
 1. G6 (in flight) and G7's diagnosis: cheap, they distort every judgment.

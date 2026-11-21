@@ -30,6 +30,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G15 Leaf textures posterized and glossy up close | Roughness channel/inversion, F0, KTX2 quality | User screenshots 2026-11-21 (evening) | Pillar 1, #12 |
 | G16 Distant clouds blocky | Outline effect or upsample on quarter-res texels | User screenshots 2026-11-21 (evening) | A/B `cloud-outline=0` first |
 | G17 Terrain banding/terracing in aerial views | Shadow-height map texels or normal quantization | User screenshots 2026-11-21 (evening) | A/B vs brute-force march / pre-aaab45b |
+| G18 Fireflies and leaf sparkle in motion | Glossy leaf speculars as sub-pixel hot pixels, amplified by TAA and bloom | User screenshots in motion 2026-11-21 | Leaf material (G15), specular AA, firefly clamp |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading
