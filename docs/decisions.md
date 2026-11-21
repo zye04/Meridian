@@ -3820,3 +3820,40 @@ planets and `clean` / `summer-hazy` are unchanged.
   with clusters, voxel trees or far cells as casters (branch
   `far-m-shadow`); cascade 4's ~1M trees would be ~70M voxels.
 
+
+## TAA: sharper history resampling, shorter blend in motion (2026-11-21)
+
+Motion shimmer had no gate: the still pair (frames 120 vs 121) only sees
+a still camera. Two runs of 120 and 121 frames that move (fixed 1/60 s
+steps ending at `--camera`) end at the same view, so their difference is
+the shimmer in motion: walk 1.4 m/s and turn 0.3 rad/s at the meadow
+view `1119 1355.9 -431 -1.55 -0.1` (placement on; mean |diff| /255 over
+the near ground, bottom 40%; Laplacian of the motion frame). DLSS DLAA,
+for reference, measures walk 10.1 / 0.459 and turn 6.1 / 0.455: some of
+the difference is content (LOD cut, stream fade), not anti-aliasing.
+
+| native TAA | walk shimmer / Laplacian | turn shimmer / Laplacian |
+|---|---|---|
+| before (Catmull-Rom, max weight 0.3) | 14.8 / 0.512 | 10.9 / 0.458 |
+| max weight 0.15 | 13.5 / 0.474 | 7.6 / 0.371 (visibly smeared) |
+| max 0.15, sharpen 0.5 | 14.4 / 0.505 | 8.1 / 0.393 (smeared) |
+| Keys a = -0.75 | 15.2 / 0.532 | 11.3 / 0.489 |
+| a = -0.75, max 0.2 | 14.3 / 0.506 | 9.1 / 0.443 |
+| **a = -1, max 0.2 (chosen)** | 14.8 / 0.529 | 9.7 / 0.480 |
+
+- A shorter blend alone (lower maximum current weight) trades shimmer
+  for smear: each frame resamples the history at a fractional offset and
+  Catmull-Rom's blur compounds. The history is now resampled with a Keys
+  cubic at a = -1 (sharper than Catmull-Rom's -0.5; same 9-tap scheme,
+  w1 and w2 stay positive), which keeps detail per resample, so the
+  maximum current weight in motion drops 0.3 -> 0.2: turn shimmer -10%
+  and sharper, walk equal and sharper. The variance clip bounds the
+  cubic's overshoot; no ringing at the marble wall's edge against the sky
+  while turning.
+- Motion gates (same build otherwise, raster shadows): fwd5 0.107 ->
+  0.114, side5 0.106 -> 0.106, beech fwd5 0.231 -> 0.242, pitch 0.102 ->
+  0.109; still shimmer crown / shadow 1.95 / 0.09 unchanged; SSIM fwd5
+  0.972 unchanged. A still camera reprojects at whole texels, where the
+  cubic is the identity.
+- Source: Keys 1981, "Cubic convolution interpolation for digital image
+  processing" (IEEE TASSP 29(6)).
