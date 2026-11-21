@@ -39,6 +39,10 @@ uint terrainSun(vec3 world, uint pool, uint id) {
     uvec3 h = pcg3d(uvec3(id, pool, 1u));
     vec3 direction = sunDiskDirection(cull.scene, float(h.x >> 8u) * (1.0 / 16777216.0),
                                       float(h.y >> 8u) * (1.0 / 16777216.0));
+    float visibility = terrainShadowVisibility(cull.scene, origin);
+    if (visibility >= 0.0) {
+        return visibility > float(h.z >> 8u) * (1.0 / 16777216.0) ? 1u : 0u;
+    }
     return terrainOccludes(cull.scene, origin, direction, kShadowRayLength) ? 0u : 1u;
 }
 

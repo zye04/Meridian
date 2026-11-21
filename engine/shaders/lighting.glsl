@@ -162,31 +162,6 @@ float cascadeVisibility(vec3 relative, vec3 normal) {
     return 1.0;
 }
 
-// The terrain's sun visibility at p from the shadow-height map
-// (terrain_shadow.comp), soft over the sun disk's penumbra at the occluder's
-// distance; -1 where the map doesn't serve (no map, or p outside it).
-float terrainShadowVisibility(vec3 p) {
-    if (pc.scene.terrainShadowMode == 0u) {
-        return -1.0;
-    }
-    vec2 offset = p.xz - pc.scene.terrainShadowOrigin;
-    vec2 q = vec2(dot(offset, pc.scene.terrainShadowAlong),
-                  dot(offset, pc.scene.terrainShadowAcross)) / pc.scene.terrainShadowTexel - 0.5;
-    float last = float(pc.scene.terrainShadowSize) - 2.0;
-    if (any(lessThan(q, vec2(1.0))) || any(greaterThan(q, vec2(last)))) {
-        return -1.0;
-    }
-    uvec2 i = uvec2(q);
-    vec2 f = q - vec2(i);
-    uint row = pc.scene.terrainShadowSize;
-    uint base = i.y * row + i.x;
-    TerrainShadowBuffer map = pc.scene.terrainShadowTexels;
-    vec2 s = mix(mix(map.texels[base], map.texels[base + 1u], f.x),
-                 mix(map.texels[base + row], map.texels[base + row + 1u], f.x), f.y);
-    float width = max(s.y * pc.scene.terrainShadowPenumbra, 0.05);
-    return clamp((p.y - s.x) / width + 0.5, 0.0, 1.0);
-}
-
 // Traces one ray toward the sun: the fraction of sunlight that arrives. 0 if
 // an object (the TLAS, from origin + start direction) or the terrain (its
 // heightfield, marched from marchOrigin) blocks it. The TLAS goes first:
@@ -227,7 +202,7 @@ float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float st
         }
     }
     if (marchTerrain) {
-        float terrain = terrainShadowVisibility(marchOrigin);
+        float terrain = terrainShadowVisibility(pc.scene, marchOrigin);
         if (terrain < 0.0) {
             terrain = terrainOccludes(pc.scene, marchOrigin, direction, kShadowRayLength) ? 0.0
                                                                                         : 1.0;

@@ -924,6 +924,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->instancesDirty = false;
   }
   endPass("upload + tlas");
+  impl_->recordTerrainShadow(cmd);
+  endPass("terrain shadow");
   // Before the main view's counters reset: the cascades' culls use the same
   // scratch buffers.
   impl_->recordSunShadows(cmd, frame);
@@ -948,8 +950,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("cull clusters");
   impl_->recordFarShadow(cmd);
   endPass("far shadow");
-  impl_->recordTerrainShadow(cmd);
-  endPass("terrain shadow");
 
   // --- Atmosphere: LUTs for the sky, sun color and haze.
 

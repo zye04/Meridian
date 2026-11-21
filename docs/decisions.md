@@ -3598,9 +3598,13 @@ two full 8-phase jitter cycles.
   (all of it off: 2.88): the TLAS query for object shadows on the terrain
   and the receiver's heightfield lift (`terrainHeight`,
   `terrainCellAbovePlane`) remain; the map fetch alone is ~0.3 ms.
-- **Not yet:** cluster_cull.comp's per-cluster march, voxel_bricks.comp and
-  gi_probes.comp still march (they can read the same map); below 1 degree
-  the march remains (backlog).
+- **Culls read it too:** cluster_cull.comp's per-cluster and
+  voxel_bricks.comp's per-brick terrain sun test compare the map's soft
+  visibility with their disk sample's hash (the same penumbra on
+  average), so the pass now runs first in the frame, before any cull.
+  Start view `cull clusters` 0.20 -> 0.10 ms, forest edge with `--trees`
+  `cull early` 1.76 -> 1.52 (diff 0.006/255). gi_probes.comp still
+  marches; below 1 degree the march remains (backlog).
 - Sources:
   - N. Max, "Horizon mapping: shadows for bump-mapped surfaces", The
     Visual Computer 4(2), 1988

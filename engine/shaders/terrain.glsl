@@ -314,6 +314,31 @@ float terrainRayDistance(SceneBuffer scene, vec3 origin, vec3 direction, float m
 }
 #endif
 
+// The terrain's sun visibility at p from the shadow-height map
+// (terrain_shadow.comp), soft over the sun disk's penumbra at the occluder's
+// distance; -1 where the map doesn't serve (no map, or p outside it).
+float terrainShadowVisibility(SceneBuffer scene, vec3 p) {
+    if (scene.terrainShadowMode == 0u) {
+        return -1.0;
+    }
+    vec2 offset = p.xz - scene.terrainShadowOrigin;
+    vec2 q = vec2(dot(offset, scene.terrainShadowAlong),
+                  dot(offset, scene.terrainShadowAcross)) / scene.terrainShadowTexel - 0.5;
+    float last = float(scene.terrainShadowSize) - 2.0;
+    if (any(lessThan(q, vec2(1.0))) || any(greaterThan(q, vec2(last)))) {
+        return -1.0;
+    }
+    uvec2 i = uvec2(q);
+    vec2 f = q - vec2(i);
+    uint row = scene.terrainShadowSize;
+    uint base = i.y * row + i.x;
+    TerrainShadowBuffer map = scene.terrainShadowTexels;
+    vec2 s = mix(mix(map.texels[base], map.texels[base + 1u], f.x),
+                 mix(map.texels[base + row], map.texels[base + row + 1u], f.x), f.y);
+    float width = max(s.y * scene.terrainShadowPenumbra, 0.05);
+    return clamp((p.y - s.x) / width + 0.5, 0.0, 1.0);
+}
+
 bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {
     return terrainRayDistance(scene, origin, direction, maxDistance) >= 0.0;
 }
