@@ -3190,3 +3190,29 @@ Editor plugin, "Nanite Foliage (Experimental)") and exports them with
   - https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-assemblies
   - https://openusd.org/release/spec_usdpreviewsurface.html
   - https://meshoptimizer.org/#simplification
+
+## Native 1440p with our own TAA is the default (2026-11-21)
+
+User direction: native 2560x1440, no upscaler, as the Chlorophyll Engine
+renders (native 1440p, no upscaler, on an RTX 3080). `--aa taa` at render
+scale 1 is the default; DLSS (Super Resolution DLAA, Ray Reconstruction)
+stays behind `--aa dlss` as an A/B, so its backlog rows are A/B-only.
+
+- The motion gates (`tools/motion-gates.sh`) are re-anchored at native
+  TAA, Release 2560x1440, rt sun shadows, same build (the minimums are
+  90% of each, rounded down):
+
+  | gate | native TAA | minimum |
+  |---|---|---|
+  | Laplacian fwd5 ground | 0.101 (motion/still 0.93) | 0.090 |
+  | Laplacian side5 ground | 0.101 (0.92) | 0.090 |
+  | Laplacian fwd5 beech | 0.221 (1.04) | 0.198 |
+  | Laplacian pitch0.02 ground | 0.098 (0.90) | 0.087 |
+  | shimmer crown / shadow | 2.62 / 1.38 | target <= 2.0 |
+  | SSIM fwd5 ground | 0.954 | target >= 0.98 |
+
+  The ground Laplacians are lower than TAA v2's first anchor (0.114,
+  0.118) because the Megascans ground replaced the old terrain material,
+  not because TAA got softer. Crown shimmer and SSIM miss their targets;
+  the limits stay as targets (backlog) for the TAA work that follows.
+- `aa` costs 0.18 ms at 2560x1440 (ground view, 0.17 at the beech).

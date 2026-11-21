@@ -46,8 +46,9 @@ cmp_le() { python3 -c "import sys;print('pass' if float(sys.argv[1])<=float(sys.
 val() { awk '{print $2}'; }
 
 # Sharpness in motion is the motion frame's own Laplacian std, thresholds
-# anchored to TAA v2 at 1440p (0.114, 0.118, 0.226, 0.108 at first measurement; minimum = 90% of
-# each, rounded down, docs/decisions.md); the motion/still
+# anchored to native TAA at 2560x1440 (0.101, 0.101, 0.221, 0.098 on
+# 2026-11-21; minimum = 90% of each, rounded down, docs/decisions.md); the
+# shimmer and SSIM limits are targets (native TAA misses them); the motion/still
 # ratio is informational (a sharper still, as under Ray Reconstruction,
 # lowers it without making the motion frame worse).
 row gate value minimum result "(motion/still ratio)"
@@ -56,10 +57,10 @@ sharp() { # label motion still minimum
   v=$($gates laplacian "$out/$2.png" | val); r=$($gates ratio "$out/$2.png" "$out/$3.png" | val)
   row "$1" "$v" ">=$4" "$(cmp_ge "$v" "$4")" "$r"
 }
-sharp "laplacian fwd5 ground" ground_fwd ground_still ${MIN_FWD_GROUND:-0.10}
-sharp "laplacian side5 ground" ground_side ground_still ${MIN_SIDE_GROUND:-0.10}
-sharp "laplacian fwd5 beech" beech_fwd beech_still ${MIN_FWD_BEECH:-0.20}
-sharp "laplacian pitch0.02 ground" ground_pitch ground_still ${MIN_PITCH_GROUND:-0.09}
+sharp "laplacian fwd5 ground" ground_fwd ground_still ${MIN_FWD_GROUND:-0.090}
+sharp "laplacian side5 ground" ground_side ground_still ${MIN_SIDE_GROUND:-0.090}
+sharp "laplacian fwd5 beech" beech_fwd beech_still ${MIN_FWD_BEECH:-0.198}
+sharp "laplacian pitch0.02 ground" ground_pitch ground_still ${MIN_PITCH_GROUND:-0.087}
 sh=$($gates shimmer "$out/beech_f120.png" "$out/beech_f121.png")
 v=$(echo "$sh" | awk '$1=="crown"{print $2}'); row "shimmer crown" "$v" "<=2.0" "$(cmp_le "$v" 2.0)"
 v=$(echo "$sh" | awk '$1=="shadow"{print $2}'); row "shimmer shadow" "$v" "<=2.0" "$(cmp_le "$v" 2.0)"

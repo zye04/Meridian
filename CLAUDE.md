@@ -120,9 +120,10 @@ Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
-`--aa dlss|taa` picks the upscaler: DLSS (default; falls back to TAA
-with the log line `DLSS unavailable: <reason>; using TAA` when NGX
-reports no Super Resolution). `--rr on|off` (default off: Super
+`--aa taa|dlss` picks the anti-aliasing: our own TAA at native
+resolution (default, taa.comp; the image is native 1440p, no upscaler),
+or DLSS, an A/B (falls back to TAA with the log line `DLSS unavailable:
+<reason>; using TAA` when NGX reports no Super Resolution). `--rr on|off` (default off: Super
 Resolution DLAA, ~2.3 ms at 1440p against RR's ~4.7, decisions.md) picks
 Ray Reconstruction under DLSS, an A/B
 (preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super

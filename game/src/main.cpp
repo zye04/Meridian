@@ -528,9 +528,9 @@ struct Options {
   std::optional<Haze> haze;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;
-  // DLSS (DLAA + Ray Reconstruction) unless --aa taa; falls back to Super
-  // Resolution DLAA, then TAA, when unsupported.
-  meridian::AaMethod aa = meridian::AaMethod::Dlss;
+  // Native TAA (decisions.md); --aa dlss is an A/B that falls back to TAA
+  // when unsupported.
+  meridian::AaMethod aa = meridian::AaMethod::Taa;
   // Unset: DLAA (RR DLAA costs 4.7 ms at 1440p; optimised from the most
   // demanding configuration down, decisions.md).
   std::optional<meridian::DlssMode> dlssMode;
