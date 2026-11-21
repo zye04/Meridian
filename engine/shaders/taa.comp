@@ -20,6 +20,8 @@ layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D historyNext;
 layout(push_constant) uniform TaaConstants {
     ExposureBuffer exposure;
     uint historyValid;
+    uint pad;
+    vec2 jitter;
 } taa;
 
 // Current-frame weight when still; motion raises it toward the maximum
@@ -37,6 +39,8 @@ const float kVarianceGamma = 1.0;
 // resample than Catmull-Rom's -0.5, so a longer history in motion stays
 // sharp; the variance clip bounds its overshoot.
 const float kHistoryCubic = -1.0;
+// 1 / (2 sigma^2) of the current frame's reconstruction filter, sigma 0.47 px.
+const float kReconstructionFalloff = 2.26;
 
 vec3 toYCoCg(vec3 c) {
     return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b,
@@ -148,16 +152,29 @@ void main() {
             1.0 - 0.9 * pow(max(jacobian, 0.0), kMagnificationPower));
     }
 
+    // The current frame, reconstructed at the pixel centre from the 3x3's
+    // jittered samples (Gaussian of each sample's distance, sigma 0.47 px,
+    // Karis 2014's fit of Blackman-Harris): the raw sample's sub-pixel
+    // offset changes every frame and reads as shimmer in motion.
     vec3 mean = vec3(0.0);
     vec3 meanSquared = vec3(0.0);
+    vec3 filtered = vec3(0.0);
+    float filteredWeight = 0.0;
+    vec2 center = uv * vec2(renderSize) - taa.jitter;
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             ivec2 p = clamp(texel + ivec2(x, y), ivec2(0), renderSize - 1);
-            vec3 c = toYCoCg(texelFetch(sceneColor, p, 0).rgb);
+            vec3 rgb = texelFetch(sceneColor, p, 0).rgb;
+            vec2 d = vec2(texel + ivec2(x, y)) + 0.5 - center;
+            float w = exp(-kReconstructionFalloff * dot(d, d));
+            filtered += rgb * w;
+            filteredWeight += w;
+            vec3 c = toYCoCg(rgb);
             mean += c;
             meanSquared += c * c;
         }
     }
+    current = filtered / filteredWeight;
     mean /= 9.0;
     vec3 sigma = sqrt(max(meanSquared / 9.0 - mean * mean, 0.0));
 
