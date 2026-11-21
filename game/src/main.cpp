@@ -2,6 +2,7 @@
 #include "perf_overlay.h"
 
 #include <fstream>
+#include <numbers>
 
 #include <meridian/camera_route.h>
 #include <meridian/model.h>
@@ -633,6 +634,8 @@ struct Options {
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
   meridian::ShadowMode shadows = meridian::ShadowMode::Raster;
   std::optional<meridian::Bloom> bloom;
+  // Horizontal field of view; unset = the grade file's, else 70.
+  std::optional<float> fovDegrees;
   std::optional<meridian::Effects> effects;
   // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
   std::optional<Haze> haze;
@@ -734,6 +737,12 @@ Options parseOptions(int argc, char **argv) {
       } else {
         throw std::runtime_error("--haze takes clean, summer or summer-hazy");
       }
+    } else if (arg == "--fov") {
+      const float fov = number(i);
+      if (!(fov > 30.0f && fov < 150.0f)) {
+        throw std::runtime_error("--fov takes degrees (horizontal) between 30 and 150");
+      }
+      options.fovDegrees = fov;
     } else if (arg == "--bloom") {
       options.bloom = meridian::Bloom{number(i), number(i)};
     } else if (arg == "--effects" && i + 1 < argc) {
@@ -1042,6 +1051,7 @@ int main(int argc, char **argv) {
   // and --grade) overrides it except for an explicit --sun, --haze or --bloom.
   Look builtIn = lookWithSun(lighting.sunDirection, options.haze.value_or(Haze::Summer));
   builtIn.grade = kStartingGrade;
+  builtIn.fovDegrees = options.fovDegrees.value_or(builtIn.fovDegrees);
   builtIn.bloom = options.bloom.value_or(meridian::Bloom{});
   builtIn.effects = options.effects.value_or(meridian::Effects{});
   Look look = builtIn;
@@ -1059,6 +1069,9 @@ int main(int argc, char **argv) {
         look.haze = *options.haze;
       } else {
         lighting.atmosphere = atmosphereFor(look.haze, floorKm);
+      }
+      if (options.fovDegrees) {
+        look.fovDegrees = *options.fovDegrees;
       }
       if (options.bloom) {
         look.bloom = *options.bloom;
@@ -1214,6 +1227,13 @@ int main(int argc, char **argv) {
     gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
     weather.update(gameSeconds);
     renderer.setWeather(weather);
+    {
+      int width = 0, height = 0;
+      window.framebufferSize(width, height);
+      constexpr float kRadians = std::numbers::pi_v<float> / 180.0f;
+      camera.fovY = meridian::verticalFov(gradePanel.look().fovDegrees * kRadians,
+                                          static_cast<float>(width) / static_cast<float>(height));
+    }
     renderer.draw(camera, lighting, frameSeconds);
 
     ++frames;

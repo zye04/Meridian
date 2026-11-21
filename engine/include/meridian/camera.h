@@ -6,6 +6,11 @@
 
 namespace meridian {
 
+// Vertical field of view (rad) for a horizontal one at this width / height.
+inline float verticalFov(float horizontalRadians, float aspect) {
+  return 2.0f * std::atan(std::tan(horizontalRadians * 0.5f) / aspect);
+}
+
 // Y is up and yaw 0 looks down -Z. Positive yaw turns right, positive pitch
 // looks up.
 struct Camera {

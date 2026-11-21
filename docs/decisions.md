@@ -4007,3 +4007,16 @@ forest-interior    1240    103.3      26.0    9.68  scene_early 3.67, cull_early
 aerial              992     82.6      60.5   12.11  scene_early 4.10, far_field 2.11, clouds 1.55, cull_early 1.49  BELOW 105
 route              5256     87.6      23.9   11.42  scene_early 4.75, cull_early 1.42, clouds 1.06, voxel_trees 1.02  BELOW 180
 ```
+
+## Camera field of view: 70 degrees horizontal, configurable (2026-11-21)
+
+The camera was fixed at fovY 1.2 rad (~101 degrees horizontal at 16:9), so
+everything looked small and fine detail was lost. The matched views of the
+five reference frames estimate his field of view at ~60-70 degrees, so the
+default is 70 degrees horizontal. `--fov`, the grade file's `fovDegrees` and
+the G panel slider (50..110) set it; fovY comes from `verticalFov(horizontal,
+aspect)` each frame, so a resize keeps the horizontal angle. Culling, LOD
+error, jitter and reprojection all derive from the projection matrix, so none
+needed a change. The motion gate minimums in `tools/motion-gates.sh` were
+anchored at the old field of view and must be re-anchored on the next gate run
+(not run with this change); captures from before it are not comparable.

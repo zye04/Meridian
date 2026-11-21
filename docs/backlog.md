@@ -25,7 +25,6 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G9 Motion shimmer above DLSS | Native TAA walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1 (/255) | Native lane | 3x3 reconstruction WIP (branch `native`) if sharpness holds |
 | G10 Forest edge 13.2 ms (target 10) | ~3 ms sub-pixel tree shading, 1.5 ms voxel brick listing | Perf lane | Visibility buffer (VG slice 4) |
 | G12 Material fidelity up close and at distance | Scans cooked 8K -> 2-4K, no detail textures / streaming, normal detail not filtered into roughness | User 2026-11-21 | Programme Pillar 1 |
-| Camera FOV much wider than his | Ours is fixed at 1.2 rad vertical (~101 deg horizontal at 16:9); his frames look ~60-70 deg, so our views show more scene with everything smaller, which hides fine detail and blocks fair matched views | Matched views 2026-11-21 (#13) | A configurable FOV (flag + G panel), default chosen against the references |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading

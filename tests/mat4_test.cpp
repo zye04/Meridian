@@ -1,3 +1,4 @@
+#include <cmath>
 #include <doctest/doctest.h>
 #include <meridian/camera.h>
 #include <meridian/math/mat4.h>
@@ -121,4 +122,13 @@ TEST_CASE("viewRotation maps camera-relative points far from the origin") {
   CHECK(std::abs(eye.x) < 1e-2f);
   CHECK(std::abs(eye.y) < 1e-2f);
   CHECK(std::abs(eye.z) < 1e-2f);
+}
+
+TEST_CASE("verticalFov derives the vertical angle from the horizontal one") {
+  constexpr float kPi = 3.14159265358979f;
+  CHECK(meridian::verticalFov(kPi / 2.0f, 1.0f) == doctest::Approx(kPi / 2.0f).epsilon(1e-5));
+  const float h = 70.0f * kPi / 180.0f;
+  CHECK(meridian::verticalFov(h, 16.0f / 9.0f) ==
+        doctest::Approx(2.0f * std::atan(std::tan(35.0f * kPi / 180.0f) * 9.0f / 16.0f))
+            .epsilon(1e-5));
 }

@@ -72,7 +72,7 @@ changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
 `~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
 names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
-`haze`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
+`haze`, `fovDegrees`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
 startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
 `--grade FILE` loads a grade file in any run (A/B captures of a tuned
 look); `--overlay grade|perf` opens a panel at startup (it is in captures;
@@ -122,6 +122,14 @@ TAA v2; `ratio` is the informational motion/still column; also
 (`GPU_RUNS=5` adds per-pass GPU medians). `--capture-sequence N` also
 saves `<capture stem>_NNN.png` every N frames (fly-throughs,
 time-lapses); per-pass GPU ms of such runs are inflated by the readbacks.
+
+`--fov DEGREES` (horizontal, 30 < x < 150, default 70, matched to the Chlorophyll
+frames; `verticalFov` in camera.h derives the vertical angle from the window
+aspect every frame) sets the field of view. Interactive runs also read
+`fovDegrees` from the grade file (explicit `--fov` wins); the G panel's "Field
+of view" slider (50..110) saves, loads and resets with the Look. Captures
+taken before this change used ~101 degrees horizontal (fixed fovY 1.2 rad), so
+old views and gate images are not comparable.
 
 `--haze clean|summer|summer-hazy` picks the aerosol (default summer:
 a clean summer day's boundary layer, AOD 0.03 from the valley floor (5th

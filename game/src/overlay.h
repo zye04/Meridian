@@ -20,6 +20,7 @@ struct Look {
   float sunAzimuthDegrees = 0.0f;
   float sunElevationDegrees = 0.0f;
   Haze haze = Haze::Summer;
+  float fovDegrees = 70.0f; // horizontal
   meridian::Bloom bloom;
   meridian::Effects effects;
 };

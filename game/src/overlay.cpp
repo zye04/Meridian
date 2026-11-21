@@ -54,6 +54,7 @@ std::string lookToJson(const Look &look) {
   const meridian::Effects &e = look.effects;
   const std::string tail = ",\n  \"sunAzimuthDegrees\": " + number(look.sunAzimuthDegrees) +
                            ",\n  \"sunElevationDegrees\": " + number(look.sunElevationDegrees) +
+                           ",\n  \"fovDegrees\": " + number(look.fovDegrees) +
                            ",\n  \"haze\": \"" + kHazeNames[static_cast<int>(look.haze)] +
                            "\",\n  \"bloomIntensity\": " + number(look.bloom.intensity) +
                            ",\n  \"bloomScatter\": " + number(look.bloom.scatter) +
@@ -76,6 +77,7 @@ Look lookFromJson(std::string_view json, const Look &base) {
       meridian::jsonNumber(json, "sunAzimuthDegrees").value_or(base.sunAzimuthDegrees);
   look.sunElevationDegrees =
       meridian::jsonNumber(json, "sunElevationDegrees").value_or(base.sunElevationDegrees);
+  look.fovDegrees = meridian::jsonNumber(json, "fovDegrees").value_or(base.fovDegrees);
   look.bloom.intensity =
       meridian::jsonNumber(json, "bloomIntensity").value_or(base.bloom.intensity);
   look.bloom.scatter = meridian::jsonNumber(json, "bloomScatter").value_or(base.bloom.scatter);
@@ -179,6 +181,10 @@ GradePanel::Changes GradePanel::draw() {
     look_.haze = static_cast<Haze>(haze);
     changes.lighting = true;
   }
+
+  ImGui::SeparatorText("Field of view");
+  bool fovChanged = false; // read every frame by main.cpp
+  slider("field of view (deg, horizontal)", look_.fovDegrees, 50.0f, 110.0f, fovChanged);
 
   ImGui::SeparatorText("Bloom");
   slider("bloom intensity", look_.bloom.intensity, 0.0f, 0.1f, changes.bloom);
