@@ -860,10 +860,9 @@ float plantOcclusion(Material m) {
                pc.scene.microShadowStrength);
 }
 
-// Leaf materials only, ambient only: the sun has its own shadow test.
-float crownOcclusion(Material m) {
-    return m.diffuseTransmission > 0.0 ? mix(1.0, inCrownVisibility, pc.scene.microShadowStrength)
-                                       : 1.0;
+// Ambient only: the sun has its own shadow test.
+float crownOcclusion() {
+    return mix(1.0, inCrownVisibility, pc.scene.microShadowStrength);
 }
 #endif
 
@@ -993,7 +992,7 @@ void main() {
 #endif
 
 #ifndef TERRAIN
-    s.occlusion *= crownOcclusion(material);
+    s.occlusion *= crownOcclusion();
 #endif
     addAmbientLight(sh, s.occlusion);
 #ifndef TERRAIN

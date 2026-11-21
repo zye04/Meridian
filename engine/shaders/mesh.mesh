@@ -34,10 +34,15 @@ layout(location = 12) out float outCrownVisibility[];
 // Tree crowns get no sky inside: leaves deep in the crown see the sky through
 // the leaves around them. The crown is the ellipsoid inscribed in the mesh's
 // bounding box, a uniform leaf medium; the visibility is its transmittance
-// toward the zenith and up-and-outward (normalized units), averaged.
+// toward the zenith, up-and-outward and low outward (normalized units),
+// averaged: a trunk under a lone crown still sees the sky below it.
 // Meshes shorter than this are plant tufts (plantOcclusion in mesh.frag).
 const float kCrownMinHalfHeight = 2.0;
 const float kCrownDensity = 2.5;
+
+bool isLeafMesh(SceneBuffer scene, MeshInfo mesh) {
+    return scene.materials.materials[mesh.materialIndex].diffuseTransmission > 0.0;
+}
 
 // The path length inside the unit sphere along q + t w, t >= 0.
 float crownExit(vec3 q, vec3 w) {
@@ -50,16 +55,20 @@ float crownExit(vec3 q, vec3 w) {
     return max(-b + root - max(-b - root, 0.0), 0.0);
 }
 
-float crownVisibility(MeshInfo mesh, vec3 position) {
+float crownVisibility(MeshInfo mesh, vec3 position, vec3 normal) {
     vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
     if (halfExtent.y < kCrownMinHalfHeight) {
         return 1.0;
     }
     vec3 q = (position - mesh.boundsCenter) / max(halfExtent, vec3(1e-3));
-    vec2 outward = dot(q.xz, q.xz) > 1e-6 ? normalize(q.xz) : vec2(0.0);
+    // Away from the crown's axis; on it (a trunk) the way the surface faces.
+    vec2 outward = q.xz + 0.5 * normal.xz;
+    outward = dot(outward, outward) > 1e-6 ? normalize(outward) : vec2(0.0);
     float up = crownExit(q, vec3(0.0, 1.0, 0.0));
-    float side = crownExit(q, normalize(vec3(outward.x, 1.0, outward.y)));
-    return 0.5 * (exp(-kCrownDensity * up) + exp(-kCrownDensity * side));
+    float steep = crownExit(q, normalize(vec3(outward.x, 1.0, outward.y)));
+    float low = crownExit(q, normalize(vec3(outward.x, 0.3, outward.y)));
+    return (exp(-kCrownDensity * up) + exp(-kCrownDensity * steep) +
+            exp(-kCrownDensity * low)) / 3.0;
 }
 
 void main() {
@@ -77,6 +86,18 @@ void main() {
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
     MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
+
+    // The crown: a leaf mesh's own bounds; the rest of a placed tree (bark)
+    // takes its leaf mesh's, so trunks and branches under it darken too.
+    bool hasCrown = isLeafMesh(scene, mesh);
+    MeshInfo crown = mesh;
+    if (!hasCrown && instance.placed) {
+        PrototypeInfo prototype = scene.prototypes.prototypes[instance.meshOrPrototype];
+        for (uint m = 0u; m < prototype.meshCount && !hasCrown; ++m) {
+            crown = scene.meshes.meshes[scene.prototypeMeshes.meshes[prototype.firstMesh + m]];
+            hasCrown = isLeafMesh(scene, crown);
+        }
+    }
 
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
@@ -104,7 +125,7 @@ void main() {
         outTerrainSun[i] = terrainSun;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
-        outCrownVisibility[i] = crownVisibility(mesh, vertex.position);
+        outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *

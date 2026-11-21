@@ -456,8 +456,9 @@ shadow strength: ambient and back irradiance via `s.occlusion`, sun
 diffuse at half weight. Tree crowns (meshes over 4 m tall) also get a crown
 sky visibility per vertex (mesh.mesh `crownVisibility`, location 12: the
 transmittance of a uniform leaf medium filling the ellipsoid inside the
-mesh's bounding box, `MeshInfo` half extents), leaf materials, ambient only,
-same strength scale.
+leaf mesh's bounding box, `MeshInfo` half extents, along three rays up and
+outward), ambient only, same strength scale; a placed tree's bark uses its
+leaf mesh's crown.
 
 ## Frame (renderer_frame.cpp, in order)
 

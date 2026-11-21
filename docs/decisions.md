@@ -3392,3 +3392,17 @@ Bar: the 2.5D path's p99 0.55.
   over long near-horizontal steps). Cloud crop Laplacian, still 0.0781
   -> 0.0783, 1 rad/s turn 0.0203 -> 0.0191. `clouds` 1.74 -> 1.70 ms at
   the ground view.
+
+## Crown sky visibility for bark (2026-11-21)
+
+Under the darker crowns the trunks and branches stood out pale pink-white
+(forest edge), where the references' trunks are dark. A placed tree's
+non-leaf meshes now take the crown of the prototype's leaf mesh (mesh.mesh
+finds it once per cluster), and mesh.frag applies the crown term to every
+material (1 where there is no crown). The visibility gained a third, low
+ray (elevation ~17 degrees), and the outward direction leans on the
+vertex normal, so a trunk on the crown's axis looks out the way it faces:
+with two rays a lone tree's trunk went black on its shadow side. Forest
+edge image L mean 0.53 -> 0.50 at the same exposure (EV100 10.81),
+dark pixels (L 0.15-0.3) 11% -> 13%; the summit view's lone tree keeps a
+brown shadow side.
