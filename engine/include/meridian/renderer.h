@@ -139,6 +139,16 @@ struct Atmosphere {
   Vec3 mieScattering = {0.003996f, 0.003996f, 0.003996f};
   Vec3 mieExtinction = {0.004440f, 0.004440f, 0.004440f};
   float mieScaleHeight = 1.2f;
+  // Km above sea level where the aerosol layer ends; 0 = no top (a plain
+  // exponential).
+  float mieLayerTop = 0.0f;
+  // Km over which the layer's density falls to zero around mieLayerTop
+  // (smoothstep from top - fade/2 to top + fade/2).
+  float mieLayerFade = 0.2f;
+  // Free-troposphere aerosol density, as a fraction of the layer's sea-level
+  // density (mieScattering / mieExtinction are the layer's sea-level values).
+  float mieBackground = 0.0f;
+  float mieBackgroundScaleHeight = 2.0f;
   // Forward-scattering of haze around the sun, in [0, 1).
   float miePhaseG = 0.8f;
   Vec3 ozoneAbsorption = {0.000650f, 0.001881f, 0.000085f};

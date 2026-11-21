@@ -452,10 +452,63 @@ meridian::Atmosphere summerHaze(float opticalDepth, float scaleHeight) {
   return atmosphere;
 }
 
-meridian::Atmosphere atmosphereFor(Haze haze) {
+// Summer haze as a boundary layer over the valley floor: near well mixed
+// below a sharp-ish top, plus a thin free-troposphere background above it,
+// so views from above the layer look through little haze while long paths
+// in the valleys stay hazy.
+meridian::Atmosphere summerLayerHaze(float floorKm) {
+  constexpr float kLayerDepthKm = 1.2f;      // top above the valley floor
+  constexpr float kLayerFadeKm = 0.25f;      // smoothstep width around the top
+  constexpr float kScaleHeightKm = 2.0f;     // inside the layer
+  constexpr float kLayerAod = 0.03f;         // AOD(550), floor to top
+  constexpr float kBackgroundAod = 0.01f;    // AOD(550) above the top
+  constexpr float kBackgroundHeightKm = 2.0f;
+  const float top = floorKm + kLayerDepthKm;
+  // Sea-level extinction from the layer's optical depth, integrated
+  // numerically (midpoint) over the profile from the floor to its fade end.
+  const float end = top + 0.5f * kLayerFadeKm;
+  constexpr int kSteps = 2000;
+  const float dh = (end - floorKm) / kSteps;
+  float shape = 0.0f;
+  for (int i = 0; i < kSteps; ++i) {
+    const float h = floorKm + (i + 0.5f) * dh;
+    const float t = std::clamp((h - (top - 0.5f * kLayerFadeKm)) / kLayerFadeKm, 0.0f, 1.0f);
+    shape += std::exp(-h / kScaleHeightKm) * (1.0f - t * t * (3.0f - 2.0f * t)) * dh;
+  }
+  const float extinction = kLayerAod / shape;
+  meridian::Atmosphere atmosphere = summerHaze(kLayerAod, kScaleHeightKm);
+  atmosphere.mieExtinction = meridian::Vec3{0.740f, 1.0f, 1.281f} * extinction;
+  atmosphere.mieScattering = atmosphere.mieExtinction * 0.925f;
+  atmosphere.mieLayerTop = top;
+  atmosphere.mieLayerFade = kLayerFadeKm;
+  atmosphere.mieBackgroundScaleHeight = kBackgroundHeightKm;
+  atmosphere.mieBackground = kBackgroundAod / (extinction * kBackgroundHeightKm *
+                                               std::exp(-top / kBackgroundHeightKm));
+  std::printf("Haze layer: floor %.2f km, top %.2f km, sea-level extinction %.3f/km (550 nm), "
+              "AOD %.2f + %.2f above, background %.3f of the layer\n",
+              floorKm, top, extinction, kLayerAod, kBackgroundAod, atmosphere.mieBackground);
+  return atmosphere;
+}
+
+// The 5th percentile of the terrain heights, km above sea level.
+float valleyFloorKm(const meridian::Heightfield &terrain) {
+  std::vector<uint64_t> histogram(65536, 0);
+  for (const uint16_t v : terrain.samples) {
+    ++histogram[v];
+  }
+  const uint64_t target = terrain.samples.size() / 20;
+  uint64_t seen = 0;
+  size_t bin = 0;
+  for (; bin < histogram.size() && seen + histogram[bin] <= target; ++bin) {
+    seen += histogram[bin];
+  }
+  return (terrain.minHeight + terrain.heightScale * static_cast<float>(bin)) * 0.001f;
+}
+
+meridian::Atmosphere atmosphereFor(Haze haze, float valleyFloorKm) {
   switch (haze) {
   case Haze::Summer:
-    return summerHaze(0.10f, 0.5f);
+    return summerLayerHaze(valleyFloorKm);
   case Haze::SummerHazy:
     return summerHaze(0.2f, 1.5f);
   case Haze::Clean:
@@ -833,6 +886,7 @@ int main(int argc, char **argv) {
     terrain = meridian::generateHeightfield({});
   }
   renderer.setTerrain(terrain);
+  const float floorKm = valleyFloorKm(terrain);
   // Megascans surfaces (docs/assets.md has what each one shows and why it
   // got its role): per role, the variants with their real-world tile sizes
   // and parallax depths (m: each surface's Megascans JSON displacementScale,
@@ -922,7 +976,7 @@ int main(int argc, char **argv) {
   double gameSeconds = 0.0;
 
   meridian::Lighting lighting;
-  lighting.atmosphere = atmosphereFor(options.haze.value_or(Haze::Summer));
+  lighting.atmosphere = atmosphereFor(options.haze.value_or(Haze::Summer), floorKm);
   if (options.sunDirection) {
     lighting.sunDirection = *options.sunDirection;
   }
@@ -946,7 +1000,7 @@ int main(int argc, char **argv) {
       if (options.haze) {
         look.haze = *options.haze;
       } else {
-        lighting.atmosphere = atmosphereFor(look.haze);
+        lighting.atmosphere = atmosphereFor(look.haze, floorKm);
       }
       if (options.bloom) {
         look.bloom = *options.bloom;
@@ -1076,7 +1130,7 @@ int main(int argc, char **argv) {
         if (changes.lighting) {
           lighting.sunDirection = sunDirection(gradePanel.look().sunAzimuthDegrees,
                                                gradePanel.look().sunElevationDegrees);
-          lighting.atmosphere = atmosphereFor(gradePanel.look().haze);
+          lighting.atmosphere = atmosphereFor(gradePanel.look().haze, floorKm);
         }
         if (changes.effects) {
           renderer.setEffects(gradePanel.effects());

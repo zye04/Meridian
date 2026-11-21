@@ -279,6 +279,10 @@ struct AtmosphereParameters {
     float absorption0Constant;
     float absorption1Linear;
     float absorption1Constant;
+    float mieLayerLow;
+    float mieLayerHigh;
+    float mieBackground;
+    float mieBackgroundExpScale;
 };
 
 // Sky irradiance on an upward-facing surface (sun illuminance 1), integrated

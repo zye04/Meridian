@@ -74,7 +74,10 @@ Medium sampleMedium(vec3 position) {
     AtmosphereParameters atmosphere = pc.scene.atmosphere;
     float height = length(position) - atmosphere.bottomRadius;
 
-    float densityMie = exp(atmosphere.mieDensityExpScale * height);
+    float densityMie =
+        exp(atmosphere.mieDensityExpScale * height) *
+            (1.0 - smoothstep(atmosphere.mieLayerLow, atmosphere.mieLayerHigh, height)) +
+        atmosphere.mieBackground * exp(atmosphere.mieBackgroundExpScale * height);
     float densityRayleigh = exp(atmosphere.rayleighDensityExpScale * height);
     float densityOzone = clamp(
         height < atmosphere.absorptionLayerWidth

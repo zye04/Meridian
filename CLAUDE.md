@@ -116,7 +116,10 @@ saves `<capture stem>_NNN.png` every N frames (fly-throughs,
 time-lapses); per-pass GPU ms of such runs are inflated by the readbacks.
 
 `--haze clean|summer|summer-hazy` picks the aerosol (default summer:
-Swiss summer haze kept low in the valleys, blue zenith; summer-hazy:
+a clean summer day's boundary layer, AOD 0.03 from the valley floor (5th
+percentile of the terrain) to 1.2 km above it with a smooth top, plus
+a free-troposphere background (H 2 km) with 0.01 above the top, ~0.05
+in all over the floor; startup prints `Haze layer:`; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 

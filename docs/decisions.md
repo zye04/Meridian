@@ -93,7 +93,7 @@ sources. Check here before re-researching a topic.
   - https://github.com/sebh/UnrealEngineSkyAtmosphere
 - **Summer haze (2026-11-19)**: the game sets a summer Mie aerosol for
   the Swiss Plateau / Napf (`summerHaze(aod, H)` in main.cpp). Presets:
-  `--haze summer` (default, AOD(550) 0.10, H 0.5 km), `--haze
+  `--haze summer` (AOD(550) 0.10, H 0.5 km; replaced 2026-11-21 by the boundary layer, last entry "Haze as a boundary layer"), `--haze
   summer-hazy` (AOD 0.2, H 1.5 km), `--haze clean` (Bruneton's very clean
   defaults, ~0.004/km, visibility ~300 km). The engine defaults stay
   Earth-clean and parametric. The derivation below is for summer-hazy;
@@ -3737,3 +3737,39 @@ Release, 2560x1440, native TAA, main at 8ce025b, GPU ms:
   2.82 start; the driver already drops outputs the depth pass doesn't
   read). Re-cooking the meadow plants after the alpha-mip fix (19ac9d1)
   changed neither cost nor triangle counts measurably (7.81 vs 7.83 ms).
+
+## Haze as a boundary layer over the valley floor (2026-11-21)
+
+The default `summer` haze is now an aerosol layer anchored at the terrain:
+the Mie density is `exp(-h / H)` cut by a smoothstep top, plus a thin
+free-troposphere background (`Atmosphere::mieLayerTop`, `mieLayerFade`,
+`mieBackground`, `mieBackgroundScaleHeight`; `sampleMedium` in
+atmosphere.glsl, so every LUT and the aerial perspective follow). Engine
+defaults (top 0, background 0) are the old plain exponential, so other
+planets and `clean` / `summer-hazy` are unchanged.
+
+- Layer (main.cpp `summerLayerHaze`): floor = 5th percentile of the
+  terrain heights (Napf: 0.75 km), top 1.2 km above it (1.95 km, the
+  Plateau's summer convective boundary layer, Collaud Coen 2014), fade
+  0.25 km, H 2 km inside (near well mixed); AOD(550) 0.03 in the layer
+  plus a background (H 2 km, not cut by the top) of 0.01 above the top and
+  ~0.008 inside, ~0.05 over the floor in all: a clean summer day after a
+  front, the low end of Ingold 2001's Swiss range. The sweep's AODs below
+  are labelled the same way (layer + background above the top). Same OPAC continental optics as before.
+- Why so little aerosol: dark shadows 1-3 km away are lifted by single
+  scattering in proportion to the optical depth of the path alone, not
+  to where the aerosol sits. At the forest overview (`700 1450 -400
+  -1.55 -0.5 --trees`, image L p5 / shadow hue L 0.15-0.3 and 0.3-0.42):
+  old summer 0.347 / 240, 217; the first try, AOD 0.10 in a 0.45 km
+  layer over the floor, made it worse, 0.370 / 245, 229 (the views look
+  down into the valleys, where it concentrates the haze); AOD 0.05 + 0.02
+  in a 1.2 km layer 0.320; 0.03 + 0.02 0.309; 0.03 + 0.01 (chosen) 0.300
+  / 207, 179; clean 0.246 / 190, 162; Chlorophyll aerials 0.13-0.23 /
+  136-147. The rest of the gap is not haze (exposure meters this dark
+  frame 1.4 EV brighter than the meadow; forest shadow ambient, backlog
+  "Sky occlusion").
+- High overview (`1119 4354 -431 -1.55 -0.35`): p5 0.341 -> 0.324 (clean
+  0.295); the sharp top shows as the haze sitting in the valleys. Ground
+  views: zenith blue/red unchanged (3.55 at the open view), horizon haze
+  kept; sunset view unchanged in character. Atmosphere pass 0.02 ms
+  before and after.

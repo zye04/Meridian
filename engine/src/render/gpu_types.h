@@ -152,9 +152,16 @@ struct GpuAtmosphere {
   float absorption0Constant = 0.0f;
   float absorption1Linear = 0.0f;
   float absorption1Constant = 0.0f;
+  // The aerosol layer's smoothstep edges (km; low > 1e8 when there is no top),
+  // and the free-troposphere density (fraction of the layer's) with its
+  // exp scale.
+  float mieLayerLow = 1e9f;
+  float mieLayerHigh = 2e9f;
+  float mieBackground = 0.0f;
+  float mieBackgroundExpScale = 0.0f;
   float pad[3] = {};
 };
-static_assert(sizeof(GpuAtmosphere) == 112);
+static_assert(sizeof(GpuAtmosphere) == 128);
 
 inline GpuAtmosphere toGpu(const Atmosphere &a) {
   GpuAtmosphere g;
@@ -166,6 +173,13 @@ inline GpuAtmosphere toGpu(const Atmosphere &a) {
   g.mieExtinction = a.mieExtinction;
   g.mieDensityExpScale = -1.0f / a.mieScaleHeight;
   g.miePhaseG = a.miePhaseG;
+  if (a.mieLayerTop > 0.0f) {
+    const float fade = std::max(a.mieLayerFade, 1e-3f);
+    g.mieLayerLow = a.mieLayerTop - 0.5f * fade;
+    g.mieLayerHigh = a.mieLayerTop + 0.5f * fade;
+  }
+  g.mieBackground = a.mieBackground;
+  g.mieBackgroundExpScale = -1.0f / a.mieBackgroundScaleHeight;
   g.absorptionExtinction = a.ozoneAbsorption;
   g.groundAlbedo = a.groundAlbedo;
   // Earth's ozone: density rises linearly to a peak at 25 km, then falls
@@ -575,20 +589,20 @@ struct SceneData {
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
-static_assert(offsetof(SceneData, terrain) == 544);
-static_assert(offsetof(SceneData, wind) == 1896);
-static_assert(offsetof(SceneData, previousWind) == 1944);
-static_assert(offsetof(SceneData, weather) == 1992);
-static_assert(offsetof(SceneData, clouds) == 2032);
-static_assert(offsetof(SceneData, farField) == 2192);
-static_assert(offsetof(SceneData, gi) == 2216);
-static_assert(offsetof(SceneData, farShadowTexels) == 2224);
-static_assert(offsetof(SceneData, farShadowMode) == 2296);
-static_assert(offsetof(SceneData, shadowView) == 2304);
-static_assert(offsetof(SceneData, sunShadows) == 2320);
-static_assert(offsetof(SceneData, protoVoxels) == 2608);
-static_assert(offsetof(SceneData, terrainShadowTexels) == 2640);
-static_assert(sizeof(SceneData) == 2688);
+static_assert(offsetof(SceneData, terrain) == 560);
+static_assert(offsetof(SceneData, wind) == 1912);
+static_assert(offsetof(SceneData, previousWind) == 1960);
+static_assert(offsetof(SceneData, weather) == 2008);
+static_assert(offsetof(SceneData, clouds) == 2048);
+static_assert(offsetof(SceneData, farField) == 2208);
+static_assert(offsetof(SceneData, gi) == 2232);
+static_assert(offsetof(SceneData, farShadowTexels) == 2240);
+static_assert(offsetof(SceneData, farShadowMode) == 2312);
+static_assert(offsetof(SceneData, shadowView) == 2320);
+static_assert(offsetof(SceneData, sunShadows) == 2336);
+static_assert(offsetof(SceneData, protoVoxels) == 2624);
+static_assert(offsetof(SceneData, terrainShadowTexels) == 2656);
+static_assert(sizeof(SceneData) == 2704);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
