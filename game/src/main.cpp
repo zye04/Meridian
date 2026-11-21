@@ -259,9 +259,45 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
   // broad-crowned tree (26.6 m, 13 m crown); the forest-grown oak is a
   // 4 m wide pole and the maple 8 m wide, so they stay a minority, and the
   // oak never stands alone. Saplings would take canopy slots (3 m tall).
-  std::vector<std::pair<uint32_t, float>> forest, lone;
+  std::vector<std::pair<uint32_t, float>> forest, lone, saplings;
+  // Megascans Trees cooked from Unreal (docs/assets.md) replace the
+  // Megaplants when present: beech forests with some alder, alder (and the
+  // open-grown beech) alone, both species' saplings under the canopy. Every
+  // cooked variant of a kind (<species>/SM_<pack>_<kind>_NN) takes an equal
+  // share of its species' weight.
+  const auto addUnrealTrees = [&](const char *species, const char *pack, const char *kind,
+                                  float weight, std::vector<std::pair<uint32_t, float>> &into) {
+    std::vector<uint32_t> ids;
+    for (int variant = 1; variant <= 20; ++variant) {
+      char name[96];
+      std::snprintf(name, sizeof(name), "SM_%s_%s_%02d", pack, kind, variant);
+      const std::string path =
+          std::string("source/megascans/") + species + "/" + name + "/" + name + ".gltf";
+      if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
+        const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
+        ids.insert(ids.end(), added.begin(), added.end());
+      }
+    }
+    for (uint32_t id : ids) {
+      into.emplace_back(id, weight / static_cast<float>(ids.size()));
+    }
+  };
+  if (trees) {
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.8f, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.2f, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Field", 0.7f, lone);
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.3f, lone);
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Sapling", 0.5f, saplings);
+    addUnrealTrees("blackalder", "BlackAlder", "Sapling", 0.5f, saplings);
+    if (lone.empty()) {
+      lone = forest;
+    }
+    std::printf("Megascans Trees: %zu forest, %zu lone, %zu sapling prototypes\n", forest.size(),
+                lone.size(), saplings.size());
+  }
+  const bool unrealTrees = !forest.empty();
   const std::vector<std::tuple<const char *, float, float>> megaplants =
-      trees ? std::vector<std::tuple<const char *, float, float>>{
+      trees && !unrealTrees ? std::vector<std::tuple<const char *, float, float>>{
                   {"tree_european_beech_01_a", 0.7f, 0.75f},
                   {"tree_norway_maple_01_a", 0.2f, 0.25f},
                   {"tree_english_oak_forest_01_a", 0.1f, 0.0f}}
@@ -374,6 +410,12 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
                        -kMaskEdge, 0.0f, 0.0f},
                       0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
     layers[0].farField = layers[1].farField = farField;
+  }
+  if (!saplings.empty()) {
+    layers.push_back({12, saplings, 15.0f,
+                      {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold, kMaskEdge,
+                       1.0f / 40.0f, 0.5f},
+                      0.8f, 1.2f, Rotation::Yaw, 0.1f, 150.0f});
   }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).

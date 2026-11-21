@@ -3904,3 +3904,61 @@ Follow-up to "Global illumination" above (`--gi probes`, still default off).
   (probes 1.06, ground 0.29, voxel trees +0.82: per-fragment probe reads
   on voxel quads). The probe trace with `--trees` (far-field march per
   ray) and the per-fragment reads on dense foliage are what is left.
+
+## Megascans Trees (card leaves) from Unreal replace the Megaplants (2026-11-21)
+
+The Megascans Trees packs (Black Alder, European Beech; Fab, Unreal only)
+are what the Chlorophyll frames look like up close: card leaves on an 8K
+atlas, scanned bark, several variants per kind (Forest, Field, Sapling).
+They are exported headless from the user's Unreal project
+(`tools/unreal/export_trees.py`, geometry glTF + the Summer textures as
+PNG), turned into textured glTFs by `tools/unreal/cook_ready.py` and
+cooked with `meridian-cook --tree` (docs/assets.md, "Megascans Trees from
+Unreal": channel layouts, slot order, measured normal convention).
+
+- **No material bake.** Unreal's glTF exporter bakes nothing headless;
+  the MA_Foliage inputs are rebuilt from the textures instead: base
+  colour + Mask R as alpha (alpha test), Mask G roughness, metallic 0,
+  Mask B (translucency) averaged over the leaf texels into the
+  material's diffuse transmission (0.35 x 0.42 for the alder, 0.35 x 0.62
+  for the beech), the normal map as is (it is already OpenGL: measured
+  by the sign of its curl against a known-GL map; flipping it, the first
+  attempt, made bark look melted and lit from below), and Unreal's
+  texture colour adjustments (the beech atlas: brightness 0.9, hue -5
+  degrees, in linear HSV as Unreal applies them), which the PNG exporter
+  leaves out. Impostor slots are dropped: the voxel tier replaces them.
+- **Every variant is a prototype** (main.cpp `addUnrealTrees`, equal
+  shares within a species): forests 80% beech Forest_01-08 + 20% alder
+  Forest_01-09 (17 prototypes), lone trees 70% alder Field_01-05 + 30%
+  beech Field_01 (6), saplings 50/50 beech Sapling_01-04 + alder
+  Sapling_01-06 (10) in a new layer 12 under the canopy (15 m footprint,
+  150 m draw distance, not in the far field). The pick is the placement
+  hash, so it is stable per instance. The Megaplants stay the fallback
+  when no Megascans Trees are cooked.
+- **Voxel tier:** the far-field and prototype-voxel bakes alpha-test the
+  cards (`farfield_bake.comp` confirms a candidate hit only above the
+  material's cutoff; masked BLAS geometry is non-opaque), so distant
+  crowns stay see-through, not solid blobs (forest-edge hill at
+  300-800 m, alder-only capture).
+- **Texture encode cache:** a species' variants share their maps, so
+  the tree cook caches KTX2 encodings by image content in
+  `<species>/.ktx2-cache` (first tree ~90 s, the others ~20 s).
+- **Measured** (Release, 2560x1440, `--aa taa --trees`, GPU ms):
+  Megaplants (same build, Megascans Trees hidden) forest edge 12.43,
+  forest overview 11.54, summit view 8.90; alder only (4.5 m forest
+  footprint) 7.86 / 10.06 / 9.81 (6 m); beech + alder (6 m forest, 15 m
+  saplings) forest edge 18.70 (36.9M triangles; the beech is 48 m tall
+  with 0.1-2M triangles per variant, and its voxels (height / 128 =
+  0.38 m) switch in only at ~500 m). Release startup with the beech
+  ~140 s, 76 s of it building the far field (3.26M level-0 bricks for
+  the beech's 53 m crowns).
+- **Open:** leaves and bark read silvery in backlit and sky-lit views.
+  Not the metallic channel (B is 0; an explicit `metallicFactor` 0 A/B
+  changed the image by 0.0002 MAE) and not the albedo (the alder's leaf
+  texels average sRGB (0.22, 0.26, 0.08), the colour of the reference's
+  crowns). It is specular: our F0 is a fixed 0.04, MA_Foliage's
+  Specular 0.2-0.3 is F0 0.016-0.024, and Unreal's leaves are glossier
+  still (Constant Roughness Leaves 0.2), so the sheen there is held
+  down by the lower F0 and its specular occlusion. Next:
+  `KHR_materials_specular` (specularFactor 0.4-0.6) in model.cpp and
+  mesh.frag; beech triangle budget and far-field build time.

@@ -203,7 +203,12 @@ the summit ridge at ~1.5 km: the open view toward the summit.
 `--trees` brings the trees back; by default they are hidden (no tree
 prototypes loaded, no forest or lone-tree layers, no forest floor in the
 terrain material, no tree models in `--scatter`), until they are textured
-and keep their coverage (`docs/backlog.md`).
+and keep their coverage (`docs/backlog.md`). With `--trees` the Megascans
+Trees cooked from Unreal (`assets/source/megascans/<species>/SM_*`,
+docs/assets.md) are used when present: beech + alder forests, alder +
+beech lone trees, saplings under the canopy (layer 12), every cooked
+variant; startup prints `Megascans Trees: F forest, L lone, S sapling
+prototypes`. Without them, the Megaplants.
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast
@@ -250,7 +255,7 @@ by `Prototype::tint`), clover: ring ~6.8M slots,
 and ~59 s to Debug startup on the first run only: the patterns are cached,
 see Gotchas), plus forests and lone trees with `--trees`
 (~2.65M instances), which loads the rocks (and with `--trees` the
-Megaplants trees) as prototypes: Debug startup
+trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
 textures, ~8.7 s of it); use it for captures that
@@ -468,9 +473,10 @@ tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
                            texture_tree.py: Megascans leaf atlas +
                            bark onto an untextured Megaplants glTF,
                            the game prefers `<tree>_tex` cooks)
-tools/unreal/              export_trees.py (Unreal editor Python:
-                           Megaplants inventory + glTF/PNG export,
-                           docs/assets.md)
+tools/unreal/              export_trees.py (Unreal editor Python, headless:
+                           inventory + glTF/PNG export, docs/assets.md),
+                           cook_ready.py (export -> textured glTFs for
+                           meridian-cook --tree)
 tests/                     doctest unit tests
 docs/                      see "Docs" at the top
 ```
