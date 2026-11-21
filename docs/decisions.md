@@ -317,7 +317,6 @@ sources. Check here before re-researching a topic.
   - https://zeux.io/2023/01/12/approximate-projected-bounds/
   - https://vkguide.dev/docs/gpudriven/compute_culling/
 
-
 ## Virtualized geometry (GPU-driven phase 3, 2026-11-19)
 
 Design: `docs/superpowers/specs/2026-11-19-virtualized-geometry-design.md`
@@ -426,7 +425,6 @@ foliage that survives simplification).
   tile's own min..max beats float32 on size (113 MB vs 225 MB) with
   sub-2-cm error. Outside the grid, indices mirror like Vulkan
   MIRRORED_REPEAT on CPU and GPU alike.
-
 
 ## Terrain rendering: CDLOD (2026-11-19)
 
@@ -3091,7 +3089,6 @@ Spec `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`.
   frame 11.6 / 10.2 ms at the ground view, 14.5 / 12.6 at low sun, 10.1 /
   10.4 at sunset; a full re-render of the 5 cascades on the first frame.
 
-
 ## Alpha-test coverage mips keep clear of the threshold (2026-11-20)
 
 `coverageMip` (tools/cook/ktx2.cpp, every alpha-tested texture the cook
@@ -3554,3 +3551,57 @@ two full 8-phase jitter cycles.
   static dither on shadowed model sides (it would swim in motion).
   `--effects contact=0` measures the pass's whole share (2.32 -> 1.77 at
   weight 0.1); the fix is the wavefront march in the backlog.
+
+## Terrain shadow-height map (2026-11-21)
+
+- **Problem:** every terrain and object fragment marched the height
+  pyramid toward the sun (`terrainOccludes`); at a terrain-filled view that
+  was ~1.3 ms of the early scene pass, more at a low sun.
+- **Choice:** a shadow-height (horizon) map. For a sun of horizontal
+  direction d and elevation E, a point p is lit by the terrain iff p.y >=
+  h(p.xz), h(x) = max over t > 0 of H(x + t d) - t tanE. Along a line toward
+  the sun with samples a_k this is max_{a_k < a}(H_k + a_k tanE) - a tanE:
+  a prefix max, so one line sweep gives every texel on it (Max 1988 horizon
+  mapping keeps a horizon angle per texel and direction; with one sun
+  direction it collapses to one height; Timonen & Westerholm 2010 sweep
+  height fields along lines the same way). Built by terrain_shadow.comp:
+  2048^2 RG32F texels of 4 m (8.2 km) in a sun-aligned window texel-snapped
+  around the camera; one 256-thread workgroup per line, exact bilinear
+  heights every 2 m in the window and every 4 m upstream as far as the
+  terrain's relief / tanE (at most kShadowRayLength) into shared memory,
+  per-thread chunk maxima, a Hillis-Steele prefix max over the threads,
+  then a second chunk walk writing every second window sample (strictly
+  upstream samples only, so a receiver never shadows itself). Each texel
+  stores h and the winning occluder's distance t*. Receivers
+  (`terrainShadowVisibility`, lighting.glsl) fetch it bilinearly and return
+  clamp((y - h) / max(w, 0.05) + 0.5, 0, 1), w = t* 2 tan(sun radius) /
+  cos^2 E (the occluder line's height change across the sun disk): a
+  deterministic penumbra instead of the per-pixel disk-sampled march.
+  `traceSunVisibility` now returns objects x terrain. Outside the window or
+  with the sun under 1 degree the march stays.
+- **Rebuild:** the build costs 0.43 ms at the default sun and 0.79-0.91 ms
+  at 2.9 and 1.5 degrees (longer upstream lines), over the 0.15 ms budget
+  for every frame, so it rebuilds only when the sun turns more than 0.02
+  degrees or the camera moves more than 1 km from the window centre (like
+  the far shadow map). A capture with an always-rebuilt map and one with the
+  gated map match exactly (diff 0.0000).
+- **Measured** (Release, 2560x1440, `--aa taa`, rt shadows; before ->
+  after, terrain shadow pass 0 in steady state): terrain-filled `1119 1420
+  -431 -1.55 -0.6`: GPU 5.92 -> 5.48 ms, scene early 4.14 -> 3.70 (diff
+  0.056/255); start view: 5.80 -> 5.59, 2.88 -> 2.79 (0.011); sunset `--sun
+  0.9 0.05 -0.4` (2.9 deg): 7.70 -> 7.31, 5.49 -> 5.00 (0.055); same at 1.5
+  deg (`--sun 0.9 0.026 -0.4`): 7.96 -> 7.34, 5.60 -> 5.14 (0.041). Ridge
+  shadows land in the same places, no acne or banding. Terrain sun
+  visibility still costs ~0.8 ms of the terrain-filled view's scene early
+  (all of it off: 2.88): the TLAS query for object shadows on the terrain
+  and the receiver's heightfield lift (`terrainHeight`,
+  `terrainCellAbovePlane`) remain; the map fetch alone is ~0.3 ms.
+- **Not yet:** cluster_cull.comp's per-cluster march, voxel_bricks.comp and
+  gi_probes.comp still march (they can read the same map); below 1 degree
+  the march remains (backlog).
+- Sources:
+  - N. Max, "Horizon mapping: shadows for bump-mapped surfaces", The
+    Visual Computer 4(2), 1988
+  - V. Timonen, J. Westerholm, "Scalable Height Field Self-Shadowing",
+    Computer Graphics Forum 29(2) (Eurographics 2010)
+  - Parallel prefix scan: Hillis & Steele 1986; Blelloch 1990

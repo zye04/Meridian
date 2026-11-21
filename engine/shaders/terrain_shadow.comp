@@ -1,0 +1,106 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "terrain.glsl"
+
+// The terrain shadow-height map (horizon mapping, Max 1988): per texel the
+// height above which the heightfield lets the sun through. Along a line
+// toward the sun, h(a) = max over upstream samples k of H(k) - (a - a_k)
+// tanE, i.e. max(H(k) + a_k tanE) - a tanE: a running max, scanned in
+// parallel. One workgroup per line (a row of the map); the line runs from
+// the farthest occluder that can still matter upstream of the window, every
+// kUpstreamStep m, then through the window every half texel (the
+// heightfield's spacing), storing every second sample.
+
+layout(local_size_x = 256) in;
+
+layout(buffer_reference, std430) writeonly buffer TerrainShadowOut {
+    vec2 texels[];
+};
+
+// Must match TerrainShadowConstants in gpu_types.h.
+layout(push_constant) uniform TerrainShadowConstants {
+    SceneBuffer scene;
+    TerrainShadowOut texels;
+    vec2 origin;
+    vec2 along;
+    vec2 across;
+    float texel;
+    uint size;
+    float tanE;
+    float maxLength;
+} build;
+
+const float kUpstreamStep = 4.0;
+const uint kMaxUpstream = 5120u;
+// kMaxUpstream + 2 * the largest map size (2048).
+const uint kMaxSamples = kMaxUpstream + 4096u;
+const uint kThreads = 256u;
+
+shared float heights[kMaxSamples];
+shared float prefixG[kThreads];
+shared uint prefixK[kThreads];
+
+void main() {
+    Terrain t = build.scene.terrain;
+    uint line = gl_WorkGroupID.x;
+    uint thread = gl_LocalInvocationID.x;
+    float spacing = 0.5 * build.texel;
+    // Occluders farther than the terrain's relief over tanE stay below any
+    // receiver.
+    float relief = terrainCellMax(build.scene, t.pyramidLevels, uvec2(0u)) - t.minHeight;
+    float reach = min(build.maxLength, relief / max(build.tanE, 1e-6));
+    uint upstream = clamp(uint(ceil(reach / kUpstreamStep)), 1u, kMaxUpstream);
+    uint count = upstream + 2u * build.size;
+    uint chunk = (count + kThreads - 1u) / kThreads;
+    uint first = min(thread * chunk, count);
+    uint last = min(first + chunk, count);
+    vec2 lineOrigin = build.origin + (float(line) + 0.5) * build.texel * build.across;
+
+    float bestG = -1e30;
+    uint bestK = 0xFFFFFFFFu;
+    for (uint k = first; k < last; ++k) {
+        float a = k < upstream ? -float(upstream - k) * kUpstreamStep : float(k - upstream) * spacing;
+        float h = terrainHeight(t, lineOrigin + a * build.along);
+        heights[k] = h;
+        float g = h + a * build.tanE;
+        if (g > bestG) {
+            bestG = g;
+            bestK = k;
+        }
+    }
+    prefixG[thread] = bestG;
+    prefixK[thread] = bestK;
+    barrier();
+    // Inclusive prefix max over the threads' chunks (Hillis-Steele).
+    for (uint offset = 1u; offset < kThreads; offset <<= 1u) {
+        float g = prefixG[thread];
+        uint k = prefixK[thread];
+        if (thread >= offset && prefixG[thread - offset] > g) {
+            g = prefixG[thread - offset];
+            k = prefixK[thread - offset];
+        }
+        barrier();
+        prefixG[thread] = g;
+        prefixK[thread] = k;
+        barrier();
+    }
+    bestG = thread > 0u ? prefixG[thread - 1u] : -1e30;
+    bestK = thread > 0u ? prefixK[thread - 1u] : 0xFFFFFFFFu;
+    for (uint k = first; k < last; ++k) {
+        float a = k < upstream ? -float(upstream - k) * kUpstreamStep : float(k - upstream) * spacing;
+        if (k > upstream && ((k - upstream) & 1u) == 1u) {
+            float aBest = bestK < upstream ? -float(upstream - bestK) * kUpstreamStep
+                                           : float(bestK - upstream) * spacing;
+            float occluder = a - aBest;
+            build.texels.texels[line * build.size + (k - upstream) / 2u] =
+                vec2(heights[bestK] - occluder * build.tanE, occluder);
+        }
+        float g = heights[k] + a * build.tanE;
+        if (g > bestG) {
+            bestG = g;
+            bestK = k;
+        }
+    }
+}

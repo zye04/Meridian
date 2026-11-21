@@ -853,6 +853,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.giMode = impl_->giMode == GiMode::Off ? 0 : 1;
   scene.gi = impl_->giBuffer.address;
   impl_->updateFarShadow(lighting.sunDirection, scene);
+  impl_->updateTerrainShadow(lighting.sunDirection, camera.position, frame.sceneBuffer.address,
+                             scene);
   scene.protoVoxels = impl_->protoVoxelInfo.address;
   scene.voxelInstances = impl_->voxelInstanceList.address;
   scene.drawCounters = impl_->drawCounters.address;
@@ -946,6 +948,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("cull clusters");
   impl_->recordFarShadow(cmd);
   endPass("far shadow");
+  impl_->recordTerrainShadow(cmd);
+  endPass("terrain shadow");
 
   // --- Atmosphere: LUTs for the sky, sun color and haze.
 

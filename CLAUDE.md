@@ -175,7 +175,7 @@ voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
 voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), atmosphere, weather, gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -361,6 +361,8 @@ engine/src/render/         renderer internals:
                            upload
   renderer_terrain.cpp     setTerrain (height image, normal map, pyramid),
                            CDLOD selection dispatches, terrain draw
+  renderer_terrain_shadow.cpp  the terrain shadow-height map: window,
+                           rebuild rule, terrain_shadow.comp dispatch
   renderer_placement.cpp   setPlacement: count, scan, write at load (two
                            submits), Debug check against evaluatePoint;
                            buildPlacedTlas: prototype BLAS + PrototypeInfo,
@@ -398,7 +400,8 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            quadtree, morph), terrain_detail.glsl (near
                            detail noise, also lifts streamed instances),
                            terrain_select.comp, terrain.mesh, terrain.frag
-                           (mesh.frag with TERRAIN), terrain_normals.comp.
+                           (mesh.frag with TERRAIN), terrain_normals.comp,
+                           terrain_shadow.comp (the shadow-height map).
                            placement.glsl: integer keep/reject twin of
                            placement.cpp; placement.comp
                            (PLACEMENT_COUNT / PLACEMENT_WRITE variants)
@@ -522,7 +525,17 @@ last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
 single/double-sided; a masked cluster of radius <= 1 m also marches the
 terrain toward the sun once and packs the result into its entry's top 8
-bits, which mesh.frag uses instead of its per-fragment march) -> atmosphere LUTs
+bits, which mesh.frag uses instead of its per-fragment march) -> terrain
+shadow (terrain_shadow.comp, renderer_terrain_shadow.cpp, only when the sun
+is above 1 degree and has turned more than 0.02 degrees, the camera moved
+more than 1 km from the window centre, or on the first frame: the
+shadow-height map, 2048^2 RG32F texels of 4 m in a sun-aligned window
+around the camera, texel-snapped in the sun's frame; one 256-thread
+workgroup per line toward the sun, bilinear heights every 2 m through the
+window and every 4 m upstream as far as the terrain's relief over tan(sun
+elevation) (at most 20 km), a parallel prefix max of H + a tanE storing
+per texel the height h above which the sun gets through and the distance
+to the occluder) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
 sky-view, aerial perspective every frame) -> weather (weather_map.comp:
 512^2 over 60 km around the camera, texel-snapped; then the cloud shadow
@@ -728,8 +741,12 @@ barriers account for that.
   span. Levels 0-1 (finer than the data) add up to 0.3 m of detail noise.
   Nodes are drawn near to far (the selected list read backwards) so
   early-Z rejects hidden terrain. The terrain is not in the TLAS: sun
-  shadows march its height pyramid (`terrainOccludes` in terrain.glsl,
-  every surface) besides the TLAS query; terrain fragments start the ray
+  shadows read the shadow-height map (`terrainShadowVisibility` in
+  lighting.glsl: one bilinear fetch, soft over the sun disk's penumbra at
+  the occluder's distance) where it serves (sun above 1 degree, receiver
+  inside the window), else march its height pyramid (`terrainOccludes` in
+  terrain.glsl, every surface; cluster_cull.comp, voxel_bricks.comp and
+  gi_probes.comp always march) besides the TLAS query; terrain fragments start the ray
   on the bilinear heightfield, the march also above their cell's corners
   over the shading normal's plane (`terrainCellAbovePlane`, so a cell
   never shadows itself where the smooth normal faces the sun). Pyramid

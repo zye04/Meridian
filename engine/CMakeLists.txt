@@ -132,6 +132,7 @@ add_shader(farfield_splat.comp farfield_mask.comp FARFIELD_MASK)
 add_shader(farfield_splat.comp farfield_pack.comp FARFIELD_PACK)
 add_shader(farfield_check.comp farfield_check.comp)
 add_shader(farfield_shadow.comp farfield_shadow.comp)
+add_shader(terrain_shadow.comp terrain_shadow.comp)
 
 get_property(SHADER_OUTPUTS GLOBAL PROPERTY MERIDIAN_SHADERS)
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
@@ -156,6 +157,7 @@ add_library(meridian STATIC
     src/render/renderer_resources.cpp
     src/render/renderer_setup.cpp
     src/render/renderer_terrain.cpp
+    src/render/renderer_terrain_shadow.cpp
     src/render/taa_upscaler.cpp
     src/render/vulkan_util.cpp
     src/gi.cpp

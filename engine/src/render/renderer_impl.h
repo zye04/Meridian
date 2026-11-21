@@ -323,6 +323,15 @@ struct Renderer::Impl {
   bool farShadowReady = false;
   VkPipelineLayout farShadowLayout = VK_NULL_HANDLE;
   VkPipeline farShadowPipeline = VK_NULL_HANDLE;
+  // The terrain shadow-height map (renderer_terrain_shadow.cpp) and the
+  // sun and window it was last built for.
+  Buffer terrainShadowMap;
+  VkPipelineLayout terrainShadowLayout = VK_NULL_HANDLE;
+  VkPipeline terrainShadowPipeline = VK_NULL_HANDLE;
+  TerrainShadowConstants terrainShadowBuild;
+  Vec3 terrainShadowSun{};
+  bool terrainShadowValid = false;
+  bool terrainShadowPending = false;
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
   // The mid tier (protovoxel.h): the prototypes' brick pools and the voxel
   // instance and brick lists cull.comp and voxel_bricks.comp append.
@@ -551,6 +560,10 @@ struct Renderer::Impl {
   void updateFarShadow(Vec3 sun, SceneData &scene);
   void recordFarShadow(VkCommandBuffer cmd);
   void checkFarShadow(const FarFieldCpu &cpu);
+  void updateTerrainShadow(Vec3 sun, Vec3 cameraPosition, VkDeviceAddress sceneAddress,
+                           SceneData &scene);
+  void recordTerrainShadow(VkCommandBuffer cmd);
+  void destroyTerrainShadow();
   // Far cells as their voxels (voxel.mesh/frag), in the early scene pass.
   void drawFarField(VkCommandBuffer cmd);
   void uploadInstances(VkCommandBuffer cmd, FrameData &frame);

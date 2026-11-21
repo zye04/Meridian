@@ -1395,6 +1395,7 @@ Renderer::~Renderer() {
   impl_->destroySunShadows();
   impl_->destroyClouds();
   impl_->destroyGi();
+  impl_->destroyTerrainShadow();
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->gradeLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyPipeline, nullptr);

@@ -481,6 +481,10 @@ layout(buffer_reference) buffer FarFieldBuffer;
 // Defined in gi.glsl.
 layout(buffer_reference) buffer GiBuffer;
 
+layout(buffer_reference, std430) readonly buffer TerrainShadowBuffer {
+    vec2 texels[];
+};
+
 // The far shadow map: two 16-bit depths per word (farfield.h).
 layout(buffer_reference, std430) readonly buffer FarShadowTexelBuffer {
     uint words[];
@@ -630,7 +634,19 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     VoxelInstanceBuffer voxelInstances;
     VoxelCounterBuffer drawCounters;
     uint voxelTrees;
-    uint pad8;
+    // The terrain shadow-height map (terrain_shadow.comp; must match
+    // SceneData): whether it serves, texels (height, occluder distance), the
+    // window's origin (x, z), axes away from the sun and across it, texel
+    // meters, size, the penumbra width per meter of occluder distance.
+    uint terrainShadowMode;
+    TerrainShadowBuffer terrainShadowTexels;
+    vec2 terrainShadowOrigin;
+    vec2 terrainShadowAlong;
+    vec2 terrainShadowAcross;
+    float terrainShadowTexel;
+    uint terrainShadowSize;
+    float terrainShadowPenumbra;
+    uint pad9;
 };
 
 // Largest axis scale of a transform: a conservative bound under

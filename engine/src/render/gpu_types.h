@@ -555,7 +555,20 @@ struct SceneData {
   VkDeviceAddress voxelInstances = 0;
   VkDeviceAddress drawCounters = 0;
   uint32_t voxelTrees = 0;
-  uint32_t pad8 = 0;
+  // The terrain shadow-height map (renderer_terrain_shadow.cpp): whether it
+  // serves, its texels (RG32F: the height the terrain lets the sun through
+  // above, the distance to that occluder), the window's origin (x, z), unit
+  // axes away from the sun and across it, texel meters, size (square) and
+  // the penumbra width per meter of occluder distance.
+  uint32_t terrainShadowMode = 0;
+  VkDeviceAddress terrainShadowTexels = 0;
+  float terrainShadowOrigin[2] = {};
+  float terrainShadowAlong[2] = {};
+  float terrainShadowAcross[2] = {};
+  float terrainShadowTexel = 0.0f;
+  uint32_t terrainShadowSize = 0;
+  float terrainShadowPenumbra = 0.0f;
+  uint32_t pad9 = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -571,7 +584,8 @@ static_assert(offsetof(SceneData, farShadowMode) == 2296);
 static_assert(offsetof(SceneData, shadowView) == 2304);
 static_assert(offsetof(SceneData, sunShadows) == 2320);
 static_assert(offsetof(SceneData, protoVoxels) == 2608);
-static_assert(sizeof(SceneData) == 2640);
+static_assert(offsetof(SceneData, terrainShadowTexels) == 2640);
+static_assert(sizeof(SceneData) == 2688);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -926,6 +940,21 @@ struct FarShadowConstants {
   uint32_t pad = 0;
 };
 static_assert(sizeof(FarShadowConstants) == 88);
+
+// Must match the push constants in terrain_shadow.comp: one workgroup per
+// line of the map.
+struct TerrainShadowConstants {
+  VkDeviceAddress scene = 0;
+  VkDeviceAddress texels = 0;
+  float origin[2] = {};
+  float along[2] = {};
+  float across[2] = {};
+  float texel = 0.0f;
+  uint32_t size = 0;
+  float tanE = 0.0f;
+  float maxLength = 0.0f;
+};
+static_assert(sizeof(TerrainShadowConstants) == 56);
 
 // Must match the push constants in farfield_check.comp (Debug).
 struct FarCheckConstants {
