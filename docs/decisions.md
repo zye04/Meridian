@@ -3406,3 +3406,33 @@ with two rays a lone tree's trunk went black on its shadow side. Forest
 edge image L mean 0.53 -> 0.50 at the same exposure (EV100 10.81),
 dark pixels (L 0.15-0.3) 11% -> 13%; the summit view's lone tree keeps a
 brown shadow side.
+
+## TAA: sharpen in proportion to motion (2026-11-21)
+
+Native TAA loses 7-10% of its Laplacian in motion (forward 5 m/s 0.93 of
+the still, pitch 0.90): each frame resamples the history at a fractional
+offset (Catmull-Rom), and the blur compounds. A still frame has none of
+that loss, and sharpening it only amplifies frame-to-frame noise (TAA v2:
+CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
+
+- **sharpen.comp scales CAS by the pixel's motion**: strength
+  `0.25 * clamp(motion px / 0.5, 0, 1)` of CAS's weakest lobe (-1/8);
+  a still pixel is copied, as before. UE4's TAA answers motion blur by
+  shortening the history with speed (TAA v2 already does, up to 0.3);
+  this compensates the output instead, so nothing feeds back.
+- Release 2560x1440, rt shadows, gates (before -> after): Laplacian fwd5
+  ground 0.101 -> 0.108 (motion/still 0.93 -> 0.99), side5 0.101 ->
+  0.108 (0.92 -> 0.99), beech fwd5 0.221 -> 0.229, pitch 0.098 -> 0.103
+  (0.90 -> 0.95); still shimmer 2.62 / 1.38 unchanged; SSIM fwd5 0.954
+  unchanged; `aa` 0.18 -> 0.20 ms. Strength 1 (full weakest lobe at 2
+  px) overshoots: motion/still 1.35 and SSIM 0.945; 0.2 gives 0.98.
+- Tried and dropped: depth-dilated motion (nearest depth in 3x3, Karis
+  2014) lowered forward / sideways sharpness to 0.097 / 0.096 (the
+  neighbour's motion misregisters continuous ground); restricted to
+  silhouettes (10% depth step) still 0.0995 / 0.099, since grazing far
+  terrain reads as a silhouette. No gate showed an edge benefit.
+- SSIM fwd5 (0.954) is not an exposure artefact: the forward run ends at
+  EV 13.81 vs the still's 13.92 (+8% brightness), but matching the means
+  only lifts it to 0.955. It is the grass texture's fine detail.
+- Sources: https://github.com/GPUOpen-Effects/FidelityFX-CAS ; Yang et
+  al. 2020, "A Survey of Temporal Antialiasing Techniques" (EG STAR).

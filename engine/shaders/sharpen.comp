@@ -22,15 +22,20 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-// Must match TaaUpscaler (taa_upscaler.cpp): the same set as taa.comp,
-// which leaves bindings 0-2 unused here.
+// Must match TaaUpscaler (taa_upscaler.cpp): the same set as taa.comp.
+layout(set = 0, binding = 1) uniform sampler2D motion;
 layout(set = 0, binding = 3, rgba16f) uniform readonly image2D history;
 layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D outputColor;
 
-// 0 = none (a copy), else CAS's 0..1 (peak lobe -1/8 to -1/5). Off: even
-// the weakest CAS lowers the forward-motion SSIM gate below 0.98 and raises
-// still-camera shimmer by 0.6-0.9/255 (docs/decisions.md, TAA v2).
+// CAS's 0..1 (peak lobe -1/8 to -1/5), applied in proportion to the
+// pixel's motion: a still image is left alone (sharpening a still frame
+// only amplifies its frame-to-frame noise, decisions.md TAA v2), while a
+// moving one gets back what the history's resampling blurred.
 const float kSharpness = 0.0;
+// Motion (render pixels per frame) that gets the full strength, and that
+// strength as a fraction of CAS's weakest lobe.
+const float kMotionPixels = 0.5;
+const float kMotionStrength = 0.25;
 
 ivec2 size;
 
@@ -52,7 +57,11 @@ void main() {
     if (any(greaterThanEqual(pixel, size))) {
         return;
     }
-    if (kSharpness == 0.0) {
+    ivec2 renderSize = textureSize(motion, 0);
+    ivec2 texel = ivec2((vec2(pixel) + 0.5) * vec2(renderSize) / vec2(size));
+    float moving = length(texelFetch(motion, texel, 0).xy * vec2(renderSize));
+    float strength = kMotionStrength * clamp(moving / kMotionPixels, 0.0, 1.0);
+    if (strength == 0.0) {
         imageStore(outputColor, pixel, imageLoad(history, pixel));
         return;
     }
@@ -80,7 +89,7 @@ void main() {
     vec3 amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, vec3(1e-6)), 0.0, 1.0));
     float peak = -1.0 / mix(8.0, 5.0, kSharpness);
     // Green's weight for all channels, as CAS does by default.
-    float w = amp.g * peak;
+    float w = amp.g * peak * strength;
     vec3 result = clamp((b * w + d * w + f * w + h * w + e) / (1.0 + 4.0 * w), 0.0, 1.0);
     // Keep the result strictly below 1, where the inverse tonemap is finite.
     result = min(result, vec3(1.0 - 1.0 / 65536.0));

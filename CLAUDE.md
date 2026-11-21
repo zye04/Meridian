@@ -567,7 +567,7 @@ display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
 Ray Reconstruction) or `TaaUpscaler`: taa.comp, which writes
 its resolve to its own history (pre-exposed, so rescaled by
 `ExposureState` exposure / previousExposure), then sharpen.comp, which
-writes `output` from it (CAS; a copy at sharpness 0, today's setting),
+writes `output` from it (CAS scaled by each pixel's motion: a copy where still, a quarter of CAS's weakest lobe from 0.5 px/frame),
 both inside the `aa` pass)
 -> bloom (bloom.comp, glare: 13-tap downsamples of `output` into a
 half-display RGBA16F mip chain down to ~1/128, tent upsamples mixing each
