@@ -236,6 +236,24 @@ mid-distance crowns (G1).
   E; clouds: higher-res or better-reconstructed march instead of a long
   history).
 
+### G20. Cloud shadows move in blocky steps, not smoothly
+- Evidence: user report 2026-11-21 evening: "The clouds shadow also
+  moves in a very blocky/spawny way, not like the cloud shadow we see in
+  real life that feel and look like a smooth movement of the shadow."
+- Likely (from the frame description in CLAUDE.md): the Beer shadow map is
+  1024^2 over 30 km (~29 m texels), texel-snapped in the sun's frame, and
+  refreshed every other row per frame (alternating) once a full map
+  exists, then a 5x5 bilateral blur. Shadow edges therefore advance in
+  ~29 m texel steps and half the rows lag a frame (interlaced steps);
+  the coverage-based fallback beyond ~13.8 km adds a second, coarser look.
+- Direction: sample the map with a sub-texel wind offset (shift the
+  lookup by the wind displacement since the map's build, so edges glide),
+  refresh the whole map per frame or temporally interpolate between two
+  builds, higher resolution near the camera (a second, finer cascade), and
+  a smooth (bicubic) lookup. Gate: a ground capture sequence with clouds
+  drifting at `--time-scale 1`: shadow edge position vs time must be
+  smooth (no steps), plus a cost check of the weather pass.
+
 ## Order proposed for the next session
 
 1. G6 (in flight) and G7's diagnosis: cheap, they distort every judgment.
