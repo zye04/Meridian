@@ -14,6 +14,7 @@ Weekly usage was exhausted (~96%); it resets **Tuesday 2026-11-24
 
 ## Ready to run after the reset (in this order)
 
+0. **G19 (#22) first:** motion smear/jitter on clouds, trees, textures (the user's top complaint); measure with a moving camera, then fix.
 1. Re-run the parity route on the Megascans Trees and the 70 deg FOV:
    `--benchmark 60 out.csv --route tools/routes/parity.route --trees`,
    `python3 -I tools/bench-route.py` (baseline in decisions.md predates
