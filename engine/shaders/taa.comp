@@ -22,9 +22,9 @@ layout(push_constant) uniform TaaConstants {
     uint historyValid;
 } taa;
 
-// Current-frame weight when still; motion raises it toward the maximum
+// (see main). Values: docs/decisions.md (TAA v2, and 1/16 when still).
 // (see main). Values and their sweep: docs/decisions.md (TAA v2).
-const float kCurrentWeight = 0.1;
+const float kCurrentWeight = 0.0625;
 const float kMaxCurrentWeight = 0.3;
 // Motion (render pixels per frame) that reaches the maximum.
 const float kMotionPixels = 0.25;

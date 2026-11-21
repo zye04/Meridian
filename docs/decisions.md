@@ -3527,3 +3527,27 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   - https://www.youtube.com/watch?v=VC_NUxbeA0E (Chlorophyll Engine)
   - Loubet and Neyret 2017, https://hal.archives-ouvertes.fr/hal-01468817v1
     (mean chord and projected area of volume LoDs)
+
+## TAA: a longer history when still (2026-11-21)
+
+At native 1440p the meadow shimmers with the camera still: alpha-tested
+grass blades thinner than a pixel flip coverage with the jitter, and the
+contact shadows' per-frame jitter flips their binary hit. With a
+current weight of 0.1 the history leaves ~23% of a per-frame flip
+visible (noise std ~ sqrt(a / (2 - a))); 1/16 leaves ~18% and averages
+two full 8-phase jitter cycles.
+
+- `kCurrentWeight` 0.1 -> 1/16 (still pixels only: motion still raises
+  it toward 0.3, and the variance clip handles disocclusion).
+- Grass view `1119 1355.9 -431 -1.55 -0.1` (placement on, frames 120 vs
+  121, /255): near 2.32 -> 1.63, mid 1.01 -> 0.73, whole frame 1.13 ->
+  0.81. Motion gates (same build otherwise): fwd5 0.108 -> 0.108, side5
+  0.107 -> 0.106, pitch 0.103 -> 0.103, SSIM fwd5 0.973 -> 0.972; beech
+  crown / shadow shimmer 2.01 / 0.97 (2.62 / 1.38 before the textured
+  beech and the exposure change landed, so not a clean A/B). No ghost at
+  the marble wall's disoccluded edge strafing at 5 m/s.
+- Tried and dropped: a contact-shadow jitter fixed in time (IGN of frame
+  0) took the near grass shimmer only 1.63 -> 1.52 and left a visible
+  static dither on shadowed model sides (it would swim in motion).
+  `--effects contact=0` measures the pass's whole share (2.32 -> 1.77 at
+  weight 0.1); the fix is the wavefront march in the backlog.
