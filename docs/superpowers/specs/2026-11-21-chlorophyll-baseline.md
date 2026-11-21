@@ -9,8 +9,9 @@ audit (`2026-11-21-look-gap-audit.md`, G1-G11).
 ## 1. What we know about CE, graded
 
 Grades: **S** = stated by the author (X post, video description; link or
-quote; his YouTube replies are collected in
-`../research/2026-11-21-chlorophyll-youtube-replies.md`), **P** = second-hand (press paraphrase of his posts, not read at the
+quote; his replies are collected in
+`../research/2026-11-21-chlorophyll-youtube-replies.md` and
+`../research/2026-11-21-chlorophyll-x-replies.md`), **P** = second-hand (press paraphrase of his posts, not read at the
 source), **I** = our inference from his frames (Section 2).
 
 | # | Claim | Grade | Source |
@@ -26,12 +27,12 @@ source), **I** = our inference from his frames (Section 2).
 | F9 | 1440p, RTX 3080: ~130 fps average uncapped, ~200 aerial, ~80 dense forest; RTX 3070 laptop ~60 fps; min. RTX 2060 / RX 6400. "No DLSS 5" means no generative filter, not no upscaler/AA (see F16) | S | YouTube pinned comment + replies |
 | F10 | First showcase: ~3M trees, "1M instances x 4M tris" high-poly vegetation; later test 10M trees over 15 km² | S / P | X post (2113305054639784159), profile snippet |
 | F11 | Hand-crafted engine, ~7-8 months of work | S / P | X post; shazoo |
-| F12 | target-meadow frame: 60 fps (vsync), CPU 0.96 ms, GPU 7.67 ms | S (his overlay) | target-meadow.png |
+| F12 | target-meadow frame: 60 fps (vsync), CPU 0.96 ms, GPU 7.67 ms; aerial views ~5 ms GPU; never below ~90 fps with GI on, ~120 average (RTX 3080) | S (his overlay) / S | target-meadow.png; X replies, Oct 22 and Nov 2 |
 | F13 | Rivers, cliffs, hiking paths WIP (meshes / terrain splats) | S | video description |
 | F14 | Earlier Godot 4.4 forest demo (2025-08), plausibly his: Houdini heightmap, colour map, grass-density map; Houdini points by slope + curvature | P (authorship unconfirmed) | 80.lv |
 | F15 | D3D12 only (Vulkan maybe later); C++ engine, luau scripting; CPU mostly idle | S | YouTube replies |
 | F16 | AA: DLSS/FSR guidance "only gets you so far"; his fixes: a lower mip bias on alpha-tested grass and a motion-based "smear mask" that sharpens selectively; reactive masks didn't help; alpha grass still smears a little, trees don't | S | YouTube reply |
-| F17 | Visibility-buffer deferred path (his answer to foliage overdraw); trees and bushes fully triangles or voxels, only grass and small ground cover alpha tested; no A2C | S | YouTube replies |
+| F17 | Visibility-buffer deferred path (his answer to foliage overdraw): most culling and all shading in compute; only the raster into the visibility buffer, output and a few effects on the graphics pipeline; mesh shaders (not compute emulation). Trees and bushes fully triangles or voxels, only grass and small ground cover alpha tested; no A2C. "Virtualize a lot" to keep a semi-constant workload | S | YouTube replies; X replies, Oct 22, Nov 2, Dec 15 2025 |
 | F18 | Virtual textures on the terrain | S | YouTube reply |
 | F19 | Shadows semi-static (VSM-like) plus a small dynamic map around the player for animated trees and characters; far animated trees get contact shadows only | S | YouTube reply |
 | F20 | Tonemap AgX with contrast control; BRDF Lambert + GGX, EON for some materials (Burley made no measurable difference for foliage and bark); models fitted to measured data for grass (terrain material and meshes) and canopy | S | YouTube reply |
@@ -40,8 +41,12 @@ source), **I** = our inference from his frames (Section 2).
 | F23 | Distant grass goes through the same voxel path as trees; the terrain fakes grass shading (normals, SSS, BRDF) further out, transition visible on steep hills or flying | S | YouTube reply |
 | F24 | Forest layout: ~2 m spacing between trees (walkability), size gradient skirt to interior; placement logic being ported from Houdini to an in-engine runtime library | S | YouTube replies |
 | F25 | Water: planar reflections + SSR; cliffs unsolved (considering a virtual runtime renderer) | S | YouTube replies |
+| F26 | Grass and small ground cover are left out of the shadow map pass; contact (screen-space) shadows alone shadow them ("not really worth the cost"; same in his Godot project) | S | X replies, Oct 29 and Mar 11 |
+| F27 | The forest is procedural, the vegetation only partly; a procedural tree simulation is in progress (trunk geometry unfinished). Godot era: assets from an asset pack, Houdini splat maps, grass-type masks and a point cloud for larger objects (terrain simulations + Labs biome tools) | S | X replies, Oct 23 and Mar 11 |
+| F28 | A comparable Unreal scene (Quixel vegetation, Nanite voxels) ran under 60 fps on his 3080, close views ~40, Lumen temporally unstable and noisy | S | X reply, Nov 3 |
 
-Unknown (not found anywhere): AO, wind, asset sources, exposure, GI
+Unknown (not found anywhere): AA method (DLSS, FSR or his own TAA; F16
+names their guidance only), AO, wind, current asset sources, exposure, GI
 details, per-pass costs, the smear mask's exact construction.
 Best source for these: his X replies tab (needs the user's login) or asking
 him directly.
