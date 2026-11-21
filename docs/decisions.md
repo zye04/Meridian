@@ -3947,11 +3947,19 @@ Unreal": channel layouts, slot order, measured normal convention).
   Megaplants (same build, Megascans Trees hidden) forest edge 12.43,
   forest overview 11.54, summit view 8.90; alder only (4.5 m forest
   footprint) 7.86 / 10.06 / 9.81 (6 m); beech + alder (6 m forest, 15 m
-  saplings) forest edge 18.70 (36.9M triangles; the beech is 48 m tall
+  saplings) 18.70 / 14.27 / 12.40 (forest edge 36.9M triangles; the beech is 48 m tall
   with 0.1-2M triangles per variant, and its voxels (height / 128 =
   0.38 m) switch in only at ~500 m). Release startup with the beech
   ~140 s, 76 s of it building the far field (3.26M level-0 bricks for
   the beech's 53 m crowns).
+- **Debug checks** with the beech: two of 37k far-field voxels differed
+  only in their octahedral normal bytes across the fold (the same normal,
+  or 1.8 degrees apart), so the check now compares normals by angle
+  (3 degrees, about 2 steps where the encoding is coarsest); two of 2852
+  far shadow texels put the first 0.5-opacity point a tree later (659 m)
+  where a sun ray's opacity creeps along 0.5 through sparse crowns, so
+  that check allows 1% of such texels, as it already did for hit/empty
+  mismatches.
 - **Open:** leaves and bark read silvery in backlit and sky-lit views.
   Not the metallic channel (B is 0; an explicit `metallicFactor` 0 A/B
   changed the image by 0.0002 MAE) and not the albedo (the alder's leaf

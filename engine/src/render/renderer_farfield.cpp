@@ -48,9 +48,11 @@ std::array<uint32_t, 2> groups2d(uint64_t groups) {
 // within `ring` of each (every instance that can reach it): columns
 // exactly; voxels within a code step (GPU log2 and division round
 // differently) or 16 fixed-point units, and where well resolved, normals
-// within 2 octahedral steps and palette colors within 0.05: a voxel's mean
+// within 3 degrees and palette colors within 0.05: a voxel's mean
 // albedo can sit halfway between two entries (a textured and a flat
 // green differ by 0.03), and the GPU's division rounds it to either.
+// cos 3 degrees: about 2 octahedral steps where the encoding is coarsest.
+constexpr float kNormalTolerance = 0.99863f;
 void checkFarField(const FarFieldGrid &grid, uint32_t ring,
                    const std::vector<FarTemplates> &templates, const std::vector<Vec3> &palette,
                    const std::array<float, kFarLevels> &scales,
@@ -121,8 +123,10 @@ void checkFarField(const FarFieldGrid &grid, uint32_t ring,
                         std::abs(va.extinction - vb.extinction) <= 16.0f * unit;
             if (vb.extinction > 64.0f * unit) {
               const Vec3 albedo = palette[va.albedoIndex] - palette[vb.albedoIndex];
-              same = same && std::abs(byte(a, 1) - byte(b, 1)) <= 2 &&
-                     std::abs(byte(a, 2) - byte(b, 2)) <= 2 && dot(albedo, albedo) < 2.5e-3f;
+              // Normals by angle, not by octahedral byte: across the fold
+              // (z < 0) one normal has several encodings bytes apart.
+              same = same && dot(va.normal, vb.normal) >= kNormalTolerance &&
+                     dot(albedo, albedo) < 2.5e-3f;
             }
             if (!same) {
               report(level, "voxel");
