@@ -3477,8 +3477,10 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   forest edge 21.05 -> 20.53, summit 11.34 -> 11.44 (run-to-run noise;
   0.56 cull early + 0.71 voxel trees against 1.4 ms less scene early), high
   overview 12.55 -> 11.84. With `--shadows rt` (one TLAS ray per voxel
-  fragment from where the sun leaves the box) the overview costs 15.84 ->
-  17.14: the voxels' ray is the price there (voxel trees 6.59). The steps
+  fragment from where the sun leaves the box) the overview cost 15.84 ->
+  17.14 with the untextured beech (voxel trees 6.59); after the textured
+  beech (heavier clusters) voxels win there too: overview 18.97 -> 17.31,
+  edge 31.75 -> 28.97 (2 px switch). The steps
   that got there at the overview (voxel pass): a mesh workgroup per brick
   at 1 px voxels 32.6 ms with the list capped; 2 px mip and the
   hidden-voxel skip 15.7; compaction to 64 drawn voxels per workgroup and
