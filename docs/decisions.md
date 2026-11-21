@@ -3814,7 +3814,9 @@ planets and `clean` / `summer-hazy` are unchanged.
   (LOD 0.25 texel for thin foliage) carry ~39 ms of the hitch (backlog).
   No visible change at the forest overview: tree shadows on the ground
   there don't show from cascade 4 with either caster (rt shows them).
-- **Rejected:** voxel trees (the mid tier's prototype voxels) as cascade
-  casters: no change in the hitch (cascades 2-3 are cheap) and cascade 4's
-  ~1M trees would be ~70M voxels (branch `far-m-shadow`).
+- **Rejected:** voxel trees (the mid tier's prototype voxels) as casters
+  in cascades 0-3: no change in the hitch (47.7 ms; cascades 2-3 are
+  cheap) and none on the overview's ground, which shows no tree shadows
+  with clusters, voxel trees or far cells as casters (branch
+  `far-m-shadow`); cascade 4's ~1M trees would be ~70M voxels.
 
