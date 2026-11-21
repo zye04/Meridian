@@ -159,6 +159,10 @@ his showcase and wants that fidelity everywhere.
   closed by commits.
 - One milestone per phase/pillar; a Projects board: Acknowledged ->
   Investigating -> Planned -> Implementing -> Verified.
+- Created 2026-11-21: issues #1-#12 = G1-G12 (same numbers), #13 matched
+  views, #14 benchmark route + ledger, #15 resemblance metric; labels
+  `gap`, `phase-0`, `pillar:*`, `engine` / `content` / `pipeline` /
+  `tooling`; one milestone per phase and pillar.
 - The repo docs stay the source of truth (audit, decisions.md, specs,
   plans); issues track and link, nothing is written twice. The audit's
   G-numbers are the issue keys.
