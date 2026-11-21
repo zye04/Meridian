@@ -3622,3 +3622,48 @@ two full 8-phase jitter cycles.
   - V. Timonen, J. Westerholm, "Scalable Height Field Self-Shadowing",
     Computer Graphics Forum 29(2) (Eurographics 2010)
   - Parallel prefix scan: Hillis & Steele 1986; Blelloch 1990
+
+## Raster sun shadows are the default (2026-11-21)
+
+User direction: raster, no ray tracing on the default path. `--shadows
+raster` (the cached cascades of "Raster sun shadows: cached cascades")
+is the default; `--shadows rt` stays as an A/B (the TLAS and BLAS stay:
+the far-field bake and `--far-shadows tlas` use them).
+
+- **Cost fix:** `cascadeVisibility` copied the `SunShadows` struct (five
+  cascades) into a local per fragment; reading the fields in place took
+  ~1.8 ms out of the early scene pass at the ground view. It, not the tap
+  count, was raster's deficit against rt.
+- **Filter:** a 3x3 tent from 4 hardware depth-compare taps (Castaño
+  2013, "Shadow Mapping Summary", The Witness: bilinear PCF taps placed
+  and weighted to integrate the tent) instead of 9 textureGathers. The
+  cascades are bound with a compare sampler (`shadowSampler`,
+  GREATER_OR_EQUAL for reverse depth) and read through a
+  `sampler2DShadow` view of the bindless binding.
+  - http://www.ludicon.com/castano/blog/articles/shadow-mapping-summary-part-1/
+- Cascades 0-1 cull at a 0.25-texel LOD error (1 texel beyond): at one
+  texel the near trees' leaf clusters simplify away and their crowns let
+  through too much sun.
+- The depth range reaches the terrain's highest sample + 150 m (was a
+  2500 m Napf constant). Trees past the voxel switch still cast as
+  clusters: the shadow views skip the voxel list.
+- Measured (Release 2560x1440, native TAA, same build; raster / rt):
+
+  | gate | raster | rt |
+  |---|---|---|
+  | shimmer crown / shadow (/255) | 1.95 / 0.09 | 2.01 / 0.97 |
+  | Laplacian fwd5 ground / side5 / pitch | 0.107 / 0.106 / 0.102 | 0.108 / 0.106 / 0.103 |
+  | Laplacian fwd5 beech | 0.231 | 0.245 |
+  | SSIM fwd5 | 0.972 | 0.972 |
+  | GPU frame, start view, placement on | 5.56 ms (scene early 2.72) | 5.90 ms (2.80) |
+  | GPU frame, forest edge `--trees` | 16.6 ms | 28.1 ms |
+
+  (Start view re-measured after rebasing onto the terrain shadow-height
+  map.) Shadow
+  shimmer drops 10x. The beech's forward Laplacian is 6% lower because
+  its dappled shadow on the ground, 12-25 m below the camera, falls in
+  cascade 1 (~10 cm texels): softer than the per-pixel ray, closer to
+  the soft shadows of the Chlorophyll frames, and stable. Accepted.
+- Re-render hitch: the first frame's five cascades cost 0.37 ms at the
+  start view, but 51 ms at the forest edge with `--trees` (every tree in
+  cascades 3-4 as clusters; backlog).

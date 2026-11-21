@@ -102,59 +102,69 @@ const float kShadowNormalOffset = 1.5;
 const float kShadowDepthBias = 1.0;
 const float kCascadeBlendFraction = 0.15;
 
-// Receiver in cascade i's light space: xy = map uv, z = receiver depth.
-bool cascadeCoords(SunShadowCascade c, vec3 relative, vec3 normal, out vec3 coords) {
-    SunShadows sh = pc.scene.sunShadows;
-    vec3 p = relative + normal * (kShadowNormalOffset * c.texel) - c.origin;
-    vec2 lightUv = vec2(dot(p, sh.u), dot(p, sh.v));
-    coords = vec3(lightUv / c.halfSize * 0.5 + 0.5,
-                  (c.depthFar - dot(p, sh.d)) / (c.depthNear + c.depthFar));
-    return all(lessThanEqual(abs(lightUv), vec2(c.halfSize - 2.0 * c.texel)));
+// Receiver in cascade i's light space: xy = map uv, z = receiver depth. The
+// cascade's fields are read in place: copying the struct to a local costs
+// ~1.8 ms per frame in mesh.frag.
+bool cascadeCoords(uint i, vec3 relative, vec3 normal, out vec3 coords) {
+    float texel = pc.scene.sunShadows.cascades[i].texel;
+    float halfSize = pc.scene.sunShadows.cascades[i].halfSize;
+    vec3 p = relative + normal * (kShadowNormalOffset * texel) -
+             pc.scene.sunShadows.cascades[i].origin;
+    vec2 lightUv = vec2(dot(p, pc.scene.sunShadows.u), dot(p, pc.scene.sunShadows.v));
+    float depthNear = pc.scene.sunShadows.cascades[i].depthNear;
+    float depthFar = pc.scene.sunShadows.cascades[i].depthFar;
+    coords = vec3(lightUv / halfSize * 0.5 + 0.5,
+                  (depthFar - dot(p, pc.scene.sunShadows.d)) / (depthNear + depthFar));
+    return all(lessThanEqual(abs(lightUv), vec2(halfSize - 2.0 * texel)));
 }
 
-// Lit fraction of a bilinear 2x2 compare at uv.
-float bilinearLit(uint map, vec2 uv, vec2 size, float receiverDepth) {
-    vec2 st = uv * size - 0.5;
-    vec2 f = fract(st);
-    vec4 g = textureGather(textures[nonuniformEXT(map)], (floor(st) + 1.0) / size, 0);
-    vec4 lit = vec4(lessThanEqual(g, vec4(receiverDepth)));
-    // gather order: x (i0,j1), y (i1,j1), z (i1,j0), w (i0,j0)
-    return mix(mix(lit.w, lit.z, f.x), mix(lit.x, lit.y, f.x), f.y);
-}
+// The cascades' table entries carry a depth-compare sampler, so a tap is a
+// hardware bilinear 2x2 compare.
+layout(set = 1, binding = 1) uniform sampler2DShadow shadowMaps[];
 
-float cascadeFiltered(SunShadowCascade c, vec3 coords) {
-    vec2 size = vec2(textureSize(textures[nonuniformEXT(c.texture)], 0));
-    float receiverDepth = coords.z + kShadowDepthBias * c.texel / (c.depthNear + c.depthFar);
-    float sum = 0.0;
-    for (int j = -1; j <= 1; ++j) {
-        for (int i = -1; i <= 1; ++i) {
-            float w = float((2 - abs(i)) * (2 - abs(j)));
-            sum += w * bilinearLit(c.texture, coords.xy + vec2(i, j) / size, size, receiverDepth);
-        }
-    }
+// 3x3 tent from 4 bilinear compare taps (Castano 2013, The Witness; the
+// weights are the tent's integrals over each tap's footprint).
+float cascadeFiltered(uint i, vec3 coords) {
+    uint map = pc.scene.sunShadows.cascades[i].texture;
+    float texel = pc.scene.sunShadows.cascades[i].texel;
+    float depthRange = pc.scene.sunShadows.cascades[i].depthNear +
+                       pc.scene.sunShadows.cascades[i].depthFar;
+    vec2 size = vec2(textureSize(shadowMaps[nonuniformEXT(map)], 0));
+    float receiverDepth = coords.z + kShadowDepthBias * texel / depthRange;
+    vec2 st = coords.xy * size;
+    vec2 base = floor(st + 0.5);
+    vec2 f = st + 0.5 - base;
+    base = (base - 0.5) / size;
+    vec2 w0 = 3.0 - 2.0 * f;
+    vec2 w1 = 1.0 + 2.0 * f;
+    vec2 o0 = ((2.0 - f) / w0 - 1.0) / size;
+    vec2 o1 = (f / w1 + 1.0) / size;
+    float sum = w0.x * w0.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o0.y), receiverDepth)) +
+                w1.x * w0.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o0.y), receiverDepth)) +
+                w0.x * w1.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o1.y), receiverDepth)) +
+                w1.x * w1.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o1.y), receiverDepth));
     return sum / 16.0;
 }
 
 // Sun visibility from the raster cascades for a receiver at relative (to the
 // camera) with geometric normal; 1 where no cascade covers it.
 float cascadeVisibility(vec3 relative, vec3 normal) {
-    SunShadows sh = pc.scene.sunShadows;
     float distanceToCamera = length(relative);
     for (uint i = 0u; i < kShadowCascades; ++i) {
-        SunShadowCascade c = sh.cascades[i];
+        float radius = pc.scene.sunShadows.cascades[i].radius;
         vec3 coords;
-        if (c.valid == 0u || distanceToCamera >= c.radius ||
-            !cascadeCoords(c, relative, normal, coords)) {
+        if (pc.scene.sunShadows.cascades[i].valid == 0u || distanceToCamera >= radius ||
+            !cascadeCoords(i, relative, normal, coords)) {
             continue;
         }
-        float visibility = cascadeFiltered(c, coords);
-        float blend = smoothstep(c.radius * (1.0 - kCascadeBlendFraction), c.radius,
+        float visibility = cascadeFiltered(i, coords);
+        float blend = smoothstep(radius * (1.0 - kCascadeBlendFraction), radius,
                                  distanceToCamera);
         if (blend > 0.0 && i + 1u < kShadowCascades) {
-            SunShadowCascade next = sh.cascades[i + 1u];
             vec3 nextCoords;
-            if (next.valid != 0u && cascadeCoords(next, relative, normal, nextCoords)) {
-                visibility = mix(visibility, cascadeFiltered(next, nextCoords), blend);
+            if (pc.scene.sunShadows.cascades[i + 1u].valid != 0u &&
+                cascadeCoords(i + 1u, relative, normal, nextCoords)) {
+                visibility = mix(visibility, cascadeFiltered(i + 1u, nextCoords), blend);
             }
         }
         return visibility;

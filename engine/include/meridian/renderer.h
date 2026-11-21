@@ -314,6 +314,8 @@ public:
   void setShadowMode(ShadowMode mode);
   // Cascade renders so far (a frame can render several).
   uint32_t sunShadowRenderCount() const;
+  // The slowest sun shadows pass over the run, in ms.
+  float sunShadowMaxMs() const;
 
   // On by default; off draws everything in the view frustum (for A/B
   // comparisons).

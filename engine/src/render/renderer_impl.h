@@ -137,7 +137,7 @@ struct Renderer::Impl {
   uint32_t visitedBvhNodes = 0;
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
-  ShadowMode shadowMode = ShadowMode::Rt;
+  ShadowMode shadowMode = ShadowMode::Raster;
   // Each cascade's rendered window, the sun it was rendered for and what
   // plan chose for this frame. shadowStale: instances or placement changed.
   std::array<Image, kShadowCascades> shadowMaps;
@@ -154,6 +154,9 @@ struct Renderer::Impl {
   VkPipeline shadowPipeline = VK_NULL_HANDLE;
   VkPipeline shadowMaskedPipeline = VK_NULL_HANDLE;
   uint32_t shadowRenderCount = 0;
+  float shadowMaxMs = 0.0f;
+  // The highest world y that casts into a cascade (setTerrain).
+  double shadowCasterTop = 2500.0;
   bool voxelFarShadows = true;
   GiMode giMode = GiMode::Off;
   // The GI probe table (gi.glsl), created on the first frame with GI on.
@@ -356,6 +359,7 @@ struct Renderer::Impl {
   VkSampler linearSampler = VK_NULL_HANDLE;
   // Linear filtering that returns the minimum of the footprint.
   VkSampler minSampler = VK_NULL_HANDLE;
+  VkSampler shadowSampler = VK_NULL_HANDLE; // linear depth compare, for the cascades
   VkDescriptorSetLayout pyramidSetLayout = VK_NULL_HANDLE;
   VkDescriptorPool pyramidPool = VK_NULL_HANDLE;
   // pyramidSets[i] reads level i - 1 (the depth image for i = 0), writes i.

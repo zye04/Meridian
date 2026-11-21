@@ -138,7 +138,8 @@ void main() {
         seedTraversal(id, instance, scene.meshes.meshes[instance.meshOrPrototype]);
         return;
     }
-    float blend = instanceVoxelBlend(scene, instance, prototype);
+    // Shadow cascades draw clusters only: a voxel tree would cast nothing.
+    float blend = scene.shadowView != 0u ? 0.0 : instanceVoxelBlend(scene, instance, prototype);
     // A tree the full voxel list dropped keeps its clusters.
     if (blend > 0.0 && appendVoxelInstance(id, instance, prototype, relative) && blend >= 1.0) {
         return;

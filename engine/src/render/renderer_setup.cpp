@@ -524,6 +524,13 @@ void Renderer::Impl::createDescriptors() {
   check(vkCreateSampler(dev, &samplerInfo, nullptr, &minSampler),
         "vkCreateSampler");
   samplerInfo.pNext = nullptr;
+  samplerInfo.maxLod = 0.0f;
+  // Reverse depth: the receiver is lit when it is at least as near the sun
+  // (greater) as the stored caster.
+  samplerInfo.compareEnable = VK_TRUE;
+  samplerInfo.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+  check(vkCreateSampler(dev, &samplerInfo, nullptr, &shadowSampler),
+        "vkCreateSampler");
 
   VkDescriptorSetLayoutBinding pyramidBindings[2]{};
   for (uint32_t b = 0; b < 2; ++b) {
@@ -1485,6 +1492,7 @@ Renderer::~Renderer() {
   vkDestroyDescriptorSetLayout(dev, impl_->postSetLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev, impl_->bloomSetLayout, nullptr);
   vkDestroySampler(dev, impl_->linearSampler, nullptr);
+  vkDestroySampler(dev, impl_->shadowSampler, nullptr);
   vkDestroySampler(dev, impl_->nearestSampler, nullptr);
   vmaDestroyAllocator(impl_->allocator);
 

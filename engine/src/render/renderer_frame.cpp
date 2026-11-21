@@ -672,6 +672,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
       impl_->passTimes[i].name = impl_->slotPassNames[frameSlot][i];
       impl_->passTimes[i].ms =
           static_cast<float>(timestamps[i + 1] - timestamps[i]) * msPerTick;
+      if (std::strcmp(impl_->passTimes[i].name, "sun shadows") == 0) {
+        impl_->shadowMaxMs = std::max(impl_->shadowMaxMs, impl_->passTimes[i].ms);
+      }
     }
     impl_->gpuFrameMs =
         static_cast<float>(timestamps[slotPasses] - timestamps[0]) *

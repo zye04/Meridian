@@ -2,9 +2,9 @@
 
 C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
-world, grand scale. Hardware ray tracing is required (sun shadows default
-to a TLAS ray; `--shadows raster`, cached cascaded shadow maps, is the
-raster path being brought up to replace it). The setting is open,
+world, grand scale. Sun shadows are raster (cached cascaded shadow maps);
+hardware ray tracing is still required (`--shadows rt` A/B, the far-field
+bake, `--far-shadows tlas`). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:
@@ -283,14 +283,17 @@ terrain under each column), traced in compute against the heightfield
 pyramid (`terrainRayDistance`) and, with `--trees`, the far-field voxels;
 ground hits are a fixed meadow albedo lit by the sun (terrain, tree and
 cloud shadow), misses the sky-view LUT + sky capture. No ray tracing.
-`--shadows raster|rt` (default rt until raster passes the shimmer gates,
-decisions.md): the sun's visibility of objects
+`--shadows raster|rt` (default raster; rt is an A/B, decisions.md): the
+sun's visibility of objects
 (trees, rocks, plants, models) from the cascaded shadow maps (lighting.glsl
-`cascadeVisibility`: 3x3 tent PCF, finest cascade within its radius,
+`cascadeVisibility`: 3x3 tent PCF from 4 hardware depth-compare taps
+(`shadowSampler`, the cascades' `sampler2DShadow` view of the bindless
+table), finest cascade within its radius,
 blended into the next over the outer 15%), or `rt` from one TLAS ray per
 pixel toward a point on the sun disk. Either way the terrain march,
 cloud shadow, contact shadows and the far path stay. Capture runs print
-`sun shadows: N cascade renders`.
+`sun shadows: N cascade renders, max X ms` (the slowest shadow pass of
+the run: the re-render hitch).
 
 ## Testing policy (usage matters)
 
@@ -491,14 +494,16 @@ window and every 4 m upstream as far as the terrain's relief over tan(sun
 elevation) (at most 20 km), a parallel prefix max of H + a tanE storing
 per texel the height h above which the sun gets through and the distance
 to the occluder) ->
-sun shadows (only with `--shadows raster`; renderer_shadows.cpp: 5 cascades, 20 * 4^i m
+sun shadows (raster, the default; renderer_shadows.cpp: 5 cascades, 20 * 4^i m
 around the camera, 2048^2 D32 each, texel-snapped on a fixed light-space
 grid; a cascade re-renders only when the camera's offset from its centre
 passes half its margin, or on the first frame, a sun change or an
 instance change; each re-render runs the cell cull -> cull -> traverse ->
 cluster cull chain on a copy of SceneData with `shadowView` set (light
 box planes, no curvature, orthographic LOD of 1 texel, no occlusion, no
-visibility writes, no streamed layers, no far switch) into its own
+visibility writes, no streamed layers, no far switch, no voxel trees,
+LOD error 0.25 texel in cascades 0-1 for thin foliage, the depth range up
+to the terrain's highest sample + 150 m) into its own
 counters and draw lists, then shadow.mesh (+ shadow_masked.frag for
 alpha-masked) draws all four buckets, cull none, slope-scaled bias) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one

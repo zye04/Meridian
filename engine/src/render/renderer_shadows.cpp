@@ -10,9 +10,6 @@
 namespace meridian {
 namespace {
 
-// The highest world y that casts a shadow into a cascade: terrain relief
-// plus the tallest placed object.
-constexpr double kCasterTop = 2500.0;
 // Reverse depth: a negative slope bias pushes the casters away from the sun.
 constexpr float kShadowDepthBiasConstant = 0.0f;
 constexpr float kShadowDepthBiasSlope = -1.5f;
@@ -31,6 +28,8 @@ void Renderer::setShadowMode(ShadowMode mode) { impl_->shadowMode = mode; }
 
 uint32_t Renderer::sunShadowRenderCount() const { return impl_->shadowRenderCount; }
 
+float Renderer::sunShadowMaxMs() const { return impl_->shadowMaxMs; }
+
 void Renderer::Impl::createSunShadows() {
   VkDevice dev = device.device;
   if (textures.size() + kShadowCascades > kMaxTextures) {
@@ -43,7 +42,7 @@ void Renderer::Impl::createSunShadows() {
                                 VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowTextures[i] = static_cast<uint32_t>(textures.size());
     textures.emplace_back();
-    writeTexture(shadowTextures[i], shadowMaps[i].view, nearestSampler,
+    writeTexture(shadowTextures[i], shadowMaps[i].view, shadowSampler,
                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   }
   for (auto &slot : shadowScenes) {
@@ -113,7 +112,7 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
   toFloat3(out.d, shadowBasis.d);
   for (uint32_t i = 0; i < kShadowCascades; ++i) {
     if (full || !shadowRendered[i] || needsRecenter(i, shadowWindows[i], shadowBasis, eye)) {
-      shadowWindows[i] = cascadeWindow(i, shadowBasis, eye, kCasterTop, sunDirection);
+      shadowWindows[i] = cascadeWindow(i, shadowBasis, eye, shadowCasterTop, sunDirection);
       shadowRendered[i] = true;
       shadowPlanned[i] = true;
       ++shadowRenderCount;
@@ -132,7 +131,9 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.shadowView = 1;
       copy.voxelTrees = 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
-      copy.lodErrorPixels = 1.0f;
+      // Foliage is thin: at one texel its leaves simplify away and the crowns
+      // shade too bright, so the near cascades keep four times the detail.
+      copy.lodErrorPixels = i < 2 ? 0.25f : 1.0f;
       copy.shadowDrawMargin =
           static_cast<float>(0.5 * (cascadeHalfSize(i) - cascadeRadius(i)) * std::sqrt(3.0));
       Buffer &buffer = shadowScenes[frameSlot][i];

@@ -527,8 +527,8 @@ struct Options {
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
   bool voxelTrees = true;
   bool occlusion = true;
-  // Rt until the raster shadows pass the shimmer gates (decisions.md).
-  meridian::ShadowMode shadows = meridian::ShadowMode::Rt;
+  // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
+  meridian::ShadowMode shadows = meridian::ShadowMode::Raster;
   std::optional<meridian::Bloom> bloom;
   std::optional<meridian::Effects> effects;
   // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
@@ -1117,7 +1117,8 @@ int main(int argc, char **argv) {
   }
   if (!interactive) {
     renderer.printAmbient();
-    std::printf("sun shadows: %u cascade renders\n", renderer.sunShadowRenderCount());
+    std::printf("sun shadows: %u cascade renders, max %.2f ms\n", renderer.sunShadowRenderCount(),
+                renderer.sunShadowMaxMs());
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "

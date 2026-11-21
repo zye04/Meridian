@@ -286,6 +286,13 @@ void Renderer::setTerrain(const Heightfield &field) {
       impl_->uploadStorage(pyramid.data(), pyramid.size() * sizeof(uint32_t));
 
   impl_->heightfield = field;
+  if (!field.samples.empty()) {
+    impl_->shadowCasterTop =
+        field.minHeight +
+        static_cast<double>(field.heightScale) *
+            *std::max_element(field.samples.begin(), field.samples.end()) +
+        kTallestCaster;
+  }
   terrain.pyramid = impl_->terrainPyramid.address;
   terrain.pyramidLevels = static_cast<uint32_t>(levels.size() - 1);
   terrain.width = field.width;

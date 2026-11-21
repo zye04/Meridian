@@ -221,6 +221,9 @@ static_assert(kTerrainNoiseWrapCells % 10 == 0,
 // origin: the horizon up to ~20 km altitude. Level 0's LOD range in meters;
 // each level's range doubles.
 constexpr uint32_t kTerrainRootLevel = 16;
+// Taller than any placed object or model above the terrain, for the sun
+// shadow cascades' depth range.
+constexpr double kTallestCaster = 150.0;
 static_assert(kTerrainRootLevel <= 16,
               "terrain node encoding (terrain.glsl) holds 16-bit x/z and a 5-bit level");
 constexpr float kTerrainLodRange0 = 80.0f;
