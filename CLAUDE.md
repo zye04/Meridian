@@ -91,7 +91,14 @@ with `--capture` or the camera velocities) is a timed run with real
 frame times, static camera and no camera input (Esc still quits; the
 partial recording is written): FILE.csv is checked writable up front, 60
 warm-up frames, then SECONDS recorded; writes the CSV, prints the
-summary, exits.
+summary, exits. `--route FILE` (only with `--benchmark`; camera_route.h,
+`TIME X Y Z YAW PITCH [LABEL]` per line) flies the camera along the keys
+(t = 0 in warm-up, then real seconds since recording started; a label
+starts a segment). `python3 -I tools/bench-route.py bench.csv
+tools/routes/parity.route` prints per-segment avg / 1% low fps, avg ms
+and the 4 heaviest passes, flagging BELOW 180 (route) and BELOW 105
+(segment). The parity route (~60 s, run it with `--trees`): meadow,
+grass, forest-edge, forest-interior, aerial.
 
 Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
 validation error):

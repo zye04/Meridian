@@ -1,0 +1,15 @@
+# Parity benchmark route (~60 s, run with --trees).
+# TIME X Y Z YAW PITCH [LABEL]; a label starts a segment that lasts to the next label.
+# Ground heights (CLAUDE.md): ridge 1354.2, forest edge ~1204, forest interior ~1157.
+0   1119 1355.9 -431 -1.55 -0.10 meadow
+10  1099 1355.9 -431 -1.55 -0.10
+12  1099 1355.9 -431 -1.55 -0.45 grass
+22  1080 1355.9 -431 -1.55 -0.45
+24  600  1205.6 -400 -1.55  0.02 forest-edge
+34  585  1205.6 -400 -1.55  0.02
+36  85   1158.6 -53  -1.55  0.25 forest-interior
+46  70   1158.6 -53  -1.55  0.25
+48  700  1450   -400 -1.55 -0.50 aerial
+52  700  1450   -400 -1.55 -0.50
+58  1119 4354   -431 -1.55 -0.35
+60  1119 4354   -431 -1.55 -0.35

@@ -3,6 +3,7 @@
 
 #include <fstream>
 
+#include <meridian/camera_route.h>
 #include <meridian/model.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
@@ -603,6 +604,8 @@ struct Options {
   // Timed run with real frame times and no input; the CSV goes to benchmarkPath.
   float benchmarkSeconds = 0.0f;
   std::filesystem::path benchmarkPath;
+  // --route FILE: the benchmark's camera follows these keys (camera_route.h).
+  std::vector<meridian::CameraKey> route;
   // Scripted runs move the camera at this velocity (m/s), ending at --camera.
   std::optional<meridian::Vec3> cameraVelocity;
   std::optional<std::pair<float, float>> cameraAngularVelocity;
@@ -702,6 +705,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--benchmark takes seconds > 0 and a file.csv");
       }
       options.benchmarkPath = argv[++i];
+    } else if (arg == "--route" && i + 1 < argc) {
+      std::ifstream file(argv[++i]);
+      if (!file) {
+        throw std::runtime_error(std::string("Can't read route ") + argv[i]);
+      }
+      options.route = meridian::parseRoute(file);
     } else if (arg == "--camera-yaw-rate") {
       options.cameraAngularVelocity = {number(i), 0.0f};
     } else if (arg == "--capture-sequence") {
@@ -836,7 +845,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-trees on|off, "
-                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, "
+                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
@@ -862,6 +871,9 @@ Options parseOptions(int argc, char **argv) {
     throw std::runtime_error(
         "--benchmark can't be combined with --capture, --camera-velocity or "
         "--camera-angular-velocity");
+  }
+  if (!options.route.empty() && options.benchmarkSeconds == 0.0f) {
+    throw std::runtime_error("--route needs --benchmark");
   }
   if (options.captureSequence > 0 && !options.capturePath) {
     throw std::runtime_error("--capture-sequence needs --capture");
@@ -1145,6 +1157,15 @@ int main(int argc, char **argv) {
         updateFlyCamera(camera, window, deltaSeconds,
                         walking ? &terrain : nullptr);
       }
+    }
+    if (benchmark && !options.route.empty()) {
+      const float t = perf.recording()
+                          ? std::chrono::duration<float>(now - benchmarkStart).count()
+                          : 0.0f;
+      const meridian::CameraPose pose = meridian::routePose(options.route, t);
+      camera.position = pose.position;
+      camera.yaw = pose.yaw;
+      camera.pitch = pose.pitch;
     }
     ++totalFrames;
     scriptAngles(options.frames - totalFrames);

@@ -3970,3 +3970,37 @@ Unreal": channel layouts, slot order, measured normal convention).
   down by the lower F0 and its specular occlusion. Next:
   `KHR_materials_specular` (specularFactor 0.4-0.6) in model.cpp and
   mesh.frag; beech triangle budget and far-field build time.
+
+## Benchmark route and ledger (2026-11-21)
+
+- **Choice:** performance is judged on `--benchmark 60 out.csv --route
+  tools/routes/parity.route --trees` (five labelled segments: meadow,
+  grass, forest-edge, forest-interior, aerial), summarised by
+  `tools/bench-route.py`: per-segment average and 1% low fps, plus the
+  passes that dominate. Single static shots hide the transitions, the
+  streaming and the 1% lows that decide whether a frame rate holds in
+  play; a route average over real frame times does not. Lines: 180 fps
+  route average, 105 fps in the heaviest segment (programme spec, Phase
+  0). Compare only between identical `Render 2560x1440` lines.
+- **Baseline (Release, main at 17dee80, GI off, raster shadows
+  default):** two runs, route average 84.6 and 87.6 fps (3.5% apart;
+  segments differ by up to 10% in `aerial`, where the 2 s hop from the
+  forest interior is part of the segment).
+
+```
+segment          frames  avg_fps  low1_fps  avg_ms  top passes (ms)
+meadow             1138     94.9      79.6   10.54  scene_early 4.37, cull_early 1.33, clouds 1.27, far_field 1.14  BELOW 105
+grass               927     77.5      24.2   12.90  scene_early 5.23, far_field 1.52, cull_early 1.43, clouds 1.07  BELOW 105
+forest-edge         893     74.3      19.8   13.45  scene_early 6.89, cull_early 1.51, sun_shadows 1.41, voxel_trees 0.93  BELOW 105
+forest-interior    1218    101.2      25.9    9.88  scene_early 3.71, cull_early 1.42, voxel_trees 1.08, clouds 0.83  BELOW 105
+aerial              902     75.2      56.4   13.30  scene_early 4.26, far_field 3.26, clouds 1.56, cull_early 1.49  BELOW 105
+route              5078     84.6      23.7   11.81  scene_early 4.79, cull_early 1.43, far_field 1.36, clouds 1.06  BELOW 180
+
+segment          frames  avg_fps  low1_fps  avg_ms  top passes (ms)
+meadow             1165     97.1      81.4   10.30  scene_early 4.38, cull_early 1.33, clouds 1.27, far_field 0.85  BELOW 105
+grass               961     80.2      23.5   12.46  scene_early 5.22, cull_early 1.40, clouds 1.09, far_field 1.03  BELOW 105
+forest-edge         898     74.8      20.2   13.38  scene_early 6.91, cull_early 1.50, sun_shadows 1.43, voxel_trees 0.95  BELOW 105
+forest-interior    1240    103.3      26.0    9.68  scene_early 3.67, cull_early 1.43, voxel_trees 1.15, clouds 0.81  BELOW 105
+aerial              992     82.6      60.5   12.11  scene_early 4.10, far_field 2.11, clouds 1.55, cull_early 1.49  BELOW 105
+route              5256     87.6      23.9   11.42  scene_early 4.75, cull_early 1.42, clouds 1.06, voxel_trees 1.02  BELOW 180
+```
