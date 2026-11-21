@@ -6,6 +6,26 @@ where it is meant to land. Add an entry whenever something is deferred
 feedback); remove it in the commit that resolves it. Milestones are the
 roadmap's (`docs/superpowers/specs/2026-11-19-showcase-roadmap.md`).
 
+## Look gap vs the Chlorophyll Engine (audit 2026-11-21)
+
+Full diagnosis, evidence screenshots and the proposed order:
+`docs/superpowers/specs/2026-11-21-look-gap-audit.md` (G1-G11). One row
+per gap so none is lost; remove a row when its gap is resolved.
+
+| Item | Why it matters | Source | Target |
+|---|---|---|---|
+| G1 Distant forests read as grey speckle | Voxel trees and far cells draw binary-coverage, flat-shaded voxels: salt-and-pepper noise, no crown form | User screenshots 2026-11-21 | Prefiltered coverage, crown-scale normal + depth darkening, fixed voxel albedo |
+| G2 No mid-scale ambient occlusion | Flat "default raster" ambient on ground, grass, rocks, trunks | User screenshots 2026-11-21 | GTAO with bent normals + multi-bounce, specular occlusion (~0.5-1 ms) |
+| G3 Foliage doesn't glow backlit | `diffuseTransmission` is weak and untinted; the translucency map is unused | User screenshots 2026-11-21 | Two-sided foliage shading: tinted thickness-scaled transmission, forward-scatter lobe |
+| G4 Grass looks bland | Uniform colour, no depth in the mat | User screenshots 2026-11-21 | G2 + G3, then clump variation and sheen |
+| G5 Contact and micro shadows weak; raster leaf shadow blobby | Binary jittered contact march; cascade 1 texels ~10 cm | User 2026-11-21; native lane | Wavefront contact shadows; contact-hardening or finer cascade 1 |
+| G6 Imported Megascans tree materials wrong | Chrome bark, grey leaves, white trunk bases, melted bark relief (likely Mask B in metallic, ignored vertex-colour layer blend, normal encoding) | User screenshots of the Black Alder import | Lane `ue-trees` |
+| G7 Grey, washed-out image in forests and at low sun | Undiagnosed: exposure in forests, haze change, GI, the saved grade file | User screenshots 2026-11-21 | Diagnose first |
+| G8 Terrain colour beige/grey/pink patches | Placeholder material dominates wide shots | Audit | Phase 2, or macro colour / vegetation tint |
+| G9 Motion shimmer above DLSS | Native TAA walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1 (/255) | Native lane | 3x3 reconstruction WIP (branch `native`) if sharpness holds |
+| G10 Forest edge 13.2 ms (target 10) | ~3 ms sub-pixel tree shading, 1.5 ms voxel brick listing | Perf lane | Visibility buffer (VG slice 4) |
+| G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
+
 ## Lighting and shading
 
 | Item | Why it matters | Source | Target |

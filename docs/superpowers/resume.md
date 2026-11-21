@@ -1,4 +1,53 @@
-# Where work stopped (2026-11-20 ~23:55, orchestrator handoff)
+# Where work stopped (2026-11-21 ~16:30, orchestrator handoff)
+
+Read this first when resuming, then the look-gap audit
+`docs/superpowers/specs/2026-11-21-look-gap-audit.md` (G1-G11, with the
+user's screenshots as evidence): it is the work list for the next session.
+
+## Direction (user, 2026-11-21)
+
+- Native 1440p with our own TAA, no upscaler (DLSS only as `--aa dlss`,
+  an A/B). Raster everything; follow the Chlorophyll Engine's approaches
+  unless something is known to be better.
+- "Real progress and real quality", judged harshly; no time on low-value
+  work. Use the reference frames as measurement data.
+- Usage: the weekly limit was ~93% used on 2026-11-21. Don't fan out many
+  Opus lanes until it resets; the lighting overhaul (audit G2-G5, G1) waits
+  for a brainstorm + spec with the user.
+
+## Lanes at handoff
+
+| Lane | Worktree / branch | State |
+|---|---|---|
+| ue-trees | `../meridian-uetrees` | Running until 17:45: Black Alder export from Unreal works headless (`tools/unreal/export_trees.py` fixed, `tools/unreal/cook_ready.py`), 22 variants cooked; fixing the materials (audit G6), then European Beech (in the UE project) and all variants per layer |
+| native | `../meridian-native`, branch `native` (WIP 36c37a8) | Paused; next: 3x3 reconstruction only if sharpness holds (G9) |
+| farm | `../meridian-farM`, branch `far-m-shadow2` (WIP) | Paused; next: land the distant tree shadows (G11), far-c's two-phase occlusion of far cells |
+| gi | `../meridian-gi` | Paused; GI off by default; forest cost and motion gates open |
+| perf, clouds, look, look2, assets | done | Results in decisions.md / backlog.md |
+
+## Unreal setup (2026-11-21)
+
+UE 5.9.0 preview-2 at `~/Apps/UnrealEngine` with the Linux Fab and Bridge
+plugins (from unrealengine.com/linux) installed under `Engine/Plugins/`.
+Project `~/Documents/Unreal Projects/MyProject` (Python,
+EditorScriptingUtilities and GLTFExporter plugins enabled). Packs added
+via Fab: Black Alder, European Beech, Hornbeam (download was running).
+Headless export: `UnrealEditor-Cmd <uproject> -run=pythonscript
+-script="<script> <args>" -unattended -nosplash -nop4 -RenderOffscreen`
+(runs beside an open editor). The material bake does nothing headless;
+textures are exported raw and mapped per slot.
+
+## Decisions waiting for the user
+
+1. GI default (off until forest cost and motion gates pass).
+2. Voxel switch 2 px (kept) vs 4 px.
+3. Softer raster leaf shadow accepted for now (audit G5).
+4. The saved grade file overrides the new starting grade in interactive
+   runs: Reset + Save in the G panel to adopt it.
+
+---
+
+# Previous handoff (2026-11-20 ~23:55)
 
 Read this first when resuming. Durable state is in git; the SDD ledgers
 and each lane's `next.md` live under git-ignored `.superpowers/` in the
