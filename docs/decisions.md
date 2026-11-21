@@ -3280,3 +3280,17 @@ the start view the masked shading was 2.6 of the 5.0 ms early scene pass
   `--shadows raster` 9.18 -> 5.92. The forest edge (26.6 ms, 47M
   triangles) is geometry bound and unchanged. Captures differ from before
   by 0.02/255 mean.
+
+## Exposure keeps the highlights (2026-11-21)
+
+Mean-log metering alone raised the exposure as foliage got darker (crown
+sky visibility): the forest edge's sky and clouds went to OKLCh L 0.92 /
+0.96, where the Chlorophyll frames hold sky at 0.72-0.82 and cloud tops at
+~0.87. exposure.comp now also finds the histogram's 95th percentile and
+never lets it map above 2.0 pre-exposed (AgX white is ~3): the target is
+the darker of the mean-to-grey EV and that bound. Views with plenty of
+sky are unchanged (start view p95 0.69, image diff 0.008/255); the forest
+edge goes 0.26 EV down (EV100 10.55 -> 10.81): image L mean 0.56 ->
+0.53, foliage L median 0.42 -> 0.40 (references 0.50-0.55, 0.32-0.42).
+A bound of 1.4 took 0.75 EV and left the image at L 0.46, darker than
+every reference. Cost: one comparison per bin in a one-thread pass.

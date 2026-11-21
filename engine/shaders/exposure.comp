@@ -19,6 +19,12 @@ const float kAdaptationSpeed = 1.5;
 // 0.104 of the white point, 0.8 EV under 18% grey: photos and games read
 // as underexposed there, so the target is raised to put the mean at grey.
 const float kMeanToGreyEv = 0.8;
+// Highlights: the exposure never puts the 95th percentile above this
+// (pre-exposed; AgX reaches white at ~3), so dark-foliage views don't blow
+// out the sky behind them. The Chlorophyll frames keep cloud tops at OKLCh
+// L ~0.87.
+const float kHighlightPercentile = 0.95;
+const float kHighlightMax = 2.0;
 
 void main() {
     uint total = 0u;
@@ -31,14 +37,19 @@ void main() {
     float cumulative = 0.0;
     float logSum = 0.0;
     float weightSum = 0.0;
+    float highlight = float(total) * kHighlightPercentile;
+    float highlightLog = kMinLogLuminance;
     for (uint i = 0u; i < kHistogramBins; ++i) {
         float count = float(post.histogram.bins[i]);
         post.histogram.bins[i] = 0u;
 
         float inRange = max(min(cumulative + count, high) - max(cumulative, low), 0.0);
-        cumulative += count;
         float logLuminance = kMinLogLuminance +
             (float(i) + 0.5) / float(kHistogramBins) * kLogLuminanceRange;
+        if (cumulative < highlight) {
+            highlightLog = logLuminance;
+        }
+        cumulative += count;
         logSum += inRange * logLuminance;
         weightSum += inRange;
     }
@@ -49,7 +60,10 @@ void main() {
     if (weightSum > 0.0) {
         // EV100 = log2(L * S / K) with ISO S = 100 and calibration K = 12.5.
         target = logSum / weightSum + log2(100.0 / 12.5) -
-                 kMeanToGreyEv - post.exposureCompensation;
+                 kMeanToGreyEv;
+        // exposure = 1 / (1.2 * 2^EV100), so L * exposure <= max.
+        target = max(target, highlightLog - log2(1.2 * kHighlightMax)) -
+                 post.exposureCompensation;
         target = clamp(target, kMinEv100, kMaxEv100);
     }
 
