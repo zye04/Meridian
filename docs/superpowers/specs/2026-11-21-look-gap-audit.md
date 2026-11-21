@@ -7,8 +7,10 @@ to `docs/backlog.md` with a reason.
 
 ## Target
 
-The Chlorophyll Engine (Toni Macaroni): all raster, native 1440p, no
-upscaler, ~130 fps average on an RTX 3080. Look target = the frames in
+The Chlorophyll Engine (Toni Macaroni): all raster, 1440p, ~130 fps
+average on an RTX 3080. Its AA method (own TAA, DLSS or FSR) is unknown;
+he says only that he follows DLSS/FSR guidance (baseline F9, F16).
+Look target = the frames in
 `assets/reference/chlorophyll/*.png` and `assets/reference/target-meadow.png`
 (git-ignored; re-create from the video). The user's verdict on 2026-11-21
 after playing the current build: "the Chlorophyll Engine is doing something
@@ -41,8 +43,10 @@ import), `lane-*` are lane captures from the same day.
   normal (density gradient or the prototype's crown ellipsoid) and depth
   darkening inside the crown (the crown sky visibility already in
   mesh.mesh), voxel albedo from the fixed leaf materials. His engine
-  generates the voxels inside the meshoptimizer LOD build: read the
-  decisions.md entry before re-deciding.
+  generates the voxels inside the meshoptimizer LOD build (F3) and swaps
+  by screen error (F22); distant grass uses the same voxel path (F23);
+  the per-asset voxel opacity volume also gives each crown's light
+  optical depth (F21). Read the decisions.md entry before re-deciding.
 - Gates: aerial frames (forest overview `700 1450 -400 -1.55 -0.5 --trees`,
   high overview) beside `aerial-*.png`; shimmer and Laplacian in motion;
   the far tier's GPU ms.
@@ -59,6 +63,8 @@ import), `lane-*` are lane captures from the same day.
 - Direction: GTAO (ground-truth ambient occlusion) with bent normals and a
   multi-bounce fit, plus specular occlusion; temporally stable under native
   TAA. Research 2026 practice (XeGTAO, its successors) and log it.
+  CE: states a screen-space + voxel GI hybrid with no hardware RT (F5);
+  an AO pass is not stated.
   Budget ~0.5-1 ms at 1440p.
 - Gates: the meadow start view and the forest edge beside
   `target-meadow.png`; still and motion shimmer.
@@ -76,6 +82,9 @@ import), `lane-*` are lane captures from the same day.
   lobe toward the sun, wrap diffuse for thin geometry.
 - Gates: backlit views (sun ahead and low: the sunset view, a meadow view
   toward the sun) beside the references; cost in mesh.frag.
+- CE: Lambert + GGX, EON for some materials, grass and canopy shading
+  fitted to measured data (F20); crown light scattering between leaves
+  from the voxel volume (F21).
 
 ### G4. Grass looks bland
 - Evidence: `user-04-...jpg`.
@@ -85,6 +94,9 @@ import), `lane-*` are lane captures from the same day.
   per-clump colour/brightness variation, specular sheen on blades, the mat's
   own bottom-up occlusion. Grass assets are phase 2 content; the shading is
   engine work now.
+- CE: grass shading fitted to measured data, terrain material and
+  meshes both (F20); terrain fakes the grass shading further out, with a
+  visible mismatch on steep hills (F23).
 
 ### G5. Contact shadows and micro shadows are weak
 - Evidence: user report (2026-11-21); `lane-raster-vs-rt-leaf-shadow.jpg`
@@ -96,6 +108,12 @@ import), `lane-*` are lane captures from the same day.
   texels), where a real 10 m crown gives a crisper dapple.
 - Direction: Bend-style wavefront screen-space shadows; contact-hardening
   (PCSS-style) or a finer cascade 1 for the cascade shadows.
+- CE: semi-static VSM-like shadows plus a small dynamic map around the
+  player (F19); grass and small ground cover are not in the shadow pass,
+  contact shadows alone shadow them (F26). Ours: streamed meadow layers
+  are out of the cascades, the static ground cover (poppies, goldenrod,
+  ferns) is not (no per-layer opt-out in `cell_cull.comp`, `cull.comp`,
+  renderer_shadows.cpp); backlog row.
 
 ### G6. Imported Megascans tree materials are wrong (Black Alder, first import)
 - Evidence: `user-01-alder-bark-metallic.jpg` (chrome/gold bark, wobbly
@@ -114,7 +132,7 @@ import), `lane-*` are lane captures from the same day.
 - To check first: exposure metering inside forests, the haze change of
   2026-11-21 (fd02fe2), GI off/on, the grade file the user has saved
   (`~/.config/meridian/grade.json`, overrides the new starting grade in
-  interactive runs). Not yet diagnosed.
+  interactive runs). Not yet diagnosed. CE: AgX with contrast control (F20).
 
 ### G8. Terrain colour: beige/grey/pink patches
 - Evidence: `user-05-...jpg`, `lane-aerial-haze-old-new-clean.jpg`.
@@ -127,15 +145,23 @@ import), `lane-*` are lane captures from the same day.
 - Native TAA, current main: walk 15.9, turn 10.4 /255 vs DLSS 10.1, 6.1
   (`meridian-native/.superpowers/native/next.md`). The 3x3 reconstruction
   WIP (branch `native`, 36c37a8) cuts 25% but softens 20%.
+- CE (F16): follows DLSS/FSR guidance, adds a lower mip bias on
+  alpha-tested grass and a motion-based "smear mask" that sharpens
+  selectively; reactive masks did not help; alpha grass still smears a
+  little, trees do not. His AA method is unknown. Ours weakens the
+  sharpen in motion (`sharpen.comp`), the opposite, and holds mip bias 0.
 
 ### G10. Forest-edge frame cost
 - 13.2 ms with `--trees` vs a 10 ms target; ~3 ms is shading sub-pixel tree
   triangles (visibility buffer = VG slice 4), 1.5 ms the voxel brick
-  listing.
+  listing. CE: a visibility-buffer deferred renderer, culling and all
+  shading in compute, mesh shaders, which he gives as his overdraw
+  answer (F17); ~80 fps in dense forest on a 3080 (F9).
 
 ### G11. Tree shadows missing at distance with raster shadows
 - Forest overview shows no tree shadows on the ground; fix WIP on branch
   `far-m-shadow2` (needs Debug, docs and the raster lane's agreement).
+- CE: far animated trees get contact shadows only (F19).
 
 ### G12. Material fidelity up close and at distance
 - Evidence: `user-01-alder-bark-metallic.jpg` (bark relief melted, low
@@ -150,6 +176,7 @@ import), `lane-*` are lane captures from the same day.
   import standard, close-up resolution (detail textures / virtual
   texturing), anisotropic filtering, Toksvig/LEAN-class normal filtering,
   coverage-preserving mips, a test bench at 1 m / 10 m / 100 m / 1 km.
+  CE: virtual textures on the terrain (F18).
 
 ### G13. Leaf back faces render black
 - Evidence: `user-06-lone-tree-giant-cards-black-backfaces.jpg`.
@@ -229,7 +256,8 @@ mid-distance crowns (G1).
   numbers (walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1) are the measured
   part. Contributors to check: history weight vs motion, velocity of
   alpha-tested foliage and voxel trees, subpixel jitter visible through
-  the sharpen, mip bias.
+  the sharpen, mip bias. CE's smear mask and alpha-grass mip bias (F16)
+  are two candidates to A/B.
 - Direction: measure in motion first (moving-camera flicker/Laplacian on
   clouds and on a forest/texture view, user-like speeds and turns), then
   input-side stability and lighter temporal reliance per rule 1 (research

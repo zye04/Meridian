@@ -110,6 +110,16 @@ virtual shadow maps, with voxels as casters unspecified.
 
 ## 2. What Chlorophyll likely does (inference)
 
+Update 2026-11-21: F3 is now first-hand (his YouTube reply: a modified
+meshoptimizer and a custom DAG builder emit voxels in the LOD build).
+New stated facts: triangles swap to voxels by screen error (F22); tile
+proxies past ~1 km drop instance data and DAG traversal (F22); distant
+grass uses the same voxel path (F23); the per-asset voxel opacity
+volume gives crown optical depth and inter-leaf scattering (F21), which
+bears on the crown-darkness bullet below (50% before, now stated for
+lighting; the far-tier use is optional per his reply). The bullets
+below are otherwise unchanged.
+
 - Voxels are produced in the cluster-simplification step (as Nanite
   does) and carry *filtered* attributes: opacity, albedo, and normal or
   normal spread. Confidence 70% (F3 is second-hand; the frames show

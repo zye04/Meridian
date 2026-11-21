@@ -2742,7 +2742,9 @@ Practice:
   around generation sources, cleaned up past radius x a cleanup
   multiplier, one radius per grid size.
 - **Chlorophyll Engine**: nothing public on its ground cover beyond the
-  video.
+  video. (Update 2026-11-21: his replies add that grass is alpha tested,
+  left out of the shadow pass and shaded by contact shadows alone, and
+  goes through the voxel path far away: baseline F17, F23, F26.)
 
 Choice: any placement layer can be **streamed**
 (`PlacementLayer::streamFullDensity > 0`). It is placed by the same
@@ -3216,6 +3218,13 @@ stays behind `--aa dlss` as an A/B, so its backlog rows are A/B-only.
   not because TAA got softer. Crown shimmer and SSIM miss their targets;
   the limits stay as targets (backlog) for the TAA work that follows.
 - `aa` costs 0.18 ms at 2560x1440 (ground view, 0.17 at the beech).
+- Note 2026-11-21 (later): this entry's rationale ("as the Chlorophyll
+  Engine renders, no upscaler") rests on press reports. His own replies
+  state 1440p and no hardware RT but never "no upscaler"; he follows
+  DLSS/FSR guidance and adds an alpha-grass mip bias and a motion smear
+  mask (baseline F9, F16), so his AA method is unknown. The decision
+  stands as the user's direction (native, own TAA); only the claim about
+  his engine changed.
 
 ## Crown sky visibility (2026-11-21)
 
@@ -3245,6 +3254,8 @@ under L 0.3. The references' crowns are dark inside with sunlit tops.
   edge, Release 1440p TAA, back to back: 30.6 / 28.3 ms main against 30.1
   ms, within run-to-run noise). The Chlorophyll Engine bakes per-vertex
   occlusion in its LOD build (assumed from its look; unpublished).
+  Update 2026-11-21: he states instead a per-asset voxel opacity volume
+  giving each crown's light optical depth (baseline F21).
 - **Result** (forest edge `600 1205.6 -400 -1.55 0.02 --trees`, Release,
   `--aa taa`): foliage L median 0.51 -> 0.42, p10 0.44 -> 0.26; image L
   p5 0.43 -> 0.25, std 0.14 -> 0.20 (references 0.15-0.25); dark pixels

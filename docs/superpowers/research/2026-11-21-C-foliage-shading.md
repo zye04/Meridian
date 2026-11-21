@@ -27,6 +27,15 @@ Gaps with no public text found: Ghost of Tsushima specular and clump variation, 
 
 ## 2. What Chlorophyll probably does (inference, not documented)
 
+Update 2026-11-21: his reply (F20) states Lambert + GGX with EON for some
+materials (Burley made no measurable difference on foliage and bark) and
+shading fitted to measured data for grass (terrain material and meshes)
+and canopy, plus crown optical depth and inter-leaf scattering from the
+voxel opacity volume (F21). That makes the "25% anything physically
+measured" guess below too low; the "custom wrap plus translucency"
+guess stays unconfirmed, no thin-leaf model is named. His terrain fakes
+the grass shading with its own normals, SSS response and BRDF (F23).
+
 - R5 ("luminous yellow-green toward the sun, blue-green away") is the signature of two-sided diffuse with a transmission colour yellower and brighter than the reflected colour, plus a cooler sky-lit side. No special grass BSDF needed.
 - F14 (earlier Godot demo, Houdini colour map and grass-density map) suggests an engine without a native foliage SSS model, so most likely a custom shader: wrap/Lambert plus a backlit translucency term. Confidence: 60% for custom wrap plus backlit translucency; 70% for grass colour driven by the terrain colour map (R4); 25% for anything physically measured. Root-dark / tip-bright grass (R3) is almost certainly a per-blade vertical gradient (same trick as Tsushima).
 

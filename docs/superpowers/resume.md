@@ -25,7 +25,8 @@ No lanes are running. Main is clean and pushed.
 1. **G19 (#22) motion smear/jitter** on clouds, trees, textures (the
    user's top complaint) and **G20 (#23) blocky cloud shadows**: measure
    with a moving camera at user-like speeds first (the flicker metric so
-   far was static), then fix per rule 1.
+   far was static), then fix per rule 1. CE's alpha-grass mip bias and
+   motion smear mask (baseline F16) are A/B candidates; his AA is unknown.
 2. **Regression checks (cheap A/Bs):** G16 (#19) blocky distant clouds vs
    `--effects cloud-outline=0`; G17 (#20) terrain banding vs the
    brute-force march / pre-aaab45b.
@@ -104,7 +105,8 @@ The user's rules:
 - Look target: the Chlorophyll Engine frames in
   `assets/reference/chlorophyll/` plus `assets/reference/target-meadow.png`
   (clouds stay volumetric by the user's choice). Native 1440p, own TAA, no
-  upscaler; raster on the default path.
+  upscaler is our direction, not a stated CE fact (F16); raster on the default
+  path.
 - Ask the user before deciding look questions; give a recommendation.
 
 Every lane brief carries: no AI attribution in commits; latest SDK

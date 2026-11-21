@@ -9,7 +9,8 @@ All ms figures below are estimates until measured on this GPU.
 
 Meridian has no screen-space occlusion: creases, rock bases, trunk/ground
 contacts and tree-on-tree gaps read flat, which Chlorophyll's frames do
-not. Add GTAO (Jimenez et al. 2016, XeGTAO implementation class) darkening
+not (his GI is a screen-space + voxel hybrid, F5; an AO pass is not
+stated). Add GTAO (Jimenez et al. 2016, XeGTAO implementation class) darkening
 the ambient term only, never the sun, never the sky specular beyond what
 its lobe sees.
 

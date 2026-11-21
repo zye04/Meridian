@@ -91,18 +91,18 @@ phone captures: judge fine detail only qualitatively).
 
 | Gap | CE evidence | Meridian today | Gap type | What CE most likely does differently (hypothesis, to verify by research) |
 |---|---|---|---|---|
-| G1 far forests speckle | R1, R2; F2, F3, F4 | Binary-coverage flat-shaded voxels; voxel albedo from wrong materials | Engine | Voxels as part of the LOD hierarchy carry filtered opacity, normals and occlusion; far tier lit with sun visibility per voxel/brick; tile aggregates prefiltered (density + colour + normal per voxel, à la sparse voxel octree / "voxel LOD" literature) |
-| G2 no mid-scale AO | R3; F5 | Micro + crown terms only; GI off | Engine | Screen-space AO (GTAO-class) + voxel occlusion from his GI voxels |
+| G1 far forests speckle | R1, R2; F2, F3, F4, F21, F22 | Binary-coverage flat-shaded voxels; voxel albedo from wrong materials | Engine | Voxels as part of the LOD hierarchy carry filtered opacity, normals and occlusion; far tier lit with sun visibility per voxel/brick; tile aggregates prefiltered (density + colour + normal per voxel, à la sparse voxel octree / "voxel LOD" literature) |
+| G2 no mid-scale AO | R3; F5, F21 | Micro + crown terms only; GI off | Engine | Screen-space AO (GTAO-class) + voxel occlusion from his GI voxels (F5 states the SS + voxel GI hybrid; F21 the crown optical depth from the same voxels; an AO pass itself is not stated) |
 | G3 foliage not luminous | R5 | Weak untinted transmission | Engine (+ maps) | Thin-surface translucency with thickness/translucency maps, wrap or forward-scatter lobe |
-| G4 grass bland | R4, R5, R3 | Shading + placeholder terrain colour | Both | Grass colour authored to match the terrain (Houdini maps), translucency, AO in the mat, density map |
-| G5 weak contact/micro shadows | R2, R3 | Binary contact march; soft cascade 1 | Engine | Unknown technique (F: unknown); his shadows are crisp near and present far |
+| G4 grass bland | R4, R5, R3; F20, F23 | Shading + placeholder terrain colour | Both | Grass colour authored to match the terrain (Houdini maps), translucency, AO in the mat, density map |
+| G5 weak contact/micro shadows | R2, R3; F19, F26 | Binary contact march; soft cascade 1; static ground cover (poppies, goldenrod, ferns) still drawn into the cascades | Engine | Semi-static VSM-like maps plus a small dynamic map around the player (F19); grass and small ground cover left out of the shadow pass, contact shadows alone (F26) |
 | G6 tree materials wrong | — | Import bug | Pipeline | n/a (our bug) |
 | G7 grey washed image | R6, R7 | Undiagnosed | Engine/look | Clean atmosphere + high-key saturated grade |
 | G8 terrain colour | R4, R10 | Placeholder material | Content | Houdini colour map (F8, F14) |
-| G9 motion shimmer | F9 (native, no upscaler) | Native TAA above DLSS shimmer | Engine | Unknown AA (F: unknown); compressed video hides shimmer: verify with his raw footage only |
-| G10 forest edge cost | F9 (~80 fps dense forest on a 3080) | 13.2 ms on a 4080 | Engine | Small triangles to voxels earlier (F2), cheaper far tier (F4) |
+| G9 motion shimmer | F9 (1440p), F16 | Native TAA above DLSS shimmer | Engine | AA method unknown (DLSS, FSR or own TAA); he follows their guidance plus a lower mip bias on alpha-tested grass and a motion-based smear mask that sharpens selectively (F16); compressed video hides shimmer: verify with his raw footage only |
+| G10 forest edge cost | F9 (~80 fps dense forest on a 3080), F12, F17 | 13.2 ms on a 4080 | Engine | Small triangles to voxels earlier (F2, F22), cheaper far tier (F4), visibility-buffer shading in compute, which he states is his overdraw answer (F17) |
 | G11 no far tree shadows | R2 | WIP branch | Engine | Far shadows cover the whole view |
 
-Gaps with no CE evidence either way: G9's AA method, G5's shadow method.
+Gaps with no CE evidence either way: G9's AA method and the smear mask's construction.
 The next step is research per gap (reputable sources: GDC/SIGGRAPH talks,
 papers, vendor docs, engine docs), then the brainstorm.

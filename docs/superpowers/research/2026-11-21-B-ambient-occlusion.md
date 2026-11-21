@@ -1,6 +1,6 @@
 # Research B: ambient occlusion and mid-scale indirect shadowing (2026-11-21)
 
-Scope: gap G2 (and G4's "mat's own bottom-up occlusion") in `specs/2026-11-21-look-gap-audit.md`; fact F5 / requirement R3 in the Chlorophyll baseline.
+Scope: gap G2 (and G4's "mat's own bottom-up occlusion") in `specs/2026-11-21-look-gap-audit.md`; fact F5 / requirement R3 in the Chlorophyll baseline (F5 is now first-hand: a screen-space + voxel GI hybrid, no hardware RT; no AO pass is stated, F21 adds the voxel crown optical depth).
 Method note (verification status): fetched and checked this session: XeGTAO README, the GTAO memo (full text), the bitmask paper abstract, the GDC Vault grass session page. Not fetchable (timeouts, 10 MB limit, no slides online): Lagarde 2014 PDF text, Lumen talk, Ghost of Tsushima slides. Every figure not from a fetched source is marked **unverified** with its origin (author memory).
 
 ## 1. Sources, newest first

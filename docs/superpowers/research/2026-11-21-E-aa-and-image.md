@@ -92,10 +92,16 @@ better than AgX's inset, to be confirmed by measurement.
 
 ## Part 3. What Chlorophyll probably does (inference)
 
-- Stated (P-grade, baseline F9): native 1440p, no upscaler, ~130 fps on an
-  RTX 3080 (about 7.7 ms per frame at 130 fps: little room for a heavy AA).
-  Likely TAA-class (about 80%), SMAA T2x-like (10%), MSAA-only (10%, hard with
-  a GPU-driven meshlet path). No source states it.
+- Stated (baseline F9): 1440p render resolution, ~130 fps on an RTX 3080
+  (about 7.7 ms per frame at 130 fps: little room for a heavy AA). The
+  earlier reading "native, no upscaler" was press-derived; he never said
+  it, and "no DLSS 5" only means no generative filter. Update 2026-11-21
+  (F16, his YouTube reply): he works with DLSS/FSR guidance ("you can only
+  get so far"), lowers the mip bias on alpha-tested grass and sharpens
+  selectively through a motion-based "smear mask"; reactive masks did not
+  help. So an upscaler-class temporal resolve is likely in use, and which
+  one (DLSS, FSR, own) is unknown. The MSAA-only guess is less likely
+  with a visibility-buffer path (F17).
 - Soft near grass in his frames (R9) fits long history, wind, or video
   compression; cannot be separated from a YouTube capture.
 - Stability at that cost likely comes from the input side (clamped blade
@@ -125,6 +131,12 @@ better than AgX's inset, to be confirmed by measurement.
 8. **Optional camera-only motion blur toggle**, off in gates.
 
 Skip: MSAA/A2C, VRS for AA.
+
+Added 2026-11-21 from F16: A/B a lower mip bias on alpha-tested grass
+(decisions.md keeps mip bias 0 under native TAA because a negative bias
+shimmered; his claim is that it pays with the smear mask) and a
+motion-based sharpen mask (ours scales CAS down with motion, the
+opposite). Gates: the motion set, `shimmer` and `laplacian`.
 
 ## Sources (all fetched or returned by search this session unless marked)
 - [S1] Castano, Computing Alpha Mipmaps, https://www.ludicon.com/castano/blog/articles/computing-alpha-mipmaps/ (2010)

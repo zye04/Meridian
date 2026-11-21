@@ -12,7 +12,9 @@ is already there; what reads as "not a photo" is the material: wrong
 channels, a fixed specular, scans cooked down, and detail that turns to
 flatness or sparkle with distance. Pillar 1 fixes the inputs once, so
 Pillar 2 (foliage model, GTAO) and Pillar 3 (voxel albedo) are tuned on
-correct materials. Estimates below are marked (est.).
+correct materials. Estimates below are marked (est.). CE evidence: virtual
+textures on its terrain (F18); BRDF Lambert + GGX, EON for some
+materials, grass and canopy fitted to measured data (F20).
 
 ## 1. Import standard per asset class
 

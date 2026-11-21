@@ -129,11 +129,16 @@ his showcase and wants that fidelity everywhere.
 - G11: far tree shadows (the WIP branch, then an optical-depth far map;
   Horizon's height-field far cascade pattern). Research A/D.
 - His architecture: voxels generated in the LOD build (cook time),
-  instance-less tile aggregates far away (memory at 10M trees).
+  instance-less tile aggregates far away (memory at 10M trees) (F3, F4,
+  F22). Also stated: distant grass takes the same voxel path (F23) and
+  the per-asset voxel opacity volume gives each crown's light optical
+  depth plus inter-leaf scattering (F21); backlog rows.
 
 ### Pillar 4: Shadows
 
 - G5: Bend Studio screen-space shadows replacing the contact march;
+  grass and small ground cover out of the shadow maps, contact shadows
+  alone, as CE does (F26; backlog row, A/B);
   a sharper cascade 1 (4096^2 or a tighter split) with scrolling;
   contact hardening by marching the cascades (UE5 SMRT-like) rather than
   PCSS; hashed alpha in the shadow pass. Research D.
@@ -142,7 +147,10 @@ his showcase and wants that fidelity everywhere.
 
 - G9: input-side stability (above) plus TAA refinements (reactive /
   thin-feature history control, luminance weighting); FSR 3.1 native AA
-  as an A/B reference only. Research E.
+  as an A/B reference only. Research E. CE's AA method is unknown; he
+  follows DLSS/FSR guidance and adds a lower mip bias on alpha-tested
+  grass and a motion-based smear mask that sharpens selectively, and
+  reactive masks did not help him (F16): candidates to A/B.
 - G10 and rule 2: the visibility buffer for sub-pixel geometry shading,
   cheaper voxel brick listing; load-time work (cook, bake, transcode)
   threaded and cached.
@@ -193,7 +201,10 @@ Marked as the orchestrator's calls unless stated as the user's.
    voxel trees 0.9, clouds 0.75), forest interior 6.8 ms, forest
    overview ~13 ms. Phase 0's benchmark route replaces these with route
    averages and 1% lows.
-3. **The visibility buffer is conditional, with a trigger:** after
+3. **The visibility buffer is conditional, with a trigger** (CE is a
+   visibility-buffer deferred renderer with all shading in compute and
+   names it his foliage-overdraw answer, F17; rule 3 would make it the
+   default, this call keeps it gated until the user revisits it): after
    Pillar 3's smooth voxel switch lands, if the forest edge still exceeds
    9.5 ms and shading of sub-pixel triangles is over ~1.5 ms of it, the
    visibility buffer starts (its own spec). To keep that cheap, shading
