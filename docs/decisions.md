@@ -2792,7 +2792,8 @@ should be in the TLAS is open (plan task 4). Plan:
 - **Meadow setup** (Release 2560x1440, open view `1119 1356 -431 -1.55
   -0.02`), matched by eye to `assets/reference/target-meadow.png` (no
   ground showing in the clearings):
-  - a short mat (the low clumps, 0.2 m footprint, full density to 30 m,
+  - a short mat (the low clumps, 0.2 m footprint (0.14 m since
+    2026-11-21, twice as dense; ring 6.8M slots, 2.2M live), full density to 30 m,
     gone at 120 m)
   - tall seed-head tufts in 15 m-scale patches (0.5 m)
   - hawkbit in clumped drifts (0.3 m, scaled 2-2.8x so the heads stand
@@ -3729,6 +3730,10 @@ Release, 2560x1440, native TAA, main at 8ce025b, GPU ms:
 - **Denser meadow headroom:** the grass mat at half the footprint area
   (0.2 -> 0.14 m, 2x the instances: 2.16M live, ring 6.8M slots, 5.9M
   triangles drawn) costs +1.05 ms at the start view (5.64 -> 6.69).
+  Adopted (orchestrator, 2026-11-21: closer to the reference meadows; the
+  meadow budget moves to 7.0 ms): start view 6.61, full ground 6.87 with
+  raster shadows the default. The static placement hash is unchanged (the
+  mat is streamed).
 - **Dead ends:** an opaque depth prepass (opaque lists depth-only, then
   EQUAL): forest edge rt 27.4 -> 25.1 but raster 18.8 -> 21.5, start
   -0.27, dropped (the opaque lists are geometry-heavy and already early-Z
