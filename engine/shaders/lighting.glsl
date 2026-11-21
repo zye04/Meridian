@@ -397,8 +397,17 @@ void addAmbientLight(inout Shading sh, float occlusion) {
         roughIrradiance = giIrradiance(gi, R, skyIrradiance);
     }
     vec4 cloudsInR = skyCaptureAt(R);
-    vec3 skyRadiance =
-        mix(skyLuminance(sh.position, R) * cloudsInR.a + cloudsInR.rgb, roughIrradiance / kPi, sh.a);
+    // Where the probes see less than the open sky and ground would along R
+    // (under a canopy), the sharp sky reflection is occluded as much.
+    float skyOcclusion = 1.0;
+    if (pc.scene.giMode != 0u) {
+        vec3 open = mix(groundIrradiance, skyIrradiance, R.y * 0.5 + 0.5);
+        const vec3 kLuminance = vec3(0.2126, 0.7152, 0.0722);
+        skyOcclusion = clamp(dot(roughIrradiance, kLuminance) / max(dot(open, kLuminance), 1e-6),
+                             0.0, 1.0);
+    }
+    vec3 skyRadiance = mix((skyLuminance(sh.position, R) * cloudsInR.a + cloudsInR.rgb) * skyOcclusion,
+                           roughIrradiance / kPi, sh.a);
     vec3 specularReflectance = mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0) * sh.energyCompensation;
     float specularOcclusion = specularAmbientOcclusion(sh.NoV, occlusion, sh.a);
     sh.diffuseLight += sh.diffuseColor / kPi * diffuseIrradiance *

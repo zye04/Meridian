@@ -3,8 +3,8 @@
 
 // Global illumination probes (gi.h is the CPU reference): a camera-centred
 // clipmap of kGiLevels levels, each kGiColumns^2 columns of kGiSlices
-// probes at heights b (2^t - 1) above the column's base (the max of the
-// heightfield over the column, so no probe is underground). A probe holds
+// probes at heights b (2^t - 1) above the column's base (the terrain at the
+// column's centre). A probe holds
 // L1 SH radiance per colour channel; gi_probes.comp traces them. The ground
 // cache (gi_ground.comp, gi_albedo.comp) holds, per texel of kGiGroundLevels
 // camera-centred windows of kGiGroundTexels^2, the albedo seen on screen and
@@ -64,6 +64,12 @@ struct GiProbe {
     float valid;
 };
 
+// The probes' SH as half floats (packHalf2x16 pairs), three channels per
+// probe in probe order: what the shading reads, 24 B per probe instead of 64.
+layout(buffer_reference, std430) buffer GiVolumeBuffer {
+    uvec2 texels[];
+};
+
 layout(buffer_reference, std430) buffer GiBuffer {
     GiLevel levels[kGiLevels];
     GiLevel ground[kGiGroundLevels];
@@ -71,6 +77,8 @@ layout(buffer_reference, std430) buffer GiBuffer {
     // 1: every probe is retraced and every ground texel relit without history.
     uint reset;
     GiGroundBuffer groundBuffer;
+    GiVolumeBuffer volumeBuffer;
+    uint pad[2];
     GiProbe probes[];
 };
 
@@ -110,44 +118,37 @@ float giIrradianceChannel(vec4 c, vec3 n) {
     return max(e0 + e1 * dot(c.yzw, n.yzx), 0.0);
 }
 
-// One level's trilinear probe radiance at `p`; weight 0 when the level
-// doesn't hold the point or its probes aren't traced yet. `edge`: how far
-// inside the window, in columns.
-float giSampleLevel(GiBuffer gi, uint k, vec3 p, out vec4 sh[3], out float edge) {
+vec4 giLoadSh(GiBuffer gi, uint probe, uint channel) {
+    uvec2 texel = gi.volumeBuffer.texels[probe * 3u + channel];
+    return vec4(unpackHalf2x16(texel.x), unpackHalf2x16(texel.y));
+}
+
+// One level's trilinear probe radiance at `p`, with the slices counted from
+// `base` (the terrain under p; the probes' own bases are the terrain under
+// their columns); weight 0 when the level's window doesn't hold the point.
+// `edge`: how far inside the window, in columns. Every probe in the windows
+// is traced before the shading reads it.
+float giSampleLevel(GiBuffer gi, uint k, vec3 p, float base, out vec4 sh[3], out float edge) {
     GiLevel level = gi.levels[k];
     vec2 f = p.xz / level.spacing - 0.5;
-    ivec2 c0 = ivec2(floor(f));
-    vec2 w = f - vec2(c0);
-    ivec2 lo = c0 - level.origin;
-    sh[0] = sh[1] = sh[2] = vec4(0.0);
     vec2 d = f - vec2(level.origin);
     edge = min(min(d.x, d.y), min(float(kGiColumns - 2) - d.x, float(kGiColumns - 2) - d.y));
-    if (min(min(lo.x, lo.y), min(kGiColumns - 2 - lo.x, kGiColumns - 2 - lo.y)) < 0) {
+    sh[0] = sh[1] = sh[2] = vec4(0.0);
+    if (edge < 0.0) {
         return 0.0;
     }
-    float total = 0.0;
+    ivec2 c0 = ivec2(floor(f));
+    vec2 w = f - vec2(c0);
+    float t = giSliceCoordinate(level, p.y - base);
+    uint t0 = min(uint(t), kGiSlices - 2u);
+    float ft = t - float(t0);
     for (int i = 0; i < 4; ++i) {
         ivec2 column = c0 + ivec2(i & 1, i >> 1);
         float wxz = ((i & 1) != 0 ? w.x : 1.0 - w.x) * ((i >> 1) != 0 ? w.y : 1.0 - w.y);
-        GiProbe bottom = gi.probes[giProbeIndex(k, column, 0u)];
-        if (bottom.valid == 0.0 || bottom.column != column || wxz <= 0.0) {
-            continue;
+        uint probe = giProbeIndex(k, column, t0);
+        for (uint ch = 0u; ch < 3u; ++ch) {
+            sh[ch] += wxz * mix(giLoadSh(gi, probe, ch), giLoadSh(gi, probe + 1u, ch), ft);
         }
-        float t = giSliceCoordinate(level, p.y - bottom.base);
-        uint t0 = min(uint(t), kGiSlices - 2u);
-        float ft = t - float(t0);
-        GiProbe a = gi.probes[giProbeIndex(k, column, t0)];
-        GiProbe b = gi.probes[giProbeIndex(k, column, t0 + 1u)];
-        for (int ch = 0; ch < 3; ++ch) {
-            sh[ch] += wxz * mix(a.sh[ch], b.sh[ch], ft);
-        }
-        total += wxz;
-    }
-    if (total < 1e-3) {
-        return 0.0;
-    }
-    for (int ch = 0; ch < 3; ++ch) {
-        sh[ch] /= total;
     }
     return 1.0;
 }
@@ -166,11 +167,13 @@ GiSample giSample(vec3 worldPosition, vec3 normal) {
     GiSample result;
     result.sh = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
     result.remaining = 1.0;
+    Terrain terrain = pc.scene.terrain;
+    float base = (terrain.width > 0u ? terrainHeight(terrain, worldPosition.xz) : 0.0) + 0.05;
     for (uint k = 0u; k < kGiLevels && result.remaining > 0.0; ++k) {
         vec3 p = worldPosition + normal * (0.25 * gi.levels[k].spacing);
         vec4 sh[3];
         float edge;
-        if (giSampleLevel(gi, k, p, sh, edge) == 0.0) {
+        if (giSampleLevel(gi, k, p, base, sh, edge) == 0.0) {
             continue;
         }
         float w = result.remaining * clamp(edge / 4.0, 0.0, 1.0);
@@ -233,6 +236,7 @@ vec4 giGroundRadiance(vec2 xz) {
     return vec4(covered > 0.0 ? sum / covered : vec3(0.0), covered);
 }
 
+#if defined(TERRAIN_GLSL) && defined(CLOUDS_GLSL) && defined(FARFIELD_GLSL)
 vec3 terrainNormalAt(Terrain t, vec2 xz) {
     const float e = 1.0;
     float dx = terrainHeight(t, xz + vec2(e, 0.0)) - terrainHeight(t, xz - vec2(e, 0.0));
@@ -255,5 +259,7 @@ float giGroundSunVisibility(vec3 p, vec3 n) {
     }
     return visibility;
 }
+
+#endif
 
 #endif

@@ -163,6 +163,8 @@ struct Renderer::Impl {
   Buffer giBuffer;
   // The ground cache records and the albedo accumulator (GiGroundBuffer).
   Buffer giGroundBuffer;
+  // The probes' SH packed for the shading's reads (GpuGiHeader::volumeBuffer).
+  Buffer giVolumeBuffer;
   VkPipeline giProbesPipeline = VK_NULL_HANDLE;
   VkPipeline giGroundPipeline = VK_NULL_HANDLE;
   VkPipeline giAlbedoScatterPipeline = VK_NULL_HANDLE;
@@ -512,8 +514,8 @@ struct Renderer::Impl {
   void createGi();
   void destroyGi();
   void writeGiAlbedoSet();
-  void drawGiGround(VkCommandBuffer cmd, Vec3 cameraPosition, uint32_t frameIndex);
-  void drawGiProbes(VkCommandBuffer cmd);
+  void drawGiProbes(VkCommandBuffer cmd, Vec3 cameraPosition, uint32_t frameIndex);
+  void drawGiGround(VkCommandBuffer cmd);
   void drawGiAlbedo(VkCommandBuffer cmd, VkDeviceAddress sceneBuffer);
   void placeWeatherMap(Vec3 cameraPosition);
   void drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame);

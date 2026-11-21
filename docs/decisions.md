@@ -3857,3 +3857,50 @@ the difference is content (LOD cut, stream fade), not anti-aliasing.
   cubic is the identity.
 - Source: Keys 1981, "Cubic convolution interpolation for digital image
   processing" (IEEE TASSP 29(6)).
+
+## GI: ground cache, canopy light, cheaper probe reads (2026-11-21)
+
+Follow-up to "Global illumination" above (`--gi probes`, still default off).
+
+- **Ground radiance cache (plan Task 5):** probe rays that hit the ground
+  read a camera-centred cache (4 levels of 256^2 texels, 1-8 m), whose
+  albedo is scattered from the rendered diffuse albedo of pixels within
+  1.5 m of the terrain (1 pixel of every 4x4 per frame, atomics, a 10%
+  blend) and which `gi_ground.comp` relights (a quarter of the texels per
+  frame: sun with terrain, tree and cloud shadow, plus the probes' own
+  irradiance, so bounces accumulate). The meadow's green now comes from
+  what is drawn, not a constant.
+- **The blue forest was not thin canopy.** A diagnostic that painted
+  canopy-blocked probe rays red showed the forest floor fully covered;
+  the blue came from (a) the sharp sky reflection, which nothing occluded,
+  turning visible once the diffuse ambient under the canopy dropped and
+  exposure rose, and (b) leaves that probe rays hit lit only by the sun
+  reaching the probe (near 0 under a canopy). Fixes: the sky reflection is
+  scaled by the probes' rough irradiance over the open sky's (a
+  probe-derived specular occlusion, as Frostbite's and DDGI's
+  irradiance-ratio occlusion); leaves hit along a ray take albedo
+  (0.09, 0.14, 0.04) for reflected + transmitted light and see the sun
+  with `mix(probe's canopy transmittance, 0.5, ray direction y)` (a
+  crown's upper leaves are about half sunlit). Forest floor: blue-grey ->
+  green and darker; aerial forest p5 (L*, canopy crop, `.superpowers/gi/
+  shade.py` in the lane worktree): off 0.221, probes 0.171; the
+  references measure 0.06-0.10 with the same script.
+- **Probe reads:** the shading read 12-15 dependent 64 B probe records
+  per fragment (scene early +2.9 ms at the forest edge). Tried: one probe
+  sample per cluster in mesh.mesh (worse: the workgroup waits on thread
+  0's loads, +0.5 ms on the meadow); a 3D texture with hardware trilinear
+  (fast, but the copied volume read back garbage with trees on; not
+  pursued further, backlog). Kept: gi_probes.comp also writes each
+  probe's SH as half floats, 24 B per probe in probe order, and the
+  shading reads the 4 columns x 2 slices with the slices counted from the
+  terrain under the point (no dependent base read, no stamps: every probe
+  in a window is traced the frame it enters). Coarser levels retrace
+  every 16th (level 1) and 32nd (2-4) frame instead of every 8th.
+- **Cost (Release, 2560x1440 native TAA, GI on vs off):** meadow start
+  view (placement) 5.79 -> 6.61 ms (gi probes 0.33, ground 0.10, albedo
+  0.11, scene early +0.27); forest interior 6.62 -> 8.14 (probes 0.91,
+  ground 0.28, scene early +0.30); forest edge 13.23 -> 15.57 (probes
+  1.04, ground 0.30, scene early +1.04); forest overview 11.53 -> 13.62
+  (probes 1.06, ground 0.29, voxel trees +0.82: per-fragment probe reads
+  on voxel quads). The probe trace with `--trees` (far-field march per
+  ray) and the per-fragment reads on dense foliage are what is left.

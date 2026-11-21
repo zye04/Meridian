@@ -1028,13 +1028,13 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   endPass("weather");
 
-  // --- GI ground cache, then probes (the sky capture and irradiance above
-  // are their sky).
+  // --- GI probes, then the ground cache (the sky capture and irradiance
+  // above are their sky).
   if (impl_->giMode != GiMode::Off) {
-    impl_->drawGiGround(cmd, camera.position, scene.frameIndex);
-    endPass("gi ground");
-    impl_->drawGiProbes(cmd);
+    impl_->drawGiProbes(cmd, camera.position, scene.frameIndex);
     endPass("gi probes");
+    impl_->drawGiGround(cmd);
+    endPass("gi ground");
   }
 
   // --- Scene pass: shade into the HDR target.

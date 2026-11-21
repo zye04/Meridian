@@ -26,10 +26,10 @@ layout(set = 2, binding = 0) uniform sampler2D depthImage;
 layout(set = 2, binding = 1) uniform sampler2D albedoImage;
 
 void main() {
-    // One pixel of every 2x2 block per frame: the atomics on the coarse
+    // One pixel of every 4x4 block per frame: the atomics on the coarse
     // texels are the pass's cost, and the blend is slow anyway.
     uint frame = pc.scene.frameIndex;
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) * 2 + ivec2(frame & 1u, (frame >> 1u) & 1u);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) * 4 + ivec2(frame & 3u, (frame >> 2u) & 3u);
     ivec2 size = textureSize(depthImage, 0);
     Terrain terrain = pc.scene.terrain;
     if (any(greaterThanEqual(pixel, size)) || terrain.width == 0u) {

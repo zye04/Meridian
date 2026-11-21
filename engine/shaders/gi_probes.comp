@@ -14,14 +14,16 @@
 // cache's radiance (lit directly where it holds none), a miss the sky with
 // the sky capture's clouds. The radiance is
 // projected on L1 SH and blended into the probe's history. A frame updates
-// every 8th probe, plus any probe whose slot holds another column (it
+// every 8th probe of the finest level, every 16th of the next and every
+// 32nd of the coarser ones, plus any probe whose slot holds another column (it
 // scrolled in) or that was never traced.
 
 layout(local_size_x = 64) in;
 
 const uint kRays = 64u;
 const float kHysteresis = 0.95;
-const vec3 kLeafAlbedo = vec3(0.05, 0.08, 0.03);
+// Reflected plus transmitted: a canopy seen from below glows green.
+const vec3 kLeafAlbedo = vec3(0.09, 0.14, 0.04);
 
 shared vec3 partial[4][kRays];
 shared bool traced;
@@ -65,8 +67,11 @@ void main() {
     if (gl_LocalInvocationIndex == 0u) {
         GiProbe stored = gi.probes[probe];
         fresh = gi.reset != 0u || stored.valid == 0.0 || stored.column != column;
-        // Spread over columns and slices, so no height level updates as one.
-        traced = fresh || (uint(column.x + 3 * column.y + 5 * int(slice)) & 7u) == (gi.frame & 7u);
+        // Spread over columns and slices, so no height level updates as one;
+        // coarser levels (farther, slower to change on screen) less often.
+        uint period = 8u << min(k, 2u);
+        traced = fresh || (uint(column.x + 3 * column.y + 5 * int(slice)) & (period - 1u)) ==
+                              (gi.frame & (period - 1u));
         if (traced) {
             // The base is the terrain under the probe (not the column's
             // maximum, which would float coarse levels' bottom probes far
@@ -125,7 +130,10 @@ void main() {
         float transmittance = farFieldTransmittance(farField, origin, direction, 0.0,
                                                     hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance,
                                                     false);
-        vec3 leaf = kLeafAlbedo / kPi * (sunAtProbe * (0.5 * canopySun * max(sun.y, 0.0)) +
+        // Leaves above the probe are sunlit more often than the probe is:
+        // about half of a crown's leaves see the sun.
+        float leafSun = mix(canopySun, 0.5, max(direction.y, 0.0));
+        vec3 leaf = kLeafAlbedo / kPi * (sunAtProbe * (0.5 * leafSun * max(sun.y, 0.0)) +
                                          0.5 * skyIrradiance);
         radiance = mix(leaf, radiance, transmittance);
     }
@@ -151,7 +159,12 @@ void main() {
         for (int ch = 0; ch < 3; ++ch) {
             vec4 traced4 = vec4(partial[0][0][ch], partial[1][0][ch], partial[2][0][ch],
                                 partial[3][0][ch]);
-            gi.probes[probe].sh[ch] = mix(traced4, stored.sh[ch], history);
+            vec4 sh = mix(traced4, stored.sh[ch], history);
+            gi.probes[probe].sh[ch] = sh;
+            // Half floats: keep a stray huge value from becoming inf.
+            vec4 packed = clamp(sh, vec4(-60000.0), vec4(60000.0));
+            gi.volumeBuffer.texels[probe * 3u + uint(ch)] =
+                uvec2(packHalf2x16(packed.xy), packHalf2x16(packed.zw));
         }
         gi.probes[probe].column = column;
         gi.probes[probe].base = probeBase;

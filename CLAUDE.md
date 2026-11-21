@@ -178,7 +178,7 @@ voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
 voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi ground + gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (with `--gi probes`), contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (with `--gi probes`), contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -566,13 +566,15 @@ from the camera into a 64^2 octahedral map (cloud luminance + haze,
 transmittance; one texel of every 2x2 block per frame, all when the
 history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
 clouds over it integrated into the scene's ambient irradiance, and the
-LUT alone into the clear-sky irradiance that lights the clouds) -> gi ground
-(only with `--gi probes`: gi_ground.comp relights a quarter of the ground
-cache's texels per frame, plus new or stale ones) -> gi probes
-(gi_probes.comp, one 64-ray workgroup per probe
-that is stale, never traced or in this frame's 1/8 (hashed over columns and
-slices); L1 SH with hysteresis 0.95; ground hits read the cache; read by the
-scene passes) -> early scene
+LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
+(only with `--gi probes`: gi_probes.comp, one 64-ray workgroup per probe
+that is stale, never traced or in this frame's share (hashed over columns and
+slices: 1/8 of the finest level, 1/16 of the next, 1/32 of the coarser); L1 SH
+with hysteresis 0.95, also written packed as half floats for the shading;
+ground hits read last frame's cache; leaves hit along a ray glow green
+(reflected + transmitted sun); read by the scene passes) -> gi ground
+(gi_ground.comp relights a quarter of the ground cache's texels per frame,
+plus new or stale ones, with this frame's probes) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
 Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
 world normal + roughness; null views unless the upscaler wants them, the diffuse albedo also when GI is on) + RGBA16F sun light (the
@@ -687,9 +689,11 @@ barriers account for that.
   frameIndex) (`pcg3d`, common.glsl) instead of interleaved gradient noise.
   The cloud march keeps interleaved gradient noise: its own resolve
   integrates it, and RR sees only the resolved clouds.
-- GI probes (`SceneData.giMode`, `gi`: the probe buffer, a 160 B header of
+- GI probes (`SceneData.giMode`, `gi`: the probe buffer, a 176 B header of
   per-level windows (probes and ground cache) + 64 B probes, toroidal by
-  world column, each stamped with the column it was traced for; the ground
+  world column, each stamped with the column it was traced for; the
+  shading reads a packed copy instead (24 B per probe, half floats, slices
+  counted from the terrain under the shaded point); the ground
   cache is a second buffer, 48 B per texel + a 16 B albedo accumulator,
   toroidal by world texel and stamped the same way). The diffuse albedo
   guide (scene attachment 3) exists whenever GI is on, not only under Ray
@@ -698,7 +702,9 @@ barriers account for that.
   upscaler. gi albedo runs after the clouds, before contact shadows, with
   depth and the albedo in SHADER_READ_ONLY: `addAmbientLight` takes the diffuse
   and rough-specular irradiance from `giSample`/`giIrradiance` when giMode
-  is 1, blending to the analytic sky + ground term outside the clipmap.
+  is 1, blending to the analytic sky + ground term outside the clipmap, and
+  occludes the sharp sky reflection by the probes' rough irradiance over
+  the open sky's (under a canopy the sky is not reflected at full strength).
 - Curvature is a display warp: the world is flat (gameplay, `heightAt`,
   lighting, shadow rays, TLAS), but every rasterized vertex drops by
   `curvatureDrop` (common.glsl, d^2 / 2R, d horizontal distance from the

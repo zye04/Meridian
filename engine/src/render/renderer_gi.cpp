@@ -4,6 +4,9 @@
 
 namespace meridian {
 
+static_assert(kGiVolumeBytes ==
+              VkDeviceSize{kGiLevels} * kGiColumns * kGiColumns * kGiSlices * 3 * 8);
+
 // The diffuse albedo the ground cache reads is created with the targets, so
 // turning GI on after they exist recreates them (as setAntiAliasing does).
 void Renderer::setGiMode(GiMode mode) {
@@ -29,9 +32,11 @@ void Renderer::Impl::createGi() {
                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   giBuffer = createBuffer(sizeof(GpuGiHeader) + kProbes * kGiProbeBytes, kUsage, 0);
   giGroundBuffer = createBuffer(kTexels * (kGiGroundTexelBytes + kGiGroundAccumBytes), kUsage, 0);
+  giVolumeBuffer = createBuffer(kGiVolumeBytes, kUsage, 0);
   submitNow([&](VkCommandBuffer cmd) {
     vkCmdFillBuffer(cmd, giBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
     vkCmdFillBuffer(cmd, giGroundBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
+    vkCmdFillBuffer(cmd, giVolumeBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
   });
   giProbesPipeline = createComputePipeline(dev, "gi_probes.comp", sceneLayout);
   giGroundPipeline = createComputePipeline(dev, "gi_ground.comp", sceneLayout);
@@ -112,13 +117,14 @@ void Renderer::Impl::destroyGi() {
     vkDestroyDescriptorSetLayout(dev, giAlbedoSetLayout, nullptr);
     giAlbedoLayout = VK_NULL_HANDLE;
   }
+  destroyBuffer(giVolumeBuffer);
   destroyBuffer(giGroundBuffer);
   destroyBuffer(giBuffer);
 }
 
-// The clipmap windows around the camera, then the ground relight. Expects
-// the scene sets and push constants bound (as for sky_irradiance.comp).
-void Renderer::Impl::drawGiGround(VkCommandBuffer cmd, Vec3 cameraPosition,
+// The clipmap windows around the camera, then the probe trace. Expects the
+// scene sets and push constants bound (as for sky_irradiance.comp).
+void Renderer::Impl::drawGiProbes(VkCommandBuffer cmd, Vec3 cameraPosition,
                                   uint32_t frameIndex) {
   GpuGiHeader header{};
   for (uint32_t k = 0; k < kGiLevels; ++k) {
@@ -135,6 +141,7 @@ void Renderer::Impl::drawGiGround(VkCommandBuffer cmd, Vec3 cameraPosition,
   header.frame = frameIndex;
   header.reset = giReset ? 1 : 0;
   header.groundBuffer = giGroundBuffer.address;
+  header.volumeBuffer = giVolumeBuffer.address;
   giReset = false;
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -143,15 +150,6 @@ void Renderer::Impl::drawGiGround(VkCommandBuffer cmd, Vec3 cameraPosition,
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, giGroundPipeline);
-  constexpr uint32_t kGroups = kGiGroundTexels / 8;
-  vkCmdDispatch(cmd, kGroups, kGroups, kGiGroundLevels);
-  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-}
-
-// The probe trace, after drawGiGround (same bindings).
-void Renderer::Impl::drawGiProbes(VkCommandBuffer cmd) {
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, giProbesPipeline);
   constexpr uint32_t kRowGroups = kGiColumns * kGiColumns * kGiSlices / 8;
   vkCmdDispatch(cmd, kRowGroups, 8 * kGiLevels, 1);
@@ -159,6 +157,18 @@ void Renderer::Impl::drawGiProbes(VkCommandBuffer cmd) {
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+
+// The ground relight, after drawGiProbes (same bindings): it reads this
+// frame's probes, which every window probe has (the probe trace reads
+// last frame's ground).
+void Renderer::Impl::drawGiGround(VkCommandBuffer cmd) {
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, giGroundPipeline);
+  constexpr uint32_t kGroups = kGiGroundTexels / 8;
+  vkCmdDispatch(cmd, kGroups, kGroups, kGiGroundLevels);
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
 // After the scene passes: scatter this frame's near-ground albedo into the
@@ -172,7 +182,7 @@ void Renderer::Impl::drawGiAlbedo(VkCommandBuffer cmd, VkDeviceAddress sceneBuff
                           nullptr);
   vkCmdPushConstants(cmd, giAlbedoLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, giAlbedoScatterPipeline);
-  vkCmdDispatch(cmd, (renderExtent.width + 15) / 16, (renderExtent.height + 15) / 16, 1);
+  vkCmdDispatch(cmd, (renderExtent.width + 31) / 32, (renderExtent.height + 31) / 32, 1);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);

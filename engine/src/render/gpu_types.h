@@ -1218,8 +1218,14 @@ struct GpuGiHeader {
   uint32_t frame = 0;
   uint32_t reset = 0;
   VkDeviceAddress groundBuffer = 0;
+  // The probes' SH packed as half floats, the layout the shading reads
+  // (gi.glsl GiVolumeBuffer).
+  VkDeviceAddress volumeBuffer = 0;
+  uint32_t pad[2] = {};
 };
-static_assert(sizeof(GpuGiHeader) == 160);
+static_assert(sizeof(GpuGiHeader) == 176);
+// GiVolumeBuffer: per probe, 3 channels of 4 half floats.
+constexpr VkDeviceSize kGiVolumeBytes = VkDeviceSize{5} * 48 * 48 * 8 * 3 * 8;
 constexpr VkDeviceSize kGiProbeBytes = 64;
 // GiGroundBuffer: one 48 B record then one 16 B accumulator per ground
 // texel, kGiGroundLevels x 256 x 256 of each.
