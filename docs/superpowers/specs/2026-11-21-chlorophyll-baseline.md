@@ -9,29 +9,40 @@ audit (`2026-11-21-look-gap-audit.md`, G1-G11).
 ## 1. What we know about CE, graded
 
 Grades: **S** = stated by the author (X post, video description; link or
-quote), **P** = second-hand (press paraphrase of his posts, not read at the
+quote; his YouTube replies are collected in
+`../research/2026-11-21-chlorophyll-youtube-replies.md`), **P** = second-hand (press paraphrase of his posts, not read at the
 source), **I** = our inference from his frames (Section 2).
 
 | # | Claim | Grade | Source |
 |---|---|---|---|
 | F1 | All raster, not path traced | S | X reply, 2026-11-17 ("no it's all raster") |
 | F2 | GPU-driven, meshlets (cluster LOD / virtual geometry), small triangles rendered as voxels "with minimal to no detail loss", no impostors | S | X replies |
-| F3 | Voxels generated during the LOD build (a modified meshoptimizer) | P | shazoo.ru, 2026-11-10 |
+| F3 | Voxels generated during the LOD build (a modified meshoptimizer, custom DAG builder) | S | YouTube replies; shazoo.ru, 2026-11-10 |
 | F4 | Very far: proxies without per-instance data; a per-tile voxel hierarchy traversed as one aggregate; proxy tiles unique, streamed, built on the player's hardware; low-end can swap a 2D representation | S | video description |
-| F5 | Hybrid screen-space + voxel GI, no ray tracing | S (user-relayed) / P | user-shared architecture list; wccftech, gamegpu |
+| F5 | Hybrid screen-space + voxel GI; no hardware ray tracing anywhere (min spec is for mesh shaders) | S | YouTube reply; user-shared architecture list |
 | F6 | Clouds are 2.5D, not truly volumetric, art-directed, still improving | S | X post |
 | F7 | Weather systems built in from the ground up (big part of his game) | S | video description |
 | F8 | All terrain and scattering in Houdini, rule based; forest edges: size gradient on the skirt, full-canopy trees outside, "sparse bottom" | S | X reply |
-| F9 | 1440p native, no upscaler ("no DLSS 5", "true native image"), RTX 3080: ~130 fps average, ~200 aerial, ~80 dense forest; RTX 3070 laptop ~60 fps; min. RTX 2060 / RX 6400 | P | wccftech, shazoo, gamegpu (2026-11-10) |
+| F9 | 1440p, RTX 3080: ~130 fps average uncapped, ~200 aerial, ~80 dense forest; RTX 3070 laptop ~60 fps; min. RTX 2060 / RX 6400. "No DLSS 5" means no generative filter, not no upscaler/AA (see F16) | S | YouTube pinned comment + replies |
 | F10 | First showcase: ~3M trees, "1M instances x 4M tris" high-poly vegetation; later test 10M trees over 15 km² | S / P | X post (2113305054639784159), profile snippet |
 | F11 | Hand-crafted engine, ~7-8 months of work | S / P | X post; shazoo |
 | F12 | target-meadow frame: 60 fps (vsync), CPU 0.96 ms, GPU 7.67 ms | S (his overlay) | target-meadow.png |
 | F13 | Rivers, cliffs, hiking paths WIP (meshes / terrain splats) | S | video description |
 | F14 | Earlier Godot 4.4 forest demo (2025-08), plausibly his: Houdini heightmap, colour map, grass-density map; Houdini points by slope + curvature | P (authorship unconfirmed) | 80.lv |
+| F15 | D3D12 only (Vulkan maybe later); C++ engine, luau scripting; CPU mostly idle | S | YouTube replies |
+| F16 | AA: DLSS/FSR guidance "only gets you so far"; his fixes: a lower mip bias on alpha-tested grass and a motion-based "smear mask" that sharpens selectively; reactive masks didn't help; alpha grass still smears a little, trees don't | S | YouTube reply |
+| F17 | Visibility-buffer deferred path (his answer to foliage overdraw); trees and bushes fully triangles or voxels, only grass and small ground cover alpha tested; no A2C | S | YouTube replies |
+| F18 | Virtual textures on the terrain | S | YouTube reply |
+| F19 | Shadows semi-static (VSM-like) plus a small dynamic map around the player for animated trees and characters; far animated trees get contact shadows only | S | YouTube reply |
+| F20 | Tonemap AgX with contrast control; BRDF Lambert + GGX, EON for some materials (Burley made no measurable difference for foliage and bark); models fitted to measured data for grass (terrain material and meshes) and canopy | S | YouTube reply |
+| F21 | The per-asset voxel opacity volume (built for GI) gives the light's optical depth through each crown plus light scattered between leaves (optional, for far forests) | S | YouTube reply |
+| F22 | Triangles to voxels by screen error; tile proxies past ~1 km drop instance data and DAG traversal | S | YouTube replies |
+| F23 | Distant grass goes through the same voxel path as trees; the terrain fakes grass shading (normals, SSS, BRDF) further out, transition visible on steep hills or flying | S | YouTube reply |
+| F24 | Forest layout: ~2 m spacing between trees (walkability), size gradient skirt to interior; placement logic being ported from Houdini to an in-engine runtime library | S | YouTube replies |
+| F25 | Water: planar reflections + SSR; cliffs unsolved (considering a virtual runtime renderer) | S | YouTube replies |
 
-Unknown (not found anywhere): graphics API, language, shadow technique,
-AA method, AO, foliage shading model, grass rendering, wind, asset sources,
-tonemapper/grade, terrain representation and material, exposure.
+Unknown (not found anywhere): AO, wind, asset sources, exposure, GI
+details, per-pass costs, the smear mask's exact construction.
 Best source for these: his X replies tab (needs the user's login) or asking
 him directly.
 
