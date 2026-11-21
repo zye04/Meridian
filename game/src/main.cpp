@@ -267,7 +267,12 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
                   {"tree_english_oak_forest_01_a", 0.1f, 0.0f}}
             : std::vector<std::tuple<const char *, float, float>>{};
   for (const auto &[tree, forestWeight, loneWeight] : megaplants) {
-    const std::string name = tree;
+    std::string name = tree;
+    // The Megascans-textured cook (tools/usd2gltf/texture_tree.py) when there is one.
+    if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / "source/megascans" /
+                                (name + "_tex") / (name + "_tex.gltf"))) {
+      name += "_tex";
+    }
     for (uint32_t id : addPrototypes(renderer, prototypes,
                                      "source/megascans/" + name + "/" + name + ".gltf", false)) {
       forest.emplace_back(id, forestWeight);

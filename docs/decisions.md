@@ -3314,3 +3314,44 @@ foliage hue 124-126, grass 111; forest edge foliage chroma 0.079 at hue
 112, off the references; the greens band (140 +- 45) can't rotate leaves
 further without rotating grass too. The engine default stays identity.
 Interactive runs load the user's grade file, which overrides this.
+
+## Textured beech from Megascans scans, no Unreal step (assets, 2026-11-21)
+
+The Megaplants' own leaf and bark textures exist only in Unreal; Megascans
+scans already downloaded hold a leaf atlas and beech bark.
+`tools/usd2gltf/texture_tree.py` maps them onto the usd2gltf glTF:
+
+- **Leaves:** Megaplants leaves are modelled outlines with UVs into an
+  atlas we don't have. Each leaf piece (connected component; vertices
+  sharing a position connect) is fitted to one leaf of a Megascans atlas:
+  PCA long axis -> the atlas leaf's vertical, the petiole end (a run of
+  thin width bins at one end, else the end the area centroid leans to)
+  -> the atlas leaf's base, the blade's extent -> the atlas leaf's box
+  (found as connected components of the opacity map). Then every vertex
+  at one position gets one UV: the source's few petiole seams per leaf,
+  multiplied over 140k leaves, locked 78k vertices in the cluster LOD
+  and cost 15M extra triangles at the forest edge (62.0M vs 47.4M); welded,
+  51.6M. Atlas for the beech: `unidentified_tree_leaves_pecjv2` (ovate,
+  smooth margin); roughness factor = the atlas's mean roughness (0.57).
+  Opaque leaves (the geometry is the outline), the atlas's normal map.
+- **Bark:** Megascans `beech_bark_thspcaes` (olive-grey, lichen; B, N,
+  ORM as glTF base colour, normal, ARM), replacing Bark012's pink-red.
+  The smooth light-grey `wmohcgfn` read white in sun.
+- **Measured** (Release, 2560x1440, `--aa taa --trees`, one run each):
+  forest edge 30.4 -> 31.7 ms (47.4M -> 52.6M triangles); open view
+  toward the summit 8.65 -> 9.54 ms (13.3M -> 17.2M; the cook keeps
+  146k of 147k leaf pieces against 140k untextured, and they reduce less
+  at coarse cluster levels); the forest overview looks the same (beech
+  crowns there are already gone, below). Only `--trees` runs pay it.
+  Look: grey-olive trunks instead of orange-red, leaves with venation
+  and per-leaf colour from the scan instead of a flat tint.
+- **Maple and oak stay untextured.** Textured the same way (assorted
+  leaves `ojioj2` palmate leaves, oak `qgkpd2`, bark `vmhkcdsg`) they look
+  better up close but fewer of their crowns survive at 300-600 m in the
+  forest overview (meshoptimizer's sparse simplification drops whole leaf
+  pieces at coarse cluster levels, and the textured cooks prune
+  differently), so the swap would regress the far look.
+- **Not solved by any texture:** past ~200 m every Megaplants tree is a
+  bare pole: the cluster LOD removes the modelled leaves. That is the
+  mid tier's job (rasterized voxels, far-m lane), or card-leaf trees
+  (Megascans Trees packs, Unreal only); `--trees` stays off by default.

@@ -55,6 +55,29 @@ tools/usd2gltf/setup.sh && tools/usd2gltf/.venv/bin/python -I tools/usd2gltf/usd
   and G with +dh/dy (rows down), +0.6 to +0.95 for all, so the cook leaves
   them as they are.
 
+## Megaplants textured from Megascans scans (no Unreal)
+
+```bash
+python3 -I tools/usd2gltf/texture_tree.py _usd/<tree>.gltf _textured/<tree>_tex.gltf \
+  --leaf-atlas _extract/<atlas>_4k --bark _extract/<bark>_4k_ue_high/Textures [--atlas-leaves 0,1]
+./build/tools/cook/meridian-cook --tree _textured/<tree>_tex.gltf <tree>_tex --triangles 4000000
+```
+
+(paths under `assets/source/megascans/`). The fetch script does this for
+the beech when `unidentified_tree_leaves_pecjv2_4k.zip` and
+`beech_bark_thspcaes_4k_ue_high.zip` are in the downloads directory; the
+game loads `<tree>_tex` instead of `<tree>` whenever that directory
+exists. Each leaf piece is fitted onto one leaf of the atlas (petiole
+down, `--atlas-leaves` picks atlas leaves, 0 = largest), UVs welded per
+position; the wood gets the bark's B/N/ORM. Atlases on hand (Megascans
+`*_4k.zip`): `unidentified_tree_leaves_pecjv2` (ovate, beech/hornbeam),
+`assorted_leaves_ojioj2` (0, 1: palmate maple), `oak_leaves_qgkpd2`
+(small serrated), `oak_leaves_rgijqka2` (lobed oak sprigs, drying),
+`oak_leaves_sedlecvh2` (spotted, dead), `assorted_leaves_ojiok2`; barks
+`beech_bark_thspcaes` (olive-grey), `wmohcgfn` (smooth, light),
+`vmhkcdsg` (fissured). Maple and oak are not textured: see decisions.md
+"Textured beech from Megascans scans".
+
 ## Textured Megaplants trees from Unreal
 
 The Megaplants' textures (leaf atlases with opacity, normal, roughness,

@@ -188,6 +188,32 @@ else
     mv "$out.part" "$out"
   done
 
+  # The beech textured from Megascans scans (Fab, same directory): leaf atlas
+  # unidentified_tree_leaves_pecjv2 (ovate, smooth-edged) on its modelled
+  # leaves, beech bark thspcaes on the wood; the game prefers this cook.
+  # Maple and oak stay untextured: textured, fewer of their crowns survive
+  # the cluster LOD at a few hundred meters (docs/assets.md).
+  beech="tree_european_beech_01_a"
+  leaves="$megascans/_extract/unidentified_tree_leaves_pecjv2_4k"
+  bark_scan="$megascans/_extract/beech_bark_thspcaes_4k_ue_high"
+  for zip in "$megaplants/$(basename "$leaves").zip" "$megaplants/$(basename "$bark_scan").zip"; do
+    extract="$megascans/_extract/$(basename "$zip" .zip)"
+    if [[ -f "$zip" && ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part"
+      mv "$extract.part" "$extract"
+    fi
+  done
+  out="$megascans/${beech}_tex"
+  if [[ -f "$megascans/_usd/$beech.gltf" && -d "$leaves" && -d "$bark_scan" && ! -d "$out" ]]; then
+    python3 -I "$root/tools/usd2gltf/texture_tree.py" "$megascans/_usd/$beech.gltf" \
+      "$megascans/_textured/${beech}_tex.gltf" --leaf-atlas "$leaves" --bark "$bark_scan/Textures"
+    rm -rf "$out.part"
+    "$cook" --tree "$megascans/_textured/${beech}_tex.gltf" "$out.part" --triangles 4000000
+    mv "$out.part" "$out"
+  fi
+
   # Megascans rocks for placement (Fab *_ue_high.zip downloads, same
   # directory): the tier 1 glTF and its 4K textures, cooked like the Poly
   # Haven models (which bakes the scan's Z-up centimeter node transform).

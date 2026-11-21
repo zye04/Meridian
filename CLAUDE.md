@@ -437,7 +437,10 @@ tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
                            ktx2.cpp (shared encoder, coverage mips)
 tools/usd2gltf/            usd2gltf.py (USD -> unflattened glTF, usd-core
                            in a git-ignored venv made by setup.sh;
-                           UsdUVTexture inputs -> glTF textures)
+                           UsdUVTexture inputs -> glTF textures;
+                           texture_tree.py: Megascans leaf atlas +
+                           bark onto an untextured Megaplants glTF,
+                           the game prefers `<tree>_tex` cooks)
 tools/unreal/              export_trees.py (Unreal editor Python:
                            Megaplants inventory + glTF/PNG export,
                            docs/assets.md)
