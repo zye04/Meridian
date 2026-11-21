@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -597,6 +598,44 @@ void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::
 
 } // namespace
 
+namespace {
+
+// Encoding a 4K atlas takes most of a tree's cook, and a species' variants
+// share their maps, so encodings are cached beside the cooked trees, keyed by
+// the image's pixels and the encoding settings.
+std::vector<uint8_t> cachedEncode(const basisu::image &image, Usage usage,
+                                  basisu::job_pool &jobPool, int coverageChannel,
+                                  const std::filesystem::path &cacheDir) {
+  constexpr uint32_t kVersion = 1;
+  uint64_t hash = 0xcbf29ce484222325ull;
+  const auto mix = [&](const void *data, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+      hash = (hash ^ static_cast<const uint8_t *>(data)[i]) * 0x100000001b3ull;
+    }
+  };
+  const uint32_t header[] = {kVersion, image.get_width(), image.get_height(),
+                             static_cast<uint32_t>(usage), static_cast<uint32_t>(coverageChannel)};
+  mix(header, sizeof(header));
+  mix(image.get_ptr(), image.get_total_pixels() * sizeof(basisu::color_rgba));
+  char name[32];
+  std::snprintf(name, sizeof(name), "%016llx.ktx2", static_cast<unsigned long long>(hash));
+  const std::filesystem::path path = cacheDir / name;
+  if (std::filesystem::exists(path)) {
+    return readFile(path);
+  }
+  std::vector<uint8_t> ktx2 = encodeKtx2(image, usage, jobPool, coverageChannel);
+  std::error_code error;
+  std::filesystem::create_directories(cacheDir, error);
+  std::ofstream file(path, std::ios::binary);
+  file.write(reinterpret_cast<const char *>(ktx2.data()), static_cast<std::streamsize>(ktx2.size()));
+  if (!file) {
+    std::printf("Warning: cannot write the texture cache %s\n", path.string().c_str());
+  }
+  return ktx2;
+}
+
+} // namespace
+
 TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::path &outDir,
                         size_t triangleBudget, const std::filesystem::path &barkTexture) {
   fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_transform |
@@ -937,6 +976,7 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   // cutoff lands on 0.5, where the coverage-preserving mips and the output
   // material's cutoff test it.
   std::map<std::tuple<size_t, Usage, float>, size_t> encoded;
+  const std::filesystem::path textureCache = outDir.parent_path() / ".ktx2-cache";
   const auto cookTexture = [&](const fastgltf::TextureInfo &info, Usage usage, float cutoff,
                                const std::string &name) {
     const size_t texCoord =
@@ -950,7 +990,7 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     const auto [it, inserted] = encoded.emplace(
         std::tuple{*source.textures[info.textureIndex].imageIndex, usage, cutoff}, 0);
     if (inserted && cutoff < 0.0f) {
-      it->second = writer.addTexture(encodeKtx2(image, usage, jobPool), name);
+      it->second = writer.addTexture(cachedEncode(image, usage, jobPool, -1, textureCache), name);
     } else if (inserted) {
       basisu::image masked = image;
       for (uint32_t i = 0; i < masked.get_total_pixels(); ++i) {
@@ -959,7 +999,7 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
             a < cutoff ? 0.5f * a / cutoff : 0.5f + 0.5f * (a - cutoff) / (1.0f - cutoff);
         masked.get_ptr()[i].a = static_cast<uint8_t>(std::lround(remapped * 255.0f));
       }
-      it->second = writer.addTexture(encodeKtx2(masked, usage, jobPool, 3), name);
+      it->second = writer.addTexture(cachedEncode(masked, usage, jobPool, 3, textureCache), name);
     }
     fastgltf::TextureInfo out = info;
     out.textureIndex = it->second;

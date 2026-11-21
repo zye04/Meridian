@@ -271,7 +271,7 @@ def parse_args():
     ap.add_argument("--out", default=os.path.expanduser("~/Downloads/unreal-export"))
     ap.add_argument("--species")
     ap.add_argument("--inventory-only", action="store_true")
-    ap.add_argument("--bake", choices=["disabled", "simple", "mesh"], default="simple")
+    ap.add_argument("--bake", choices=["disabled", "simple", "mesh"], default="disabled")
     ap.add_argument("--source-model", choices=["auto", "on", "off"], default="auto")
     buf = io.StringIO()
     try:
@@ -521,7 +521,10 @@ def material_info(mat, cache):
 def texture_info(t):
     d = {"path": asset_path(t), "class": class_name(t)}
     for n in ("compression_settings", "srgb", "lod_group", "never_stream", "mip_gen_settings",
-              "virtual_texture_streaming", "compression_no_alpha", "flip_green_channel"):
+              "virtual_texture_streaming", "compression_no_alpha", "flip_green_channel",
+              # Applied at texture build time, not in the source the PNG exporter writes.
+              "adjust_brightness", "adjust_brightness_curve", "adjust_saturation", "adjust_vibrance",
+              "adjust_rgb_curve", "adjust_hue"):
         v = get_prop(t, n, "<n/a>")
         d[n] = enum_name(v) if hasattr(v, "name") else short(v)
     sx = safe(lambda: t.blueprint_get_size_x(), "size_x", None, d["path"])
@@ -946,12 +949,18 @@ def main():
                 write_manifest()
 
             # textures referenced by materials of exported meshes
+            # Only the summer set of the pack's own textures: the PNG exporter
+            # asserts (crashes the editor) on engine float textures such as
+            # PivotPainter's, and impostor slots are replaced by our voxel tier.
             needed = {}
             for a in manifest["assets"]:
                 for s in a["slots"]:
+                    if "impostor" in (s["slot"] or "").lower():
+                        continue
                     for lst in s["textures_by_role"].values():
                         for e in lst:
-                            needed[e["texture"]] = None
+                            if (e["texture"] or "").startswith("/Game/") and "winter" not in e["param"].lower():
+                                needed[e["texture"]] = None
             for tp in needed:
                 try:
                     to = tex_objs.get(tp) or load(tp)

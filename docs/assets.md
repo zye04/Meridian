@@ -106,10 +106,8 @@ in Unreal Engine 5.7+ (Linux editor):
    `export_log.txt`. Headless:
    `UnrealEditor <project>.uproject -run=pythonscript -script="<path>/export_trees.py --folder /Game/<pack folder> --species beech"`.
 
-The script is a draft written from the API docs, never run: its first run
-on one beech is diagnostic. Send back `inventory.json`, `manifest.json`,
-`export_log.txt` and `ls -lR ~/Downloads/unreal-export/beech` (and the
-tail of `Saved/Logs/<project>.log` if the editor crashed). Wind (Dynamic
+For the Megascans Trees packs (static meshes, card leaves) the script has
+run end to end; see "Megascans Trees from Unreal" below. Wind (Dynamic
 Wind: skeletal bones and weights) is listed in the inventory, not
 exported.
 
@@ -129,6 +127,90 @@ reads the assets directory at compile time: `MERIDIAN_ASSET_DIR`).
 If glTF export fails, `usd2gltf.py` also reads a USD export with
 textures (UsdPreviewSurface inputs connected to UsdUVTexture files); FBX
 would need a new dependency (assimp via FetchContent), not added.
+
+## Megascans Trees from Unreal (Black Alder, European Beech)
+
+The Megascans Trees packs on Fab (Black Alder, European Beech, Hornbeam,
+...) are Unreal-only: Nanite static meshes with card leaves on an 8K
+atlas, a tiling bark, a unique trunk-base texture and "decoration" cards
+(lichen, knots), all on `MA_Foliage` (`/Game/MSPresets`). Per pack:
+`Geometry/SimpleWind/SM_<Pack>_{Field,Forest,Sapling,Seedling}_NN` (use
+these; `PivotPainter/*_PP` are the same meshes with wind pivots),
+`Materials/SimpleWind/MI_*`, `Textures/{TwoSided/Summer,Tileable,Trunk/Trunk_NN,Decoration}`.
+
+1. In the editor, add the pack from Fab to the project (it lands in
+   `/Game/<Pack>`; `ls "~/Documents/Unreal Projects/<project>/Content"`).
+   Nothing in the project is modified or saved by the export, and it runs
+   headless next to an open editor (~1 min startup, ~10 s per 8K texture):
+
+   ```bash
+   ~/Apps/UnrealEngine/Engine/Binaries/Linux/UnrealEditor-Cmd "<project>.uproject" -run=pythonscript \
+     -script="$PWD/tools/unreal/export_trees.py --folder /Game/<Pack>/Geometry/SimpleWind --species <species>" \
+     -unattended -nosplash -nop4 -RenderOffscreen
+   ```
+
+   `<species>` is the lower-case pack name (`blackalder`,
+   `europeanbeech`, `europeanhornbeam`): the game looks for
+   `assets/source/megascans/<species>/SM_<Pack>_<Kind>_NN/`. Output in
+   `~/Downloads/unreal-export/<species>/`: one glTF per mesh (geometry,
+   meters, Y up; material baking does nothing headless, so it is off),
+   `textures/*.png` (the Summer set of the pack's own textures: the PNG
+   exporter crashes the editor on engine float textures such as
+   PivotPainter's, so `/Engine` textures, Winter parameters and the
+   Impostor slot are skipped), `manifest.json` (slots per mesh with their
+   textures), `inventory.json` (material parameters, texture settings
+   including Unreal's colour adjustments).
+2. Cook-ready glTFs, then the tree cook (texture encodings are cached in
+   `assets/source/megascans/<species>/.ktx2-cache`, so a pack's variants
+   share them; the first tree takes ~90 s, the rest ~20 s):
+
+   ```bash
+   python3 -I tools/unreal/cook_ready.py ~/Downloads/unreal-export/<species> assets/source/megascans/_unreal/<species> [SM_... ...]
+   ./build/tools/cook/meridian-cook --tree assets/source/megascans/_unreal/<species>/SM_<Pack>_Forest_01.gltf \
+     assets/source/megascans/<species>/SM_<Pack>_Forest_01 --triangles 1000000
+   ```
+
+   (one cook per Forest, Field and Sapling variant; seedlings are skipped).
+3. `--trees` picks every cooked variant up (main.cpp `addUnrealTrees`):
+   beech Forest 80% + alder Forest 20% in the forests, alder Field 70% +
+   beech Field 30% alone, both species' saplings under the canopy; a new
+   species needs a line there.
+
+What the export holds (verified on Black Alder and European Beech):
+
+- **glTF materials are the mesh's slots in order, without the Impostor
+  slot** (it only exists on the impostor LOD). Checked by UV ranges and
+  heights: tiling UVs (v from -5 to 3) on the Tileable bark, 0..1 on the
+  trunk base (0-1.5 m) and decoration, an atlas sub-range on TwoSided.
+- **Mask** (linear, `TC_MASKS`): R opacity (leaf and decoration cards; the
+  bark's R is not used), G roughness (leaves ~0.61), B translucency
+  (leaves ~0.42, twigs ~0), A unused. The Albedo's alpha is solid.
+  `cook_ready.py` writes the base colour with R as alpha, a
+  metallicRoughness map with G as roughness and metallic 0, and
+  `diffuseTransmissionFactor` = 0.35 x the mean B over the leaf texels
+  (the engine has one transmission per material; decoration 0).
+- **Normal maps are already OpenGL (green up)**, as glTF wants, although
+  Unreal itself is DirectX: measured by the curl of the map
+  (corr(dNx/drow, dNy/dcol) = -0.16 to -0.30, the sign of the known-GL
+  Bark012 map's -0.37; a DirectX map gives a positive value). Flipping
+  green made bark look melted and lit from below.
+- **Albedo adjustments**: Unreal applies a texture's `adjust_*` settings
+  at build time and the PNG exporter writes the unadjusted source; the
+  beech's leaf atlas has brightness 0.9 and hue 355, which
+  `cook_ready.py` applies (in linear HSV, as Unreal does). The alder's
+  are identity.
+- `COLOR_0` is wind and blend data (leaves: R phase, G, A per-leaf; trunk
+  base: A ~225 drives `MA_Foliage`'s dithered trunk-to-bark blend over
+  the 1.0-1.5 m overlap), not AO; the cook drops it, so the trunk base
+  shows its own texture up to 1.5 m. `TEXCOORD_1` is constant per
+  primitive (dropped too).
+- MI parameters (`inventory.json`) not reproduced: Albedo Tint with
+  "Tint BaseColor" (identity with "Split Albedo Controls", whose leaf and
+  branch tints are white), "LightInfluence BaseColor Strength" 3,
+  specular 0.2-0.3 (Unreal F0 0.016-0.024 against our fixed 0.04),
+  seasons and per-instance colour variation, wind. The master's graph was
+  not readable from Python (`get_material_property_input_node` returns
+  nothing for its attributes).
 
 ## Grass and flower plants
 
