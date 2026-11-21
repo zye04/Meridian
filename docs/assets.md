@@ -128,7 +128,7 @@ If glTF export fails, `usd2gltf.py` also reads a USD export with
 textures (UsdPreviewSurface inputs connected to UsdUVTexture files); FBX
 would need a new dependency (assimp via FetchContent), not added.
 
-## Megascans Trees from Unreal (Black Alder, European Beech)
+## Megascans Trees from Unreal (Black Alder, European Beech, European Hornbeam)
 
 The Megascans Trees packs on Fab (Black Alder, European Beech, Hornbeam,
 ...) are Unreal-only: Nanite static meshes with card leaves on an 8K
@@ -171,10 +171,11 @@ these; `PivotPainter/*_PP` are the same meshes with wind pivots),
    ```
 
    (one cook per Forest, Field and Sapling variant; seedlings are skipped).
-3. `--trees` picks every cooked variant up (main.cpp `addUnrealTrees`):
-   beech Forest 80% + alder Forest 20% in the forests, alder Field 70% +
-   beech Field 30% alone, both species' saplings under the canopy; a new
-   species needs a line there.
+3. `--trees` picks every cooked variant up (main.cpp `addUnrealTrees`,
+   weights in decisions.md); a new species needs a line there. Hornbeam:
+   `--folder /Game/EuropeanHornbeam/Geometry/SimpleWind --species
+   europeanhornbeam`, cooked with `--triangles 2000000` like the beech
+   (1M fails on the beech: its wood alone is over).
 
 What the export holds (verified on Black Alder and European Beech):
 

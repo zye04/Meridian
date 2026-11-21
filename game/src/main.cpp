@@ -262,10 +262,11 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
   // oak never stands alone. Saplings would take canopy slots (3 m tall).
   std::vector<std::pair<uint32_t, float>> forest, lone, saplings;
   // Megascans Trees cooked from Unreal (docs/assets.md) replace the
-  // Megaplants when present: beech forests with some alder, alder (and the
-  // open-grown beech) alone, both species' saplings under the canopy. Every
-  // cooked variant of a kind (<species>/SM_<pack>_<kind>_NN) takes an equal
-  // share of its species' weight.
+  // Megaplants when present: beech forests with hornbeam and some alder;
+  // alder, hornbeam and the open-grown beech alone; all three species'
+  // saplings under the canopy. Every cooked variant of a kind
+  // (<species>/SM_<pack>_<kind>_NN) takes an equal share of its species'
+  // weight.
   const auto addUnrealTrees = [&](const char *species, const char *pack, const char *kind,
                                   float weight, std::vector<std::pair<uint32_t, float>> &into) {
     std::vector<uint32_t> ids;
@@ -284,12 +285,15 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
     }
   };
   if (trees) {
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.8f, forest);
-    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.2f, forest);
-    addUnrealTrees("blackalder", "BlackAlder", "Field", 0.7f, lone);
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.3f, lone);
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Sapling", 0.5f, saplings);
-    addUnrealTrees("blackalder", "BlackAlder", "Sapling", 0.5f, saplings);
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.6f, forest);
+    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", 0.25f, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.15f, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Field", 0.5f, lone);
+    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Field", 0.3f, lone);
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.2f, lone);
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Sapling", 1.0f, saplings);
+    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Sapling", 1.0f, saplings);
+    addUnrealTrees("blackalder", "BlackAlder", "Sapling", 1.0f, saplings);
     if (lone.empty()) {
       lone = forest;
     }

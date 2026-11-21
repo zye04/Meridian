@@ -212,8 +212,8 @@ prototypes loaded, no forest or lone-tree layers, no forest floor in the
 terrain material, no tree models in `--scatter`), until they are textured
 and keep their coverage (`docs/backlog.md`). With `--trees` the Megascans
 Trees cooked from Unreal (`assets/source/megascans/<species>/SM_*`,
-docs/assets.md) are used when present: beech + alder forests, alder +
-beech lone trees, saplings under the canopy (layer 12), every cooked
+docs/assets.md) are used when present: beech, hornbeam and alder forests and
+lone trees, saplings under the canopy (layer 12), every cooked
 variant; startup prints `Megascans Trees: F forest, L lone, S sapling
 prototypes`. Without them, the Megaplants.
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
@@ -270,7 +270,7 @@ don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
-trees, 0x07e181370bb13473 with `--trees` and the Megascans Trees cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+trees, 0x5dc566c95239a00c with `--trees` and the Megascans Trees (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws

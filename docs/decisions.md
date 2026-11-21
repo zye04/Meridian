@@ -3928,10 +3928,11 @@ Unreal": channel layouts, slot order, measured normal convention).
   degrees, in linear HSV as Unreal applies them), which the PNG exporter
   leaves out. Impostor slots are dropped: the voxel tier replaces them.
 - **Every variant is a prototype** (main.cpp `addUnrealTrees`, equal
-  shares within a species): forests 80% beech Forest_01-08 + 20% alder
-  Forest_01-09 (17 prototypes), lone trees 70% alder Field_01-05 + 30%
-  beech Field_01 (6), saplings 50/50 beech Sapling_01-04 + alder
-  Sapling_01-06 (10) in a new layer 12 under the canopy (15 m footprint,
+  shares within a species): forests 60% beech Forest_01-08, 25% hornbeam
+  Forest_01-10, 15% alder Forest_01-09 (27 prototypes); lone trees 50%
+  alder Field_01-05, 30% hornbeam Field_01-04, 20% beech Field_01 (10);
+  saplings in equal parts beech 01-04, hornbeam 01-08, alder 01-06 (18)
+  in a new layer 12 under the canopy (15 m footprint,
   150 m draw distance, not in the far field). The pick is the placement
   hash, so it is stable per instance. The Megaplants stay the fallback
   when no Megascans Trees are cooked.
@@ -3947,7 +3948,8 @@ Unreal": channel layouts, slot order, measured normal convention).
   Megaplants (same build, Megascans Trees hidden) forest edge 12.43,
   forest overview 11.54, summit view 8.90; alder only (4.5 m forest
   footprint) 7.86 / 10.06 / 9.81 (6 m); beech + alder (6 m forest, 15 m
-  saplings) 18.70 / 14.27 / 12.40 (forest edge 36.9M triangles; the beech is 48 m tall
+  saplings) 18.70 / 14.27 / 12.40; with the hornbeam (smaller trees) in
+  the mix forest edge 16.28, overview 12.93 (beech + alder forest edge 36.9M triangles; the beech is 48 m tall
   with 0.1-2M triangles per variant, and its voxels (height / 128 =
   0.38 m) switch in only at ~500 m). Release startup with the beech
   ~140 s, 76 s of it building the far field (3.26M level-0 bricks for
