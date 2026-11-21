@@ -51,6 +51,7 @@ tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate tabl
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
+python3 -I tools/resemblance.py ours.png ref.png --regions docs/superpowers/research/matched-views/regions.json --view NAME   # OKLCh region stats, ours vs reference
 tools/cloud-compare.sh build-release out-dir     # cloud look views beside the reference photos + measured targets (tools/cloud-metrics.py)
 ```
 
