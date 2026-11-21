@@ -137,6 +137,20 @@ import), `lane-*` are lane captures from the same day.
 - Forest overview shows no tree shadows on the ground; fix WIP on branch
   `far-m-shadow2` (needs Debug, docs and the raster lane's agreement).
 
+### G12. Material fidelity up close and at distance
+- Evidence: `user-01-alder-bark-metallic.jpg` (bark relief melted, low
+  detail up close); user (2026-11-21): a 4M-polygon tree "has to look
+  almost like an actual photorealistic picture".
+- Seen: materials lose their photographic quality up close (resolution,
+  relief) and at distance (detail turns into flatness or sparkle).
+- Diagnosis: scans cooked down from 8K to 2-4K; no detail textures or
+  texture streaming; normal-map detail is not filtered into roughness at
+  distance; no per-asset material test bench.
+- Direction: programme Pillar 1 (`2026-11-21-chlorophyll-parity-programme-design.md`):
+  import standard, close-up resolution (detail textures / virtual
+  texturing), anisotropic filtering, Toksvig/LEAN-class normal filtering,
+  coverage-preserving mips, a test bench at 1 m / 10 m / 100 m / 1 km.
+
 ## Order proposed for the next session
 
 1. G6 (in flight) and G7's diagnosis: cheap, they distort every judgment.

@@ -24,6 +24,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G8 Terrain colour beige/grey/pink patches | Placeholder material dominates wide shots | Audit | Phase 2, or macro colour / vegetation tint |
 | G9 Motion shimmer above DLSS | Native TAA walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1 (/255) | Native lane | 3x3 reconstruction WIP (branch `native`) if sharpness holds |
 | G10 Forest edge 13.2 ms (target 10) | ~3 ms sub-pixel tree shading, 1.5 ms voxel brick listing | Perf lane | Visibility buffer (VG slice 4) |
+| G12 Material fidelity up close and at distance | Scans cooked 8K -> 2-4K, no detail textures / streaming, normal detail not filtered into roughness | User 2026-11-21 | Programme Pillar 1 |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading
