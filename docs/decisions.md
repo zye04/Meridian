@@ -3216,3 +3216,42 @@ stays behind `--aa dlss` as an A/B, so its backlog rows are A/B-only.
   not because TAA got softer. Crown shimmer and SSIM miss their targets;
   the limits stay as targets (backlog) for the TAA work that follows.
 - `aa` costs 0.18 ms at 2560x1440 (ground view, 0.17 at the beech).
+
+## Crown sky visibility (2026-11-21)
+
+Foliage took the full sky and ground ambient at every leaf, so crowns read
+flat and pale: forest edge foliage OKLCh L median 0.51 (p10 0.44) against
+the Chlorophyll frames' 0.32-0.42 (p10 0.21-0.26), no pixel of the view
+under L 0.3. The references' crowns are dark inside with sunlit tops.
+
+- **Choice: an analytic crown medium, per vertex.** mesh.mesh treats a
+  mesh taller than 4 m (half height > 2 m) as a crown: the ellipsoid
+  inscribed in its bounding box (`MeshInfo::halfExtent`, new) filled with
+  a uniform leaf medium. A leaf's sky visibility is the transmittance
+  `exp(-2.5 t)` to the ellipsoid's surface (t in units of the half
+  extents) toward the zenith and toward up-and-outward, averaged; leaves
+  on the top and sides see the sky, those deep inside or under the crown
+  see ~5-20%. mesh.frag multiplies `s.occlusion` (ambient, back
+  irradiance, specular occlusion) by it for leaf materials only, scaled by
+  the micro shadow strength (`--effects micro=0` is the A/B). The sun is
+  untouched: its shadow ray already darkens the interior. It multiplies
+  the plant height occlusion (which all leaf meshes keep); tufts (half
+  height <= 2 m) get only that.
+- **Why not a cook-time bake or ray-traced sky visibility:** a bake needs
+  a vertex channel (the 48 B vertex has none free) and a re-cook of every
+  tree, which is changing source (Megaplants); RT is off the default path
+  (raster direction). The ellipsoid is what SpeedTree-style per-vertex
+  crown AO approximates, needs no data, and costs nothing measurable (forest
+  edge, Release 1440p TAA, back to back: 30.6 / 28.3 ms main against 30.1
+  ms, within run-to-run noise). The Chlorophyll Engine bakes per-vertex
+  occlusion in its LOD build (assumed from its look; unpublished).
+- **Result** (forest edge `600 1205.6 -400 -1.55 0.02 --trees`, Release,
+  `--aa taa`): foliage L median 0.51 -> 0.42, p10 0.44 -> 0.26; image L
+  p5 0.43 -> 0.25, std 0.14 -> 0.20 (references 0.15-0.25); dark pixels
+  (L 0.15-0.3) 0 -> 8.5% at hue 146 (references 10-18% at 129-147).
+  Exposure rises with the darker foliage (sky L 0.87 -> 0.92).
+  Motion gates: crown shimmer 2.62 -> 2.70 (target 2.0, already
+  missed at native TAA; the darker interior adds leaf contrast), the
+  rest unchanged (ground views have no crowns).
+- Left (backlog): far-field voxels and bark get no crown term.
+

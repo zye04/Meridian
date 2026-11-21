@@ -450,7 +450,11 @@ Megascans plants, which ship no AO) get an occlusion that darkens toward
 the tuft base (height 0..1 from the vertex's object-space y over the mesh
 bound's top, varying location 8; mesh.vert sends 1), scaled by the micro
 shadow strength: ambient and back irradiance via `s.occlusion`, sun
-diffuse at half weight.
+diffuse at half weight. Tree crowns (meshes over 4 m tall) also get a crown
+sky visibility per vertex (mesh.mesh `crownVisibility`, location 12: the
+transmittance of a uniform leaf medium filling the ellipsoid inside the
+mesh's bounding box, `MeshInfo` half extents), leaf materials, ambient only,
+same strength scale.
 
 ## Frame (renderer_frame.cpp, in order)
 

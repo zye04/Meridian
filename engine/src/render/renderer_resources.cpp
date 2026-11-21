@@ -549,6 +549,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   }
   MeshInfo info;
   info.boundsCenter = (lo + hi) * 0.5f;
+  info.halfExtent = (hi - lo) * 0.5f;
   for (const Vertex &v : data.vertices) {
     info.boundsRadius =
         std::max(info.boundsRadius, length(v.position - info.boundsCenter));

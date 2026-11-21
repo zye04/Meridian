@@ -67,9 +67,10 @@ struct MeshInfo {
     uint clusterCount;
     uint firstLevel;
     uint levelCount;
-    uint pad0;
-    uint pad1;
-    uint pad2;
+    // Half size of the bounding box (centred on boundsCenter).
+    float halfExtentX;
+    float halfExtentY;
+    float halfExtentZ;
 };
 
 layout(buffer_reference, std430) readonly buffer MeshBuffer {

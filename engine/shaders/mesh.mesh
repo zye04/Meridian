@@ -25,6 +25,38 @@ layout(location = 10) flat out float outStreamFade[];
 // The terrain's sun visibility from the draw list entry (cluster_cull.comp),
 // -1 where mesh.frag marches the terrain per fragment.
 layout(location = 11) flat out float outTerrainSun[];
+layout(location = 12) out float outCrownVisibility[];
+
+// Tree crowns get no sky inside: leaves deep in the crown see the sky through
+// the leaves around them. The crown is the ellipsoid inscribed in the mesh's
+// bounding box, a uniform leaf medium; the visibility is its transmittance
+// toward the zenith and up-and-outward (normalized units), averaged.
+// Meshes shorter than this are plant tufts (plantOcclusion in mesh.frag).
+const float kCrownMinHalfHeight = 2.0;
+const float kCrownDensity = 2.5;
+
+// The path length inside the unit sphere along q + t w, t >= 0.
+float crownExit(vec3 q, vec3 w) {
+    float b = dot(q, w);
+    float d = b * b - dot(q, q) + 1.0;
+    if (d <= 0.0) {
+        return 0.0;
+    }
+    float root = sqrt(d);
+    return max(-b + root - max(-b - root, 0.0), 0.0);
+}
+
+float crownVisibility(MeshInfo mesh, vec3 position) {
+    vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
+    if (halfExtent.y < kCrownMinHalfHeight) {
+        return 1.0;
+    }
+    vec3 q = (position - mesh.boundsCenter) / max(halfExtent, vec3(1e-3));
+    vec2 outward = dot(q.xz, q.xz) > 1e-6 ? normalize(q.xz) : vec2(0.0);
+    float up = crownExit(q, vec3(0.0, 1.0, 0.0));
+    float side = crownExit(q, normalize(vec3(outward.x, 1.0, outward.y)));
+    return 0.5 * (exp(-kCrownDensity * up) + exp(-kCrownDensity * side));
+}
 
 void main() {
     // Entries past the list's capacity were dropped by the cull.
@@ -68,6 +100,7 @@ void main() {
         outTerrainSun[i] = terrainSun;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
+        outCrownVisibility[i] = crownVisibility(mesh, vertex.position);
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *

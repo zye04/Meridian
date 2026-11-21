@@ -572,7 +572,7 @@ struct MeshInfo {
   uint32_t clusterCount = 0;
   uint32_t firstLevel = 0;
   uint32_t levelCount = 0;
-  uint32_t pad[3] = {};
+  Vec3 halfExtent;
 };
 static_assert(sizeof(MeshInfo) == 64);
 
