@@ -3710,3 +3710,30 @@ subtle by default, an Effects strength with 0 = off; still flicker free.
   strength 0 -> 1 (ground, wide, sunset): cover 0.468 -> 0.466, 0.552 ->
   0.548, 0.792 -> 0.794; tops, mids and bases within 3%: the look holds.
   `clouds` 1.41 ms at both strengths (cloud-compare's ground view).
+
+## Frame cost measured, perf lane (2026-11-21)
+
+Release, 2560x1440, native TAA, main at 8ce025b, GPU ms:
+
+- **Targets** (Chlorophyll: 7.7 ms on a 3080 with forest; ours a 4080):
+  start view 5.64 (scene early 2.76, clouds 1.39, weather 0.44); full
+  ground `-0.25` pitch 5.65 (without placement 4.16); forest interior
+  with `--trees` 9.82 rt / 7.40 raster; forest edge 28.1 rt / 15.7
+  raster.
+- **Forest edge, raster:** scene early 10.4 = ~3.5 geometry (all mesh
+  shading stripped), 3.7 the object sun visibility (cascade PCF: with it
+  forced to 1, 6.7), ~3 shading sub-pixel tree triangles; `cull early`
+  1.5 (voxel_bricks.comp), voxel trees 1.1, clouds 0.7.
+- **Clouds** (ground view): the quarter-resolution march is ~0.9 ms even
+  looking down (the sky part), the composite 0.14, the resolve ~0.1.
+- **Denser meadow headroom:** the grass mat at half the footprint area
+  (0.2 -> 0.14 m, 2x the instances: 2.16M live, ring 6.8M slots, 5.9M
+  triangles drawn) costs +1.05 ms at the start view (5.64 -> 6.69).
+- **Dead ends:** an opaque depth prepass (opaque lists depth-only, then
+  EQUAL): forest edge rt 27.4 -> 25.1 but raster 18.8 -> 21.5, start
+  -0.27, dropped (the opaque lists are geometry-heavy and already early-Z
+  tested). A lean depth-only mesh shader for the masked prepass (no crown,
+  normals, previous clip): no change (10.39 -> 10.15 forest edge, 2.76 ->
+  2.82 start; the driver already drops outputs the depth pass doesn't
+  read). Re-cooking the meadow plants after the alpha-mip fix (19ac9d1)
+  changed neither cost nor triangle counts measurably (7.81 vs 7.83 ms).
