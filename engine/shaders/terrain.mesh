@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "terrain.glsl"
+#include "farfield.glsl"
 
 // Draws the nodes terrain_select.comp chose: 16 workgroups per node, each a
 // block of 8x8 of its 32x32 quads. Vertices sample the heightfield and
@@ -20,9 +21,17 @@ layout(location = 3) out vec4 outPreviousClip[];
 layout(location = 4) out vec2 outUv[];
 layout(location = 5) out vec4 outTangent[];
 layout(location = 6) flat out uint outMaterialIndex[];
+// Sky visibility under the trees' canopy (canopySkyVisibility).
+layout(location = 12) out float outSkyVisibility[];
 
 const uint kBlockQuads = 8u;
 const uint kBlockVertices = kBlockQuads + 1u;
+
+// The canopy's sky visibility is marched at 3 x 3 vertices of the block
+// (every 4th) and interpolated: the far field's 4 m voxels carry no finer
+// detail, and a march per vertex cost ~2 ms.
+const uint kCanopyStride = 4u;
+shared float canopySamples[9];
 
 // The vertex at grid position `grid` (node-local index `local`) as seen
 // from `camera`: morph factor and detail weight depend on the distance to
@@ -62,6 +71,14 @@ void main() {
     uvec2 blockOrigin = uvec2(block & 3u, block >> 2) * kBlockQuads;
 
     SetMeshOutputsEXT(kBlockVertices * kBlockVertices, 2u * kBlockQuads * kBlockQuads);
+    if (gl_LocalInvocationIndex < 9u) {
+        uvec2 local = blockOrigin + uvec2(gl_LocalInvocationIndex % 3u,
+                                          gl_LocalInvocationIndex / 3u) * kCanopyStride;
+        canopySamples[gl_LocalInvocationIndex] = canopySkyVisibility(
+            scene, terrainVertex(terrain, nodeOrigin + vec2(local) * quad, local, level, quad,
+                                 scene.cameraPosition));
+    }
+    barrier();
     for (uint i = gl_LocalInvocationIndex; i < kBlockVertices * kBlockVertices; i += 32u) {
         uvec2 local = blockOrigin + uvec2(i % kBlockVertices, i / kBlockVertices);
         vec2 grid = nodeOrigin + vec2(local) * quad;
@@ -80,6 +97,12 @@ void main() {
         outUv[i] = vec2(0.0);
         outTangent[i] = vec4(0.0);
         outMaterialIndex[i] = 0u;
+        vec2 f = vec2(local - blockOrigin) / float(kCanopyStride);
+        uvec2 c = min(uvec2(f), uvec2(1u));
+        vec2 t = f - vec2(c);
+        uint c00 = c.y * 3u + c.x;
+        outSkyVisibility[i] = mix(mix(canopySamples[c00], canopySamples[c00 + 1u], t.x),
+                                  mix(canopySamples[c00 + 3u], canopySamples[c00 + 4u], t.x), t.y);
     }
     for (uint i = gl_LocalInvocationIndex; i < 2u * kBlockQuads * kBlockQuads; i += 32u) {
         uint q = i / 2u;

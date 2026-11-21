@@ -494,4 +494,27 @@ float farFieldShadowDistance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dir
     return i >= kFarMaxRaySteps && t < tEnd ? -2.0 : -1.0;
 }
 
+// ------------------------------------------------------------ Canopy sky
+// The sky light that reaches a point under the placed trees' canopy: the
+// far field's transmittance up the vertical and four rays 45 degrees off
+// it, averaged (a coarse cosine-weighted hemisphere). Light the leaves
+// scatter and transmit still comes through a closed canopy: a share of
+// kCanopyGlow of the open sky. 1 without a far field.
+const float kCanopyGlow = 0.25;
+
+float canopySkyVisibility(SceneBuffer scene, vec3 world) {
+    if (scene.farFieldEnabled == 0u) {
+        return 1.0;
+    }
+    const float d = 0.70710678;
+    const vec3 directions[5] = vec3[](vec3(0.0, 1.0, 0.0), vec3(d, d, 0.0), vec3(-d, d, 0.0),
+                                      vec3(0.0, d, d), vec3(0.0, d, -d));
+    FarFieldBuffer farField = scene.farField;
+    float sum = 0.0;
+    for (uint i = 0u; i < 5u; ++i) {
+        sum += farFieldTransmittance(farField, world, directions[i], 0.0, 200.0, false);
+    }
+    return mix(kCanopyGlow, 1.0, sum / 5.0);
+}
+
 #endif

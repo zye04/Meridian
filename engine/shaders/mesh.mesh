@@ -2,6 +2,7 @@
 #extension GL_EXT_mesh_shader : require
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#include "farfield.glsl"
 
 // One workgroup per culled cluster (see cluster_cull.comp): its vertices
 // and triangles, with the same outputs as mesh.vert.
@@ -29,7 +30,9 @@ layout(location = 10) flat out float outStreamFade[];
 // The terrain's sun visibility from the draw list entry (cluster_cull.comp),
 // -1 where mesh.frag marches the terrain per fragment.
 layout(location = 11) flat out float outTerrainSun[];
-layout(location = 12) out float outCrownVisibility[];
+// Sky visibility: inside a tree's crown (crownVisibility), else under the
+// trees' canopy at the cluster (canopySkyVisibility).
+layout(location = 12) out float outSkyVisibility[];
 
 // Tree crowns get no sky inside: leaves deep in the crown see the sky through
 // the leaves around them. The crown is the ellipsoid inscribed in the mesh's
@@ -98,6 +101,9 @@ void main() {
             hasCrown = isLeafMesh(scene, crown);
         }
     }
+    float canopy = hasCrown ? 1.0
+                            : canopySkyVisibility(
+                                  scene, (instance.transform * vec4(cluster.boundsCenter, 1.0)).xyz);
 
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
@@ -125,7 +131,7 @@ void main() {
         outTerrainSun[i] = terrainSun;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
-        outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;
+        outSkyVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : canopy;
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *

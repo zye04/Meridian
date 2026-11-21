@@ -28,9 +28,10 @@ layout(location = 9) flat in vec3 inTint;
 // A streamed plant's shrink factor (1 = full size): it shades like the
 // terrain it turns into as this goes to 0.
 layout(location = 10) flat in float inStreamFade;
-// Sky visibility inside a tree crown (mesh.mesh), 1 elsewhere.
-layout(location = 12) in float inCrownVisibility;
 #endif
+// Sky visibility inside a tree crown or under the trees' canopy (mesh.mesh,
+// terrain.mesh).
+layout(location = 12) in float inSkyVisibility;
 #ifdef ALPHA_MASK
 // The cluster's terrain sun visibility (cluster_cull.comp), or -1 where the
 // terrain is marched here per fragment.
@@ -859,11 +860,6 @@ float plantOcclusion(Material m) {
     return mix(1.0, mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, inHeight), inStreamFade),
                pc.scene.microShadowStrength);
 }
-
-// Ambient only: the sun has its own shadow test.
-float crownOcclusion() {
-    return mix(1.0, inCrownVisibility, pc.scene.microShadowStrength);
-}
 #endif
 
 Surface materialSurface(Material m, vec3 normal) {
@@ -991,9 +987,8 @@ void main() {
     }
 #endif
 
-#ifndef TERRAIN
-    s.occlusion *= crownOcclusion();
-#endif
+    // Ambient only: the sun has its own shadow test.
+    s.occlusion *= mix(1.0, inSkyVisibility, pc.scene.microShadowStrength);
     addAmbientLight(sh, s.occlusion);
 #ifndef TERRAIN
     if (leaf) {
