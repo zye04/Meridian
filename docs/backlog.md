@@ -31,6 +31,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G16 Distant clouds blocky | Outline effect or upsample on quarter-res texels | User screenshots 2026-11-21 (evening) | A/B `cloud-outline=0` first |
 | G17 Terrain banding/terracing in aerial views | Shadow-height map texels or normal quantization | User screenshots 2026-11-21 (evening) | A/B vs brute-force march / pre-aaab45b |
 | G18 Fireflies and leaf sparkle in motion | Glossy leaf speculars as sub-pixel hot pixels, amplified by TAA and bloom | User screenshots in motion 2026-11-21 | Leaf material (G15), specular AA, firefly clamp |
+| G19 Smear / jitter / shimmer on everything in motion (top priority) | Clouds' long history (weight 0.05) smears small detail when moving; native TAA smears/jitters trees and textures | User 2026-11-21 evening | Measure in motion, then rule-1 fixes (research E) |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading

@@ -213,6 +213,29 @@ Also in these frames: hard-edged pale grey rock-blend patches on the
 terrain (G8, terrain material), overexposed lit slopes (G7), noisy
 mid-distance crowns (G1).
 
+### G19. Smear / jitter / shimmer on everything in motion (user, top priority)
+- Evidence: user report after playing main on 2026-11-21 evening: "The
+  clouds still smear/jitter with movement, specially the small clouds
+  detail. Same goes for trees and every texture/model with movement there
+  is a noticeable smear/jitter/shimmering thing." This is the anti-goal
+  of the programme (rule 1).
+- Clouds: quarter-res march + a temporal history with current weight
+  0.05 (0.125 in the layer) since a5d0c4a: stable when still, but small
+  detail smears and jitters as the camera moves, and the outline
+  sharpens the jitter. Our flicker metric measured static drift only; it
+  never measured a moving camera.
+- Scene: native TAA (still weight 1/16, Keys cubic history, motion
+  sharpen) leaves smear/jitter on trees and textures in motion; G9's
+  numbers (walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1) are the measured
+  part. Contributors to check: history weight vs motion, velocity of
+  alpha-tested foliage and voxel trees, subpixel jitter visible through
+  the sharpen, mip bias.
+- Direction: measure in motion first (moving-camera flicker/Laplacian on
+  clouds and on a forest/texture view, user-like speeds and turns), then
+  input-side stability and lighter temporal reliance per rule 1 (research
+  E; clouds: higher-res or better-reconstructed march instead of a long
+  history).
+
 ## Order proposed for the next session
 
 1. G6 (in flight) and G7's diagnosis: cheap, they distort every judgment.
