@@ -171,10 +171,11 @@ geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
-voxels), `bvh nodes N` (cluster group BVH nodes the
+voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
+voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, far field, pyramid, cull late, scene late, clouds, contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -259,6 +260,10 @@ window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
+`--voxel-trees on|off` (default on; needs the far field): a tree whose
+prototype's finest voxel (height / 128) projects under 1 px draws as that
+prototype's voxels, rasterized (below); off keeps its clusters up to the
+far switch (A/B).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
@@ -361,7 +366,9 @@ engine/src/render/         renderer internals:
                            buildPlacedTlas: prototype BLAS + PrototypeInfo,
                            cell margin, TLAS fill (tlas_fill.comp) + build
   renderer_farfield.cpp    far field at setPlacement: prototype bake
-                           (farfield_bake.comp, ray queries on the BLAS),
+                           (farfield_bake.comp, ray queries on the BLAS;
+                           also each tree prototype's fine grid for its
+                           voxel mips, protovoxel.h/.cpp),
                            splat of the placed table into world bricks
                            (farfield_splat.comp), column map, Debug checks
                            against the CPU replica (farfield.h/.cpp)
@@ -407,7 +414,12 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            cluster_cull.comp.
                            farfield.glsl: brick lookup, the far-cell
                            march, farFieldTransmittance; voxel.mesh/.frag
-                           draw far cells; lighting.glsl: the shading
+                           draw far cells; protovoxel.glsl: prototype
+                           voxel layout, switch rule, axis depths;
+                           voxel_bricks.comp lists a voxel tree's bricks
+                           and voxels, voxel_instance.mesh/.frag draw
+                           them (voxel_band.frag: the switch band's
+                           dither); lighting.glsl: the shading
                            mesh.frag and voxel.frag share.
                            wind.glsl (windVelocity, windOffset, gust),
                            weather.glsl (weatherAt: history lookup),
@@ -491,7 +503,14 @@ are chunks too; with the far field, a cell whose 4 m voxel is under
 -> early cull (cull.comp, one workgroup per chunk, phase
 0: instances visible last frame, frustum test (placed: the prototype's
 sphere and draw distance) only, seeding (instance, level root) for each
-DAG level of each mesh whose LOD band can hold the cut) -> traverse
+DAG level of each mesh whose LOD band can hold the cut; a tree past the
+voxel switch (its prototype's finest voxel <= 1 px, both over a 10% band)
+is listed as (instance, mip: the coarsest whose voxel is <= 2 px) instead,
+and voxel_bricks.comp, one workgroup per tree, lists its bricks in the
+frustum (with the terrain's sun visibility marched once per brick) and,
+compacted, the voxels that draw: coverage by a stable hash of tree and
+voxel against the voxel's opacity along the view, skipping voxels whose
+baked optical depth toward the camera exceeds 3.5) -> traverse
 (cluster_traverse.comp, breadth-first over each level's cluster group
 BVH, one indirect dispatch per BVH depth over ping-pong node queues: a
 node is skipped when its LOD bounds rule out every cluster below or it
@@ -531,7 +550,12 @@ reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster: the opaque lists, then the masked lists shaded with depth EQUAL,
 no discard and early fragment tests, so hidden grass and the terrain
-under it aren't shaded; the late pass orders its lists the same way; then the far field pass: voxel.mesh emits each far cell's
+under it aren't shaded; the late pass orders its lists the same way; then the voxel trees: voxel_instance.mesh, 64 voxels per
+workgroup, each a camera-facing quad of the cube's projected area,
+voxel_instance.frag shades it flat (no discard, so early depth holds;
+trees in the switch band take voxel_band.frag's dither discard, which
+the masked clusters' depth pass complements); then
+the far field pass: voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
 and writes the hit's depth (conservative, depth_less), motion and the
 same attachments) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
@@ -542,7 +566,7 @@ and phase 0's queued nodes go through the traversal (nodes tested against
 the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
 buffer) ->
-late scene pass (load; late lists (masked depth, opaque, masked shaded), then blended instances CPU-sorted back
+late scene pass (load; late lists (masked depth, opaque, masked shaded), the late voxel trees, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it, each texel's ray
 offset within the texel's central half per frame (R2 sequence): luminance with

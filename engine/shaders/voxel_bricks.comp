@@ -1,0 +1,161 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#include "common.glsl"
+#include "cull.glsl"
+#include "terrain.glsl"
+#include "farfield.glsl"
+#include "protovoxel.glsl"
+
+// One workgroup per voxel tree cull.comp listed in this phase. Each occupied
+// brick of the prototype at the tree's mip that is in the frustum is listed
+// (tree entry, pool brick | terrain sun << 31), with the terrain's sun
+// visibility marched once from its center (as cluster_cull.comp does per
+// small cluster: per fragment it cost ~3 ms at the forest overview). Then
+// each of its voxels that draws is listed (brick entry << 6 | voxel), 64 per
+// voxel_instance.mesh workgroup, one reservation per 64 bricks: a voxel draws where the stable hash of tree
+// and voxel is below its opacity along the view (coverage), unless the crown
+// hides it from the camera (kVoxelHiddenDepth). The tree itself passed the
+// instance occlusion test; its bricks are not tested against the pyramid.
+
+layout(local_size_x = 64) in;
+
+shared uint keptCount;
+shared uint keptFirst;
+shared uint keptPool[64];
+shared uint quadCount;
+shared uint threadQuads[64];
+shared uint quadFirst;
+
+// Whether the terrain lets the sun reach a point (world), one ray toward a
+// point of the sun's disk fixed per brick.
+uint terrainSun(vec3 world, uint pool, uint id) {
+    vec3 sun = cull.scene.sunDirection;
+    if (sun.y < -sin(cull.scene.sunAngularRadius)) {
+        return 0u;
+    }
+    vec3 origin = world;
+    origin.y = max(origin.y, terrainHeight(cull.scene.terrain, origin.xz) + kShadowRayBias);
+    uvec3 h = pcg3d(uvec3(id, pool, 1u));
+    vec3 direction = sunDiskDirection(cull.scene, float(h.x >> 8u) * (1.0 / 16777216.0),
+                                      float(h.y >> 8u) * (1.0 / 16777216.0));
+    return terrainOccludes(cull.scene, origin, direction, kShadowRayLength) ? 0u : 1u;
+}
+
+// Reserves `count` consecutive entries of a list (counters[counter]); what
+// doesn't fit is given back and counted as dropped. Returns what fits.
+uint reserve(uint counter, uint capacity, uint count, out uint first) {
+    first = atomicAdd(cull.counters.counters[counter], count);
+    uint end = min(first + count, capacity);
+    uint kept = end > first ? end - first : 0u;
+    if (kept < count) {
+        atomicAdd(cull.counters.counters[counter], kept - count);
+        atomicAdd(cull.counters.counters[kCounterVoxelDrops], count - kept);
+        atomicAdd(cull.counters.counters[kCounterOverflow], count - kept);
+    }
+    return kept;
+}
+
+void main() {
+    SceneBuffer scene = cull.scene;
+    uint phase = cull.phase & 1u;
+    uint treeIndex = phase * kMaxVoxelInstances + gl_WorkGroupID.x;
+    uvec2 tree = scene.voxelInstances.entries[treeIndex];
+    LoadedInstance instance = loadInstance(scene, tree.x);
+    ProtoVoxelBuffer pv = scene.protoVoxels;
+    PrototypeVoxels info = pv.prototypes.prototypes[instance.meshOrPrototype];
+    ProtoVoxelLevel level = pv.levels.levels[info.firstLevel + tree.y];
+    float v = level.voxelSize;
+    float radius = 0.8660254 * 4.0 * v * instance.scale;
+    mat3 toLocal = transpose(mat3(instance.transform));
+    uint brickBase = kVoxelBrickListBase + phase * kMaxVoxelBricks;
+    // Trees in the switch band go to the list drawn with the dither discard.
+    uint list = phase * 2u +
+                (instanceVoxelBlend(scene, instance,
+                                    scene.prototypes.prototypes[instance.meshOrPrototype]) < 1.0
+                     ? 1u : 0u);
+    uint quadBase = voxelQuadListStart(list);
+    uint i = gl_LocalInvocationIndex;
+
+    for (uint base = 0u; base < level.brickCount; base += 64u) {
+        if (i == 0u) {
+            keptCount = 0u;
+        }
+        barrier();
+        uint brick = base + i;
+        if (brick < level.brickCount) {
+            uint pool = level.brickOffset + brick;
+            uint coords = pv.brickCoords.voxels[pool];
+            vec3 local = info.lo + (vec3(coords & 0x3FFu, (coords >> 10) & 0x3FFu, coords >> 20) +
+                                    0.5) * (4.0 * v);
+            vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
+            vec4 sphere = displayedSphere(relative, radius);
+            if (inFrustum(sphere.xyz, sphere.w)) {
+                uint sun = terrainSun(scene.cameraPosition + relative, pool, tree.x);
+                keptPool[atomicAdd(keptCount, 1u)] = pool | sun << 31;
+            }
+        }
+        barrier();
+        if (i == 0u) {
+            keptCount = reserve(kCounterVoxelBricks + phase, kMaxVoxelBricks, keptCount, keptFirst);
+        }
+        barrier();
+        if (i < keptCount) {
+            scene.voxelInstances.entries[brickBase + keptFirst + i] = uvec2(treeIndex, keptPool[i]);
+        }
+
+        // The kept bricks' voxels: thread i decides voxel i of every kept
+        // brick (a bit per brick), then one reservation for the batch.
+        uint kept = keptCount;
+        uvec2 drawnMask = uvec2(0u);
+        for (uint k = 0u; k < kept; ++k) {
+            uint pool = keptPool[k] & 0x7FFFFFFFu;
+            uint word = pv.voxels.voxels[pool * 64u + i];
+            float extinction = voxelExtinction(word);
+            if (extinction <= 0.0) {
+                continue;
+            }
+            uint coords = pv.brickCoords.voxels[pool];
+            ivec3 voxel = ivec3(coords & 0x3FFu, (coords >> 10) & 0x3FFu, coords >> 20) * 4 +
+                          ivec3(i & 3u, (i >> 2) & 3u, i >> 4);
+            vec3 local = info.lo + (vec3(voxel) + 0.5) * v;
+            vec3 view = normalize(toLocal * ((instance.transform * vec4(local, 1.0)).xyz -
+                                             scene.cameraPosition));
+            float spread = abs(view.x) + abs(view.y) + abs(view.z);
+            float opacity = 1.0 - exp(-extinction * v / spread);
+            float noise = float(pcg3d(uvec3(tree.x, pool, i)).x) * (1.0 / 4294967296.0);
+            if (noise < opacity &&
+                protoVoxelDepth(pv.occlusion.voxels[pool * 64u + i], -view) < kVoxelHiddenDepth) {
+                drawnMask[k >> 5] |= 1u << (k & 31u);
+            }
+        }
+        threadQuads[i] = bitCount(drawnMask.x) + bitCount(drawnMask.y);
+        barrier();
+        if (i == 0u) {
+            uint total = 0u;
+            for (uint t = 0u; t < 64u; ++t) {
+                uint n = threadQuads[t];
+                threadQuads[t] = total;
+                total += n;
+            }
+            quadCount = 0u;
+            if (total > 0u) {
+                quadCount = reserve(kCounterVoxelQuads + list, voxelQuadListCapacity(list), total,
+                                    quadFirst);
+                uint end = quadFirst + quadCount;
+                atomicMax(cull.counters.counters[kCounterVoxelTasks + list * 3u], (end + 63u) / 64u);
+            }
+        }
+        barrier();
+        uint slot = threadQuads[i];
+        for (uint w = 0u; w < 2u; ++w) {
+            while (drawnMask[w] != 0u && slot < quadCount) {
+                uint k = w * 32u + uint(findLSB(drawnMask[w]));
+                drawnMask[w] &= drawnMask[w] - 1u;
+                uint q = quadBase + quadFirst + slot++;
+                scene.voxelInstances.entries[q >> 1][q & 1u] = (keptFirst + k) << 6 | i;
+            }
+        }
+        barrier();
+    }
+}

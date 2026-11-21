@@ -968,7 +968,9 @@ foliage that survives simplification).
   - Per-instance voxels to the horizon: 1M+ tiny boxes at the overview.
   - Per-cell bricks with clusters to 4 km (the prototype): the cost and
     thin foliage above.
-  - Rasterized voxel cubes: one-pixel triangles at the far switch.
+  - Rasterized voxel cubes: one-pixel triangles at the far switch (for
+    the per-cell far field; the mid tier rasterizes its prototype voxels
+    after all, see "Mid tier: rasterized prototype voxels").
   - (B) a 2.5D canopy aggregate: no 3D crowns; the user chose C.
   - Nanite's stochastic per-pixel normals: noisy; a deterministic 0.5
     opacity hit gives a stable image.
@@ -3436,3 +3438,86 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   only lifts it to 0.955. It is the grass texture's fine detail.
 - Sources: https://github.com/GPUOpen-Effects/FidelityFX-CAS ; Yang et
   al. 2020, "A Survey of Temporal Antialiasing Techniques" (EG STAR).
+
+## Mid tier: rasterized prototype voxels (M2a Task 11, 2026-11-21)
+
+- **Chosen (user, 2026-11-20): rasterize the prototype voxels the Nanite
+  Foliage way**, replacing the per-instance box + fragment DDA (measured
+  6.7-85 ms, gate 1.5). Epic (UE 5.7 Nanite Foliage docs): voxels are 4^3
+  bricks in the same hierarchy as the triangles, binned separately,
+  depth-bucketed and rasterized, no ray march. Chlorophyll generates its
+  voxels inside its meshoptimizer LOD build.
+- **How.** cull.comp lists a tree past the switch (its prototype's finest
+  voxel, height / 128, under 1 px; both representations over a 10% band
+  with complementary per-pixel dither) as (instance, mip), the mip the
+  coarsest whose voxel is <= 2 px (`kVoxelMipPixels`). voxel_bricks.comp,
+  one workgroup per tree, frustum-tests each occupied brick, marches the
+  terrain's sun visibility once per brick, and lists the voxels that
+  draw, compacted 64 per mesh workgroup. A cube of edge v seen along unit
+  d (prototype space) covers v^2 S on screen, S = |dx| + |dy| + |dz|, and
+  its mean chord is v / S, so each voxel is a camera-facing quad of that
+  area drawn with opacity `1 - exp(-sigma v / S)`, decided by a hash of
+  (tree, voxel): stable from frame to frame (no temporal noise for TAA to
+  smear), and over many voxels the coverage is the baked extinction's.
+  Voxels whose baked optical depth toward the camera exceeds 3.5 (< 3%
+  visible) are skipped: the build stores per voxel the optical depth from
+  its center out of the box along the 6 axis directions (4 bits each,
+  0.5 steps, in the occlusion word), blended by d^2 like an ambient cube.
+  The same depths toward the sun shade the crown itself; the sun ray then
+  starts where it leaves the box (cascades or TLAS, as other surfaces).
+  Fragments shade flat at the voxel center (normal, palette albedo, baked
+  sky occlusion), exact depth and static motion.
+- **Measured** (Release 2560x1440, `--aa taa --trees --shadows raster`,
+  one run each, clusters = `--voxel-trees off`, frame GPU ms): forest
+  overview 14.68 -> 13.41 (scene early 9.64 -> 3.73, voxel trees 3.73,
+  cull early +1.55; 5.19M voxels from 1.57M bricks of 151.7k trees),
+  forest edge 21.05 -> 20.53, summit 11.34 -> 11.44 (run-to-run noise;
+  0.56 cull early + 0.71 voxel trees against 1.4 ms less scene early), high
+  overview 12.55 -> 11.84. With `--shadows rt` (one TLAS ray per voxel
+  fragment from where the sun leaves the box) the overview costs 15.84 ->
+  17.14: the voxels' ray is the price there (voxel trees 6.59). The steps
+  that got there at the overview (voxel pass): a mesh workgroup per brick
+  at 1 px voxels 32.6 ms with the list capped; 2 px mip and the
+  hidden-voxel skip 15.7; compaction to 64 drawn voxels per workgroup and
+  the terrain march per brick instead of per fragment 7.6; no discard in
+  the main pipeline (early depth) 3.7; one list reservation per 64 bricks
+  cut the expansion 2.0 -> 1.6 ms. The skip did not pay alone while every
+  brick was a workgroup (the workgroups were the cost, not the quads).
+- **Motion** (summit view `1119 1356 -431 -1.55 -0.02`, raster, TAA,
+  forest crop 1560x300+1000+600): Laplacian turning at 0.3 rad/s 0.424
+  (still 0.432) against clusters 0.315 (still 0.302); shimmer between
+  frames 120 and 121 1.41% against 1.38%. The coverage hash is fixed per
+  tree and voxel, so the voxels hold still under TAA. A fly-toward
+  sequence across the switch shows no popping.
+- **Look:** where clusters thin to bare trunks (overview, summit ridges at
+  0.3-1.5 km), the voxels keep the canopy continuous
+  (`.superpowers/farm/out` captures in the far-m worktree). Trees nearer
+  than the switch (~150-260 m, the three prototypes' finest voxels 0.12-0.21
+  m at 1 px) still lose leaves to cluster simplification (backlog). A
+  switch at 2 px (half the distance) keeps those crowns too, at +0.9 ms
+  summit and +2.0 ms edge, mostly voxel_bricks.comp's per-voxel loop over
+  the larger near bricks: not taken yet.
+- **Rejected:** a mesh workgroup per brick (the workgroup count, not the
+  quads, cost 9-13 ms); voxels at 1 px (~4x the voxels for the same
+  coverage, list overflow); per-voxel band dither in place of the
+  per-pixel discard (independent masks lose up to ~16% coverage mid band);
+  per-brick Hi-Z (a dithered canopy leaves holes in the min-depth pyramid,
+  so it would mainly cull bricks behind terrain, which the instance test
+  already does).
+- **Voxel generation on the CPU at cook time (research, 2026-11-21):**
+  a prototype (branch `farm-cpuvox`, tools/cpuvox) rasterizes each
+  prototype's triangles into the bake's ray grid (4x4 rays per voxel face
+  per axis, nearest hit) and matches brute-force ray-triangle tests (0
+  mismatches over 2100 rays); 0.16-0.45 s per 1-4M-triangle Megaplant on
+  one thread (~1.6 s for five), 0.5 MiB zstd for five at level 0. That
+  removes the bake's BLAS/ray-query dependency and caches with the
+  `.clusters` file, as Chlorophyll does in its LOD build. Decided: move it
+  there when the BLAS goes (raster direction) or the textured Megaplants
+  land, whichever is first; it needs a CPU alpha decode of the BC7/Basis
+  base colour (the current trees' leaves are alpha 1) and keying by the
+  geometry hash and a bake version (backlog "Far-field bake needs ray
+  queries").
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-foliage
+  - https://www.youtube.com/watch?v=VC_NUxbeA0E (Chlorophyll Engine)
+  - Loubet and Neyret 2017, https://hal.archives-ouvertes.fr/hal-01468817v1
+    (mean chord and projected area of volume LoDs)

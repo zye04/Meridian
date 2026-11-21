@@ -169,6 +169,12 @@ void Renderer::Impl::resetDrawCounters(VkCommandBuffer cmd, const Buffer &counte
   }
   initial.retestDispatch[1] = initial.retestDispatch[2] = 1;
   initial.farTasks[1] = initial.farTasks[2] = 1;
+  for (uint32_t phase = 0; phase < 2; ++phase) {
+    initial.voxelDispatch[phase][1] = initial.voxelDispatch[phase][2] = 1;
+    for (auto &tasks : initial.voxelTasks[phase]) {
+      tasks[1] = tasks[2] = 1;
+    }
+  }
   vkCmdUpdateBuffer(cmd, counters.buffer, 0, sizeof(initial), &initial);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -245,6 +251,27 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                 VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+}
+
+// The voxel trees cull.comp listed in this phase become bricks to draw
+// (voxel_bricks.comp, one workgroup per tree).
+void Renderer::Impl::expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame,
+                                       uint32_t phase) {
+  if (protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+    return;
+  }
+  const CullConstants constants = cullConstants(frame, phase, nullptr);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, voxelBricksPipeline);
+  vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
+                     &constants);
+  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+                        offsetof(DrawCounters, voxelDispatch) +
+                            phase * sizeof(DrawCounters::voxelDispatch[0]));
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
@@ -466,6 +493,11 @@ CullDrops Renderer::droppedCullEntries() const {
 uint32_t Renderer::drawnCellCount() const { return impl_->drawnCells; }
 
 uint32_t Renderer::drawnFarCellCount() const { return impl_->drawnFarCells; }
+uint32_t Renderer::drawnVoxelTreeCount() const { return impl_->drawnVoxelTrees; }
+
+uint32_t Renderer::drawnVoxelBrickCount() const { return impl_->drawnVoxelBricks; }
+
+uint32_t Renderer::drawnVoxelQuadCount() const { return impl_->drawnVoxelQuads; }
 
 uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
@@ -493,6 +525,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 }
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
+void Renderer::setVoxelTrees(bool enabled) { impl_->voxelTrees = enabled; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
@@ -656,6 +689,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
     impl_->drawnFarCells = counters->farTasks[0];
+    impl_->drawnVoxelTrees = 0;
+    impl_->drawnVoxelBricks = 0;
+    impl_->drawnVoxelQuads = 0;
+    for (uint32_t phase = 0; phase < 2; ++phase) {
+      impl_->drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
+      impl_->drawnVoxelBricks += std::min(counters->voxelBricks[phase], kMaxVoxelBricks);
+      impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads) +
+                                std::min(counters->voxelQuads[phase][1], kMaxVoxelBandQuads);
+    }
     impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
               impl_->droppedByList.begin());
@@ -811,6 +853,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.giMode = impl_->giMode == GiMode::Off ? 0 : 1;
   scene.gi = impl_->giBuffer.address;
   impl_->updateFarShadow(lighting.sunDirection, scene);
+  scene.protoVoxels = impl_->protoVoxelInfo.address;
+  scene.voxelInstances = impl_->voxelInstanceList.address;
+  scene.drawCounters = impl_->drawCounters.address;
+  scene.voxelTrees = impl_->protoVoxelInfo.buffer != VK_NULL_HANDLE && impl_->voxelTrees ? 1 : 0;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -892,6 +938,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->cullCells(cmd, frame, 0);
   endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);
+  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull early");
   impl_->traverseClusters(cmd, frame, 0);
   endPass("traverse");
@@ -1119,6 +1166,29 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        sizeof(scenePush), &scenePush);
   };
 
+  // The voxel trees' voxels (voxel_instance.mesh), one workgroup per 64; the
+  // phase rides in drawList.
+  auto drawVoxelTrees = [&](uint32_t phase) {
+    if (impl_->protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+      return;
+    }
+    vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
+    for (uint32_t band = 0; band < 2; ++band) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        band ? impl_->voxelBandPipeline : impl_->voxelInstancePipeline);
+      PushConstants listPush = scenePush;
+      listPush.drawList = phase * 2 + band;
+      vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(listPush),
+                         &listPush);
+      impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
+          cmd, impl_->drawCounters.buffer,
+          offsetof(DrawCounters, voxelTasks) + listPush.drawList * sizeof(DrawCounters::voxelTasks[0][0]),
+          1, sizeof(DrawCounters::voxelTasks[0][0]));
+    }
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(scenePush),
+                       &scenePush);
+  };
+
   beginScene();
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
   vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -1127,6 +1197,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   drawCulled(0, false, false);
   drawCulled(0, true, false);
   endPass("scene early");
+  drawVoxelTrees(0);
+  endPass("voxel trees");
   impl_->drawFarField(cmd);
   vkCmdEndRendering(cmd);
   endPass("far field");
@@ -1136,6 +1208,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("pyramid");
   impl_->cullCells(cmd, frame, 1);
   impl_->cullInstances(cmd, frame, 1);
+  impl_->expandVoxelBricks(cmd, frame, 1);
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
   endPass("cull late");
@@ -1163,6 +1236,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   drawCulled(1, true, true);
   drawCulled(1, false, false);
   drawCulled(1, true, false);
+  endPass("scene late");
+  drawVoxelTrees(1);
+  endPass("voxel trees late");
 
   // Blended last, back to front, from the CPU: each surface must composite
   // over everything behind it, and there are few of them.
@@ -1188,7 +1264,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
 
   vkCmdEndRendering(cmd);
-  endPass("scene late");
+  endPass("blended");
 
   if (impl_->cloudsEnabled) {
     impl_->drawClouds(cmd, frame, camera.position);

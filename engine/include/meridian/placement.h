@@ -18,7 +18,6 @@ constexpr float kCellSize = 64.0f;
 
 struct Prototype {
   std::vector<MeshId> meshes;
-  bool impostor = false;
   // Multiplies the base colour of every placed instance of it, 0..2 per
   // channel (grading scanned plants toward a target look).
   Vec3 tint{1.0f, 1.0f, 1.0f};

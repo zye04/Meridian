@@ -296,6 +296,11 @@ public:
   uint32_t drawnCellCount() const;
   // Far cells drawn as voxels in a recent frame.
   uint32_t drawnFarCellCount() const;
+  // Trees drawn as prototype voxels in a recent frame (both phases).
+  uint32_t drawnVoxelTreeCount() const;
+  // Their bricks and voxels drawn (both phases).
+  uint32_t drawnVoxelBrickCount() const;
+  uint32_t drawnVoxelQuadCount() const;
   // Cluster group BVH nodes the traversal visited in a recent frame.
   uint32_t visitedBvhNodeCount() const;
 
@@ -323,6 +328,10 @@ public:
   // Off by default; Probes lights ambient from the terrain-following probe
   // clipmap traced against the heightfield and the far field.
   void setGiMode(GiMode mode);
+  // On by default: trees whose triangles go sub-pixel draw as their
+  // prototype's voxels; off keeps their clusters up to the far switch (for
+  // A/B comparisons). Needs a far field (setPlacement).
+  void setVoxelTrees(bool enabled);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

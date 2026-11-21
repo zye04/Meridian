@@ -524,6 +524,8 @@ struct Options {
   bool farField = true;
   bool voxelFarShadows = true;
   bool gi = false;
+  // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
+  bool voxelTrees = true;
   bool occlusion = true;
   // Rt until the raster shadows pass the shimmer gates (decisions.md).
   meridian::ShadowMode shadows = meridian::ShadowMode::Rt;
@@ -707,6 +709,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--gi takes off or probes");
       }
       options.gi = mode == "probes";
+    } else if (arg == "--voxel-trees" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "on" && mode != "off") {
+        throw std::runtime_error("--voxel-trees takes on or off");
+      }
+      options.voxelTrees = mode == "on";
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -731,7 +739,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --trees, --no-occlusion, "
-                               "--far-field off, --far-shadows tlas|voxel, --gi off|probes, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-trees on|off, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -808,6 +816,7 @@ int main(int argc, char **argv) {
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
   renderer.setGiMode(options.gi ? meridian::GiMode::Probes : meridian::GiMode::Off);
+  renderer.setVoxelTrees(options.voxelTrees);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
   renderer.setCloudsEnabled(options.clouds);
@@ -1111,14 +1120,15 @@ int main(int argc, char **argv) {
     std::printf("sun shadows: %u cascade renders\n", renderer.sunShadowRenderCount());
     const meridian::CullDrops drops = renderer.droppedCullEntries();
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, cells %u, far cells %u, bvh nodes %u, "
+                "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "
                 "%u dropped by full "
                 "cull lists (chunks %u, work items %u, clusters %u, terrain nodes %u, "
                 "bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
-                renderer.drawnFarCellCount(),
+                renderer.drawnFarCellCount(), renderer.drawnVoxelTreeCount(),
+                renderer.drawnVoxelBrickCount(), renderer.drawnVoxelQuadCount(),
                 renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
                 drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
                 renderer.placedInstanceCount(),

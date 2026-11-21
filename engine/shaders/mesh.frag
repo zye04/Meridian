@@ -6,6 +6,7 @@
 #include "material.glsl"
 #include "terrain.glsl"
 #include "lighting.glsl"
+#include "protovoxel.glsl"
 #ifdef TERRAIN
 #include "placement.glsl"
 #endif
@@ -35,6 +36,10 @@ layout(location = 12) in float inCrownVisibility;
 // The cluster's terrain sun visibility (cluster_cull.comp), or -1 where the
 // terrain is marched here per fragment.
 layout(location = 11) flat in float inTerrainSun;
+#endif
+#ifdef ALPHA_MASK
+// The weight of the instance's voxel representation (mesh.mesh).
+layout(location = 13) flat in float inVoxelBlend;
 #endif
 
 #ifdef ALPHA_MASK
@@ -916,6 +921,11 @@ Surface materialSurface(Material m, vec3 normal) {
 
 void main() {
 #ifdef DEPTH_ONLY
+    // A tree in the voxel switch band: its voxels cover where the dither is
+    // below their weight (the shaded pass then fails depth EQUAL there).
+    if (voxelDither(gl_FragCoord.xy, pc.scene.frameIndex) < inVoxelBlend) {
+        discard;
+    }
     Material cutoutMaterial = pc.scene.materials.materials[inMaterialIndex];
     float cutoutAlpha = cutoutMaterial.baseColorFactor.a;
     if (cutoutMaterial.baseColorTexture != kNoTexture) {

@@ -209,7 +209,7 @@ const float kCellSize = 64.0;
 // A placed prototype. Must match PrototypeInfo in C++: its meshes
 // (PrototypeMeshBuffer from firstMesh; a ray hit's geometry index counts
 // from there), their bounding sphere and BLAS, the projected size below
-// which it becomes an impostor (0: never) and its draw distance (0: none).
+// finest voxel (0: no voxels) and its draw distance (0: none).
 struct PrototypeInfo {
     uint firstMesh;
     uint meshCount;
@@ -220,7 +220,7 @@ struct PrototypeInfo {
     vec3 boundsCenter;
     float boundsRadius;
     uvec2 blasAddress;
-    float transitionSize;
+    float voxelSize;
     float maxDrawDistance;
 };
 
@@ -486,6 +486,17 @@ layout(buffer_reference, std430) readonly buffer FarShadowTexelBuffer {
     uint words[];
 };
 
+// Declared here, defined in protovoxel.glsl.
+layout(buffer_reference) buffer ProtoVoxelBuffer;
+
+layout(buffer_reference, std430) buffer VoxelInstanceBuffer {
+    uvec2 entries[];
+};
+
+layout(buffer_reference, std430) readonly buffer VoxelCounterBuffer {
+    uint counters[];
+};
+
 layout(buffer_reference, std430) buffer FarCellListBuffer {
     uint entries[];
 };
@@ -612,6 +623,14 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint shadowMode;
     float shadowDrawMargin;
     SunShadows sunShadows;
+    // The prototype voxels, the voxel instance lists (per phase, entries
+    // (instance, mip)) and the DrawCounters (voxel_instance.mesh's counts);
+    // voxelTrees: trees past the mid switch draw as voxels.
+    ProtoVoxelBuffer protoVoxels;
+    VoxelInstanceBuffer voxelInstances;
+    VoxelCounterBuffer drawCounters;
+    uint voxelTrees;
+    uint pad8;
 };
 
 // Largest axis scale of a transform: a conservative bound under

@@ -324,6 +324,24 @@ struct Renderer::Impl {
   VkPipelineLayout farShadowLayout = VK_NULL_HANDLE;
   VkPipeline farShadowPipeline = VK_NULL_HANDLE;
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
+  // The mid tier (protovoxel.h): the prototypes' brick pools and the voxel
+  // instance and brick lists cull.comp and voxel_bricks.comp append.
+  Buffer protoVoxelPrototypes;
+  Buffer protoVoxelLevels;
+  Buffer protoVoxelData;
+  Buffer protoVoxelOcclusion;
+  Buffer protoVoxelCoords;
+  Buffer protoVoxelInfo;
+  Buffer voxelInstanceList;
+  // Each prototype's finest voxel (m; 0: none), for PrototypeInfo.
+  std::vector<float> protoFinestVoxel;
+  VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
+  VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
+  VkPipeline voxelBandPipeline = VK_NULL_HANDLE;
+  bool voxelTrees = true;
+  uint32_t drawnVoxelTrees = 0;
+  uint32_t drawnVoxelBricks = 0;
+  uint32_t drawnVoxelQuads = 0;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -546,6 +564,7 @@ struct Renderer::Impl {
   void destroyStreamBuffers(Stream &stream);
   void destroyStream();
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
+  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {
     VkDeviceAddress scene;

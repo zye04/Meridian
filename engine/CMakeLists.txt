@@ -103,7 +103,7 @@ foreach(source
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp
     clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
-    cloud_shadow_blur.comp sky_capture.comp voxel.mesh)
+    cloud_shadow_blur.comp sky_capture.comp voxel.mesh voxel_instance.mesh)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
@@ -116,6 +116,9 @@ add_shader(shadow_masked.frag shadow_masked.frag)
 add_shader(voxel.frag voxel.frag ${MARCH_DEFINES})
 add_shader(gi_probes.comp gi_probes.comp ${MARCH_DEFINES})
 add_shader(cluster_cull.comp cluster_cull.comp ${MARCH_DEFINES})
+add_shader(voxel_instance.frag voxel_instance.frag ${MARCH_DEFINES})
+add_shader(voxel_instance.frag voxel_band.frag VOXEL_BAND ${MARCH_DEFINES})
+add_shader(voxel_bricks.comp voxel_bricks.comp ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
 add_shader(placement.comp placement_stream.comp PLACEMENT_STREAM)
@@ -138,6 +141,7 @@ add_library(meridian STATIC
     src/clusterlod.cpp
     src/frame_stats.cpp
     src/farfield.cpp
+    src/protovoxel.cpp
     src/grade.cpp
     src/model.cpp
     src/placement.cpp

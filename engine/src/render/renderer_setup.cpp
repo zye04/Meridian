@@ -1023,6 +1023,14 @@ void Renderer::Impl::createPipelines() {
   meshDesc.meshShader = "voxel.mesh";
   meshDesc.fragmentShader = "voxel.frag";
   voxelPipeline = createGraphicsPipeline(dev, meshDesc);
+  // The trees' prototype voxels: one camera-facing quad per voxel.
+  meshDesc.meshShader = "voxel_instance.mesh";
+  meshDesc.fragmentShader = "voxel_instance.frag";
+  voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
+  // Trees in the switch band dither against their clusters: the discard
+  // costs early depth, so only they take this pipeline.
+  meshDesc.fragmentShader = "voxel_band.frag";
+  voxelBandPipeline = createGraphicsPipeline(dev, meshDesc);
 
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
@@ -1064,6 +1072,7 @@ void Renderer::Impl::createPipelines() {
   cullPipeline = createComputePipeline(dev, "cull.comp", cullLayout);
   clusterTraversePipeline = createComputePipeline(dev, "cluster_traverse.comp", cullLayout);
   clusterCullPipeline = createComputePipeline(dev, "cluster_cull.comp", cullLayout);
+  voxelBricksPipeline = createComputePipeline(dev, "voxel_bricks.comp", cullLayout);
 
   VkPushConstantRange terrainPushRange{VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                        sizeof(TerrainSelectConstants)};
@@ -1408,6 +1417,7 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->cullPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->clusterTraversePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->clusterCullPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->voxelBricksPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->gradeLayout, nullptr);
@@ -1417,6 +1427,8 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->voxelPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->voxelInstancePipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->voxelBandPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainSelectPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->terrainSelectLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);

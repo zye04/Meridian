@@ -44,6 +44,10 @@ layout(push_constant) uniform FarBakeConstants {
     vec3 origin;
     uint raysPerAxis;
     uvec3 size;
+    // The dispatch's first voxel (the prototype bake runs in chunks) and the
+    // voxel edge (1 for the far field's template).
+    uint firstVoxel;
+    float voxelSize;
 } pc;
 
 struct Hit {
@@ -79,14 +83,14 @@ vec4 baseColor(Hit hit) {
 }
 
 void main() {
-    uint index = gl_GlobalInvocationID.x;
     uint voxelCount = pc.size.x * pc.size.y * pc.size.z;
+    uint index = pc.firstVoxel + gl_GlobalInvocationID.x;
     if (index >= voxelCount) {
         return;
     }
     uvec3 cell = uvec3(index % pc.size.x, (index / pc.size.x) % pc.size.y,
                        index / (pc.size.x * pc.size.y));
-    vec3 corner = pc.origin + vec3(cell);
+    vec3 corner = pc.origin + vec3(cell) * pc.voxelSize;
 
     BakeVoxel voxel;
     voxel.passes = 0u;
@@ -102,12 +106,12 @@ void main() {
         vec3 u = direction.yzx, w = direction.zxy;
         for (uint a = 0u; a < pc.raysPerAxis; ++a) {
             for (uint b = 0u; b < pc.raysPerAxis; ++b) {
-                vec3 origin = corner + u * ((float(a) + 0.5) * step) +
-                              w * ((float(b) + 0.5) * step);
+                vec3 origin = corner + (u * ((float(a) + 0.5) * step) +
+                                        w * ((float(b) + 0.5) * step)) * pc.voxelSize;
                 rayQueryEXT query;
                 rayQueryInitializeEXT(query, accelerationStructureEXT(pc.tlas),
                                       gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, origin, 0.0,
-                                      direction, 1.0);
+                                      direction, pc.voxelSize);
                 while (rayQueryProceedEXT(query)) {
                     if (rayQueryGetIntersectionTypeEXT(query, false) ==
                         gl_RayQueryCandidateIntersectionTriangleEXT) {
@@ -139,5 +143,5 @@ void main() {
             }
         }
     }
-    pc.bake.voxels[index] = voxel;
+    pc.bake.voxels[gl_GlobalInvocationID.x] = voxel;
 }

@@ -543,6 +543,19 @@ struct SceneData {
   // draws until then.
   float shadowDrawMargin = 0.0f;
   GpuSunShadows sunShadows;
+  // The prototype voxels (GpuProtoVoxels; 0 when none), the voxel instance
+  // lists (per phase kMaxVoxelInstances entries (instance, mip), then per
+  // phase kMaxVoxelBricks entries (tree entry, pool brick | terrain sun
+  // << 31), then per phase kMaxVoxelQuads uints (brick entry << 6 | voxel),
+  // then per phase kMaxVoxelBandQuads of the trees in the switch band)
+  // and the
+  // DrawCounters (voxel_instance.mesh reads its counts). voxelTrees: trees
+  // past the mid switch draw as voxels.
+  VkDeviceAddress protoVoxels = 0;
+  VkDeviceAddress voxelInstances = 0;
+  VkDeviceAddress drawCounters = 0;
+  uint32_t voxelTrees = 0;
+  uint32_t pad8 = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -557,7 +570,8 @@ static_assert(offsetof(SceneData, farShadowTexels) == 2224);
 static_assert(offsetof(SceneData, farShadowMode) == 2296);
 static_assert(offsetof(SceneData, shadowView) == 2304);
 static_assert(offsetof(SceneData, sunShadows) == 2320);
-static_assert(sizeof(SceneData) == 2608);
+static_assert(offsetof(SceneData, protoVoxels) == 2608);
+static_assert(sizeof(SceneData) == 2640);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {
@@ -627,8 +641,8 @@ static_assert(sizeof(ClusterLevelGpu) == 16);
 // (prototypeMeshes[firstMesh..]; a ray hit's geometry index counts from
 // firstMesh), their combined bounding sphere and the BLAS holding them.
 // tlasMask: its TLAS records' instance mask (kShadowCasterMask, or
-// kFarFieldCasterMask in a far-field layer). transitionSize: projected size
-// below which it is drawn as an impostor (0: never). maxDrawDistance: the largest of its layers' (0: none).
+// kFarFieldCasterMask in a far-field layer). voxelSize: its finest voxel (m;
+// 0: it has no voxels, protovoxel.h). maxDrawDistance: the largest of its layers' (0: none).
 struct PrototypeInfo {
   uint32_t firstMesh = 0;
   uint32_t meshCount = 0;
@@ -638,7 +652,7 @@ struct PrototypeInfo {
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
   VkDeviceAddress blasAddress = 0;
-  float transitionSize = 0.0f;
+  float voxelSize = 0.0f;
   float maxDrawDistance = 0.0f;
 };
 static_assert(sizeof(PrototypeInfo) == 48);
@@ -682,8 +696,18 @@ struct DrawCounters {
   // workgroup per cell (x counts the far cells drawn).
   uint32_t farTasks[3];
   uint32_t pad2;
+  // Per phase: voxel_bricks.comp's dispatch (x = voxel trees, one
+  // workgroup each); per phase and list (0: trees past the switch band, 1:
+  // in it, drawn with the dither discard) voxel_instance.mesh's task
+  // arguments (one workgroup per 64 voxels); the bricks listed per phase,
+  // the voxels per phase and list; then the entries dropped from full lists.
+  uint32_t voxelDispatch[2][3];
+  uint32_t voxelTasks[2][2][3];
+  uint32_t voxelBricks[2];
+  uint32_t voxelQuads[2][2];
+  uint32_t voxelDrops;
 };
-static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths) * 4);
+static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths + 25) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -700,6 +724,12 @@ static_assert(offsetof(DrawCounters, bvhNodes) == 50 * 4);
 static_assert(offsetof(DrawCounters, traverseDispatch) == 52 * 4);
 static_assert(offsetof(DrawCounters, traverseCount) == (52 + 6 * kBvhDepths) * 4);
 static_assert(offsetof(DrawCounters, farTasks) == (52 + 8 * kBvhDepths) * 4);
+// protovoxel.glsl's kCounterVoxel*.
+static_assert(offsetof(DrawCounters, voxelDispatch) == 152 * 4);
+static_assert(offsetof(DrawCounters, voxelTasks) == 158 * 4);
+static_assert(offsetof(DrawCounters, voxelBricks) == 170 * 4);
+static_assert(offsetof(DrawCounters, voxelQuads) == 172 * 4);
+static_assert(offsetof(DrawCounters, voxelDrops) == 176 * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {
@@ -927,11 +957,16 @@ struct FarBakeConstants {
   float origin[3] = {};
   uint32_t raysPerAxis = 0;
   uint32_t size[3] = {};
-  uint32_t pad = 0;
+  // The first voxel of the dispatch (the prototype bake runs in chunks) and
+  // the voxel edge (1 for the template).
+  uint32_t firstVoxel = 0;
+  float voxelSize = 1.0f;
+  uint32_t pad[3] = {};
 };
-static_assert(sizeof(FarBakeConstants) == 96);
+static_assert(sizeof(FarBakeConstants) == 112);
 static_assert(offsetof(FarBakeConstants, origin) == 64);
 static_assert(offsetof(FarBakeConstants, size) == 80);
+static_assert(offsetof(FarBakeConstants, voxelSize) == 96);
 
 // Must match BakeVoxel in farfield_bake.comp.
 struct FarBakeVoxel {
@@ -942,6 +977,40 @@ struct FarBakeVoxel {
   float slotColor[kFarBakeSlots][4];
 };
 static_assert(sizeof(FarBakeVoxel) == 160);
+
+// The prototype voxels (protovoxel.h), concatenated over the prototypes.
+// Must match protovoxel.glsl.
+constexpr uint32_t kProtoBakeRays = 4;
+constexpr uint32_t kMaxVoxelInstances = 1u << 18;
+constexpr uint32_t kMaxVoxelBricks = 1u << 22;
+constexpr uint32_t kMaxVoxelQuads = 1u << 23;
+constexpr uint32_t kMaxVoxelBandQuads = 1u << 21;
+struct GpuProtoVoxelLevel {
+  float voxelSize;
+  // Occupied bricks: the pool's brickOffset .. + brickCount.
+  uint32_t brickOffset;
+  uint32_t brickCount;
+  uint32_t pad;
+};
+static_assert(sizeof(GpuProtoVoxelLevel) == 16);
+struct GpuPrototypeVoxels {
+  float lo[3];
+  uint32_t levelCount;
+  float hi[3];
+  uint32_t firstLevel;
+};
+static_assert(sizeof(GpuPrototypeVoxels) == 32);
+struct GpuProtoVoxels {
+  VkDeviceAddress prototypes = 0;
+  VkDeviceAddress levels = 0;
+  VkDeviceAddress voxels = 0;
+  // One word per voxel, the occlusion in the low byte (read at a hit only).
+  VkDeviceAddress occlusion = 0;
+  // One word per pool brick: its brick coordinates in its level, x | y << 10
+  // | z << 20.
+  VkDeviceAddress brickCoords = 0;
+};
+static_assert(sizeof(GpuProtoVoxels) == 40);
 
 // Must match the push constants in scan.comp.
 struct ScanConstants {

@@ -130,6 +130,7 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.viewProjection = cascadeProjection(window, shadowBasis);
       copy.drawLists = shadowDrawLists.address;
       copy.shadowView = 1;
+      copy.voxelTrees = 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
       copy.lodErrorPixels = 1.0f;
       copy.shadowDrawMargin =
