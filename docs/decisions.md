@@ -3517,6 +3517,19 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   -> 4.54M voxels, voxel trees 3.73 -> 3.28 ms, the canopy unchanged to
   the eye (mean luminance of the forest within 1%). Load prints each
   prototype's coverage per level.
+- **State on main 5fb418e** (Release 2560x1440, `--trees --shadows
+  raster`, back to back, frame GPU ms clusters -> voxels): forest edge
+  18.49 -> 15.47, summit 9.99 -> 8.73, forest overview 17.60 -> 13.05,
+  high overview 13.17 -> 11.60; far horizon from the summit (clouds off)
+  14.67 -> 10.50. Earlier single runs above were taken with five lanes on
+  the GPU and read 2-5 ms high.
+- **Tried, not taken:** a 4 px switch (~65 m): crowns on the oaks and
+  maples that still thin at 65-130 m, edge 15.47 -> 14.86 ms, but a
+  nearby tree in the band shows its 4 px squares (summit view); for the
+  user's eye. Voxel trees as cascade casters (cascades 0-3; cascade 4's
+  ~1M trees overflow to clusters): no visible gain at the overview, whose
+  receivers are in cascade 4 (branch `far-m-shadow`). The per-brick
+  terrain march costs ~0.15 ms at the overview (within run noise).
 - **Rejected:** a mesh workgroup per brick (the workgroup count, not the
   quads, cost 9-13 ms); voxels at 1 px (~4x the voxels for the same
   coverage, list overflow); per-voxel band dither in place of the
