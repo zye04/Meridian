@@ -3294,3 +3294,23 @@ edge goes 0.26 EV down (EV100 10.55 -> 10.81): image L mean 0.56 ->
 0.53, foliage L median 0.42 -> 0.40 (references 0.50-0.55, 0.32-0.42).
 A bound of 1.4 took 0.75 EV and left the image at L 0.46, darker than
 every reference. Cost: one comparison per bin in a one-thread pass.
+
+## Starting grade: neutral saturation, stronger greens (2026-11-21)
+
+Measured offline (the tonemap pass replayed on captured `.pfm`s with
+`bakeGradeLut` / `sampleGradeLut`, which match the GPU to 0.34/255) against
+the Chlorophyll frames (display OKLCh, phone-capture borders cropped):
+their sky has chroma 0.04-0.07 and a top-of-frame blue/red of 1.5-2.9;
+at identity ours is already 0.04 / 2.0, but the starting grade's global
+saturation 1.4 took it to 0.06 / 2.9-4.5 (summit view). Their foliage is
+chroma 0.055-0.12 at hue 123-133, grass hue 117-125; ours at identity is
+chroma 0.047 at hue 145 (AgX's inset mixes the other channels into each,
+and the leaf colour leans blue), grass 118. So `kStartingGrade` becomes
+contrast 1.4, saturation 1.0 (the user's own saved grade had already
+turned it down to 1.0), greens -10 degrees and 1.5x chroma (was -12 /
+1.15). Summit view: sky chroma 0.062 -> 0.051, blue/red 4.52 -> 3.45;
+foliage hue 124-126, grass 111; forest edge foliage chroma 0.079 at hue
+139 (references 0.055-0.086 at 123-133). -15 degrees pushed the grass to
+112, off the references; the greens band (140 +- 45) can't rotate leaves
+further without rotating grass too. The engine default stays identity.
+Interactive runs load the user's grade file, which overrides this.

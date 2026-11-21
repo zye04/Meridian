@@ -39,12 +39,12 @@ constexpr float kWalkSprintSpeed = 5.0f;
 constexpr float kEyeHeight = 1.7f;
 
 // A starting look toward the Chlorophyll Engine frames
-// (assets/reference/chlorophyll): AgX alone is flat and desaturated for
-// daylight foliage, and the cooked leaf colour leans blue.
+// (assets/reference/chlorophyll): AgX alone is flat, its inset desaturates
+// daylight foliage and the cooked leaf colour leans blue; the sky already
+// matches their chroma, so only the greens get more.
 const meridian::Grade kStartingGrade{
     .contrast = 1.4f,
-    .saturation = 1.4f,
-    .greens = {.hueShiftDegrees = -12.0f, .saturation = 1.15f}};
+    .greens = {.hueShiftDegrees = -10.0f, .saturation = 1.5f}};
 
 // walkOn: the eye follows the ground at eye height, WASD stays horizontal.
 void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
