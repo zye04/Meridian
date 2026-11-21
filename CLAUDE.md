@@ -544,10 +544,11 @@ buffer) ->
 late scene pass (load; late lists (masked depth, opaque, masked shaded), then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it, each texel's ray
-offset within the texel per frame (R2 sequence): luminance with
+offset within the texel's central half per frame (R2 sequence): luminance with
 haze + transmittance, mean cloud depth d, stored -1 - d where scene
 geometry cut the march; the cirrus sheet (`cirrusLayer`) behind it on
 sky pixels; clouds_resolve.comp accumulates it into a per-resolution history
+(current weight 0.05, 0.125 in the layer; rescaled on exposure change)
 reprojected by cloud depth + wind; clouds_composite.comp upsamples it
 bilaterally on scene depth over HDR (as storage, GENERAL), writes
 cloud motion where opacity > 0.5 and raises the transparency mask to the

@@ -22,10 +22,11 @@ layout(set = 2, binding = 4) uniform sampler2D historyDepth;
 layout(set = 2, binding = 5, rgba16f) uniform writeonly image2D resolvedColor;
 layout(set = 2, binding = 6, r32f) uniform writeonly image2D resolvedDepth;
 
-// Weight of this frame; inside the layer clouds move fast across the view,
-// so less history.
-const float kCurrentWeight = 0.1;
-const float kCurrentWeightInLayer = 0.25;
+// Weight of this frame: the flicker of the output is about this weight times
+// the spread of the jittered samples. Inside the layer clouds move fast
+// across the view, so more of the current frame.
+const float kCurrentWeight = 0.05;
+const float kCurrentWeightInLayer = 0.125;
 const float kVarianceGamma = 2.0;
 
 // 9-tap Catmull-Rom (as taa.comp): bilinear would blur the history a little
@@ -129,6 +130,8 @@ void main() {
 
     vec4 sigma = sqrt(max(meanSquared / count - mean * mean, 0.0));
     vec4 history = sampleCatmullRom(previousUv, vec2(size));
+    // Pre-exposed by last frame's exposure.
+    history.rgb *= pc.scene.exposure.exposure / pc.scene.exposure.previousExposure;
     // The box can reach below zero at high-contrast edges: clamping after
     // the clip keeps a dim channel from going negative, which the composite
     // clamps per channel, leaving saturated (blue) texels.

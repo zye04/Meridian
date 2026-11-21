@@ -3355,3 +3355,40 @@ scans already downloaded hold a leaf atlas and beech bark.
   bare pole: the cluster LOD removes the modelled leaves. That is the
   mid tier's job (rasterized voxels, far-m lane), or card-leaf trees
   (Megascans Trees packs, Unreal only); `--trees` stays off by default.
+
+## Cloud temporal stability under TAA (2026-11-21)
+
+User request: volumetric clouds free of flicker while drifting
+(`--time-scale 1`) and turning, at native 1440p TAA. Flicker metric
+(`tools/cloud-flicker.py`): static camera, `--time-scale 1`, 240 frames,
+the last 120 scored, consecutive-frame |luma difference| /255 after a 4x4
+box blur, p99 over the sky crop (rows 0-45%) at the ground view
+`1119 1355.9 -431 -1.55 0.15`, the whole frame in the layer
+`1119 3200 -431 -1.55 0` (its terrain alone, `--clouds off`: p99 0.29).
+Bar: the 2.5D path's p99 0.55.
+
+- **Cause, measured:** a static ground camera sees clouds 5-15 km away
+  drift ~0.05 px per frame, so reprojection is not the source: the
+  resolve's output moves by its current weight w times the current
+  sample's distance from the history. Halving w (0.1 -> 0.05) halved the
+  ground p99 (1.33 -> 0.64). A heat map of the mean frame difference put it on the
+  silhouettes, where the R2 sub-texel offset over the whole texel swings
+  a texel between clear and opaque from frame to frame.
+- **Choice:** w 0.05 (0.125 in the layer, from 0.25) and the sub-texel
+  offset over the texel's central half (`0.25 + 0.5 R2`): the texel still
+  integrates an area (no stair-steps at 2x zoom), the edge swing halves,
+  and the clouds read a little crisper. The variance clip (2 sigma) keeps
+  turns from ghosting. With the longer history the cloud history is now
+  rescaled by exposure / previousExposure (it is pre-exposed), as
+  taa.comp does.
+- **Rejected:** per-texel golden-ratio along-ray jitter from a hashed
+  start (worse: ground p99 1.53, layer 2.30, it maximises the
+  frame-to-frame step); a 20 m minimum step in the layer (no change:
+  0.86).
+- **Measured** (Release, TAA, 2560x1440): ground p99 / p99.9 1.33 / 6.23
+  -> 0.51 / 2.90; in the layer 1.86 / 6.27 -> 0.85 / 3.49 (at
+  `--time-scale 0` 0.76; with the along-ray jitter fixed at 0.5 it drops
+  to 0.50 but bands, so the in-layer remainder is the along-ray jitter
+  over long near-horizontal steps). Cloud crop Laplacian, still 0.0781
+  -> 0.0783, 1 rad/s turn 0.0203 -> 0.0191. `clouds` 1.74 -> 1.70 ms at
+  the ground view.

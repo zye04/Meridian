@@ -64,11 +64,13 @@ void main() {
     if (any(greaterThanEqual(id, size))) {
         return;
     }
-    // A sub-texel offset per frame (R2 sequence), which the resolve
-    // accumulates into the texel's area: point samples at fixed texel
+    // A sub-texel offset per frame (R2 sequence) over the texel's central
+    // half, which the resolve accumulates: point samples at fixed texel
     // centers stair-stepped cloud edges and broke thin cirrus streaks into
-    // dashes.
-    vec2 offset = fract(0.5 + float(pc.scene.frameIndex % 64u) * vec2(0.7548776662, 0.5698402910));
+    // dashes, while offsets over the whole texel swung edge texels between
+    // clear and opaque, which the resolve passed on as flicker.
+    vec2 offset =
+        0.25 + 0.5 * fract(0.5 + float(pc.scene.frameIndex % 64u) * vec2(0.7548776662, 0.5698402910));
     vec2 uv = (vec2(id) + offset) / vec2(size);
 
     // View ray without the camera's jitter, as the aerial perspective LUT
