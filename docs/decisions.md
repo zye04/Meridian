@@ -3982,7 +3982,8 @@ Unreal": channel layouts, slot order, measured normal convention).
   play; a route average over real frame times does not. Lines: 180 fps
   route average, 105 fps in the heaviest segment (programme spec, Phase
   0). Compare only between identical `Render 2560x1440` lines.
-- **Baseline (Release, main at 17dee80, GI off, raster shadows
+- **Baseline (Release, main at 17dee80 with the Megaplants trees, before
+  3f26df5 brought the Megascans Trees: re-run on the new trees; GI off, raster shadows
   default):** two runs, route average 84.6 and 87.6 fps (3.5% apart;
   segments differ by up to 10% in `aerial`, where the 2 s hop from the
   forest interior is part of the segment).
