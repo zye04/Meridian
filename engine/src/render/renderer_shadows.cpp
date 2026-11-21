@@ -71,10 +71,14 @@ void Renderer::Impl::createSunShadows() {
   shadowPipeline = createGraphicsPipeline(dev, desc);
   desc.fragmentShader = "shadow_masked.frag";
   shadowMaskedPipeline = createGraphicsPipeline(dev, desc);
+  desc.meshShader = "voxel.mesh";
+  desc.fragmentShader = "voxel_shadow.frag";
+  farShadowCasterPipeline = createGraphicsPipeline(dev, desc);
 }
 
 void Renderer::Impl::destroySunShadows() {
   VkDevice dev = device.device;
+  vkDestroyPipeline(dev, farShadowCasterPipeline, nullptr);
   vkDestroyPipeline(dev, shadowMaskedPipeline, nullptr);
   vkDestroyPipeline(dev, shadowPipeline, nullptr);
   destroyBuffer(shadowDrawLists);
@@ -129,6 +133,7 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.viewProjection = cascadeProjection(window, shadowBasis);
       copy.drawLists = shadowDrawLists.address;
       copy.shadowView = 1;
+      copy.shadowFarCells = i + 1 == kShadowCascades ? 1 : 0;
       copy.voxelTrees = 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
       // Foliage is thin: at one texel its leaves simplify away and the crowns
@@ -211,6 +216,16 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
           cmd, shadowCounters.buffer,
           offsetof(DrawCounters, meshTasks) + bucket * sizeof(DrawCounters::meshTasks[0][0]), 1,
           sizeof(DrawCounters::meshTasks[0][0]));
+    }
+    if (i + 1 == kShadowCascades && farFieldInfo.buffer != VK_NULL_HANDLE) {
+      // The coarsest cascade's trees cast as their far cells' voxels.
+      PushConstants push;
+      push.sceneBuffer = sceneBuffer.address;
+      vkCmdPushConstants(cmd, sceneLayout, kScenePushStages, 0, sizeof(push), &push);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, farShadowCasterPipeline);
+      dispatch.cmdDrawMeshTasksIndirectEXT(cmd, shadowCounters.buffer,
+                                           offsetof(DrawCounters, farTasks), 1,
+                                           sizeof(DrawCounters::farTasks));
     }
     vkCmdEndRendering(cmd);
     transitionImage(cmd, {shadowMaps[i].image, VK_IMAGE_ASPECT_DEPTH_BIT,

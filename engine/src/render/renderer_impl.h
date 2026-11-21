@@ -350,6 +350,7 @@ struct Renderer::Impl {
   VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
   VkPipeline voxelBandPipeline = VK_NULL_HANDLE;
+  VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
   bool voxelTrees = true;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;

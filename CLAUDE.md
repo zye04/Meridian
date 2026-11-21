@@ -508,7 +508,10 @@ visibility writes, no streamed layers, no far switch, no voxel trees,
 LOD error 0.25 texel in cascades 0-1 for thin foliage, the depth range up
 to the terrain's highest sample + 150 m) into its own
 counters and draw lists, then shadow.mesh (+ shadow_masked.frag for
-alpha-masked) draws all four buckets, cull none, slope-scaled bias) ->
+alpha-masked) draws all four buckets, cull none, slope-scaled bias; the
+coarsest cascade (`shadowFarCells`) skips every cell's trees and casts its
+far cell instead: voxel.mesh's box, voxel_shadow.frag marching the bricks
+along the sunlight to opacity 0.5) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the

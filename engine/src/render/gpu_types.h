@@ -585,7 +585,9 @@ struct SceneData {
   float terrainShadowTexel = 0.0f;
   uint32_t terrainShadowSize = 0;
   float terrainShadowPenumbra = 0.0f;
-  uint32_t pad9 = 0;
+  // 1 in the coarsest cascade's copy: its trees cast as their far cells'
+  // voxels (cell_cull.comp, voxel_shadow.frag).
+  uint32_t shadowFarCells = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);

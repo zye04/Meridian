@@ -650,7 +650,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     float terrainShadowTexel;
     uint terrainShadowSize;
     float terrainShadowPenumbra;
-    uint pad9;
+    // 1 in the coarsest cascade's copy: trees cast as far cells.
+    uint shadowFarCells;
 };
 
 // Largest axis scale of a transform: a conservative bound under

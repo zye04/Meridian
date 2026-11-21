@@ -3799,3 +3799,22 @@ planets and `clean` / `summer-hazy` are unchanged.
   views: zenith blue/red unchanged (3.55 at the open view), horizon haze
   kept; sunset view unchanged in character. Atmosphere pass 0.02 ms
   before and after.
+
+## Coarsest shadow cascade casts far cells (2026-11-21)
+
+- **Chosen:** cascade 4 (5.12 km radius, ~6 m texels) skips every cell's
+  trees in its cell cull and draws each cell's far-field canopy box,
+  marched along the sunlight to opacity 0.5 (voxel.frag's `SHADOW`
+  variant, depth only), instead of ~1M trees as clusters at a 1-texel LOD.
+  A texel there is about an L0 voxel (4 m); the far cells are the
+  instance-less aggregate the far field already keeps.
+- **Measured** (Release 1440p, forest edge `--trees`, the first frame's
+  five cascade renders, `--frames 3`): sun shadows 51.3 -> 47.1 ms; alone,
+  cascade 4 costs 3.35 ms, cascade 3 0.92, cascade 2 3.76, so cascades 0-1
+  (LOD 0.25 texel for thin foliage) carry ~39 ms of the hitch (backlog).
+  No visible change at the forest overview: tree shadows on the ground
+  there don't show from cascade 4 with either caster (rt shows them).
+- **Rejected:** voxel trees (the mid tier's prototype voxels) as cascade
+  casters: no change in the hitch (cascades 2-3 are cheap) and cascade 4's
+  ~1M trees would be ~70M voxels (branch `far-m-shadow`).
+

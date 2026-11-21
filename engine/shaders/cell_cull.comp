@@ -36,6 +36,9 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
 // bricks but no trees (crowns reaching in from a neighbor) uses the box's
 // height. Returns how many instances to skip: its trees if far, else 0.
 // Phase 0 appends a far cell in the frustum to the far list with its level.
+// In the coarsest cascade (shadowFarCells) every cell is far: a texel there
+// is about an L0 voxel, and casting a million trees as clusters cost a 51 ms
+// re-render at the forest edge.
 uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
     FarField field = scene.farField.field;
     FarCell far = field.cells.cells[index];
@@ -45,16 +48,19 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
     vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
     vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
     vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
+    bool shadow = scene.shadowView != 0u;
     float distance = max(length(max(max(boxLo, -boxHi), vec3(0.0))), scene.nearPlane);
-    float pixelsPerMeter = abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
+    float pixelsPerMeter =
+        shadow ? scene.orthoPixelsPerMeter
+               : abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
     float height = far.treeCount > 0u ? far.treeHeight : far.top - far.bottom;
-    if (height * pixelsPerMeter >= kFarSwitchPixels) {
+    if (!shadow && height * pixelsPerMeter >= kFarSwitchPixels) {
         return 0u;
     }
     // The drawn box (voxel.mesh) reaches up to the coarsest level's pad past
     // the canopy extent.
     vec3 pad = vec3(0.0, farCanopyPad(kFarLevels - 1u), 0.0);
-    if (cull.phase == 0u && displayedBoxInFrustum(scene, boxLo - pad, boxHi + pad)) {
+    if ((cull.phase == 0u || shadow) && displayedBoxInFrustum(scene, boxLo - pad, boxHi + pad)) {
         // The coarsest level whose voxel projects to at most kFarLevelPixels.
         float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
         uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
@@ -89,7 +95,8 @@ void main() {
     }
     Cell cell = scene.cells.cells[index];
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    uint skipped = !shadow && scene.farFieldEnabled != 0u && index < gridCells
+    uint skipped = (!shadow || scene.shadowFarCells != 0u) && scene.farFieldEnabled != 0u &&
+                           index < gridCells
                        ? farSwitch(scene, index, gridIndex)
                        : 0u;
     // Cell bits follow the instance ids' (static and ring) in the visibility

@@ -20,6 +20,7 @@ layout(location = 0) in vec3 inDisplayed;
 layout(location = 1) flat in uint inEntry;
 layout(location = 2) flat in float inDrop;
 
+#ifndef SHADOW
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outMotion;
 // The guides and the sun's exposed radiance, as in mesh.frag; the
@@ -28,6 +29,7 @@ layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
+#endif
 layout(depth_less) out float gl_FragDepth;
 
 // Optical depth at opacity 0.5.
@@ -46,11 +48,19 @@ void main() {
     uvec2 cell = uvec2(index % field.cellsX, index / field.cellsX);
     FarCell far = field.cells.cells[index];
 
+#ifdef SHADOW
+    // A cascade's depth (voxel_shadow.frag): the march goes along the
+    // sunlight from the box face; the copy has no curvature.
+    vec3 direction = -scene.sunDirection;
+    vec3 fieldOrigin = vec3(field.originX, field.heightBase, field.originZ);
+    vec3 origin = scene.cameraPosition + inDisplayed - fieldOrigin;
+#else
     // The displayed ray from the camera, shifted up by the cell's drop: the
     // same ray in the flat world (field coordinates).
     vec3 direction = normalize(inDisplayed);
     vec3 fieldOrigin = vec3(field.originX, field.heightBase, field.originZ);
     vec3 origin = scene.cameraPosition - fieldOrigin + vec3(0.0, inDrop, 0.0);
+#endif
     float pad = farCanopyPad(level);
     vec3 boxLo = vec3(vec2(cell) * kCellSize, far.bottom - pad - field.heightBase).xzy;
     vec3 boxHi = boxLo + vec3(kCellSize, far.top - far.bottom + 2.0 * pad, kCellSize);
@@ -62,11 +72,20 @@ void main() {
 
     uint voxel;
     float opticalDepth = 0.0;
-    float t = farMarchCell(farField, cell, level, origin, direction, length(inDisplayed), tEnd,
+#ifdef SHADOW
+    float tStart = 0.0;
+#else
+    float tStart = length(inDisplayed);
+#endif
+    float t = farMarchCell(farField, cell, level, origin, direction, tStart, tEnd,
                            kHitOpticalDepth, opticalDepth, voxel);
     if (t < 0.0) {
         discard;
     }
+#ifdef SHADOW
+    vec4 shadowClip = scene.viewProjection * vec4(inDisplayed + direction * t, 1.0);
+    gl_FragDepth = min(shadowClip.z / shadowClip.w, gl_FragCoord.z);
+#else
 
     vec3 displayedHit = direction * t;
     vec4 clip = scene.viewProjection * vec4(displayedHit, 1.0);
@@ -121,4 +140,5 @@ void main() {
                     displayedPosition(scene, relative + (scene.cameraPosition -
                                                          scene.previousCameraPosition));
     outMotion = previous.xy / previous.w * 0.5 - current.xy / current.w * 0.5;
+#endif
 }
