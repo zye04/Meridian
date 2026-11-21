@@ -12,11 +12,13 @@
 // + |dz|) on screen and its mean chord is v / (|dx| + |dy| + |dz|):
 // voxel_bricks.comp drew it with the opacity of that chord, and the quad
 // gets that area, so over many voxels the coverage matches the baked
-// extinction.
+// extinction. SHADOW (voxel_shadow.mesh): the same voxels as a cascade's
+// depth-only casters.
 
 layout(local_size_x = 64) in;
 layout(triangles, max_vertices = 256, max_primitives = 128) out;
 
+#ifndef SHADOW
 // Flat: the voxel center relative to the camera (flat world), its packed
 // voxel and occlusion word, the instance and the brick's pool index |
 // terrain sun << 31, and the center in prototype space.
@@ -24,6 +26,7 @@ layout(location = 0) flat out vec3 outRelative[];
 layout(location = 1) flat out uvec2 outVoxel[];
 layout(location = 2) flat out uvec2 outBrick[];
 layout(location = 3) flat out vec3 outLocal[];
+#endif
 
 void main() {
     SceneBuffer scene = pc.scene;
@@ -54,9 +57,24 @@ void main() {
                   ivec3(i & 3u, (i >> 2) & 3u, i >> 4);
     vec3 local = info.lo + (vec3(voxel) + 0.5) * v;
     vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
+#ifdef SHADOW
+    vec3 view = normalize(transpose(mat3(instance.transform)) * -scene.sunDirection);
+#else
     vec3 view = normalize(transpose(mat3(instance.transform)) * relative);
+#endif
     float spread = abs(view.x) + abs(view.y) + abs(view.z);
 
+#ifdef SHADOW
+    // Depth only, in the cascade's orthographic view along the sun: the quad
+    // spans the light basis' u and v.
+    float halfWorld = 0.5 * v * instance.scale * sqrt(spread);
+    vec3 u = scene.sunShadows.u * halfWorld, w = scene.sunShadows.v * halfWorld;
+    for (uint corner = 0u; corner < 4u; ++corner) {
+        vec2 offset = vec2(corner & 1u, corner >> 1) * 2.0 - 1.0;
+        gl_MeshVerticesEXT[slot * 4u + corner].gl_Position =
+            scene.viewProjection * vec4(relative + offset.x * u + offset.y * w, 1.0);
+    }
+#else
     vec4 center = scene.viewProjection * displayedPosition(scene, relative);
     vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * abs(scene.projectionScale);
     uvec2 packed = uvec2(pv.voxels.voxels[pool * 64u + i], pv.occlusion.voxels[pool * 64u + i]);
@@ -69,6 +87,7 @@ void main() {
         outBrick[vertex] = uvec2(tree.x, brick.y);
         outLocal[vertex] = local;
     }
+#endif
     gl_PrimitiveTriangleIndicesEXT[slot * 2u] = uvec3(0u, 1u, 3u) + slot * 4u;
     gl_PrimitiveTriangleIndicesEXT[slot * 2u + 1u] = uvec3(0u, 3u, 2u) + slot * 4u;
 }

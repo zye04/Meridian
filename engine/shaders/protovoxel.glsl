@@ -94,9 +94,13 @@ float voxelBlend(float distance, float switchDistance) {
     return clamp((distance - switchDistance) / (kVoxelSwitchBand * switchDistance), 0.0, 1.0);
 }
 
+// A shadow cascade's copy (shadowView) is orthographic: a voxel spans the
+// same texels at any distance, so the switch is all or nothing per cascade.
 uint voxelMip(SceneBuffer scene, float distance, float finestVoxel, float scale,
               uint levelCount) {
-    float ratio = kVoxelMipPixels * distance / (pixelsPerMeter(scene) * finestVoxel * scale);
+    float ratio = scene.shadowView != 0u
+                      ? kVoxelMipPixels / (scene.orthoPixelsPerMeter * finestVoxel * scale)
+                      : kVoxelMipPixels * distance / (pixelsPerMeter(scene) * finestVoxel * scale);
     return min(uint(floor(log2(max(ratio, 1.0)))), levelCount - 1u);
 }
 
@@ -108,6 +112,12 @@ uint voxelMip(SceneBuffer scene, float distance, float finestVoxel, float scale,
 float instanceVoxelBlend(SceneBuffer scene, LoadedInstance instance, PrototypeInfo prototype) {
     if (scene.voxelTrees == 0u || prototype.voxelSize <= 0.0) {
         return 0.0;
+    }
+    if (scene.shadowView != 0u) {
+        return prototype.voxelSize * instance.scale * scene.orthoPixelsPerMeter <=
+                       kVoxelSwitchPixels
+                   ? 1.0
+                   : 0.0;
     }
     vec3 relative = (instance.transform * vec4(prototype.boundsCenter, 1.0)).xyz -
                     scene.cameraPosition;
