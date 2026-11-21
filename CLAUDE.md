@@ -65,7 +65,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
 parallax self-shadow, micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
-(off skips the dispatch) + length x0..3, bloom on/off), with Save, Load, Reset and a "show built-in
+(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
@@ -163,7 +163,7 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0`
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=0`
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
@@ -591,9 +591,12 @@ offset within the texel's central half per frame (R2 sequence): luminance with
 haze + transmittance, mean cloud depth d, stored -1 - d where scene
 geometry cut the march; the cirrus sheet (`cirrusLayer`) behind it on
 sky pixels; clouds_resolve.comp accumulates it into a per-resolution history
-(current weight 0.05, 0.125 in the layer; rescaled on exposure change)
+(current weight 0.03 for a still view up to 0.1 at 0.5 texel per frame of
+motion, 0.04-0.25 in the layer; rescaled on exposure change)
 reprojected by cloud depth + wind; clouds_composite.comp upsamples it
-bilaterally on scene depth over HDR (as storage, GENERAL), writes
+bilaterally on scene depth, sharpens it where every tap agrees (the
+outline: an unsharp mask of opacity and shading against a radius-2-texel
+tent, `Effects::cloudOutline`, push constant) and composites it over HDR (as storage, GENERAL), writes
 cloud motion where opacity > 0.5 and raises the transparency mask to the
 cloud coverage) -> contact shadows (contact_shadows.comp: with the
 complete depth, a 16-step march toward the sun over 0.25-1.5 m; where it
@@ -738,7 +741,7 @@ barriers account for that.
   march targets, the history to read (sampled) and to write, HDR and
   motion (storage), all GENERAL; one set per resolution and frame parity
   (`r * 2 + frameNumber % 2`), shared by the march, resolve and composite
-  (push constants `CloudConstants`: scene, historyValid, inLayer).
+  (push constants `CloudConstants`: scene, historyValid, inLayer, outline).
 - Terrain: the heightfield's quadtree is centered on the origin (shifted
   under one sample so level 2's 2 m vertices land on samples); level 0
   nodes are 16 m of 32x32 quads, level 0's LOD range is 80 m, ranges

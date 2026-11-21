@@ -461,6 +461,7 @@ void Renderer::Impl::drawClouds(VkCommandBuffer cmd, const FrameData &frame,
   // A new resolution starts its history over.
   push.historyValid = historyValid && r == cloudHistoryResolution ? 1 : 0;
   push.inLayer = r;
+  push.outline = effects.cloudOutline;
   cloudHistoryResolution = r;
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMarchLayout, 0, 3, sets, 0,
                           nullptr);

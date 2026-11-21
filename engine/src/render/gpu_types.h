@@ -1219,8 +1219,11 @@ struct CloudConstants {
   // 0 on the first frame at this cloud resolution (no usable history).
   uint32_t historyValid = 0;
   uint32_t inLayer = 0;
+  // Effects::cloudOutline (the composite's sharpening).
+  float outline = 0.0f;
+  uint32_t pad = 0;
 };
-static_assert(sizeof(CloudConstants) == 16);
+static_assert(sizeof(CloudConstants) == 24);
 
 // Must match Material in common.glsl.
 constexpr uint32_t kNoTexture = 0xFFFFFFFFu;

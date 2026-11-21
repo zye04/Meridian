@@ -23,10 +23,13 @@ layout(set = 2, binding = 5, rgba16f) uniform writeonly image2D resolvedColor;
 layout(set = 2, binding = 6, r32f) uniform writeonly image2D resolvedDepth;
 
 // Weight of this frame: the flicker of the output is about this weight times
-// the spread of the jittered samples. Inside the layer clouds move fast
-// across the view, so more of the current frame.
-const float kCurrentWeight = 0.05;
-const float kCurrentWeightInLayer = 0.125;
+// the spread of the jittered samples, so a still view keeps a long history;
+// where the view moves (a turn, clouds close by in the layer) more of the
+// current frame keeps the clouds sharp, as the resampled history blurs.
+const vec2 kCurrentWeight = vec2(0.03, 0.1);        // still, moving
+const vec2 kCurrentWeightInLayer = vec2(0.04, 0.25);
+// Motion (texels per frame) at which the weight is the moving one.
+const float kMovingTexels = 0.5;
 const float kVarianceGamma = 2.0;
 
 // 9-tap Catmull-Rom (as taa.comp): bilinear would blur the history a little
@@ -149,7 +152,9 @@ void main() {
     float weightSum = dot(weights, vec4(1.0));
     float historyDistance = weightSum > 0.0 ? dot(weights, depths) / weightSum : reprojectDepth;
 
-    float w = pc.inLayer != 0u ? kCurrentWeightInLayer : kCurrentWeight;
+    vec2 currentWeight = pc.inLayer != 0u ? kCurrentWeightInLayer : kCurrentWeight;
+    float motion = length((previousUv - uv) * vec2(size));
+    float w = mix(currentWeight.x, currentWeight.y, min(motion / kMovingTexels, 1.0));
     vec4 resolved = mix(history, current, w);
     float currentOpacity = (1.0 - current.a) * w;
     float historyOpacity = (1.0 - history.a) * (1.0 - w);

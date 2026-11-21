@@ -100,9 +100,14 @@ void main() {
         // step is covered evenly. (Jittering only the start shifted later
         // samples less and less where steps split the remaining segment,
         // leaving static bands after accumulation.) Interleaved gradient
-        // noise under Ray Reconstruction too: the clouds' own resolve
-        // integrates it, and RR sees only the resolved result.
-        float jitter = interleavedGradientNoise(vec2(id), pc.scene.frameIndex);
+        // noise in space, each texel stepped by the golden ratio per frame:
+        // stratified in time, so the resolve's exponential window averages
+        // it evenly (IGN's own frame offset left its diagonal pattern as
+        // combed stripes), while neighbours stay spread for the resolve's
+        // and TAA's neighbourhoods. The same under Ray Reconstruction: the
+        // clouds' own resolve integrates it, and RR sees only the result.
+        float jitter = fract(interleavedGradientNoise(vec2(id), 0u) +
+                             float(pc.scene.frameIndex % 1024u) * 0.6180339887);
         march = marchClouds(direction, span.x, span.y, jitter, kMinStep, kStepGrowth, kMaxSteps,
                             pc.scene.skyIrradiance.clearIrradiance);
     }

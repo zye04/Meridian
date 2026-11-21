@@ -3667,3 +3667,46 @@ the far-field bake and `--far-shadows tlas` use them).
 - Re-render hitch: the first frame's five cascades cost 0.37 ms at the
   start view, but 51 ms at the forest edge with `--trees` (every tree in
   cascades 3-4 as clusters; backlog).
+
+## Cloud outline and motion-adaptive resolve (2026-11-21)
+
+User request: crisper volumetric clouds, "almost a pseudo outline", on the
+outer silhouette and on the lobes inside it, from the resolved clouds,
+subtle by default, an Effects strength with 0 = off; still flicker free.
+
+- **Outline (clouds_composite.comp):** an unsharp mask of the upsampled
+  resolved clouds against a tent of radius 2 low-res texels (continuous
+  across texel borders, like the Catmull-Rom upsample), applied as two
+  scales of the premultiplied colour: the opacity sharpened (clamped to
+  0..1) hardens the silhouette, and the luminance per unit opacity (the
+  cloud's own shading) sharpened as a ratio (0.5..2) raises the steps
+  between lit and shaded lobes. Only where every tap agrees with the
+  pixel's surface (no halos on ridges). Rejected on the way: sharpening
+  the four channels apart (dark blue rims where opacity and colour
+  diverged) and clamping to the 4x4 range (the range is constant per
+  texel, so it showed the texel grid as flat blocks). Strength:
+  `Effects::cloudOutline`, default 1 (0..3), a `CloudConstants` push
+  constant, `--effects cloud-outline=X`, the G panel, `effectCloudOutline`.
+  Default 1 because it matches the reference: median edge width (step /
+  steepest gradient across sky-cloud edges) at the ground view 5.85 px
+  before this session, 5.54 at strength 0, 4.11 at 1, 3.52 at 2; the
+  Chlorophyll `flower-meadow-cumulus.png` cumulus 4.02 px.
+- **Resolve weight by motion:** sharpening amplifies the resolve's
+  residual noise (ground p99 0.50 -> 0.71 at strength 1), so the still
+  weight drops to 0.03 (0.04 in the layer) and rises to 0.1 (0.25) at
+  0.5 texel per frame of reprojection motion, where the resampled history
+  would blur (a turn, close clouds in the layer). Drifting clouds at
+  `--time-scale 1` from the ground move ~0.05 px per frame: still.
+- **Along-ray jitter:** interleaved gradient noise in space plus a
+  golden-ratio step per frame per texel, instead of IGN's own per-frame
+  offset, whose recent-weighted mean left IGN's diagonal pattern as combed
+  stripes in the layer under the long history; flicker unchanged or lower.
+- **Measured** (Release, TAA, 2560x1440, strength 1, flicker p99 /
+  p99.9 /255 as in "Cloud temporal stability under TAA"): ground 0.46 /
+  2.88, in the layer 0.49 / 2.18 (before this session 1.33 / 6.23 and
+  1.86 / 6.27). Cloud crop Laplacian under a 1 rad/s turn 0.0191 ->
+  0.0262; summit-silhouette drift at `--time-scale 1.5` 0.0351 vs its
+  still 0.0353 (no smear). `tools/cloud-compare.sh` image metrics at
+  strength 0 -> 1 (ground, wide, sunset): cover 0.468 -> 0.466, 0.552 ->
+  0.548, 0.792 -> 0.794; tops, mids and bases within 3%: the look holds.
+  `clouds` 1.41 ms at both strengths (cloud-compare's ground view).

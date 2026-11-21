@@ -178,6 +178,7 @@ struct Effects {
   bool contactShadows = true;       // off skips the pass
   float contactLength = 1.0f;       // multiplier on the ray length, 0..3
   bool bloom = true;                // off skips the pass
+  float cloudOutline = 1.0f;        // cloud silhouette and lobe sharpening, 0 = off, 0..3
 };
 
 // GPU time of one named frame pass.

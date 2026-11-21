@@ -489,6 +489,7 @@ meridian::Effects parseEffects(const std::string &text) {
     else if (name == "contact") e.contactShadows = value != 0.0f;
     else if (name == "contact-length") e.contactLength = value;
     else if (name == "bloom") e.bloom = value != 0.0f;
+    else if (name == "cloud-outline") e.cloudOutline = value;
     else throw std::runtime_error("--effects: unknown effect " + name);
   }
   return e;

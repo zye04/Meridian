@@ -101,12 +101,19 @@ void main() {
     // keeps the result between its neighbors.
     vec4 lowest = vec4(1e30);
     vec4 highest = vec4(-1e30);
+    // The outline's wider blur: a tent of radius 2 texels around this
+    // pixel, continuous across texel borders like the Catmull-Rom.
+    vec4 wide = vec4(0.0);
+    float wideWeight = 0.0;
     for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 4; ++x) {
             ivec2 texel = clamp(base + ivec2(x - 1, y - 1), ivec2(0), lowSize - 1);
             accumulate(texel, wx[x] * wy[y], sceneDistance);
+            vec4 c = imageLoad(resolvedColor, texel);
+            vec2 tent = max(2.0 - abs(vec2(x - 1, y - 1) - f), 0.0);
+            wide += c * tent.x * tent.y;
+            wideWeight += tent.x * tent.y;
             if (x >= 1 && x <= 2 && y >= 1 && y <= 2) {
-                vec4 c = imageLoad(resolvedColor, texel);
                 lowest = min(lowest, c);
                 highest = max(highest, c);
             }
@@ -144,6 +151,26 @@ void main() {
     vec4 cloud = cloudSum / weightSum;
     if (ringClamp) {
         cloud = clamp(cloud, lowest, highest);
+        // Outline: unsharp mask of the resolved clouds against the wider
+        // blur. The opacity hardens the outer silhouette; the luminance per
+        // unit opacity (the cloud's own shading) raises the steps between
+        // lit and shaded lobes inside it. Applied as scales of the
+        // premultiplied colour, so the hue holds (sharpening the channels
+        // apart left dark blue rims) and nothing goes negative; no range
+        // clamp, which showed the texel grid as flat blocks.
+        float opacity = 1.0 - cloud.a;
+        if (pc.outline > 0.0 && opacity > 1e-4) {
+            wide /= wideWeight;
+            float wideOpacity = 1.0 - wide.a;
+            float sharpOpacity = clamp(opacity + pc.outline * (opacity - wideOpacity), 0.0, 1.0);
+            const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+            float shade = dot(cloud.rgb, kLuma) / opacity;
+            float wideShade = dot(wide.rgb, kLuma) / max(wideOpacity, 1e-4);
+            float contrast = clamp(1.0 + pc.outline * opacity * (shade - wideShade) /
+                                             max(wideShade, 1e-6),
+                                   0.5, 2.0);
+            cloud = vec4(cloud.rgb * (sharpOpacity / opacity) * contrast, 1.0 - sharpOpacity);
+        }
     }
     cloud = vec4(max(cloud.rgb, 0.0), clamp(cloud.a, 0.0, 1.0));
     vec4 background = imageLoad(hdr, pixel);

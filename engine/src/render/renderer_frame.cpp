@@ -518,6 +518,7 @@ void Renderer::setEffects(const Effects &effects) {
   impl_->effects.parallaxDepth = std::clamp(effects.parallaxDepth, 0.0f, 4.0f);
   impl_->effects.microShadowStrength = std::clamp(effects.microShadowStrength, 0.0f, 1.0f);
   impl_->effects.contactLength = std::clamp(effects.contactLength, 0.0f, 3.0f);
+  impl_->effects.cloudOutline = std::clamp(effects.cloudOutline, 0.0f, 3.0f);
 }
 
 void Renderer::setOcclusionCulling(bool enabled) {

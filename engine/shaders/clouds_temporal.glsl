@@ -11,6 +11,8 @@ layout(push_constant) uniform CloudConstants {
     uint historyValid;
     // The camera is in or near the layer (half-resolution march).
     uint inLayer;
+    // Sharpening of the composited clouds, 0 = off.
+    float outline;
 } pc;
 
 // The unjittered view ray through uv, as the march builds it.
