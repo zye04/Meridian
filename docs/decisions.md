@@ -3742,6 +3742,14 @@ Release, 2560x1440, native TAA, main at 8ce025b, GPU ms:
   2.82 start; the driver already drops outputs the depth pass doesn't
   read). Re-cooking the meadow plants after the alpha-mip fix (19ac9d1)
   changed neither cost nor triangle counts measurably (7.81 vs 7.83 ms).
+  Skipping the cloud march for texels with scene depth: clouds 1.20 ->
+  1.17 ms at the full-ground view (0.64 both at pitch -0.6): the march
+  already ends where the depth cuts the ray before the layer
+  (`cloudLayerSpan` clamped by the scene distance), so its cost is the
+  sky texels'.
+- **After raster shadows became the default** (513ddb9, with the dense
+  mat): forest edge `--trees` 13.17 ms (scene early 8.26, cull early 1.51,
+  voxel trees 0.93, clouds 0.75), forest interior 6.81.
 
 ## Haze as a boundary layer over the valley floor (2026-11-21)
 
