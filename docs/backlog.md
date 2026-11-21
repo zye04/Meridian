@@ -25,6 +25,11 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G9 Motion shimmer above DLSS | Native TAA walk 15.9 / turn 10.4 vs DLSS 10.1 / 6.1 (/255) | Native lane | 3x3 reconstruction WIP (branch `native`) if sharpness holds |
 | G10 Forest edge 13.2 ms (target 10) | ~3 ms sub-pixel tree shading, 1.5 ms voxel brick listing | Perf lane | Visibility buffer (VG slice 4) |
 | G12 Material fidelity up close and at distance | Scans cooked 8K -> 2-4K, no detail textures / streaming, normal detail not filtered into roughness | User 2026-11-21 | Programme Pillar 1 |
+| G13 Leaf back faces render black | Back faces shaded with the front normal, weak transmission | User screenshots 2026-11-21 (evening) | With or before G3 |
+| G14 Giant leaf cards on some tree variants | Wrong atlas/material or scale on Field variants | User screenshots 2026-11-21 (evening) | Pipeline, #6 |
+| G15 Leaf textures posterized and glossy up close | Roughness channel/inversion, F0, KTX2 quality | User screenshots 2026-11-21 (evening) | Pillar 1, #12 |
+| G16 Distant clouds blocky | Outline effect or upsample on quarter-res texels | User screenshots 2026-11-21 (evening) | A/B `cloud-outline=0` first |
+| G17 Terrain banding/terracing in aerial views | Shadow-height map texels or normal quantization | User screenshots 2026-11-21 (evening) | A/B vs brute-force march / pre-aaab45b |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading

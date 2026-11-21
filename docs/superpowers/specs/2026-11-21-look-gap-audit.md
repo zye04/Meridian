@@ -151,6 +151,52 @@ import), `lane-*` are lane captures from the same day.
   texturing), anisotropic filtering, Toksvig/LEAN-class normal filtering,
   coverage-preserving mips, a test bench at 1 m / 10 m / 100 m / 1 km.
 
+### G13. Leaf back faces render black
+- Evidence: `user-06-lone-tree-giant-cards-black-backfaces.jpg`.
+- Seen: leaves seen from behind (sun on the other side) are near black,
+  front faces olive-yellow; the crown reads as a black-and-yellow mosaic.
+- Likely: two-sided leaves shade the back face with the front normal (no
+  flip), and transmission is too weak to light it (G3). Engine bug, high
+  impact: fix with the foliage shading model (G3) or before it.
+
+### G14. Some Megascans tree variants show giant leaf cards
+- Evidence: `user-06-...jpg` (lone tree), left tree in
+  `user-08-trees-mid-distance.jpg`.
+- Seen: single leaves ~0.3-0.5 m on one tree kind (lone/Field variants of
+  beech or hornbeam), unlike the small leaves of the others.
+- Likely: wrong material/atlas region on those variants (a single-leaf
+  texture where a cluster card belongs), or a scale/UV issue in
+  `cook_ready.py`. Pipeline (#6 / G6).
+
+### G15. Leaf textures posterized and glossy up close
+- Evidence: `user-07-leaf-closeup-posterized-glossy.jpg`.
+- Seen: blotchy banded colour and blue sky reflections on leaves at 0.5 m,
+  a wet-plastic sheen.
+- Likely: roughness read from the wrong channel or inverted (gloss vs
+  roughness), the fixed F0 0.04 (materials spec A/B), and texture
+  compression quality (KTX2 encode settings). Pillar 1 (#12).
+
+### G16. Clouds blocky / pixel-stepped at distance
+- Evidence: `user-09-blocky-clouds-cliff-speckle.jpg`,
+  `user-11-aerial-terrain-banding-blocky-clouds.jpg`.
+- Seen: distant cumulus with stair-stepped edges (quarter-res texels
+  visible); near clouds fine (`user-10-...jpg`).
+- Likely: the cloud outline effect (a5d0c4a, default strength 1)
+  sharpening quarter-resolution texels at distance, or the bilateral
+  upsample. Check `--effects cloud-outline=0` first.
+
+### G17. Terrain slopes show banding / terracing in aerial views
+- Evidence: `user-11-...jpg` (diagonal dark stripes and terraces on lit
+  slopes).
+- Likely: the terrain shadow-height map (aaab45b, 4 m texels) banding,
+  or heightfield quantization in the normals. A/B against
+  `-DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON` / a build before aaab45b.
+
+Also confirmed by these screenshots: G1 (far forest blue-grey speckle,
+`user-09`), G7 (washed distant terrain and pale sky, `user-11`), the
+known cirrus straight-line streaks (`user-10`, backlog row "Cloud look
+gaps").
+
 ## Order proposed for the next session
 
 1. G6 (in flight) and G7's diagnosis: cheap, they distort every judgment.
