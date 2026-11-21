@@ -37,6 +37,12 @@ layout(location = 12) in float inCrownVisibility;
 layout(location = 11) flat in float inTerrainSun;
 #endif
 
+#ifdef ALPHA_MASK
+#ifndef DEPTH_ONLY
+layout(early_fragment_tests) in;
+#endif
+#endif
+
 layout(location = 0) out vec4 outColor;
 // Screen-space motion in UV units, pointing from this frame's position to
 // last frame's (the convention DLSS also uses).
@@ -910,6 +916,17 @@ Surface materialSurface(Material m, vec3 normal) {
 }
 
 void main() {
+#ifdef DEPTH_ONLY
+    Material cutoutMaterial = pc.scene.materials.materials[inMaterialIndex];
+    float cutoutAlpha = cutoutMaterial.baseColorFactor.a;
+    if (cutoutMaterial.baseColorTexture != kNoTexture) {
+        cutoutAlpha *= sampleTexture(cutoutMaterial.baseColorTexture, inUv).a;
+    }
+    if (cutoutAlpha < cutoutMaterial.alphaCutoff) {
+        discard;
+    }
+    return;
+#else
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
 #ifdef TERRAIN
     vec3 normal = terrainNormal();
@@ -926,12 +943,6 @@ void main() {
         s.normal = normalize(mix(terrainNormal(), s.normal, inStreamFade));
     }
 #endif
-#ifdef ALPHA_MASK
-    if (s.alpha < material.alphaCutoff) {
-        discard;
-    }
-#endif
-
     Shading sh = beginShading(s, inRelativePosition);
 
     // Offset shadow rays along the true triangle normal: the smooth shading
@@ -1027,5 +1038,6 @@ void main() {
     outSpecularAlbedo = vec4(mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0), 1.0);
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
     outSunLight = vec4(sunRadiance * pc.scene.sunIlluminance * pc.scene.exposure.exposure, 1.0);
+#endif
 #endif
 }

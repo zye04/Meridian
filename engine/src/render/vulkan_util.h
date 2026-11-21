@@ -66,6 +66,10 @@ struct PipelineDesc {
   bool alphaBlend = false;
   // Depth bias set per draw (vkCmdSetDepthBias).
   bool dynamicDepthBias = false;
+  // Masked prepass: depth only, written without colour. Masked shading:
+  // tested EQUAL against the prepass, not written.
+  bool noColorWrites = false;
+  bool depthEqualNoWrite = false;
 };
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc);

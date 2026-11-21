@@ -170,6 +170,7 @@ struct Renderer::Impl {
   VkPipelineLayout sceneLayout = VK_NULL_HANDLE;
   VkPipeline meshPipeline = VK_NULL_HANDLE;
   VkPipeline maskedMeshPipeline = VK_NULL_HANDLE;
+  VkPipeline maskedDepthPipeline = VK_NULL_HANDLE;
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
   VkPipeline cellCullPipeline = VK_NULL_HANDLE;

@@ -108,6 +108,7 @@ foreach(source
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
+add_shader(mesh.frag mesh_masked_depth.frag ALPHA_MASK DEPTH_ONLY)
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
 add_shader(shadow.mesh shadow.mesh)

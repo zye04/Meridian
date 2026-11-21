@@ -3255,3 +3255,28 @@ under L 0.3. The references' crowns are dark inside with sunlit tops.
   rest unchanged (ground views have no crowns).
 - Left (backlog): far-field voxels and bark get no crown term.
 
+## Masked depth prepass (perf, 2026-11-21)
+
+Alpha-masked clusters (grass, flowers, leaves) were shaded in one pass
+with `discard`, which turns off early depth testing: every overlapping
+grass fragment ran the full shading (sun ray query, terrain march,
+ambient, haze), and so did the terrain drawn first under the grass. At
+the start view the masked shading was 2.6 of the 5.0 ms early scene pass
+(measured by stripping it), the terrain under the grass ~2.1 ms.
+
+- **Practice:** a depth prepass for alpha-tested geometry, then a shading
+  pass with depth EQUAL and no discard, is the standard fix (UE's
+  "masked in depth prepass", Frostbite and Decima foliage; the
+  alternative, a visibility buffer, is VG slice 4).
+- **Choice:** each scene phase draws the masked lists depth-only first
+  (`mesh_masked_depth.frag`, the alpha test alone, no colour writes), then
+  the terrain and the opaque lists, then the masked lists again shaded
+  with compare EQUAL, depth write off, early fragment tests. Coverage comes
+  from the prepass. Both passes use mesh.mesh, whose `gl_Position` is
+  `invariant`, so the depths match bit for bit.
+- **Measured** (Release 2560x1440, `--aa taa`): start view GPU 7.83 ->
+  5.44 ms (scene early 5.06 -> 2.77), looking down into the grass 8.40 ->
+  5.66 ms, forest interior with `--trees` 10.32 -> 9.19, start view with
+  `--shadows raster` 9.18 -> 5.92. The forest edge (26.6 ms, 47M
+  triangles) is geometry bound and unchanged. Captures differ from before
+  by 0.02/255 mean.

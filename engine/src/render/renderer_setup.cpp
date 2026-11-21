@@ -995,9 +995,16 @@ void Renderer::Impl::createPipelines() {
                         .dynamicCullMode = true};
   meshPipeline = createGraphicsPipeline(dev, meshDesc);
   // Alpha testing (discard) disables early depth testing, so masked
-  // materials get their own pipeline instead of slowing down opaque ones.
+  // materials are shaded after a depth-only alpha-test prepass and shade
+  // only the fragments whose depth equals the prepass's.
+  meshDesc.fragmentShader = "mesh_masked_depth.frag";
+  meshDesc.noColorWrites = true;
+  maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.noColorWrites = false;
+  meshDesc.depthEqualNoWrite = true;
   meshDesc.fragmentShader = "mesh_masked.frag";
   maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.depthEqualNoWrite = false;
   meshDesc.meshShader = nullptr;
   meshDesc.vertexShader = "mesh.vert";
   meshDesc.fragmentShader = "mesh_blended.frag";
@@ -1406,6 +1413,7 @@ Renderer::~Renderer() {
   vkDestroyPipelineLayout(dev, impl_->gradeLayout, nullptr);
   vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
+  vkDestroyPipeline(dev, impl_->maskedDepthPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->voxelPipeline, nullptr);

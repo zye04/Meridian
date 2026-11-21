@@ -150,8 +150,11 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
   const bool depthTest =
       desc.depthTest && desc.depthFormat != VK_FORMAT_UNDEFINED;
   depthStencil.depthTestEnable = depthTest;
-  depthStencil.depthWriteEnable = depthTest && !desc.alphaBlend;
-  depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+  depthStencil.depthWriteEnable =
+      depthTest && !desc.alphaBlend && !desc.depthEqualNoWrite;
+  depthStencil.depthCompareOp = desc.depthEqualNoWrite
+                                    ? VK_COMPARE_OP_EQUAL
+                                    : VK_COMPARE_OP_GREATER_OR_EQUAL;
 
   VkPipelineColorBlendAttachmentState blendAttachment{};
   blendAttachment.colorWriteMask =
@@ -200,6 +203,12 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
     }
   } else if (blendAttachments.size() > 2) {
     blendAttachments[2].colorWriteMask = 0;
+  }
+
+  if (desc.noColorWrites) {
+    for (auto &attachment : blendAttachments) {
+      attachment.colorWriteMask = 0;
+    }
   }
 
   VkPipelineColorBlendStateCreateInfo colorBlend{};

@@ -521,10 +521,13 @@ pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray
 Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
 world normal + roughness; null views unless the upscaler wants them) + RGBA16F sun light (the
 sun's exposed radiance, for contact shadows) + D32 depth
-(sky fullscreen, then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
+(sky fullscreen, then the masked lists depth-only (mesh_masked_depth.frag:
+the alpha test alone), then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
-cluster; then the far field pass: voxel.mesh emits each far cell's
+cluster: the opaque lists, then the masked lists shaded with depth EQUAL,
+no discard and early fragment tests, so hidden grass and the terrain
+under it aren't shaded; the late pass orders its lists the same way; then the far field pass: voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
 and writes the hit's depth (conservative, depth_less), motion and the
 same attachments) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
@@ -535,7 +538,7 @@ and phase 0's queued nodes go through the traversal (nodes tested against
 the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
 buffer) ->
-late scene pass (load; late lists, then blended instances CPU-sorted back
+late scene pass (load; late lists (masked depth, opaque, masked shaded), then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it, each texel's ray
 offset within the texel per frame (R2 sequence): luminance with

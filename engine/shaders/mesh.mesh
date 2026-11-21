@@ -9,6 +9,10 @@
 layout(local_size_x = 32) in;
 layout(triangles, max_vertices = 128, max_primitives = 128) out;
 
+out gl_MeshPerVertexEXT {
+    invariant vec4 gl_Position;
+} gl_MeshVerticesEXT[];
+
 layout(location = 0) out vec3 outRelativePosition[];
 layout(location = 1) out vec3 outNormal[];
 layout(location = 2) out vec4 outCurrentClip[];

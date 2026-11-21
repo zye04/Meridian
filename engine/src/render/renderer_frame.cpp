@@ -1092,18 +1092,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        sizeof(scenePush), &scenePush);
     vkCmdBindIndexBuffer(cmd, impl_->indexPool.buffer, 0, VK_INDEX_TYPE_UINT32);
   };
-  // The GPU-culled cluster draw lists: opaque, then alpha-masked, each
-  // single- and double-sided, one mesh workgroup per cluster.
-  auto drawCulled = [&](uint32_t phase) {
-    for (uint32_t bucket = 0; bucket < kDrawBuckets; ++bucket) {
-      const bool masked = bucket >= 2;
+  // The GPU-culled cluster draw lists, one mesh workgroup per cluster:
+  // opaque or alpha-masked (the masked ones twice: the depth prepass
+  // carries the alpha test, the shading pass tests depth EQUAL), each
+  // single- and double-sided.
+  auto drawCulled = [&](uint32_t phase, bool masked, bool prepass) {
+    for (uint32_t bucket = masked ? 2 : 0; bucket < (masked ? kDrawBuckets : 2);
+         ++bucket) {
       const bool doubleSided = bucket % 2 == 1;
       PushConstants listPush = scenePush;
       listPush.drawList = phase * kDrawBuckets + bucket;
       vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
                          sizeof(listPush), &listPush);
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        masked ? impl_->maskedMeshPipeline : impl_->meshPipeline);
+                        !masked ? impl_->meshPipeline
+                        : prepass ? impl_->maskedDepthPipeline
+                                  : impl_->maskedMeshPipeline);
       vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
           cmd, impl_->drawCounters.buffer,
@@ -1118,8 +1122,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginScene();
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
   vkCmdDraw(cmd, 3, 1, 0, 0);
+  drawCulled(0, true, true);
   impl_->drawTerrain(cmd);
-  drawCulled(0);
+  drawCulled(0, false, false);
+  drawCulled(0, true, false);
   endPass("scene early");
   impl_->drawFarField(cmd);
   vkCmdEndRendering(cmd);
@@ -1154,7 +1160,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   sceneRendering.pColorAttachments = lateAttachments;
   beginScene();
-  drawCulled(1);
+  drawCulled(1, true, true);
+  drawCulled(1, false, false);
+  drawCulled(1, true, false);
 
   // Blended last, back to front, from the CPU: each surface must composite
   // over everything behind it, and there are few of them.
