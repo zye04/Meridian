@@ -2,7 +2,7 @@
 
 Built 2026-11-21 against main (Release, `--trees`, 2560x1440 fullscreen, `--frames 30`, 0 validation errors).
 Each `*-sbs.jpg` is his frame (black bars cropped) left, ours right, both scaled to 720 px high.
-`*-ours.png` is our capture downscaled to 1600x900. His frames are not stored here.
+Our captures are not committed (size); re-create them with the commands below. His frames are not stored here.
 
 Prefix every command with `flock /tmp/meridian-gpu.lock ./build-release/game/game --trees`.
 
