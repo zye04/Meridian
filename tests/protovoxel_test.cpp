@@ -151,8 +151,9 @@ TEST_CASE("The mid switch: band weights complementary, distance monotonic in hei
     CHECK(w >= 0.0f);
     CHECK(w <= 1.0f);
   }
-  CHECK(voxelMip(d * 0.5f, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 0);
-  CHECK(voxelMip(d, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 1);
-  CHECK(voxelMip(d * 4.5f, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 3);
+  // At the switch the finest voxel is kVoxelSwitchPixels (2 px): mip 0.
+  CHECK(voxelMip(d, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 0);
+  CHECK(voxelMip(d * 2.0f, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 1);
+  CHECK(voxelMip(d * 4.5f, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 2);
   CHECK(voxelMip(d * 1000.0f, 25.0f / 128.0f, 1.0f, pixelsPerMeter, 5) == 4);
 }

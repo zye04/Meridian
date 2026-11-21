@@ -3454,7 +3454,7 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   depth-bucketed and rasterized, no ray march. Chlorophyll generates its
   voxels inside its meshoptimizer LOD build.
 - **How.** cull.comp lists a tree past the switch (its prototype's finest
-  voxel, height / 128, under 1 px; both representations over a 10% band
+  voxel, height / 128, under 2 px; both representations over a 10% band
   with complementary per-pixel dither) as (instance, mip), the mip the
   coarsest whose voxel is <= 2 px (`kVoxelMipPixels`). voxel_bricks.comp,
   one workgroup per tree, frustum-tests each occupied brick, marches the
@@ -3497,12 +3497,15 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   sequence across the switch shows no popping.
 - **Look:** where clusters thin to bare trunks (overview, summit ridges at
   0.3-1.5 km), the voxels keep the canopy continuous
-  (`.superpowers/farm/out` captures in the far-m worktree). Trees nearer
-  than the switch (~150-260 m, the three prototypes' finest voxels 0.12-0.21
-  m at 1 px) still lose leaves to cluster simplification (backlog). A
-  switch at 2 px (half the distance) keeps those crowns too, at +0.9 ms
-  summit and +2.0 ms edge, mostly voxel_bricks.comp's per-voxel loop over
-  the larger near bricks: not taken yet.
+  (`.superpowers/farm/out` captures in the far-m worktree). At a 1 px
+  switch trees at ~150-260 m (the prototypes' finest voxels 0.12-0.21 m)
+  were still bare clusters; the switch is now where the finest voxel is
+  2 px (`kVoxelSwitchPixels`), half that distance, and the voxels there
+  draw at mip 0. Measured after the textured beech landed (raster, frame
+  GPU ms, clusters / 1 px switch / 2 px switch): edge 23.23 / 20.73 /
+  21.07, summit 10.29 / 8.41 / 8.92, overview 18.14 / 13.48 / 13.48; the
+  2 px switch's cost is voxel_bricks.comp over the larger near bricks
+  (cull early 0.69 -> 1.75 at the edge).
 - **Rejected:** a mesh workgroup per brick (the workgroup count, not the
   quads, cost 9-13 ms); voxels at 1 px (~4x the voxels for the same
   coverage, list overflow); per-voxel band dither in place of the

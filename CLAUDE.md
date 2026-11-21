@@ -261,7 +261,7 @@ placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
 `--voxel-trees on|off` (default on; needs the far field): a tree whose
-prototype's finest voxel (height / 128) projects under 1 px draws as that
+prototype's finest voxel (height / 128) projects under 2 px draws as that
 prototype's voxels, rasterized (below); off keeps its clusters up to the
 far switch (A/B).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
@@ -504,7 +504,7 @@ are chunks too; with the far field, a cell whose 4 m voxel is under
 0: instances visible last frame, frustum test (placed: the prototype's
 sphere and draw distance) only, seeding (instance, level root) for each
 DAG level of each mesh whose LOD band can hold the cut; a tree past the
-voxel switch (its prototype's finest voxel <= 1 px, both over a 10% band)
+voxel switch (its prototype's finest voxel <= 2 px, both over a 10% band)
 is listed as (instance, mip: the coarsest whose voxel is <= 2 px) instead,
 and voxel_bricks.comp, one workgroup per tree, lists its bricks in the
 frustum (with the terrain's sun visibility marched once per brick) and,

@@ -40,7 +40,7 @@ uint voxelQuadListCapacity(uint list) {
 // A voxel this deep in its crown seen from the camera (its baked axis
 // depths, protoVoxelDepth) shows through less than 3% of the time: skipped.
 const float kVoxelHiddenDepth = 3.5;
-const float kVoxelSwitchPixels = 1.0;
+const float kVoxelSwitchPixels = 2.0;
 const float kVoxelSwitchBand = 0.1;
 const float kVoxelMipPixels = 2.0;
 

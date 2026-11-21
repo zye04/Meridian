@@ -22,8 +22,10 @@ constexpr uint32_t kProtoMaxLevels = 8;
 constexpr uint32_t kEmptyBrick = 0xFFFFFFFFu;
 // A tree draws as voxels once its finest voxel projects to at most this
 // many pixels (cull.comp), over a band of kVoxelSwitchBand of that distance
-// where both representations draw with complementary dither masks.
-constexpr float kVoxelSwitchPixels = 1.0f;
+// where both representations draw with complementary dither masks. At 1 px
+// the clusters' simplified foliage thinned to bare trunks before the
+// switch (~150-260 m); 2 px halves that distance.
+constexpr float kVoxelSwitchPixels = 2.0f;
 constexpr float kVoxelSwitchBand = 0.1f;
 // Voxels draw at the coarsest mip whose voxel projects to at most this many
 // pixels: at 1 px the forest overview drew ~4x the voxels for the same
