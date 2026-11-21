@@ -3505,6 +3505,17 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   21.07, summit 10.29 / 8.41 / 8.92, overview 18.14 / 13.48 / 13.48; the
   2 px switch's cost is voxel_bricks.comp over the larger near bricks
   (cull early 0.69 -> 1.75 at the edge).
+- **Mips keep coverage** (2026-11-21): averaging the 8 children's
+  extinction covers more at every coarser level (1 - exp(-mean depth) >=
+  the mean of 1 - exp(-depth)): a beech's projected coverage grew 0.27 ->
+  0.34 by its 3.4 m level, an oak's 0.19 -> 0.34 by 4 m, so distant trees
+  thickened and each mip switch stepped. A coarse voxel now keeps its
+  children's mean transmittance along each axis (the 4 two-voxel columns
+  through it), averaged over the axes: 0.27 -> 0.29 and 0.19 -> 0.24
+  (the rest is correlation along longer columns). Forest overview: 5.19M
+  -> 4.54M voxels, voxel trees 3.73 -> 3.28 ms, the canopy unchanged to
+  the eye (mean luminance of the forest within 1%). Load prints each
+  prototype's coverage per level.
 - **Rejected:** a mesh workgroup per brick (the workgroup count, not the
   quads, cost 9-13 ms); voxels at 1 px (~4x the voxels for the same
   coverage, list overflow); per-voxel band dither in place of the

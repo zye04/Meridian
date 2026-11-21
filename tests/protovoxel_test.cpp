@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <vector>
 
 using namespace meridian;
@@ -36,19 +37,6 @@ void fill(ProtoBakeGrid &grid, uint32_t x0, uint32_t y0, uint32_t z0, uint32_t x
   }
 }
 
-double mass(const PrototypeVoxels &voxels, uint32_t level) {
-  const ProtoVoxelLevel &l = voxels.levels[level];
-  double sum = 0.0;
-  for (uint32_t z = 0; z < l.bricks[2] * 4; ++z) {
-    for (uint32_t y = 0; y < l.bricks[1] * 4; ++y) {
-      for (uint32_t x = 0; x < l.bricks[0] * 4; ++x) {
-        sum += unpackVoxel(protoVoxelAt(voxels, level, x, y, z)).extinction;
-      }
-    }
-  }
-  return sum * std::pow(l.voxelSize, 3.0);
-}
-
 } // namespace
 
 TEST_CASE("A solid box voxelizes to full occupancy, an empty prototype to none") {
@@ -72,15 +60,26 @@ TEST_CASE("A solid box voxelizes to full occupancy, an empty prototype to none")
   CHECK(protoVoxelAt(empty, 0, 3, 3, 3) == 0);
 }
 
-TEST_CASE("Mips conserve extinction-weighted mass") {
+TEST_CASE("Mips keep a sparse crown's coverage") {
+  // Scattered dense leaves, as a crown voxelizes: averaging extinction
+  // would cover more at every coarser level (1 - exp(-mean) >= mean of 1 -
+  // exp); each coarse voxel keeps its children's mean transmittance instead.
   ProtoBakeGrid grid = emptyGrid(64, 64, 64, 0.25f);
-  fill(grid, 5, 3, 7, 40, 50, 33, 2.0f);
-  fill(grid, 20, 20, 20, 30, 60, 30, 0.7f);
+  std::mt19937 random(7);
+  for (size_t i = 0; i < grid.extinction.size(); ++i) {
+    if (random() % 50 == 0) {
+      grid.extinction[i] = 3.0f;
+      grid.normal[i] = {0.0f, 1.0f, 0.0f};
+    }
+  }
   const PrototypeVoxels voxels = buildPrototypeVoxels(grid);
   REQUIRE(voxels.levels.size() >= 3);
-  const double base = mass(voxels, 0);
+  const Vec3 base = protoCoverage(voxels, 0);
   for (uint32_t level = 1; level < voxels.levels.size(); ++level) {
-    CHECK(mass(voxels, level) == doctest::Approx(base).epsilon(0.01));
+    const Vec3 c = protoCoverage(voxels, level);
+    CHECK(c.x == doctest::Approx(base.x).epsilon(0.05));
+    CHECK(c.y == doctest::Approx(base.y).epsilon(0.05));
+    CHECK(c.z == doctest::Approx(base.z).epsilon(0.05));
   }
 }
 

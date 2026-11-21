@@ -568,6 +568,14 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                 built.levels.size(), built.brickCount,
                 static_cast<double>(built.voxels.size() * 4 + built.brickGrid.size() * 4) * kMiB,
                 fineMs, buildMs);
+    // Projected coverage per level (mean of the 3 axes): the mips should
+    // keep it (protovoxel.cpp downsample).
+    std::printf("  coverage per level:");
+    for (uint32_t l = 0; l < built.levels.size(); ++l) {
+      const Vec3 c = protoCoverage(built, l);
+      std::printf(" %.3f", (c.x + c.y + c.z) / 3.0f);
+    }
+    std::printf("\n");
   }
   vkDestroyPipeline(dev, bakePipeline, nullptr);
   vkDestroyPipelineLayout(dev, bakeLayout, nullptr);

@@ -100,6 +100,10 @@ struct ProtoHit {
 ProtoHit marchPrototypeVoxelsBrute(const PrototypeVoxels &voxels, uint32_t level, Vec3 origin,
                                    Vec3 direction, float tMax, float limit);
 
+// The fraction of axis-aligned rays through a level's box (along x, y, z)
+// its voxels block: the mean of 1 - exp(-optical depth) over the columns.
+Vec3 protoCoverage(const PrototypeVoxels &voxels, uint32_t level);
+
 // The optical depth from a voxel's center out of the box along unit d, from
 // its occlusion word (protoVoxelDepth in protovoxel.glsl).
 float protoVoxelDepth(uint32_t occlusionWord, Vec3 d);

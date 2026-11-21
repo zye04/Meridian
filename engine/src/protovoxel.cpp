@@ -77,7 +77,12 @@ void bakeOcclusion(Dense &fine, float voxelSize, float reach) {
   }
 }
 
-Dense downsample(const Dense &in) {
+// Halves the resolution. A coarse voxel keeps its children's mean
+// transmittance along each axis (over the 4 two-voxel columns through it),
+// averaged over the axes: averaging extinction instead covers more at every
+// level (1 - exp(-mean depth) >= the mean of 1 - exp(-depth)), +30% at a
+// beech's 3.4 m level, so distant trees thickened.
+Dense downsample(const Dense &in, float fineVoxel) {
   Dense out;
   for (int a = 0; a < 3; ++a) {
     out.dims[a] = in.dims[a] / 2;
@@ -115,8 +120,24 @@ Dense downsample(const Dense &in) {
         if (sum <= 0.0) {
           continue;
         }
+        double coarse = 0.0;
+        for (int axis = 0; axis < 3; ++axis) {
+          double transmittance = 0.0;
+          for (uint32_t column = 0; column < 4; ++column) {
+            float depth = 0.0f;
+            for (uint32_t t = 0; t < 2; ++t) {
+              uint32_t c[3];
+              c[axis] = t;
+              c[(axis + 1) % 3] = column & 1;
+              c[(axis + 2) % 3] = column >> 1;
+              depth += in.extinction[in.index(2 * x + c[0], 2 * y + c[1], 2 * z + c[2])];
+            }
+            transmittance += std::exp(-depth * fineVoxel);
+          }
+          coarse += -std::log(std::max(transmittance / 4.0, 1e-6)) / (2.0 * fineVoxel);
+        }
         const size_t o = out.index(x, y, z);
-        out.extinction[o] = static_cast<float>(sum / 8.0);
+        out.extinction[o] = static_cast<float>(coarse / 3.0);
         out.occlusion[o] = static_cast<float>(occlusion / sum);
         out.normal[o] = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
         uint32_t best = 0;
@@ -243,7 +264,7 @@ PrototypeVoxels buildPrototypeVoxels(const ProtoBakeGrid &grid) {
   for (uint32_t level = 0; level < levels; ++level) {
     packLevel(dense, grid.voxelSize * static_cast<float>(1u << level), out);
     if (level + 1 < levels) {
-      dense = downsample(dense);
+      dense = downsample(dense, grid.voxelSize * static_cast<float>(1u << level));
     }
   }
   return out;
@@ -337,6 +358,30 @@ float voxelSwitchDistance(float finestVoxel, float scale, float pixelsPerMeter) 
 
 float voxelBlend(float distance, float switchDistance) {
   return std::clamp((distance - switchDistance) / (kVoxelSwitchBand * switchDistance), 0.0f, 1.0f);
+}
+
+Vec3 protoCoverage(const PrototypeVoxels &voxels, uint32_t level) {
+  const ProtoVoxelLevel &l = voxels.levels[level];
+  float out[3];
+  for (int axis = 0; axis < 3; ++axis) {
+    const int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+    double blocked = 0.0;
+    for (uint32_t u = 0; u < l.dims[a1]; ++u) {
+      for (uint32_t w = 0; w < l.dims[a2]; ++w) {
+        double depth = 0.0;
+        for (uint32_t t = 0; t < l.dims[axis]; ++t) {
+          int32_t c[3];
+          c[axis] = static_cast<int32_t>(t);
+          c[a1] = static_cast<int32_t>(u);
+          c[a2] = static_cast<int32_t>(w);
+          depth += unpackVoxel(protoVoxelAt(voxels, level, c[0], c[1], c[2])).extinction;
+        }
+        blocked += 1.0 - std::exp(-depth * l.voxelSize);
+      }
+    }
+    out[axis] = static_cast<float>(blocked / (double(l.dims[a1]) * l.dims[a2]));
+  }
+  return {out[0], out[1], out[2]};
 }
 
 float protoVoxelDepth(uint32_t occlusionWord, Vec3 d) {
