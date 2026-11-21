@@ -3409,6 +3409,12 @@ edge image L mean 0.53 -> 0.50 at the same exposure (EV100 10.81),
 dark pixels (L 0.15-0.3) 11% -> 13%; the summit view's lone tree keeps a
 brown shadow side.
 
+Far-field voxels keep occlusion 1: the vertical transmittance through the
+bricks above the voxel hit (farMarchCell straight up) changed the forest
+overview and a 1500 m view by 0.15/255 mean, under 1% of pixels by more
+than 3/255. The hit sits at opacity 0.5 near the canopy top, so little is
+above it, and far cells are kilometres away under haze.
+
 ## TAA: sharpen in proportion to motion (2026-11-21)
 
 Native TAA loses 7-10% of its Laplacian in motion (forward 5 m/s 0.93 of
