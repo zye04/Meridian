@@ -51,12 +51,16 @@ pair sky_turn1 "$sky" "${skyArgs[@]}" --time-scale 0 --camera-yaw-rate 1
 # Region fractions x0,y0,x1,y1.
 all="all=0,0,1,1"
 clouds="clouds=0,0,1,0.45"
+# Small distant cumulus above the hills in the sky view: the whole-frame
+# Laplacian of the sky rows hides their smear behind the terrain and wall.
+detail="detail=0.35,0.50,0.95,0.63"
 num() { awk '{print $2}'; }
 printf "%-14s %-7s %8s %7s %8s %8s\n" case region sharp ratio jitter error
-row() { # case region-spec still [error: yes|no]
-  local c=$1 spec=$2 still=$3 s r j e="-"
-  s=$($gates laplacian "$out/${c}_120.png" | num)
-  r=$($gates ratio "$out/${c}_120.png" "$out/${still}_120.png" | num)
+row() { # case region-spec still [error: yes|no] [crop: Laplacian on the region]
+  local c=$1 spec=$2 still=$3 s r j e="-" rect=
+  [ "${5:-}" = crop ] && rect=${spec#*=}
+  s=$($gates laplacian "$out/${c}_120.png" $rect | num)
+  r=$($gates ratio "$out/${c}_120.png" "$out/${still}_120.png" $rect | num)
   j=$($gates shimmer "$out/${c}_120.png" "$out/${c}_121.png" "$spec" | num)
   [ "$4" = yes ] && e=$($gates shimmer "$out/${c}_120.png" "$out/${still}_120.png" "$spec" | num)
   printf "%-14s %-7s %8s %7s %8s %8s\n" "$c" "${spec%%=*}" "$s" "$r" "$j" "$e"
@@ -72,6 +76,9 @@ row ground_turn1 "$all" ground_still yes
 row sky_still "$clouds" sky_still no
 row sky_drift "$clouds" sky_still no
 row sky_turn1 "$clouds" sky_still yes
+row sky_still "$detail" sky_still no crop
+row sky_drift "$detail" sky_still yes crop
+row sky_turn1 "$detail" sky_still yes crop
 
 echo "resolution: $(magick identify -format '%wx%h' "$out/forest_still_120.png")"
 grep -L " 0 validation errors" "$out"/*.log | sed 's/^/validation errors or no summary in: /'

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Image gates for motion-clarity checks. Usage:
-  image-gates.py laplacian A.png   (absolute sharpness: the motion gates)
-  image-gates.py ratio MOTION.png STILL.png   (informational)
+  image-gates.py laplacian A.png [X0,Y0,X1,Y1]   (absolute sharpness: the motion gates)
+  image-gates.py ratio MOTION.png STILL.png [X0,Y0,X1,Y1]   (informational)
   image-gates.py shimmer A.png B.png [NAME=X0,Y0,X1,Y1 ...]   (fractions)
   image-gates.py ssim A.png B.png
   image-gates.py diff A.png B.png
@@ -23,8 +23,14 @@ def magick(*args):
     return subprocess.run(["magick", *args], capture_output=True, check=False)
 
 
-def laplacian(path):
-    r = magick(path, "-colorspace", "gray", "-morphology", "Convolve",
+def laplacian(path, rect=None):
+    crop = []
+    if rect:
+        w, h = (int(v) for v in magick(path, "-format", "%w %h", "info:").stdout.split())
+        x0, y0, x1, y1 = (float(v) for v in rect.split(","))
+        xs, ys = round(x0 * w), round(y0 * h)
+        crop = ["-crop", f"{round(x1 * w) - xs}x{round(y1 * h) - ys}+{xs}+{ys}", "+repage"]
+    r = magick(path, *crop, "-colorspace", "gray", "-morphology", "Convolve",
                "Laplacian:0", "-format", "%[fx:standard_deviation]\n", "info:")
     return float(r.stdout.decode().strip())
 
@@ -61,9 +67,10 @@ def main(argv):
         sys.exit(__doc__)
     cmd, args = argv[1], argv[2:]
     if cmd == "laplacian":
-        print(f"laplacian {laplacian(args[0]):.4f}")
+        print(f"laplacian {laplacian(*args[:2]):.4f}")
     elif cmd == "ratio":
-        print(f"ratio {laplacian(args[0]) / laplacian(args[1]):.4f}")
+        rect = args[2] if len(args) > 2 else None
+        print(f"ratio {laplacian(args[0], rect) / laplacian(args[1], rect):.4f}")
     elif cmd == "ssim":
         print(f"ssim {ssim(args[0], args[1]):.4f}")
     elif cmd == "diff":
