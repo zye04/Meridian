@@ -1,7 +1,45 @@
-# Resume here (entry point; updated 2026-11-21 evening)
+# Resume here (entry point; updated 2026-11-22)
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
-No lanes are running. Main is clean and pushed.
+
+## Session 2026-11-22 (Pro account, inline work, no lanes)
+
+Pro-plan rules while on that account: work inline in the main thread, no
+lane sub-orchestrators or fan-out, lighter workflow (draft, self-review,
+direct write; full SDD only for structural changes, after asking),
+subagents only when clearly worth it at the lowest tier, fewest GPU runs.
+The user may run parallel Claude Code terminals themselves.
+
+Landed on main: `tools/motion-clarity.sh` (4b2f454: jitter = frame 120 vs
+121 at the same pose while moving, error = motion vs still), stable TAA
+(5789387, `Effects::stableTaa`, absorbs the `native` branch's 3x3
+reconstruction: drop that branch), DLSS DLAA as the default AA (a5c8f43).
+User preference: stability over sharpness (memory).
+
+G19 (#22) plan, this lane ("image-stability"):
+- Step 0 done (baseline under TAA: `.superpowers/motion/baseline-main/`).
+- Step 1 done (stable TAA, then DLAA chosen; decisions.md 2026-11-22).
+- DLAA baseline: `tools/motion-clarity.sh build-release
+  .superpowers/motion/baseline-dlaa` was started (table in
+  `.superpowers/motion-baseline-dlaa.txt`); if it is missing or
+  incomplete, re-run it. Check 0 validation errors and `DLSS` in the
+  `Render` line.
+- Next, step c: a separate mip bias for the alpha cut-out only (the
+  DEPTH_ONLY path of mesh.frag ~line 930, and shadow_masked.frag), probe
+  -1 and +1 (CE F16: "tweaked the mip bias on alpha-tested grass") on the
+  forest/ground sideways 5 m/s + turn 1 rad/s cases against the DLAA
+  baseline; keep a winner behind an Effects toggle.
+- Then step 2: cloud small-detail smear (quarter-res march + history,
+  measured on a crop of cloud detail, not the whole sky region): A/B
+  half-res march outside the layer, shorter history in motion, outline in
+  motion (`cloud-outline=0` doubles as the G16 check).
+- Even under DLAA a moving frame differs ~6x more than a still one:
+  foliage input is the larger remaining source.
+
+Parallel terminals the user opened (check with them / `git worktree list`):
+- G20 (#23) cloud shadows stepping: worktree `../meridian-g20`, branch `g20`.
+- Leaf geometry design (cards -> opaque triangles at cook time), folded
+  into `specs/2026-11-21-materials-fidelity-design.md`: docs only.
 
 ## The work list
 
@@ -34,8 +72,8 @@ No lanes are running. Main is clean and pushed.
    back faces), G14 (#17 giant cards), G18 (#21 fireflies). Spec
    `2026-11-21-materials-fidelity-design.md` (draft: user confirms 3
    decisions) -> plan.
-4. **Reconcile WIP branches** against their issues: `native` 36c37a8 (3x3
-   reconstruction, #9/#22), `far-m-shadow2` (distant tree shadows, #11),
+4. **Reconcile WIP branches** against their issues: `native` (absorbed by
+   stable TAA 5789387: drop it), `far-m-shadow2` (distant tree shadows, #11),
    `far-c` (far-cell occlusion, #10). Finish or drop each.
 5. Re-run the parity route (`--benchmark 60 out.csv --route
    tools/routes/parity.route --trees`, `python3 -I tools/bench-route.py`)
@@ -48,7 +86,7 @@ No lanes are running. Main is clean and pushed.
 
 ## State of main (2026-11-21)
 
-Native 1440p TAA default (DLSS A/B only); raster sun shadows default;
+Native 1440p, DLSS DLAA default since 2026-11-22 (own stable TAA = fallback); raster sun shadows default;
 `--fov` default 70 deg horizontal; Megascans Trees (alder, beech,
 hornbeam, all variants) under `--trees` (forest edge ~16 ms, #10);
 voxel trees; clouds with outline (default 1); valley-anchored haze; GI
