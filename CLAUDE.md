@@ -45,6 +45,7 @@ flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
 python3 -I tools/image-gates.py laplacian motion.png   # laplacian|ratio|shimmer|ssim|diff
 tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate table, GPU passes
+tools/motion-clarity.sh build-release out-dir    # in-motion jitter (frame 120 vs 121, same pose) + smear vs still at user speeds
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
