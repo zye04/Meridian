@@ -29,7 +29,9 @@ G19 (#22) plan, this lane ("image-stability"):
   a valid re-test; leaf dead zone (G13), voxel transmission (G1), jittered
   contact shadows (G5) confirmed in code. Backlog rows carry the rest.
 - Next, step 2: cloud small-detail smear, re-planned in the triage doc
-  (A/B list 0-5, waiting for the user's OK before any GPU run). Crop
+  (A/B list 0-5). Step 0 done (crop rows in motion-clarity.sh). Step 1
+  (user OK) running: preset M and K tables into
+  `.superpowers/motion/preset-{M,K}{,.txt}` (L dropped for usage). Crop
   baseline (DLAA M): sky_turn1 Laplacian ratio 0.70, jitter 1.19, error
   2.48 on the `detail` crop.
 - A `cloudpop` terminal (worktree `../meridian-cloudpop`, uncommitted)
