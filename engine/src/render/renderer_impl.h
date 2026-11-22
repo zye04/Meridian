@@ -492,6 +492,13 @@ struct Renderer::Impl {
   // displacement since then.
   float cloudWindLocal[2] = {};
   bool cloudWindLocalValid = false;
+  // The cloud wind's displacement summed since startup (x, z), in double:
+  // the cloud shadow map's texel grid moves with it.
+  double cloudWindTravel[2] = {};
+  // The cloud shadow map's texel indices of the camera in the cloud frame,
+  // last frame (placeCloudShadow); a change re-marches the whole map.
+  int64_t cloudShadowSnap[2] = {};
+  bool cloudShadowFullRefresh = true;
 
   std::vector<GpuMesh> meshes;
 

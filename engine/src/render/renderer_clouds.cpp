@@ -274,8 +274,11 @@ void Renderer::Impl::drawWeatherMap(VkCommandBuffer cmd, const FrameData &frame)
 }
 
 // Orthographic along the sun (cloudShadowBasis), centered on the camera and
-// snapped to whole texels in the sun's frame, so shadows don't swim as the
-// camera moves (in double, like the weather map). Off with the clouds.
+// snapped to whole texels in the sun's frame (in double, like the weather
+// map). The grid moves with the clouds (cloudWindTravel): a texel keeps
+// marching the same part of a cloud, so a shadow edge glides with the
+// bilinear lookup instead of jumping a texel when it crosses a texel's
+// centre. Off with the clouds.
 void Renderer::Impl::placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection) {
   if (!cloudsEnabled) {
     clouds.shadowSize = 0.0f;
@@ -283,11 +286,8 @@ void Renderer::Impl::placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection) {
   }
   const SunBasis basis = cloudShadowBasis(sunDirection);
   constexpr double kTexel = kCloudShadowSize / kCloudShadowResolution;
-  auto fromCenter = [&](Vec3 axis) {
-    const double u = double{cameraPosition.x} * axis.x + double{cameraPosition.y} * axis.y +
-                     double{cameraPosition.z} * axis.z;
-    return static_cast<float>(u - std::floor(u / kTexel) * kTexel);
-  };
+  const double x = double{cameraPosition.x} - cloudWindTravel[0];
+  const double z = double{cameraPosition.z} - cloudWindTravel[1];
   const Vec3 *axes[] = {&basis.right, &basis.up, &basis.forward};
   float *targets[] = {clouds.shadowRight, clouds.shadowUp, clouds.shadowForward};
   for (int i = 0; i < 3; ++i) {
@@ -296,8 +296,17 @@ void Renderer::Impl::placeCloudShadow(Vec3 cameraPosition, Vec3 sunDirection) {
     targets[i][2] = axes[i]->z;
   }
   clouds.shadowSize = static_cast<float>(kCloudShadowSize);
-  clouds.shadowCamera[0] = fromCenter(basis.right);
-  clouds.shadowCamera[1] = fromCenter(basis.up);
+  // Half the rows per frame keep their texels' clouds only while the grid
+  // stays put; a step of the grid shifts what every texel stands for.
+  cloudShadowFullRefresh = !historyValid;
+  for (int i = 0; i < 2; ++i) {
+    const Vec3 &axis = i == 0 ? basis.right : basis.up;
+    const double u = x * axis.x + double{cameraPosition.y} * axis.y + z * axis.z;
+    const double snap = std::floor(u / kTexel);
+    clouds.shadowCamera[i] = static_cast<float>(u - snap * kTexel);
+    cloudShadowFullRefresh |= static_cast<int64_t>(snap) != cloudShadowSnap[i];
+    cloudShadowSnap[i] = static_cast<int64_t>(snap);
+  }
 }
 
 // After the weather map (the march reads it): the Beer shadow map, then its
@@ -308,12 +317,13 @@ void Renderer::Impl::drawCloudShadow(VkCommandBuffer cmd, const FrameData &frame
                           nullptr);
   PushConstants push;
   push.sceneBuffer = frame.sceneBuffer.address;
-  // Half the rows per frame once a full map exists (cloud_shadow.comp).
-  push.drawList = historyValid ? 1 : 0;
+  // Half the rows per frame once a full map exists and the grid kept still
+  // (cloud_shadow.comp, placeCloudShadow).
+  push.drawList = cloudShadowFullRefresh ? 0 : 1;
   vkCmdPushConstants(cmd, cloudLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
   for (VkPipeline pipeline : {cloudShadowPipeline, cloudShadowBlurPipeline}) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-    const uint32_t rows = pipeline == cloudShadowPipeline && historyValid
+    const uint32_t rows = pipeline == cloudShadowPipeline && !cloudShadowFullRefresh
                               ? kCloudShadowResolution / 2
                               : kCloudShadowResolution;
     vkCmdDispatch(cmd, kCloudShadowResolution / 8, rows / 8, 1);

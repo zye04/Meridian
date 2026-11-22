@@ -584,6 +584,7 @@ void Renderer::setWeather(const Weather &weather) {
     const double moved = std::remainder(double{now} - impl_->cloudWindLocal[i],
                                         kDisplacementPeriod);
     clouds.windDisplacement[i] = impl_->cloudWindLocalValid ? static_cast<float>(moved) : 0.0f;
+    impl_->cloudWindTravel[i] += clouds.windDisplacement[i];
     impl_->cloudWindLocal[i] = now;
   }
   impl_->cloudWindLocalValid = true;

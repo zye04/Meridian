@@ -4141,3 +4141,33 @@ Status: decided, not implemented (spec
   voxel switch (baseline on cards first; fallback: area-preserving
   pruning per cluster DAG level, then an earlier voxel switch), forest
   edge GPU ms not above today's, tree memory under the cap.
+
+## Cloud shadow map grid moves with the clouds (2026-11-22)
+
+Cloud shadows advanced in ~29 m jumps (G20, #23). Measured on a still
+camera at 2400 m looking down, `--weather broken --time-scale 1`, 30 s
+captured every 10 frames, each frame divided by a `--clouds off` still to
+keep the cloud shadow alone: a kymograph (one image column over time) of a
+shadow edge was a staircase, one map texel every ~1.7 s. The cause is the
+sampling, not the row interleave: the map's texels were fixed in the world
+(snapped around the camera) while the clouds drift through them, so a sharp
+cloud edge sampled at texel centres reconstructs (bilinear, after the blur)
+at texel positions only, and jumps a texel when it crosses a centre. The
+alternating-row refresh lags half the rows one frame, ~0.2 m of wind, too
+little to see.
+
+Fix: snap the map in the cloud frame instead of the world, the camera
+position minus the cloud wind's displacement summed in double since startup
+(`cloudWindTravel`, from the per-frame `windDisplacement`). A texel then
+keeps marching the same part of a cloud, and the lookup, which takes the
+camera's sub-texel offset in that frame (`shadowCamera`), glides the shadow
+continuously. Only the wind's horizontal displacement projected on the map's
+right and up axes matters: the part along the sun moves a cloud along its own
+shadow line. No shader change. Interleaved rows stay valid while the grid
+keeps its texel; on a frame the grid steps (camera or wind crossing a texel,
+also the old misregistration when the camera crossed one) the whole map is
+re-marched, ~5 frames per second at 150 m/s flight and once every ~2 s from
+the wind alone. On average this costs nothing: the weather pass stays 0.67 ms
+at 1440p, still or flying at 150 m/s. Same sequence after: the kymograph
+edge is a straight diagonal. The ~29 m outline resolution remains (backlog:
+finer near cascade or bicubic lookup, a look decision).

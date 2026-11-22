@@ -281,6 +281,10 @@ mid-distance crowns (G1).
   a smooth (bicubic) lookup. Gate: a ground capture sequence with clouds
   drifting at `--time-scale 1`: shadow edge position vs time must be
   smooth (no steps), plus a cost check of the weather pass.
+- Landed 2026-11-22: the map's texel grid moves with the cloud wind and the
+  map is re-marched whole on a frame its grid steps a texel (decisions.md,
+  "Cloud shadow map grid moves with the clouds"). The outline resolution
+  (finer cascade, bicubic) stays a look decision, in the backlog.
 
 ## Order proposed for the next session
 

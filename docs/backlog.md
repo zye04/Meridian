@@ -32,7 +32,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G17 Terrain banding/terracing in aerial views | Shadow-height map texels or normal quantization | User screenshots 2026-11-21 (evening) | A/B vs brute-force march / pre-aaab45b |
 | G18 Fireflies and leaf sparkle in motion | Glossy leaf speculars as sub-pixel hot pixels, amplified by TAA and bloom | User screenshots in motion 2026-11-21 | Leaf material (G15), specular AA, firefly clamp |
 | G19 Smear / jitter / shimmer on everything in motion (top priority) | Clouds' long history (weight 0.05) smears small detail when moving; native TAA smears/jitters trees and textures | User 2026-11-21 evening | Measure in motion, then rule-1 fixes (research E); A/B CE's alpha-grass mip bias and motion smear mask (baseline F16; his AA method is unknown) |
-| G20 Cloud shadows move in blocky steps | ~29 m texel-snapped map refreshed every other row; edges advance in texel steps | User 2026-11-21 evening | Sub-texel wind offset in the lookup, full refresh or interpolation, finer near cascade, bicubic lookup |
+| Cloud shadow outline resolution | The cloud shadow map's ~29 m texels (bilinear over a 5x5 blur) show as staircase outlines on sharp cloud shadows; the motion is smooth since G20 | G20 (2026-11-22) | Look decision: finer near cascade or bicubic lookup |
 | G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading
