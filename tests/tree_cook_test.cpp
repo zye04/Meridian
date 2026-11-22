@@ -14,6 +14,7 @@
 #include <map>
 #include <numeric>
 #include <random>
+#include <set>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -350,7 +351,8 @@ TEST_CASE("cookTree keeps a textured leaf material's UVs through simplification 
   basisu::image texture(64, 64);
   for (uint32_t y = 0; y < 64; ++y) {
     for (uint32_t x = 0; x < 64; ++x) {
-      texture(x, y).set(60, 140, 30, (x / 4 + y / 4) % 2 ? 255 : 0);
+      // Opaque alpha: not traced, so this covers UV-preserving pruning.
+      texture(x, y).set(60, 140, 30, 255);
     }
   }
   REQUIRE(basisu::save_png((dir / "leaf.png").string(), texture));
@@ -380,8 +382,7 @@ TEST_CASE("cookTree keeps a textured leaf material's UVs through simplification 
       continue;
     }
     sawLeaves = true;
-    CHECK(material.alphaMode == fastgltf::AlphaMode::Mask);
-    CHECK(material.alphaCutoff == 0.5f);
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Opaque);
     REQUIRE(material.pbrData.baseColorTexture);
     CHECK(material.diffuseTransmission);
 
@@ -442,6 +443,94 @@ TEST_CASE("cookTree keeps a textured leaf material's UVs through simplification 
       CHECK(leaf.uv.max[1] == doctest::Approx(cellV + kLeafUvSize).epsilon(1e-5));
     }
     CHECK(pieces.size() < 50 * 200);
+  }
+  CHECK(sawLeaves);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree traces alpha-tested cards into opaque leaves") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_trace_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  // 200 single-quad cards, each showing its own 16 x 16-texel cell of a
+  // 256 x 256 atlas; every cell holds a disk of radius 5 texels inside the
+  // card's 14.4-texel UV square.
+  const Mesh meshes[2] = {tube(), leaves()};
+  const std::vector<std::pair<int, Matrix>> nodes = {{0, placement(0.0f, 1.0f, 0, 0, 0)},
+                                                     {1, placement(0.0f, 1.0f, 0, 0, 0)}};
+  basisu::image texture(256, 256);
+  for (uint32_t y = 0; y < 256; ++y) {
+    for (uint32_t x = 0; x < 256; ++x) {
+      const float cx = x % 16 + 0.5f - 7.2f, cy = y % 16 + 0.5f - 7.2f;
+      texture(x, y).set(60, 140, 30, std::hypot(cx, cy) < 5.0f ? 255 : 0);
+    }
+  }
+  REQUIRE(basisu::save_png((dir / "leaf.png").string(), texture));
+  writeSource(dir / "tree.gltf", meshes, nodes, "leaf.png");
+
+  const meridian::cook::TreeCookResult result =
+      meridian::cook::cookTree(dir / "tree.gltf", dir / "out", 1000000, {});
+  const double cardArea = 0.1 * 0.06, uvArea = 0.9 * 16 * 0.9 * 16;
+  CHECK(result.leafAreaBefore ==
+        doctest::Approx(200 * cardArea * 3.14159265 * 25 / uvArea).epsilon(0.05));
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+
+  bool sawLeaves = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+    if (!material.doubleSided) {
+      continue;
+    }
+    sawLeaves = true;
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Opaque);
+    CHECK(material.diffuseTransmission);
+
+    const auto &positionAccessor =
+        asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+    std::vector<std::array<float, 3>> positions(positionAccessor.count);
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+        asset, positionAccessor,
+        [&](fastgltf::math::fvec3 p, size_t i) { positions[i] = {p.x(), p.y(), p.z()}; });
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
+        asset, asset.accessors[primitive.findAttribute("TEXCOORD_0")->accessorIndex],
+        [&](fastgltf::math::fvec2 uv, size_t) {
+          CHECK(uv.x() >= 0.0f);
+          CHECK(uv.x() <= 1.0f);
+          CHECK(uv.y() >= 0.0f);
+          CHECK(uv.y() <= 1.0f);
+        });
+    const auto &indexAccessor = asset.accessors[*primitive.indicesAccessor];
+    std::vector<uint32_t> indices(indexAccessor.count);
+    fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
+    std::map<std::array<float, 3>, size_t> ids;
+    std::vector<size_t> parent;
+    const auto id = [&](uint32_t v) {
+      auto [it, inserted] = ids.emplace(positions[v], parent.size());
+      if (inserted) {
+        parent.push_back(parent.size());
+      }
+      return it->second;
+    };
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      const size_t a = id(indices[i]);
+      parent[findRoot(parent, id(indices[i + 1]))] = findRoot(parent, a);
+      parent[findRoot(parent, id(indices[i + 2]))] = findRoot(parent, a);
+    }
+    std::set<size_t> roots;
+    for (size_t i = 0; i < parent.size(); ++i) {
+      roots.insert(findRoot(parent, i));
+    }
+    CHECK(roots.size() == 200);
   }
   CHECK(sawLeaves);
   std::filesystem::remove_all(dir);

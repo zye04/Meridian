@@ -24,7 +24,8 @@ struct TreeCookResult {
 // Cooks an unflattened tree glTF (usd2gltf's output: one mesh per prototype,
 // one node per instance) into outDir/<name>.gltf: flattened into one mesh per
 // material, at most `triangleBudget` triangles. Materials with a base color
-// texture keep their UVs and maps; untextured leaves get a tint palette, and
+// texture keep their UVs and maps; an alpha-tested leaf material's cards are
+// traced into opaque leaves (leaf_trace.h); untextured leaves get a tint palette, and
 // `barkTexture`, an optional ambientCG texture set directory, textures
 // untextured wood.
 TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::path &outDir,

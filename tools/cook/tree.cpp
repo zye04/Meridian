@@ -12,6 +12,7 @@
 #include "tree.h"
 
 #include "ktx2.h"
+#include "leaf_trace.h"
 
 #include <fastgltf/core.hpp>
 #include <fastgltf/tools.hpp>
@@ -39,11 +40,7 @@ namespace {
 
 using Vec3 = std::array<float, 3>;
 
-struct Vertex {
-  Vec3 position;
-  Vec3 normal;
-  float uv[2];
-};
+using Vertex = CardVertex;
 
 // One glTF primitive of a prototype mesh.
 struct Prototype {
@@ -66,9 +63,11 @@ struct Instance {
   fastgltf::math::fmat4x4 matrix;
 };
 
-// Absolute simplification error limit in meters (prototype space): wood
-// silhouettes and leaf outlines move by at most a centimeter.
-constexpr float kSimplifyError = 0.01f;
+// Absolute simplification error limits in meters (prototype space): wood
+// silhouettes move by at most a centimeter, leaf outlines by 2 mm, so a 5-8 cm
+// leaf keeps its shape up close (the cluster LOD coarsens it with distance).
+constexpr float kWoodSimplifyError = 0.01f;
+constexpr float kLeafSimplifyError = 0.002f;
 constexpr float kNormalWeight = 0.5f;
 // Textured meshes also weigh UVs, scaled by the piece's texel density (surface
 // length per UV unit): a UV error costs as much as the position error of the
@@ -216,7 +215,10 @@ bool isLeafMaterial(const fastgltf::Material &material) {
 
 namespace {
 
-Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive &primitive) {
+// With `atlas`, the primitive's triangles are alpha-tested cards, replaced by
+// the atlas's traced leaves clipped onto them.
+Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive &primitive,
+                        const AtlasMesh *atlas) {
   const auto position = primitive.findAttribute("POSITION");
   if (position == primitive.attributes.cend()) {
     throw std::runtime_error("tree primitive without positions");
@@ -264,6 +266,16 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
   }
   if (normal == primitive.attributes.cend()) {
     computeNormals(p);
+  }
+  if (atlas) {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    clipToCards(*atlas, p.vertices, p.indices, vertices, indices);
+    std::printf("Traced leaf material %s: %zu card triangles -> %zu triangles\n",
+                std::string(asset.materials[p.material].name).c_str(), p.indices.size() / 3,
+                indices.size() / 3);
+    p.vertices = std::move(vertices);
+    p.indices = std::move(indices);
   }
   if (p.leaf) {
     splitLeafPieces(p);
@@ -339,7 +351,8 @@ void simplify(Prototype &p, double ratio) {
     const size_t kept = meshopt_simplifyWithAttributes(
         out.data(), indices.data(), count, vertices[0].position.data(), vertices.size(),
         sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, attributes,
-        locked.data(), target, kSimplifyError, meshopt_SimplifyErrorAbsolute, nullptr);
+        locked.data(), target, p.leaf ? kLeafSimplifyError : kWoodSimplifyError,
+        meshopt_SimplifyErrorAbsolute, nullptr);
     // A piece is never simplified away; pruning decides which go.
     if (kept == 0) {
       p.cooked.insert(p.cooked.end(), begin, end);
@@ -524,45 +537,46 @@ private:
   std::vector<std::byte> bytes_;
 };
 
-// A textured material's maps, re-encoded; a leaf base color with alpha is
-// alpha-tested (cookTexture's cutoff). Leaves
-// transmit by the source's diffuse transmission (its texture averaged over
-// the opaque texels, as the engine has no transmission map) or the default.
+// A textured leaf whose base color alpha is an alpha-test mask: its cards are
+// traced into opaque leaves. An opaque source's alpha may hold something else
+// (gloss, a packed mask).
+bool tracedMaterial(const fastgltf::Material &material, bool leaf, const basisu::image &color) {
+  return leaf && color.has_alpha() && material.alphaMode != fastgltf::AlphaMode::Opaque;
+}
+
+float alphaCutoff(const fastgltf::Material &material) {
+  return material.alphaMode == fastgltf::AlphaMode::Mask ? material.alphaCutoff : 0.5f;
+}
+
+// A textured material's maps, re-encoded. Leaves transmit by the source's
+// diffuse transmission (its texture averaged over the opaque texels, as the
+// engine has no transmission map) or the default.
 template <typename SourceImage, typename CookTexture>
 void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::string &name,
                           fastgltf::Material &material, SourceImage &&sourceImage,
                           CookTexture &&cookTexture) {
   const basisu::image &color = sourceImage(from.pbrData.baseColorTexture->textureIndex);
-  // An opaque source's alpha may hold something else (gloss, a packed mask).
-  const bool masked =
-      leaf && color.has_alpha() && from.alphaMode != fastgltf::AlphaMode::Opaque;
-  const float cutoff = from.alphaMode == fastgltf::AlphaMode::Mask ? from.alphaCutoff : 0.5f;
-  if (masked && !(cutoff > 0.0f && cutoff < 1.0f)) {
-    throw std::runtime_error(name + ": alpha cutoff outside (0, 1)");
-  }
-  material.pbrData.baseColorTexture = cookTexture(*from.pbrData.baseColorTexture, Usage::Color,
-                                                  masked ? cutoff : -1.0f, name + "_color");
+  const bool traced = tracedMaterial(from, leaf, color);
+  const float cutoff = alphaCutoff(from);
+  material.pbrData.baseColorTexture =
+      cookTexture(*from.pbrData.baseColorTexture, Usage::Color, name + "_color");
   if (from.pbrData.metallicRoughnessTexture) {
     material.pbrData.metallicRoughnessTexture =
-        cookTexture(*from.pbrData.metallicRoughnessTexture, Usage::Data, -1.0f, name + "_orm");
+        cookTexture(*from.pbrData.metallicRoughnessTexture, Usage::Data, name + "_orm");
   }
   if (from.occlusionTexture) {
     fastgltf::OcclusionTextureInfo occlusion;
     static_cast<fastgltf::TextureInfo &>(occlusion) =
-        cookTexture(*from.occlusionTexture, Usage::Data, -1.0f, name + "_occlusion");
+        cookTexture(*from.occlusionTexture, Usage::Data, name + "_occlusion");
     occlusion.strength = from.occlusionTexture->strength;
     material.occlusionTexture = std::move(occlusion);
   }
   if (from.normalTexture) {
     fastgltf::NormalTextureInfo normal;
     static_cast<fastgltf::TextureInfo &>(normal) =
-        cookTexture(*from.normalTexture, Usage::Normal, -1.0f, name + "_normal");
+        cookTexture(*from.normalTexture, Usage::Normal, name + "_normal");
     normal.scale = from.normalTexture->scale;
     material.normalTexture = std::move(normal);
-  }
-  if (masked) {
-    material.alphaMode = fastgltf::AlphaMode::Mask;
-    material.alphaCutoff = 0.5f;
   }
   if (!leaf) {
     std::printf("Textured wood material %s\n", name.c_str());
@@ -575,14 +589,14 @@ void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::
       const basisu::image &map = sourceImage(texture->textureIndex);
       const bool sameSize = map.get_width() == color.get_width() &&
                             map.get_height() == color.get_height();
-      if (masked && !sameSize) {
+      if (traced && !sameSize) {
         std::printf("%s: transmission map and base color differ in size; averaging the whole "
                     "map\n", name.c_str());
       }
       double sum = 0.0;
       size_t opaque = 0;
       for (uint32_t i = 0; i < map.get_total_pixels(); ++i) {
-        if (!masked || !sameSize || color.get_ptr()[i].a >= cutoff * 255.0f) {
+        if (!traced || !sameSize || color.get_ptr()[i].a >= cutoff * 255.0f) {
           sum += map.get_ptr()[i].a / 255.0;
           ++opaque;
         }
@@ -593,7 +607,7 @@ void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::
   material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
   material.diffuseTransmission->diffuseTransmissionFactor = transmission;
   std::printf("Textured leaf material %s: %s, diffuse transmission %.3f\n", name.c_str(),
-              masked ? "alpha-tested" : "opaque", transmission);
+              traced ? "traced" : "opaque", transmission);
 }
 
 } // namespace
@@ -654,12 +668,56 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   }
   const fastgltf::Asset &source = loaded.get();
 
+  std::map<size_t, basisu::image> images;
+  const auto sourceImage = [&](size_t texture) -> basisu::image & {
+    const auto index = source.textures.at(texture).imageIndex;
+    if (!index) {
+      throw std::runtime_error("texture " + std::to_string(texture) +
+                               " has no PNG or JPEG image");
+    }
+    auto it = images.find(*index);
+    if (it == images.end()) {
+      it = images
+               .emplace(*index, decode(sourceImageBytes(source, source.images[*index],
+                                                        in.parent_path())))
+               .first;
+    }
+    return it->second;
+  };
+
+  // Alpha-tested leaf materials: their atlas traced once, for every card.
+  std::map<size_t, AtlasMesh> atlases;
+  for (size_t m = 0; m < source.materials.size(); ++m) {
+    const fastgltf::Material &material = source.materials[m];
+    if (!material.pbrData.baseColorTexture) {
+      continue;
+    }
+    const basisu::image &color = sourceImage(material.pbrData.baseColorTexture->textureIndex);
+    if (!tracedMaterial(material, isLeafMaterial(material), color)) {
+      continue;
+    }
+    const float cutoff = alphaCutoff(material);
+    if (!(cutoff > 0.0f && cutoff < 1.0f)) {
+      throw std::runtime_error(std::string(material.name) + ": alpha cutoff outside (0, 1)");
+    }
+    std::vector<uint8_t> alpha(color.get_total_pixels());
+    for (size_t i = 0; i < alpha.size(); ++i) {
+      alpha[i] = color.get_ptr()[i].a;
+    }
+    const AtlasMesh &atlas = atlases[m] =
+        traceAtlas(alpha, color.get_width(), color.get_height(), cutoff);
+    std::printf("Traced atlas of %s: %zu triangles\n", std::string(material.name).c_str(),
+                atlas.indices.size() / 3);
+  }
+
   std::vector<Prototype> prototypes;
   std::vector<std::vector<size_t>> meshPrototypes(source.meshes.size());
   for (size_t m = 0; m < source.meshes.size(); ++m) {
     for (const fastgltf::Primitive &primitive : source.meshes[m].primitives) {
       meshPrototypes[m].push_back(prototypes.size());
-      prototypes.push_back(loadPrototype(source, primitive));
+      const auto atlas = atlases.find(primitive.materialIndex.value_or(0));
+      prototypes.push_back(
+          loadPrototype(source, primitive, atlas == atlases.end() ? nullptr : &atlas->second));
     }
   }
   std::vector<Instance> instances;
@@ -956,28 +1014,9 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     barkArm = writer.addTexture(encodeKtx2(arm, Usage::Data, jobPool), "bark_arm");
   }
 
-  std::map<size_t, basisu::image> images;
-  const auto sourceImage = [&](size_t texture) -> basisu::image & {
-    const auto index = source.textures.at(texture).imageIndex;
-    if (!index) {
-      throw std::runtime_error("texture " + std::to_string(texture) +
-                               " has no PNG or JPEG image");
-    }
-    auto it = images.find(*index);
-    if (it == images.end()) {
-      it = images
-               .emplace(*index, decode(sourceImageBytes(source, source.images[*index],
-                                                        in.parent_path())))
-               .first;
-    }
-    return it->second;
-  };
-  // cutoff >= 0: the alpha is an alpha-test mask. It is remapped so the
-  // cutoff lands on 0.5, where the coverage-preserving mips and the output
-  // material's cutoff test it.
-  std::map<std::tuple<size_t, Usage, float>, size_t> encoded;
+  std::map<std::pair<size_t, Usage>, size_t> encoded;
   const std::filesystem::path textureCache = outDir.parent_path() / ".ktx2-cache";
-  const auto cookTexture = [&](const fastgltf::TextureInfo &info, Usage usage, float cutoff,
+  const auto cookTexture = [&](const fastgltf::TextureInfo &info, Usage usage,
                                const std::string &name) {
     const size_t texCoord =
         info.transform ? info.transform->texCoordIndex.value_or(info.texCoordIndex)
@@ -987,19 +1026,10 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
                                "; the tree cook keeps only TEXCOORD_0");
     }
     const basisu::image &image = sourceImage(info.textureIndex);
-    const auto [it, inserted] = encoded.emplace(
-        std::tuple{*source.textures[info.textureIndex].imageIndex, usage, cutoff}, 0);
-    if (inserted && cutoff < 0.0f) {
+    const auto [it, inserted] =
+        encoded.emplace(std::pair{*source.textures[info.textureIndex].imageIndex, usage}, 0);
+    if (inserted) {
       it->second = writer.addTexture(cachedEncode(image, usage, jobPool, -1, textureCache), name);
-    } else if (inserted) {
-      basisu::image masked = image;
-      for (uint32_t i = 0; i < masked.get_total_pixels(); ++i) {
-        const float a = masked.get_ptr()[i].a / 255.0f;
-        const float remapped =
-            a < cutoff ? 0.5f * a / cutoff : 0.5f + 0.5f * (a - cutoff) / (1.0f - cutoff);
-        masked.get_ptr()[i].a = static_cast<uint8_t>(std::lround(remapped * 255.0f));
-      }
-      it->second = writer.addTexture(cachedEncode(masked, usage, jobPool, 3, textureCache), name);
     }
     fastgltf::TextureInfo out = info;
     out.textureIndex = it->second;
