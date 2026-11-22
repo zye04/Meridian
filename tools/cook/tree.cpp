@@ -66,8 +66,11 @@ struct Instance {
 // Absolute simplification error limits in meters (prototype space): wood
 // silhouettes move by at most a centimeter, leaf outlines by 2 mm, so a 5-8 cm
 // leaf keeps its shape up close (the cluster LOD coarsens it with distance).
+// A tree over budget at 2 mm coarsens its leaf outlines up to 5 mm before it
+// prunes leaves: survivors scaled up read as oversized leaves, far more than a
+// slightly polygonal edge does.
 constexpr float kWoodSimplifyError = 0.01f;
-constexpr float kLeafSimplifyError = 0.002f;
+constexpr float kLeafSimplifyErrors[] = {0.002f, 0.003f, 0.004f, 0.005f};
 constexpr float kNormalWeight = 0.5f;
 // Textured meshes also weigh UVs, scaled by the piece's texel density (surface
 // length per UV unit): a UV error costs as much as the position error of the
@@ -288,7 +291,7 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
 
 // Each piece is simplified on its own compact vertex buffer: meshoptimizer's
 // cost scales with the buffer it is given, and a prototype holds many pieces.
-void simplify(Prototype &p, double ratio) {
+void simplify(Prototype &p, double ratio, float leafError) {
   p.cooked.clear();
   p.cookedPieces.clear();
   float weights[5] = {kNormalWeight, kNormalWeight, kNormalWeight, 0.0f, 0.0f};
@@ -351,7 +354,7 @@ void simplify(Prototype &p, double ratio) {
     const size_t kept = meshopt_simplifyWithAttributes(
         out.data(), indices.data(), count, vertices[0].position.data(), vertices.size(),
         sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, attributes,
-        locked.data(), target, p.leaf ? kLeafSimplifyError : kWoodSimplifyError,
+        locked.data(), target, p.leaf ? leafError : kWoodSimplifyError,
         meshopt_SimplifyErrorAbsolute, nullptr);
     // A piece is never simplified away; pruning decides which go.
     if (kept == 0) {
@@ -776,18 +779,26 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   // One ratio for every prototype, so each gets a budget share weighted by
   // its instance count; lowered until the total fits or simplification
   // stalls at its error limits.
-  double ratio = std::min(1.0, static_cast<double>(triangleBudget) / result.sourceTriangles);
-  size_t previous = SIZE_MAX;
-  for (int pass = 0; pass < 8; ++pass) {
-    for (Prototype &p : prototypes) {
-      simplify(p, ratio);
+  double ratio = 1.0;
+  float leafError = 0.0f;
+  for (const float error : kLeafSimplifyErrors) {
+    leafError = error;
+    ratio = std::min(1.0, static_cast<double>(triangleBudget) / result.sourceTriangles);
+    size_t previous = SIZE_MAX, total = 0;
+    for (int pass = 0; pass < 8; ++pass) {
+      for (Prototype &p : prototypes) {
+        simplify(p, ratio, leafError);
+      }
+      total = cookedTriangles(prototypes, false) + cookedTriangles(prototypes, true);
+      if (total <= triangleBudget || total > previous - previous / 100) {
+        break;
+      }
+      previous = total;
+      ratio *= static_cast<double>(triangleBudget) / total;
     }
-    const size_t total = cookedTriangles(prototypes, false) + cookedTriangles(prototypes, true);
-    if (total <= triangleBudget || total > previous - previous / 100) {
+    if (total <= triangleBudget) {
       break;
     }
-    previous = total;
-    ratio *= static_cast<double>(triangleBudget) / total;
   }
   const size_t woodTriangles = cookedTriangles(prototypes, false);
   if (woodTriangles > triangleBudget) {
@@ -889,9 +900,10 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     }
     result.leafAreaAfter += pieces[i].area * pieces[i].scale * pieces[i].scale;
   }
-  std::printf("simplified to %.3f of the source; wood %zu tris; leaves %zu of %zu pieces kept "
+  std::printf("simplified to %.3f of the source (leaf outlines %.0f mm); wood %zu tris; leaves "
+              "%zu of %zu pieces kept "
               "(%zu tris), scaled by %.3f; bounds (%.2f %.2f %.2f)..(%.2f %.2f %.2f) m\n",
-              ratio, woodTriangles, kept, leafPieceCount, leafTriangles, scale, bounds.min[0],
+              ratio, leafError * 1000.0f, woodTriangles, kept, leafPieceCount, leafTriangles, scale, bounds.min[0],
               bounds.min[1], bounds.min[2], bounds.max[0], bounds.max[1], bounds.max[2]);
   std::vector<std::vector<const LeafPiece *>> instancePieces(instances.size());
   for (const LeafPiece &leaf : pieces) {

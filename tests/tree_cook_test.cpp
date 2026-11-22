@@ -217,6 +217,78 @@ size_t findRoot(std::vector<size_t> &parent, size_t i) {
   return i;
 }
 
+// 200 disjoint discs of 3 cm radius, 96 outline vertices around a centre:
+// outlines that simplify further the larger the allowed error.
+Mesh discs() {
+  Mesh mesh;
+  std::mt19937 rng(11);
+  std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+  for (uint32_t leaf = 0; leaf < 200; ++leaf) {
+    const float cx = unit(rng) - 0.5f, cy = 1.5f + unit(rng), cz = unit(rng) - 0.5f;
+    const uint32_t base = static_cast<uint32_t>(mesh.positions.size() / 3);
+    mesh.positions.insert(mesh.positions.end(), {cx, cy, cz});
+    for (int k = 0; k < 96; ++k) {
+      const float angle = 6.2831853f * k / 96;
+      mesh.positions.insert(mesh.positions.end(),
+                            {cx + 0.03f * std::cos(angle), cy + 0.03f * std::sin(angle), cz});
+      mesh.indices.insert(mesh.indices.end(),
+                          {base, base + 1 + k, base + 1 + static_cast<uint32_t>((k + 1) % 96)});
+    }
+    for (int k = 0; k < 97; ++k) {
+      mesh.normals.insert(mesh.normals.end(), {0.0f, 0.0f, 1.0f});
+      mesh.uvs.insert(mesh.uvs.end(), {0.0f, 0.0f});
+    }
+  }
+  return mesh;
+}
+
+// Connected leaf pieces of a cooked tree (vertices joined by exact position).
+size_t cookedLeafPieces(const std::filesystem::path &gltf) {
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(gltf);
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), gltf.parent_path(), fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+  size_t pieces = 0;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    if (!asset.materials[*primitive.materialIndex].doubleSided) {
+      continue;
+    }
+    const auto &positionAccessor =
+        asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+    std::vector<std::array<float, 3>> positions(positionAccessor.count);
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+        asset, positionAccessor,
+        [&](fastgltf::math::fvec3 p, size_t i) { positions[i] = {p.x(), p.y(), p.z()}; });
+    const auto &indexAccessor = asset.accessors[*primitive.indicesAccessor];
+    std::vector<uint32_t> indices(indexAccessor.count);
+    fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
+    std::map<std::array<float, 3>, size_t> ids;
+    std::vector<size_t> parent;
+    const auto id = [&](uint32_t v) {
+      auto [it, inserted] = ids.emplace(positions[v], parent.size());
+      if (inserted) {
+        parent.push_back(parent.size());
+      }
+      return it->second;
+    };
+    for (size_t i = 0; i < indices.size(); i += 3) {
+      const size_t a = id(indices[i]);
+      parent[findRoot(parent, id(indices[i + 1]))] = findRoot(parent, a);
+      parent[findRoot(parent, id(indices[i + 2]))] = findRoot(parent, a);
+    }
+    std::set<size_t> roots;
+    for (size_t i = 0; i < parent.size(); ++i) {
+      roots.insert(findRoot(parent, i));
+    }
+    pieces += roots.size();
+  }
+  return pieces;
+}
+
 } // namespace
 
 TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
@@ -533,6 +605,24 @@ TEST_CASE("cookTree traces alpha-tested cards into opaque leaves") {
     CHECK(roots.size() == 200);
   }
   CHECK(sawLeaves);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree coarsens leaf outlines before pruning leaves") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_coarsen_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const Mesh meshes[2] = {tube(), discs()};
+  // Leaves only. A 3 cm disc needs ~9 triangles for a 2 mm outline, ~6 at
+  // 4-5 mm: 7 per disc fits only coarser outlines.
+  const std::vector<std::pair<int, Matrix>> nodes = {{1, placement(0.0f, 1.0f, 0, 0, 0)}};
+  writeSource(dir / "tree.gltf", meshes, nodes);
+  const size_t budget = 200 * 7;
+  const meridian::cook::TreeCookResult result =
+      meridian::cook::cookTree(dir / "tree.gltf", dir / "coarse", budget, {});
+  CHECK(result.triangles <= budget);
+  CHECK(cookedLeafPieces(dir / "coarse" / "tree.gltf") == 200);
   std::filesystem::remove_all(dir);
 }
 
