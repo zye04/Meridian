@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "coverage.h"
 #include "leaf_trace.h"
 
 #include <cmath>
@@ -224,4 +225,14 @@ TEST_CASE("clipToCards clips to the card") {
   const Clipped out = clip(atlas, squareCard(0.0f, 0.0f, 0.5f));
   const double side = 0.5 - 0.5 / kSize;
   CHECK(area3(out) == doctest::Approx(side * side * 4.0).epsilon(1e-4));
+}
+
+TEST_CASE("projectedCoverage of half a square") {
+  using meridian::cook::projectedCoverage;
+  const std::vector<std::array<float, 3>> positions = {
+      {0, 0, 0}, {0.5f, 0, 0}, {0.5f, 1, 0}, {0, 1, 0}, {1, 0, 0}};
+  CHECK(projectedCoverage(positions, {0, 1, 2, 0, 2, 3}, 0, 0, 1, 1, 256) ==
+        doctest::Approx(0.5).epsilon(0.01));
+  CHECK(projectedCoverage(positions, {0, 4, 3}, 0, 0, 1, 1, 256) ==
+        doctest::Approx(0.5).epsilon(0.02));
 }

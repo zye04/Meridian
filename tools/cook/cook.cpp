@@ -6,6 +6,7 @@
 // BC7 at load time. Color textures are encoded and mip-filtered as sRGB;
 // normal maps keep unit-length normals in every mip.
 
+#include "coverage.h"
 #include "ktx2.h"
 #include "tree.h"
 
@@ -687,6 +688,18 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if (argc == 3 && std::strcmp(argv[1], "--coverage") == 0) {
+    try {
+      std::printf("%10s %10s %8s %12s\n", "distance", "coverage", "ratio", "triangles");
+      for (const auto &s : meridian::cook::crownCoverage(argv[2], {10.0f, 30.0f, 60.0f, 120.0f, 0.0f})) {
+        std::printf("%9.0fm %10.4f %8.3f %12zu\n", s.distance, s.coverage, s.ratio, s.triangles);
+      }
+    } catch (const std::exception &e) {
+      std::fprintf(stderr, "meridian-cook: %s\n", e.what());
+      return 1;
+    }
+    return 0;
+  }
   if ((argc == 6 || argc == 8) && std::strcmp(argv[1], "--tree") == 0 &&
       std::strcmp(argv[4], "--triangles") == 0 &&
       (argc == 6 || std::strcmp(argv[6], "--bark-texture") == 0)) {
@@ -713,7 +726,8 @@ int main(int argc, char **argv) {
                  "<spacing> <out.height>\n"
                  "       meridian-cook --tree <in.gltf> <output-dir> --triangles <n> "
                  "[--bark-texture <dir>]\n"
-                 "       meridian-cook --stats <file.ktx2|.png>...\n");
+                 "       meridian-cook --stats <file.ktx2|.png>...\n"
+                 "       meridian-cook --coverage <tree.gltf>\n");
     return 2;
   }
   try {
