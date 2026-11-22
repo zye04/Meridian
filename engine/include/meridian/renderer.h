@@ -189,6 +189,7 @@ struct Effects {
   float contactLength = 1.0f;       // multiplier on the ray length, 0..3
   bool bloom = true;                // off skips the pass
   float cloudOutline = 1.0f;        // cloud silhouette and lobe sharpening, 0 = off, 0..3
+  bool stableTaa = true; // TAA: Catmull-Rom history, 3x3 reconstruction, no motion sharpen; off = sharper, less stable
 };
 
 // GPU time of one named frame pass.

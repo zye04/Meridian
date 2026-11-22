@@ -4031,3 +4031,35 @@ error, jitter and reprojection all derive from the projection matrix, so none
 needed a change. The motion gate minimums in `tools/motion-gates.sh` were
 anchored at the old field of view and must be re-anchored on the next gate run
 (not run with this change); captures from before it are not comparable.
+
+## TAA stability over sharpness (2026-11-22)
+
+The user's G19 complaint (smear, jitter, shimmer in motion) is mostly
+instability, and they prefer a stable image to a sharp one. Measured with
+`tools/motion-clarity.sh` (same pose reached on frame 120 and 121 while
+moving: their mean difference is the jitter; frame 120 against the still
+is the error; 2560x1440, Release): a still camera differs by ~1.2/255
+between frames, a moving one by 8-16 under our TAA and 8-9 under DLSS
+DLAA, which is also sharper when still, so the resolve, not only the
+input, falls short.
+
+- Tried on the forest edge and the meadow (sideways 5 m/s, turn 1 rad/s):
+  - Catmull-Rom (-0.5) history resampling instead of Keys -1: jitter
+    -4..-19%, still image unchanged. Keys -1's overshoot compounds every
+    frame in motion (the moving frame had up to 1.8x the still's Laplacian)
+    and the variance clip turns it into flicker.
+  - The 3x3 jitter-aware reconstruction of the current frame (Gaussian,
+    sigma 0.47 px, Karis 2014; WIP branch `native`): jitter -16..-23%,
+    still 21% softer; at equal still sharpness a plain blur scores the
+    same, so it is a softening that buys stability, accepted as such.
+  - Motion sharpening off: jitter -3..-7%.
+  - Dropped: no motion-raised current weight (worse), variance gamma 1.5
+    (error up to +31%).
+- Choice: all three kept together as `Effects::stableTaa` (default on;
+  `--effects taa-stable=0` and the G panel give the previous resolve):
+  jitter -27..-35%, error -10..-22% against the previous resolve, still
+  ~21% softer; `aa` 0.20 ms. DLSS DLAA still leads (forest sideways:
+  jitter 7.8 vs 9.2, error 6.5 vs 13.5).
+- The motion gates' Laplacian minimums (`tools/motion-gates.sh`) were
+  anchored to the sharper resolve (not re-run here); the clarity table is
+  the gate for this work.

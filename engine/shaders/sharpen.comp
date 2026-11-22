@@ -26,6 +26,12 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 1) uniform sampler2D motion;
 layout(set = 0, binding = 3, rgba16f) uniform readonly image2D history;
 layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D outputColor;
+layout(push_constant) uniform TaaConstants {
+    uvec2 exposure; // the buffer address, unused here
+    uint historyValid;
+    uint stable; // Effects::stableTaa: no motion sharpening
+    vec2 jitter;
+} taa;
 
 // CAS's 0..1 (peak lobe -1/8 to -1/5), applied in proportion to the
 // pixel's motion: a still image is left alone (sharpening a still frame
@@ -60,7 +66,7 @@ void main() {
     ivec2 renderSize = textureSize(motion, 0);
     ivec2 texel = ivec2((vec2(pixel) + 0.5) * vec2(renderSize) / vec2(size));
     float moving = length(texelFetch(motion, texel, 0).xy * vec2(renderSize));
-    float strength = kMotionStrength * clamp(moving / kMotionPixels, 0.0, 1.0);
+    float strength = taa.stable != 0u ? 0.0 : kMotionStrength * clamp(moving / kMotionPixels, 0.0, 1.0);
     if (strength == 0.0) {
         imageStore(outputColor, pixel, imageLoad(history, pixel));
         return;

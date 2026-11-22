@@ -67,7 +67,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
 parallax self-shadow, micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
-(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3), with Save, Load, Reset and a "show built-in
+(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, stable TAA on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
@@ -183,7 +183,7 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=0`
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=0,taa-stable=0`
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
@@ -651,8 +651,10 @@ display-sized RGBA16F `output`; the backend is DLSS (meridian_dlss,
 `NGX_VULKAN_EVALUATE_DLSS_EXT`, or `NGX_VULKAN_EVALUATE_DLSSD_EXT` under
 Ray Reconstruction) or `TaaUpscaler`: taa.comp, which writes
 its resolve to its own history (pre-exposed, so rescaled by
-`ExposureState` exposure / previousExposure), then sharpen.comp, which
-writes `output` from it (CAS scaled by each pixel's motion: a copy where still, a quarter of CAS's weakest lobe from 0.5 px/frame),
+`ExposureState` exposure / previousExposure; with `Effects::stableTaa`, the
+default, the current frame is reconstructed from the 3x3's jittered samples
+and the history resampled by Catmull-Rom), then sharpen.comp, which
+writes `output` from it (a copy under stable TAA; otherwise CAS scaled by each pixel's motion: a copy where still, a quarter of CAS's weakest lobe from 0.5 px/frame),
 both inside the `aa` pass)
 -> bloom (bloom.comp, glare: 13-tap downsamples of `output` into a
 half-display RGBA16F mip chain down to ~1/128, tent upsamples mixing each

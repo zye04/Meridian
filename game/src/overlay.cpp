@@ -66,7 +66,8 @@ std::string lookToJson(const Look &look) {
                            ",\n  \"effectContactShadows\": " + number(e.contactShadows) +
                            ",\n  \"effectContactLength\": " + number(e.contactLength) +
                            ",\n  \"effectBloom\": " + number(e.bloom) +
-                           ",\n  \"effectCloudOutline\": " + number(e.cloudOutline) + "\n}\n";
+                           ",\n  \"effectCloudOutline\": " + number(e.cloudOutline) +
+                           ",\n  \"effectStableTaa\": " + number(e.stableTaa) + "\n}\n";
   return json + tail;
 }
 
@@ -96,6 +97,7 @@ Look lookFromJson(std::string_view json, const Look &base) {
   e.contactLength = meridian::jsonNumber(json, "effectContactLength").value_or(b.contactLength);
   e.bloom = flag("effectBloom", b.bloom);
   e.cloudOutline = meridian::jsonNumber(json, "effectCloudOutline").value_or(b.cloudOutline);
+  e.stableTaa = flag("effectStableTaa", b.stableTaa);
   if (auto haze = meridian::jsonString(json, "haze")) {
     for (int i = 0; i < 3; ++i) {
       if (*haze == kHazeNames[i]) {
@@ -208,6 +210,7 @@ GradePanel::Changes GradePanel::draw() {
   effect("micro shadows", fx.microShadows, &fx.microShadowStrength, 1.0f, "strength");
   effect("contact shadows", fx.contactShadows, &fx.contactLength, 3.0f, "length x");
   slider("cloud outline", fx.cloudOutline, 0.0f, 3.0f, changes.effects);
+  changes.effects |= ImGui::Checkbox("stable TAA", &fx.stableTaa);
 
   ImGui::Separator();
   if (ImGui::Checkbox("show built-in grade", &showBuiltIn_)) {

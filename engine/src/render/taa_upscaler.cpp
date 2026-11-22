@@ -6,13 +6,14 @@ namespace meridian {
 
 namespace {
 
-// Must match TaaConstants in taa.comp.
+// Must match TaaConstants in taa.comp and sharpen.comp.
 struct TaaConstants {
   VkDeviceAddress exposure = 0;
   uint32_t historyValid = 0;
-  uint32_t pad = 0;
+  uint32_t stable = 0; // Effects::stableTaa
+  float jitter[2] = {}; // render pixels, UpscalerFrame::jitter
 };
-static_assert(sizeof(TaaConstants) == 16);
+static_assert(sizeof(TaaConstants) == 24);
 
 // Must match taa.comp and sharpen.comp, which share the set: scene colour,
 // motion, previous history, then the new history and the output as storage
@@ -153,6 +154,9 @@ void TaaUpscaler::evaluate(const UpscalerFrame &frame) {
   TaaConstants constants;
   constants.exposure = renderer_.exposureBuffer.address;
   constants.historyValid = frame.reset ? 0u : 1u;
+  constants.stable = renderer_.effects.stableTaa ? 1u : 0u;
+  constants.jitter[0] = frame.jitter[0];
+  constants.jitter[1] = frame.jitter[1];
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1,
                           &set, 0, nullptr);
