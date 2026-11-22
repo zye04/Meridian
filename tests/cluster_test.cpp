@@ -429,3 +429,92 @@ TEST_CASE("selectClustersBvh orthographic equals lodVisible") {
   check(buildClusterLod(bumpyGrid(1)), {});
   check(buildClusterLod(bumpyGrid(100)), {0.0f, 5.0f, 500.0f});
 }
+
+namespace {
+
+// 3000 disjoint leaves in a 2 m crown: flat discs of 3 cm radius, 24 outline
+// vertices around a centre. Simplification shrinks and drops such pieces.
+MeshData leafCrown() {
+  MeshData mesh;
+  uint32_t state = 777;
+  const auto random = [&] {
+    state = state * 1664525u + 1013904223u;
+    return static_cast<float>(state >> 8) / 16777216.0f;
+  };
+  for (int leaf = 0; leaf < 3000; ++leaf) {
+    const Vec3 center{random() * 2.0f - 1.0f, random() * 2.0f, random() * 2.0f - 1.0f};
+    const Vec3 n = normalize(Vec3{random() - 0.5f, random() - 0.5f, random() - 0.5f});
+    const Vec3 u = normalize(cross(n, Vec3{0.3f, 1.0f, 0.2f}));
+    const Vec3 v = cross(n, u);
+    const auto base = static_cast<uint32_t>(mesh.vertices.size());
+    Vertex middle;
+    middle.position = center;
+    middle.normal = n;
+    mesh.vertices.push_back(middle);
+    for (int k = 0; k < 24; ++k) {
+      const float angle = 6.2831853f * k / 24;
+      Vertex rim;
+      rim.position = center + (u * std::cos(angle) + v * std::sin(angle)) * 0.03f;
+      rim.normal = n;
+      mesh.vertices.push_back(rim);
+      mesh.indices.insert(mesh.indices.end(),
+                          {base, base + 1 + k, base + 1 + (k + 1) % 24});
+    }
+  }
+  return mesh;
+}
+
+float fullArea(const MeshData &mesh) {
+  float area = 0.0f;
+  for (size_t i = 0; i < mesh.indices.size(); i += 3) {
+    area += triangleArea(mesh, mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]);
+  }
+  return area;
+}
+
+} // namespace
+
+TEST_CASE("leaf meshes keep their area down the cluster LOD") {
+  MeshData plain = leafCrown();
+  plain.clusters = buildClusterLod(plain);
+  CHECK(plain.clusters.addedPositions.empty());
+
+  MeshData leaves = leafCrown();
+  leaves.leaf = true;
+  leaves.clusters = buildClusterLod(leaves);
+  const size_t sourceVertices = leaves.vertices.size();
+  CHECK_FALSE(leaves.clusters.addedPositions.empty());
+  appendClusterVertices(leaves);
+  CHECK(leaves.vertices.size() == sourceVertices + leaves.clusters.addedPositions.size());
+  CHECK(validClusterLod(leaves.clusters, sourceVertices));
+
+  const float full = fullArea(plain);
+  // Farther, these isolated discs collapse at once into a sloppy level past the
+  // scale limit; real crowns (connected sprigs) are gated by meridian-cook
+  // --coverage up to the voxel switch.
+  for (const float distance : {12.0f, 15.0f}) {
+    CAPTURE(distance);
+    const Vec3 camera{0.0f, 1.0f, distance};
+    const Cut lost = selectCut(plain, plain.clusters, camera, 1.0f);
+    const Cut kept = selectCut(leaves, leaves.clusters, camera, 1.0f);
+    // Without compensation the coarse cut visibly thins the crown.
+    CHECK(lost.area < 0.9f * full);
+    CHECK(kept.area == doctest::Approx(full).epsilon(0.1));
+    CHECK(kept.triangles == lost.triangles);
+  }
+}
+
+TEST_CASE("added leaf vertices survive the cluster cache") {
+  MeshData leaves = leafCrown();
+  leaves.leaf = true;
+  const ClusterLod lod = buildClusterLod(leaves);
+  const auto file = cacheFile("meridian_leaves.clusters");
+  writeClusterCache(file, 11, {lod});
+  const auto read = readClusterCache(file, 11);
+  std::filesystem::remove(file);
+  REQUIRE(read);
+  CHECK(read->front().addedSources == lod.addedSources);
+  REQUIRE(read->front().addedPositions.size() == lod.addedPositions.size());
+  CHECK(std::memcmp(read->front().addedPositions.data(), lod.addedPositions.data(),
+                    lod.addedPositions.size() * sizeof(Vec3)) == 0);
+}

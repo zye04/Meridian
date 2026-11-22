@@ -72,6 +72,12 @@ struct ClusterLod {
   std::vector<uint8_t> triangles;
   std::vector<ClusterBvhNode> nodes;
   std::vector<ClusterLevelInfo> levels;
+  // Leaf meshes: vertices of coarser levels moved to keep the leaves' area
+  // (scaled about each leaf's centre). Cluster vertex index mesh vertex count
+  // + i is a copy of mesh vertex addedSources[i] at addedPositions[i];
+  // appendClusterVertices adds them to the mesh.
+  std::vector<uint32_t> addedSources;
+  std::vector<Vec3> addedPositions;
 };
 
 ClusterLod buildClusterLod(const MeshData &mesh);

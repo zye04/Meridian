@@ -276,7 +276,7 @@ uint64_t geometryKey(const std::vector<MeshData> &meshes) {
     }
   };
   for (const MeshData &mesh : meshes) {
-    const uint64_t counts[] = {mesh.vertices.size(), mesh.indices.size()};
+    const uint64_t counts[] = {mesh.vertices.size(), mesh.indices.size(), mesh.leaf};
     mix(counts, sizeof(counts));
     mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
     mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
@@ -298,6 +298,7 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
   if (valid) {
     for (size_t i = 0; i < meshes.size(); ++i) {
       meshes[i].clusters = std::move((*cached)[i]);
+      appendClusterVertices(meshes[i]);
     }
     return;
   }
@@ -306,6 +307,9 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
   for (MeshData &mesh : meshes) {
     mesh.clusters = buildClusterLod(mesh);
     lods.push_back(mesh.clusters);
+  }
+  for (MeshData &mesh : meshes) {
+    appendClusterVertices(mesh);
   }
   // The cache only saves time: a model still loads where it can't be written.
   try {
@@ -408,6 +412,12 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
           material ? materialUvTransform(*material) : UvTransform{};
       primitives.push_back(loadPrimitive(asset, primitive, uvTransform,
                                          material && material->normalTexture.has_value()));
+      primitives.back().leaf =
+          material && keepsLeafArea(material->alphaMode == fastgltf::AlphaMode::Opaque,
+                                    material->doubleSided,
+                                    material->diffuseTransmission
+                                        ? material->diffuseTransmission->diffuseTransmissionFactor
+                                        : 0.0f);
     }
   }
   loadClusters(path, primitives);

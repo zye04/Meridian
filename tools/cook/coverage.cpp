@@ -135,7 +135,16 @@ std::vector<CoverageSample> crownCoverage(const std::filesystem::path &gltf,
       const auto &indices = asset.accessors[*primitive.indicesAccessor];
       mesh.indices.resize(indices.count);
       fastgltf::copyFromAccessor<uint32_t>(asset, indices, mesh.indices.data());
+      if (primitive.materialIndex) {
+        const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+        mesh.leaf = keepsLeafArea(material.alphaMode == fastgltf::AlphaMode::Opaque,
+                                  material.doubleSided,
+                                  material.diffuseTransmission
+                                      ? material.diffuseTransmission->diffuseTransmissionFactor
+                                      : 0.0f);
+      }
       mesh.clusters = buildClusterLod(mesh);
+      appendClusterVertices(mesh);
       meshes.push_back(std::move(mesh));
     }
   }

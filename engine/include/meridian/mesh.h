@@ -25,6 +25,18 @@ struct MeshData {
   std::vector<uint32_t> indices;
   // Filled by loadGltf; meshes without clusters are built at upload.
   ClusterLod clusters;
+  // Opaque double-sided leaves with transmission: disjoint pieces whose
+  // coarser cluster levels are scaled to keep their area (buildClusterLod).
+  bool leaf = false;
 };
+
+// The MeshData::leaf rule, from the glTF material.
+inline bool keepsLeafArea(bool opaque, bool doubleSided, float diffuseTransmission) {
+  return opaque && doubleSided && diffuseTransmission > 0.0f;
+}
+
+// Appends clusters.addedSources/addedPositions to the vertices, where the
+// cluster vertex indices expect them. Call once, after the clusters are set.
+void appendClusterVertices(MeshData &mesh);
 
 } // namespace meridian

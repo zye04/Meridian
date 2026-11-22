@@ -20,7 +20,9 @@ constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
-constexpr uint32_t kCacheVersion = (3u << 16) | MESHOPTIMIZER_VERSION;
+constexpr uint32_t kCacheVersion = (4u << 16) | MESHOPTIMIZER_VERSION;
+// Most a leaf piece is scaled up (linearly) to keep its group's area.
+constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 static_assert(sizeof(ClusterBvhNode) == 48 && sizeof(ClusterLevelInfo) == 16);
 
@@ -213,6 +215,132 @@ void buildBvh(ClusterLod &lod, const std::vector<GroupRange> &groups) {
 
 } // namespace
 
+void appendClusterVertices(MeshData &mesh) {
+  const size_t count = mesh.clusters.addedSources.size();
+  mesh.vertices.reserve(mesh.vertices.size() + count);
+  for (size_t i = 0; i < count; ++i) {
+    Vertex v = mesh.vertices[mesh.clusters.addedSources[i]];
+    v.position = mesh.clusters.addedPositions[i];
+    mesh.vertices.push_back(v);
+  }
+}
+
+namespace {
+
+uint32_t findRoot(std::vector<uint32_t> &parent, uint32_t i) {
+  while (parent[i] != i) {
+    i = parent[i] = parent[parent[i]];
+  }
+  return i;
+}
+
+// Simplification shrinks and drops disjoint leaves, thinning a crown with
+// distance. Each group's simplified clusters are scaled about the centres of
+// their connected pieces so they cover the area their group had as drawn
+// (stochastic simplification's area rule, Cook et al. 2007, per DAG level).
+// Groups are numbered in build order, so a cluster's refined group, and its
+// scale, come before the group the cluster belongs to.
+void keepLeafArea(const MeshData &mesh, ClusterLod &lod, const std::vector<int> &groupOf,
+                  const std::vector<int> &refinedOf, size_t groupCount) {
+  const auto clusterVertex = [&](const Cluster &c, uint32_t t, int k) {
+    return lod.vertices[c.firstVertex + lod.triangles[(c.firstTriangle + t) * 3 + k]];
+  };
+  std::vector<double> rawArea(lod.clusters.size(), 0.0);
+  for (size_t i = 0; i < lod.clusters.size(); ++i) {
+    const Cluster &c = lod.clusters[i];
+    for (uint32_t t = 0; t < c.triangleCount; ++t) {
+      const Vec3 a = mesh.vertices[clusterVertex(c, t, 0)].position;
+      rawArea[i] += 0.5 * length(cross(mesh.vertices[clusterVertex(c, t, 1)].position - a,
+                                       mesh.vertices[clusterVertex(c, t, 2)].position - a));
+    }
+  }
+  std::vector<std::vector<size_t>> members(groupCount), simplified(groupCount);
+  for (size_t i = 0; i < lod.clusters.size(); ++i) {
+    members[groupOf[i]].push_back(i);
+    if (refinedOf[i] >= 0) {
+      simplified[refinedOf[i]].push_back(i);
+    }
+  }
+  std::vector<float> scale(groupCount, 1.0f);
+  const auto drawnScale = [&](size_t i) { return refinedOf[i] < 0 ? 1.0f : scale[refinedOf[i]]; };
+  for (size_t g = 0; g < groupCount; ++g) {
+    double before = 0.0, after = 0.0;
+    for (size_t i : members[g]) {
+      before += rawArea[i] * drawnScale(i) * drawnScale(i);
+    }
+    for (size_t i : simplified[g]) {
+      after += rawArea[i];
+    }
+    if (after > 0.0) {
+      scale[g] = std::clamp(static_cast<float>(std::sqrt(before / after)), 1.0f, kMaxLeafScale);
+    }
+  }
+
+  std::vector<uint32_t> parent(mesh.vertices.size());
+  std::vector<Vec3> weighted(mesh.vertices.size());
+  std::vector<double> weight(mesh.vertices.size());
+  std::vector<uint32_t> added(mesh.vertices.size(), UINT32_MAX);
+  for (size_t g = 0; g < groupCount; ++g) {
+    if (scale[g] == 1.0f) {
+      continue;
+    }
+    // Pieces of the simplified clusters, by shared vertices, and their
+    // area-weighted centres.
+    for (size_t i : simplified[g]) {
+      const Cluster &c = lod.clusters[i];
+      for (uint32_t v = 0; v < c.vertexCount; ++v) {
+        const uint32_t id = lod.vertices[c.firstVertex + v];
+        parent[id] = id;
+        weighted[id] = {};
+        weight[id] = 0.0;
+        added[id] = UINT32_MAX;
+      }
+    }
+    for (size_t i : simplified[g]) {
+      const Cluster &c = lod.clusters[i];
+      for (uint32_t t = 0; t < c.triangleCount; ++t) {
+        const uint32_t a = findRoot(parent, clusterVertex(c, t, 0));
+        parent[findRoot(parent, clusterVertex(c, t, 1))] = a;
+        parent[findRoot(parent, clusterVertex(c, t, 2))] = a;
+      }
+    }
+    for (size_t i : simplified[g]) {
+      const Cluster &c = lod.clusters[i];
+      for (uint32_t t = 0; t < c.triangleCount; ++t) {
+        const Vec3 a = mesh.vertices[clusterVertex(c, t, 0)].position;
+        const Vec3 b = mesh.vertices[clusterVertex(c, t, 1)].position;
+        const Vec3 d = mesh.vertices[clusterVertex(c, t, 2)].position;
+        const float area = 0.5f * length(cross(b - a, d - a));
+        const uint32_t root = findRoot(parent, clusterVertex(c, t, 0));
+        weighted[root] = weighted[root] + (a + b + d) * (area / 3.0f);
+        weight[root] += area;
+      }
+    }
+    for (size_t i : simplified[g]) {
+      Cluster &c = lod.clusters[i];
+      const Vec3 center = c.boundsCenter;
+      for (uint32_t v = 0; v < c.vertexCount; ++v) {
+        uint32_t &id = lod.vertices[c.firstVertex + v];
+        if (added[id] == UINT32_MAX) {
+          const uint32_t root = findRoot(parent, id);
+          const Vec3 pieceCenter =
+              weight[root] > 0.0 ? weighted[root] * static_cast<float>(1.0 / weight[root])
+                                 : mesh.vertices[id].position;
+          added[id] = static_cast<uint32_t>(mesh.vertices.size() + lod.addedSources.size());
+          lod.addedSources.push_back(id);
+          lod.addedPositions.push_back(pieceCenter +
+                                       (mesh.vertices[id].position - pieceCenter) * scale[g]);
+        }
+        const Vec3 moved = lod.addedPositions[added[id] - mesh.vertices.size()];
+        id = added[id];
+        c.boundsRadius = std::max(c.boundsRadius, length(moved - center));
+      }
+    }
+  }
+}
+
+} // namespace
+
 ClusterLod buildClusterLod(const MeshData &mesh) {
   // Normals guide simplification; UVs (the floats around them in Vertex:
   // uvX, normal, uvY) only protect seams.
@@ -232,7 +360,7 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
   ClusterLod lod;
   std::vector<LodBounds> groups;
   std::vector<GroupRange> groupRanges;
-  std::vector<int> refinedGroups;
+  std::vector<int> refinedGroups, clusterGroups;
   std::vector<unsigned int> localVertices(kMaxClusterTriangles * 3);
   std::vector<unsigned char> localTriangles(kMaxClusterTriangles * 3);
   clodBuild(clodDefaultConfig(kMaxClusterTriangles), input,
@@ -263,6 +391,7 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
                                      localTriangles.begin() + c.index_count);
                 lod.clusters.push_back(cluster);
                 refinedGroups.push_back(c.refined);
+                clusterGroups.push_back(groupIndex);
               }
               return groupIndex;
             });
@@ -271,6 +400,9 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
     const int refined = refinedGroups[i];
     lod.clusters[i].refined =
         refined < 0 ? LodBounds{{}, 0.0f, -1.0f} : groups[refined];
+  }
+  if (mesh.leaf) {
+    keepLeafArea(mesh, lod, clusterGroups, refinedGroups, groups.size());
   }
   buildBvh(lod, groupRanges);
   return lod;
@@ -294,6 +426,8 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
       writeArray(out, lod.triangles);
       writeArray(out, lod.nodes);
       writeArray(out, lod.levels);
+      writeArray(out, lod.addedSources);
+      writeArray(out, lod.addedPositions);
     }
     if (!out) {
       std::filesystem::remove(partial, error);
@@ -331,7 +465,8 @@ readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
   for (ClusterLod &lod : lods) {
     if (!readArray(in, size, lod.clusters) || !readArray(in, size, lod.vertices) ||
         !readArray(in, size, lod.triangles) || !readArray(in, size, lod.nodes) ||
-        !readArray(in, size, lod.levels)) {
+        !readArray(in, size, lod.levels) || !readArray(in, size, lod.addedSources) ||
+        !readArray(in, size, lod.addedPositions)) {
       return std::nullopt;
     }
   }
@@ -378,8 +513,14 @@ bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
       return false;
     }
   }
-  return std::all_of(lod.vertices.begin(), lod.vertices.end(),
-                     [&](uint32_t v) { return v < meshVertexCount; });
+  if (lod.addedSources.size() != lod.addedPositions.size() ||
+      !std::all_of(lod.addedSources.begin(), lod.addedSources.end(),
+                   [&](uint32_t v) { return v < meshVertexCount; })) {
+    return false;
+  }
+  return std::all_of(lod.vertices.begin(), lod.vertices.end(), [&](uint32_t v) {
+    return v < meshVertexCount + lod.addedSources.size();
+  });
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
