@@ -1,6 +1,7 @@
 # Tree Leaves as Opaque Geometry Implementation Plan
 
-Status: in progress (branch `leaf-geometry`, worktree `../meridian-leafgeo`)
+Status: paused WIP (branch `leaf-geometry`, worktree `../meridian-leafgeo`,
+2026-11-22 late; usage window). Not merged. Resume notes at the end.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -178,3 +179,50 @@ Status: in progress (branch `leaf-geometry`, worktree `../meridian-leafgeo`)
 - [ ] **Step 3: Gates** (same commands and AA as Task 0, plus `--coverage` on the traced Field_01 per species): table cards vs traced in `artifacts/gates.md`. Pass: motion-clarity forest rows' jitter lower and error not higher; coverage ratio >= 0.95 at 30/60/120 m and the switch (or no worse than cards where cards are below); forest edge GPU ms not above cards; close-up captures (1 m and 5 m of one tree per species, e.g. walk-mode views near the forest edge) show outlines without background fringes; a Debug `--trees` capture with 0 validation errors, `placement check` and `stream check` 0 mismatches, far-field and far-shadow checks passing.
 - [ ] **Step 4: If coverage fails:** stop and report (the spec's fallbacks are engine work: area-preserving pruning per DAG level, then an earlier voxel switch).
 - [ ] **Step 5: Docs** as listed under Files, with the measured numbers; commit `Trees: traced opaque leaves, 30 cooked variants` and merge to main after the gates; then re-cook the same variants into the main checkout's `assets/source/megascans/` (the shared assets) and remove the dropped variants' cooked directories there.
+
+## Resume notes (2026-11-22, paused)
+
+**Done and committed** (tests pass, `./build/tests/tests`): Tasks 1-4 (atlas
+trace, clip onto cards, traced leaves in the tree cook with 2 mm outlines,
+`meridian-cook --coverage`), plus two additions approved mid-run:
+- `3a3ecab` Cluster LOD keeps leaf area per DAG level (group-uniform scale,
+  max 4x, added vertices in the cluster cache v4; opaque double-sided leaf
+  meshes with transmission only). Fixed the coverage gate's first failure
+  (alder Forest_01 0.93/0.85/0.72/0.62 -> 0.98/0.97/0.96/0.96 at
+  30/60/120 m/switch).
+- `714ba50` Tree cook coarsens leaf outlines 2 -> 5 mm before pruning
+  (biggest trees pruned to 19% of leaves, survivors x2.3, before).
+
+**Cooked** (worktree only, `assets/source/megascans/{blackalder,europeanbeech,
+europeanhornbeam}` are real dirs with the traced cooks; everything else in
+`assets/` is a per-file symlink farm of the main checkout's assets, so
+cluster caches (v4) are written here, never into main's): 30 variants
+(Task 5 list, `staging/cook-all.sh`), 28.7M triangles (cap 30M); beech
+Field_01 4M, alder Field_02 2M budgets; every tree's survivors scaled
+<= 1.22. Main's assets are untouched.
+
+**Open problem (Task 5 gate 2):** alder and hornbeam pass coverage >= 0.94
+everywhere; the beech does not: Field_01 0.86 at 120 m, 0.38 at its 169 m
+switch; Forest_01 0.29 at its 345 m switch (its cards also drop: 0.75 at
+250 m, 0.31 at 346 m). Spikes in `.superpowers/sdd/2026-11-22-leaf-geometry/
+artifacts/`: `spike-cluster-perpiece.cpp` (per-piece area attribution; with
+clamp 64 the beech passes, 0.93 / 1.01, but remnants land up to 21 m outside
+the tree; capping moves at k x level error bounds that to ~k px but the beech
+thins again at k <= 16; ~0.5 GB of added vertices over 30 trees),
+`spike-cluster-error-raise.cpp` (area loss counted as LOD error, cumulative
+vs full detail: no gain). Next to try: per-piece attribution + move cap
+k ~ 8 for levels drawn before the switch only, or a finer prototype voxel
+grid for tall trees (beech switches at 169-345 m because its voxels are
+height/128); decide with the GPU gates.
+
+**Not run yet:** Task 5 GPU gates on the traced trees (motion-clarity,
+GPU ms, overview captures, Debug checks); docs (assets.md, decisions.md,
+CLAUDE.md placement hash), merge, re-cook in main's assets. Card baselines
+are in `artifacts/cards/` (forest edge DLSS GPU 25.79 ms, 52.0M triangles;
+motion jitter still 1.24 / side5 7.88 / side30 9.92 / turn1 4.79). Ledger:
+`.superpowers/sdd/2026-11-22-leaf-geometry/progress.md`.
+
+**Lane notes from the Neon triage** (main,
+`docs/superpowers/research/2026-11-22-neon-triage.md`): the leaf dead-zone
+bug (mesh.frag 976-997, G13 #16), geometric specular AA (G18) and the
+F0-is-right note (G15) are on this lane.
