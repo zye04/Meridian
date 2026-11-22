@@ -34,9 +34,13 @@ G19 (#22) plan, this lane ("image-stability"):
   `.superpowers/motion/preset-{M,K}{,.txt}` (L dropped for usage). Crop
   baseline (DLAA M): sky_turn1 Laplacian ratio 0.70, jitter 1.19, error
   2.48 on the `detail` crop.
-- A `cloudpop` terminal (worktree `../meridian-cloudpop`, uncommitted)
-  counts still-camera cloud pops; outline off halves them. Coordinate
-  before running the outline A/B here.
+- `cloudpop` (worktree `../meridian-cloudpop`, paused WIP, no commits;
+  note `.superpowers/cloudpop/RESUME.md`): still-camera sky pops/frame
+  under DLAA at `1119 1356 -431 -1.55 0.35`: base 21.3, outline=0 9.7,
+  variance clip off 22.5 (not the cause); frozen clouds 12.9 / 8.3 with
+  outline=0. Suspects: the outline's contrast term (shade / opacity at
+  thin rims), then the composite's binary motion switch (opacity > 0.5).
+  Step 2's outline A/B (2) is the in-motion half of this.
 - Even under DLAA a moving frame differs ~6x more than a still one:
   foliage input is the larger remaining source.
 
