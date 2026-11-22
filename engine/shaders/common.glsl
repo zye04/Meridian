@@ -586,7 +586,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // grid cells and the streamed records.
     uint ringCount;
     uint streamRecordCount;
-    uint pad4;
+    // Effects: extra mip bias of the alpha cut-out test (mesh.frag DEPTH_ONLY).
+    float cutoutMipBias;
     uint pad5;
     StreamLayerBuffer streamLayers;
     StreamThresholdBuffer streamThresholds;

@@ -67,7 +67,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
 parallax self-shadow, micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
-(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, stable TAA on/off), with Save, Load, Reset and a "show built-in
+(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, cut-out mip bias -2..2, stable TAA on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
@@ -184,7 +184,7 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=0,taa-stable=0`
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=0,cutout-bias=0,taa-stable=0`
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
@@ -606,7 +606,7 @@ Reconstruction guides (RGBA8 diffuse albedo, RGBA8 specular albedo, RGBA16F
 world normal + roughness; null views unless the upscaler wants them, the diffuse albedo also when GI is on) + RGBA16F sun light (the
 sun's exposed radiance, for contact shadows) + D32 depth
 (sky fullscreen, then the masked lists depth-only (mesh_masked_depth.frag:
-the alpha test alone), then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
+the alpha test alone, its texture fetch biased by `Effects::cutoutMipBias`, default +1 mip), then the terrain (terrain.mesh, 16 workgroups of 8x8 quads per node, so hills
 reach the depth pyramid; not drawn again late), then
 vkCmdDrawMeshTasksIndirectEXT per list, mesh.mesh, one workgroup per
 cluster: the opaque lists, then the masked lists shaded with depth EQUAL,

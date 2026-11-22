@@ -929,7 +929,8 @@ void main() {
     Material cutoutMaterial = pc.scene.materials.materials[inMaterialIndex];
     float cutoutAlpha = cutoutMaterial.baseColorFactor.a;
     if (cutoutMaterial.baseColorTexture != kNoTexture) {
-        cutoutAlpha *= sampleTexture(cutoutMaterial.baseColorTexture, inUv).a;
+        cutoutAlpha *= texture(textures[nonuniformEXT(cutoutMaterial.baseColorTexture)], inUv,
+                               pc.scene.mipBias + pc.scene.cutoutMipBias).a;
     }
     if (cutoutAlpha < cutoutMaterial.alphaCutoff) {
         discard;

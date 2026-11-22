@@ -509,7 +509,7 @@ struct SceneData {
   // per record its cell coordinates.
   uint32_t ringCount = 0;
   uint32_t streamRecordCount = 0;
-  uint32_t pad4 = 0;
+  float cutoutMipBias = 0.0f;
   uint32_t pad5 = 0;
   VkDeviceAddress streamLayers = 0;
   VkDeviceAddress streamThresholds = 0;

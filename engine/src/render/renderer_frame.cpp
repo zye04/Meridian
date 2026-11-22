@@ -518,6 +518,7 @@ void Renderer::setEffects(const Effects &effects) {
   impl_->effects.parallaxDepth = std::clamp(effects.parallaxDepth, 0.0f, 4.0f);
   impl_->effects.microShadowStrength = std::clamp(effects.microShadowStrength, 0.0f, 1.0f);
   impl_->effects.contactLength = std::clamp(effects.contactLength, 0.0f, 3.0f);
+  impl_->effects.cutoutMipBias = std::clamp(effects.cutoutMipBias, -2.0f, 2.0f);
   impl_->effects.cloudOutline = std::clamp(effects.cloudOutline, 0.0f, 3.0f);
 }
 
@@ -831,6 +832,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.parallaxSelfShadow = effects.parallaxSelfShadow ? 1.0f : 0.0f;
   scene.microShadowStrength = effects.microShadows ? effects.microShadowStrength : 0.0f;
   scene.contactLengthScale = effects.contactLength;
+  scene.cutoutMipBias = effects.cutoutMipBias;
   scene.drawLists = impl_->drawLists.address;
   scene.placedInstances = impl_->placedInstances.address;
   scene.cells = impl_->cells.address;

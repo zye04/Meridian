@@ -4171,3 +4171,36 @@ the wind alone. On average this costs nothing: the weather pass stays 0.67 ms
 at 1440p, still or flying at 150 m/s. Same sequence after: the kymograph
 edge is a straight diagonal. The ~29 m outline resolution remains (backlog:
 finer near cascade or bicubic lookup, a look decision).
+
+## Alpha cut-out: +1 mip bias (G19 step c, 2026-11-22)
+
+- **Problem:** under DLAA a moving frame still differs ~6x more than a
+  still one; alpha-tested foliage is the largest source. The cut-out edge
+  of the masked depth prepass (mesh_masked_depth.frag; the shaded pass
+  only matches its depth) follows the alpha of whichever mip the
+  sub-pixel jitter and motion pick.
+- **Practice:** CE "tweaked the mip bias on alpha-tested grass" (baseline
+  F16). A coarser mip averages the cut-out over more texels, so the edge
+  moves less frame to frame; coverage holds because the cook builds
+  coverage-preserving alpha mips (ktx2.cpp).
+- **Measured** (`motion-clarity.sh` rows, Release, DLAA, 1440p; jitter =
+  frame 120 vs 121 at the same pose, error = motion vs still, 0-255):
+
+  | case | jitter 0 / -1 / +1 | error 0 / -1 / +1 |
+  |---|---|---|
+  | ground side 5 m/s | 9.41 / 10.21 / 8.41 | 11.62 / 12.32 / 11.04 |
+  | ground turn 1 rad/s | 4.97 / 5.20 / 4.59 | 7.42 / 7.74 / 6.99 |
+  | forest side 5 m/s | 7.84 / 8.03 / 7.71 | 6.53 / 6.74 / 6.21 |
+  | forest turn 1 rad/s | 4.80 / 4.92 / 4.63 | 5.33 / 5.55 / 5.27 |
+
+  -1 is worse everywhere. +1: still ground Laplacian -5% (0.646 ->
+  0.615), mean luminance unchanged (no visible coverage loss); forest
+  edge GPU +1.1 ms (25.7 -> 26.8: the cut-out depth occludes less, ~6%
+  more instances drawn), ground unchanged.
+- **Choice:** `Effects::cutoutMipBias` (`--effects cutout-bias=X`, G
+  panel, grade file `effectCutoutMipBias`, -2..2), default +1, added to
+  the texture mip bias in the masked depth pass only (stability over
+  sharpness). The cascades' alpha test (shadow_masked.frag) keeps its
+  own LOD: the shadow map doesn't move with the camera jitter. Once tree
+  leaves are opaque geometry (entry above) the bias touches only grass,
+  flowers, ferns and the meadow, and the forest cost goes with it.
