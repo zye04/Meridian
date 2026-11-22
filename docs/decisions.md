@@ -4085,3 +4085,59 @@ and DLAA is how DLSS is commonly shipped as pure anti-aliasing.
   ~6x more than a still one (alpha-tested foliage), so the foliage work
   (mip bias, geometry leaves) and the cloud march's own history still
   apply.
+
+## Tree leaves as opaque geometry, traced from the atlas (2026-11-22)
+
+Status: decided, not implemented (spec
+`2026-11-21-materials-fidelity-design.md` section 2, D1 and D2).
+
+- **Problem:** the Megascans Trees' leaves and decoration are
+  alpha-tested cards. Their cut-out edge depends on a texture fetch whose
+  mip moves with distance and motion, so under a pixel it flickers even
+  under DLAA (moving frames differ ~6x more than still ones, entry
+  above). A card's UV box is 85-94% transparent (Black Alder Forest_01:
+  6,298 cards, 50k triangles, 61 atlas regions, each a sprig of 3-23
+  pieces), so the masked depth prepass also discards most of what it
+  draws.
+- **Practice:** Epic's Nanite foliage guidance is to cut masked cards
+  into opaque geometry (masked Nanite pays programmable raster and
+  overdraw; UE 5.7's Nanite Foliage builds on geometric leaves plus
+  voxels); tools do it by contouring the alpha, triangulating and
+  projecting onto the card (SideFX "Converting alpha cards to opaque
+  geometry" with the Trace SOP, Atlas2Mesh, CardCutter, the "Masked
+  Material to Nanite" Geometry Script tool). CE: trees fully triangles or
+  voxels, only grass and small ground cover alpha tested (baseline F17),
+  "alpha grass still smears a little, trees don't" (F16).
+- **Choice:** in `meridian-cook --tree`, trace the cooked atlas alpha once
+  per material (marching squares at the 0.5 cutoff, Douglas-Peucker ~1
+  texel, earcut triangulation), then clip that atlas-space mesh to every
+  card triangle through its UVs (Sutherland-Hodgman, repeat tiles for UVs
+  outside [0,1]) and map by barycentrics, so leaves follow the card's
+  bend; the existing piece split, simplification (leaves ~2 mm, wood
+  keeps 1 cm: a 1 cm error polygonizes a 5-8 cm leaf up close, and the
+  cluster LOD already simplifies by screen error at distance) and pruning
+  follow.
+  Leaf and decoration materials become opaque, double-sided, without
+  alpha. Rejected: per-card tracing (same result, thousands of traces),
+  an offline Houdini/Blender step (outside the cook), tight-fit masked
+  cards (overdraw only, the shimmer stays). Megaplants leaves are already
+  geometry.
+- **Budget:** tracing gives ~150-400 triangles per card against 4-6
+  (est.). Frame cost follows the cluster LOD cut, not source triangles;
+  memory does not: 55 tree prototypes hold 13.7M triangles at ~110-125 B
+  each with cluster data, so 4M per tree (CE's figure, F10) would be
+  ~25 GB. Chosen: ~30 prototypes (5 Forest per species, 6 Field, 3
+  Sapling per species) and a ~30M total cap (~3.5 GB est.): CE's own
+  trade of few dense assets, heavily instanced, over pruning leaves into
+  fewer, bigger ones (close-up quality) or keeping 55 at ~60M (VRAM).
+  Re-checked on real counts after the first alder and beech trace; if
+  ~2 mm outlines don't fit, cut variants before coarsening outlines; past
+  that, cluster compression and streaming (VG slice 5).
+- **Not solved by geometry:** back faces (G13), leaf material (G15, G18),
+  translucency (G3), dapple resolution (G5), forest edge cost (G10), and
+  leaves stay flat in their card's plane.
+- **Gates:** motion jitter lower than with cards (`motion-clarity.sh`,
+  forest edge and interior), crown coverage within 5% from 30 m to the
+  voxel switch (baseline on cards first; fallback: area-preserving
+  pruning per cluster DAG level, then an earlier voxel switch), forest
+  edge GPU ms not above today's, tree memory under the cap.
