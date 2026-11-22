@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numeric>
+#include <tuple>
 
 namespace meridian::cook {
 
@@ -209,6 +210,214 @@ double atlasArea(const AtlasMesh &mesh) {
         signedArea(mesh.uv[mesh.indices[t]], mesh.uv[mesh.indices[t + 1]], mesh.uv[mesh.indices[t + 2]]));
   }
   return area;
+}
+
+namespace {
+
+using Uv = std::array<double, 2>;
+
+double cross(const Uv &a, const Uv &b) { return a[0] * b[1] - a[1] * b[0]; }
+Uv minus(const Uv &a, const Uv &b) { return {a[0] - b[0], a[1] - b[1]}; }
+
+bool before(const CardVertex &a, const CardVertex &b) {
+  return std::tie(a.position, a.uv[0], a.uv[1]) < std::tie(b.position, b.uv[0], b.uv[1]);
+}
+
+// A point of a clipped polygon: an atlas vertex, a point on card edge `edge`
+// at `t` along it (in its canonical order), or card corner `corner`.
+struct Point {
+  enum Kind { Atlas, Edge, Corner } kind;
+  uint32_t id = 0; // atlas vertex, edge or corner
+  double t = 0.0;
+  Uv uv;           // in the tile's frame, for the clipping tests
+};
+
+// A polygon side: part of atlas edge (a, b) in canonical order, or of a card
+// edge (a = UINT32_MAX).
+struct Side {
+  uint32_t a, b;
+};
+
+struct CardTriangle {
+  const CardVertex *v[3];
+  Uv uv[3];   // shifted into the tile
+  // Edge k runs between corners k and k+1; from/to in canonical order.
+  int from[3], to[3];
+};
+
+CardVertex lerp(const CardVertex &a, const CardVertex &b, double t) {
+  CardVertex out;
+  const float f = static_cast<float>(t);
+  for (int c = 0; c < 3; ++c) {
+    out.position[c] = a.position[c] + f * (b.position[c] - a.position[c]);
+    out.normal[c] = a.normal[c] + f * (b.normal[c] - a.normal[c]);
+  }
+  for (int c = 0; c < 2; ++c) {
+    out.uv[c] = a.uv[c] + f * (b.uv[c] - a.uv[c]);
+  }
+  return out;
+}
+
+void normalize(std::array<float, 3> &n) {
+  const float length = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+  if (length > 0.0f) {
+    for (float &c : n) {
+      c /= length;
+    }
+  }
+}
+
+} // namespace
+
+void clipToCards(const AtlasMesh &atlas, const std::vector<CardVertex> &vertices,
+                 const std::vector<uint32_t> &indices, std::vector<CardVertex> &outVertices,
+                 std::vector<uint32_t> &outIndices) {
+  constexpr int kGrid = 256;
+  std::vector<std::vector<uint32_t>> grid(kGrid * kGrid);
+  const auto cellOf = [](double x) { return std::clamp(int(std::floor(x * kGrid)), 0, kGrid - 1); };
+  for (uint32_t t = 0; t < atlas.indices.size() / 3; ++t) {
+    double lo[2] = {1e9, 1e9}, hi[2] = {-1e9, -1e9};
+    for (int k = 0; k < 3; ++k) {
+      for (int c = 0; c < 2; ++c) {
+        lo[c] = std::min<double>(lo[c], atlas.uv[atlas.indices[3 * t + k]][c]);
+        hi[c] = std::max<double>(hi[c], atlas.uv[atlas.indices[3 * t + k]][c]);
+      }
+    }
+    for (int y = cellOf(lo[1]); y <= cellOf(hi[1]); ++y) {
+      for (int x = cellOf(lo[0]); x <= cellOf(hi[0]); ++x) {
+        grid[y * kGrid + x].push_back(t);
+      }
+    }
+  }
+  std::vector<uint64_t> seen(atlas.indices.size() / 3, UINT64_MAX);
+  uint64_t stamp = 0;
+  std::vector<Point> polygon, clipped;
+  std::vector<Side> sides, clippedSides;
+
+  for (size_t c = 0; c + 2 < indices.size(); c += 3) {
+    CardTriangle card;
+    for (int k = 0; k < 3; ++k) {
+      card.v[k] = &vertices[indices[c + k]];
+    }
+    for (int k = 0; k < 3; ++k) {
+      const bool forward = !before(*card.v[(k + 1) % 3], *card.v[k]);
+      card.from[k] = forward ? k : (k + 1) % 3;
+      card.to[k] = forward ? (k + 1) % 3 : k;
+    }
+    double lo[2] = {1e9, 1e9}, hi[2] = {-1e9, -1e9};
+    for (int k = 0; k < 3; ++k) {
+      for (int a = 0; a < 2; ++a) {
+        lo[a] = std::min<double>(lo[a], card.v[k]->uv[a]);
+        hi[a] = std::max<double>(hi[a], card.v[k]->uv[a]);
+      }
+    }
+    const Uv original[3] = {{card.v[0]->uv[0], card.v[0]->uv[1]},
+                            {card.v[1]->uv[0], card.v[1]->uv[1]},
+                            {card.v[2]->uv[0], card.v[2]->uv[1]}};
+    const double area = cross(minus(original[1], original[0]), minus(original[2], original[0]));
+    if (std::abs(area) < 1e-14) {
+      continue;
+    }
+    // Inside a card edge: on the same side as the opposite corner.
+    const double orientation = area > 0.0 ? 1.0 : -1.0;
+    for (int ty = int(std::floor(lo[1])); ty <= int(std::ceil(hi[1])) - 1; ++ty) {
+      for (int tx = int(std::floor(lo[0])); tx <= int(std::ceil(hi[0])) - 1; ++tx) {
+        for (int k = 0; k < 3; ++k) {
+          card.uv[k] = {original[k][0] - tx, original[k][1] - ty};
+        }
+        const auto inside = [&](int k, const Uv &p) {
+          return orientation * cross(minus(card.uv[(k + 1) % 3], card.uv[k]),
+                                     minus(p, card.uv[k])) >= 0.0;
+        };
+        ++stamp;
+        for (int y = cellOf(lo[1] - ty); y <= cellOf(hi[1] - ty); ++y) {
+          for (int x = cellOf(lo[0] - tx); x <= cellOf(hi[0] - tx); ++x) {
+            for (uint32_t t : grid[y * kGrid + x]) {
+              if (seen[t] == stamp) {
+                continue;
+              }
+              seen[t] = stamp;
+              polygon.clear();
+              sides.clear();
+              for (int k = 0; k < 3; ++k) {
+                const uint32_t a = atlas.indices[3 * t + k], b = atlas.indices[3 * t + (k + 1) % 3];
+                polygon.push_back({Point::Atlas, a, 0.0, {atlas.uv[a][0], atlas.uv[a][1]}});
+                sides.push_back({std::min(a, b), std::max(a, b)});
+              }
+              // Sutherland-Hodgman against the card's three edges.
+              for (int k = 0; k < 3 && !polygon.empty(); ++k) {
+                clipped.clear();
+                clippedSides.clear();
+                const Uv &e0 = card.uv[card.from[k]], &e1 = card.uv[card.to[k]];
+                for (size_t i = 0; i < polygon.size(); ++i) {
+                  const Point &p = polygon[i], &q = polygon[(i + 1) % polygon.size()];
+                  const bool pIn = inside(k, p.uv), qIn = inside(k, q.uv);
+                  if (pIn) {
+                    clipped.push_back(p);
+                    clippedSides.push_back(sides[i]);
+                  }
+                  if (pIn == qIn) {
+                    continue;
+                  }
+                  Point cut;
+                  if (sides[i].a == UINT32_MAX) {
+                    // Along another card edge: the crossing is their shared corner.
+                    const int other = static_cast<int>(sides[i].b);
+                    const int corner = (other + 1) % 3 == k ? k : (k + 1) % 3;
+                    cut = {Point::Corner, static_cast<uint32_t>(corner), 0.0, card.uv[corner]};
+                  } else {
+                    const Uv a0 = {atlas.uv[sides[i].a][0], atlas.uv[sides[i].a][1]};
+                    const Uv a1 = {atlas.uv[sides[i].b][0], atlas.uv[sides[i].b][1]};
+                    const Uv d = minus(a1, a0), e = minus(e1, e0);
+                    const double t = std::clamp(cross(minus(a0, e0), d) / cross(e, d), 0.0, 1.0);
+                    cut = {Point::Edge, static_cast<uint32_t>(k), t,
+                           {e0[0] + t * e[0], e0[1] + t * e[1]}};
+                  }
+                  clipped.push_back(cut);
+                  // Leaving the card, the next side runs along card edge k.
+                  clippedSides.push_back(pIn ? Side{UINT32_MAX, static_cast<uint32_t>(k)} : sides[i]);
+                }
+                std::swap(polygon, clipped);
+                std::swap(sides, clippedSides);
+              }
+              if (polygon.size() < 3) {
+                continue;
+              }
+              const uint32_t first = static_cast<uint32_t>(outVertices.size());
+              for (const Point &p : polygon) {
+                CardVertex v;
+                if (p.kind == Point::Corner) {
+                  v = *card.v[p.id];
+                } else if (p.kind == Point::Edge) {
+                  v = lerp(*card.v[card.from[p.id]], *card.v[card.to[p.id]], p.t);
+                } else {
+                  double w[3];
+                  for (int k = 0; k < 3; ++k) {
+                    w[k] = cross(minus(card.uv[(k + 2) % 3], card.uv[(k + 1) % 3]),
+                                 minus(p.uv, card.uv[(k + 1) % 3])) / area;
+                  }
+                  v = {};
+                  for (int k = 0; k < 3; ++k) {
+                    for (int a = 0; a < 3; ++a) {
+                      v.position[a] += static_cast<float>(w[k] * card.v[k]->position[a]);
+                      v.normal[a] += static_cast<float>(w[k] * card.v[k]->normal[a]);
+                    }
+                  }
+                  v.uv[0] = static_cast<float>(p.uv[0] + tx);
+                  v.uv[1] = static_cast<float>(p.uv[1] + ty);
+                }
+                normalize(v.normal);
+                outVertices.push_back(v);
+              }
+              for (uint32_t i = 1; i + 1 < polygon.size(); ++i) {
+                outIndices.insert(outIndices.end(), {first, first + i, first + i + 1});
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 } // namespace meridian::cook

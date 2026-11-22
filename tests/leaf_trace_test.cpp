@@ -3,7 +3,9 @@
 #include "leaf_trace.h"
 
 #include <cmath>
+#include <map>
 #include <numbers>
+#include <set>
 
 using meridian::cook::AtlasMesh;
 using meridian::cook::atlasArea;
@@ -83,4 +85,143 @@ TEST_CASE("traceAtlas drops specks") {
 TEST_CASE("traceAtlas of transparent alpha is empty") {
   const AtlasMesh mesh = traceAtlas(std::vector<uint8_t>(kSize * kSize, 0), kSize, kSize, 0.5f);
   CHECK(mesh.indices.empty());
+}
+
+namespace {
+
+using meridian::cook::CardVertex;
+using meridian::cook::clipToCards;
+
+// The unit square in xz (y up), split along its 0-2 diagonal.
+struct Card {
+  std::vector<CardVertex> vertices;
+  std::vector<uint32_t> indices{0, 1, 2, 0, 2, 3};
+};
+
+Card squareCard(float u0 = 0.0f, float v0 = 0.0f, float uvSize = 1.0f) {
+  Card card;
+  const float corners[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+  for (const auto &c : corners) {
+    card.vertices.push_back(
+        {{c[0], 0.0f, c[1]}, {0.0f, 1.0f, 0.0f}, {u0 + c[0] * uvSize, v0 + c[1] * uvSize}});
+  }
+  return card;
+}
+
+struct Clipped {
+  std::vector<CardVertex> vertices;
+  std::vector<uint32_t> indices;
+};
+
+Clipped clip(const AtlasMesh &atlas, const Card &card) {
+  Clipped out;
+  clipToCards(atlas, card.vertices, card.indices, out.vertices, out.indices);
+  return out;
+}
+
+double area3(const Clipped &c) {
+  double sum = 0.0;
+  for (size_t t = 0; t < c.indices.size(); t += 3) {
+    const auto &a = c.vertices[c.indices[t]].position, &b = c.vertices[c.indices[t + 1]].position,
+               &d = c.vertices[c.indices[t + 2]].position;
+    const double e[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    const double f[3] = {d[0] - a[0], d[1] - a[1], d[2] - a[2]};
+    sum += 0.5 * std::hypot(e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2],
+                            e[0] * f[1] - e[1] * f[0]);
+  }
+  return sum;
+}
+
+// Connected parts, joining vertices whose positions are bit-identical.
+size_t components(const Clipped &c) {
+  std::map<std::array<float, 3>, size_t> ids;
+  std::vector<size_t> parent;
+  const auto id = [&](uint32_t v) {
+    auto [it, inserted] = ids.emplace(c.vertices[v].position, parent.size());
+    if (inserted) {
+      parent.push_back(parent.size());
+    }
+    return it->second;
+  };
+  const auto find = [&](size_t i) {
+    while (parent[i] != i) {
+      i = parent[i] = parent[parent[i]];
+    }
+    return i;
+  };
+  for (size_t t = 0; t < c.indices.size(); t += 3) {
+    const size_t a = id(c.indices[t]);
+    parent[find(id(c.indices[t + 1]))] = find(a);
+    parent[find(id(c.indices[t + 2]))] = find(a);
+  }
+  std::set<size_t> roots;
+  for (size_t i = 0; i < parent.size(); ++i) {
+    roots.insert(find(i));
+  }
+  return roots.size();
+}
+
+AtlasMesh disk() { return traceAtlas(ring(128, 128, 0, 80), kSize, kSize, 0.5f); }
+
+} // namespace
+
+TEST_CASE("clipToCards maps the atlas onto a flat card") {
+  const AtlasMesh atlas = disk();
+  const Clipped out = clip(atlas, squareCard());
+  CHECK(area3(out) == doctest::Approx(atlasArea(atlas)).epsilon(1e-4));
+  for (const CardVertex &v : out.vertices) {
+    CHECK(v.position[1] == 0.0f);
+    CHECK(v.normal[1] == doctest::Approx(1.0f));
+  }
+}
+
+TEST_CASE("clipToCards keeps a leaf across the card's diagonal in one piece") {
+  CHECK(components(clip(disk(), squareCard())) == 1);
+}
+
+TEST_CASE("clipToCards follows a bent card") {
+  // Vertex 3 rotated 30 degrees about the 0-2 diagonal, out of the plane.
+  Card card = squareCard();
+  const float s = std::sin(std::numbers::pi_v<float> / 6), c = std::cos(std::numbers::pi_v<float> / 6);
+  // Its offset from the diagonal is (-0.5, 0, 0.5); rotate that about the axis.
+  card.vertices[3].position = {0.5f - 0.5f * c, std::sqrt(0.5f) * s, 0.5f + 0.5f * c};
+  const Clipped out = clip(disk(), card);
+  const auto plane = [&](uint32_t a, uint32_t b, uint32_t d, const std::array<float, 3> &p) {
+    const auto &pa = card.vertices[a].position, &pb = card.vertices[b].position,
+               &pd = card.vertices[d].position;
+    const double e[3] = {pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]};
+    const double f[3] = {pd[0] - pa[0], pd[1] - pa[1], pd[2] - pa[2]};
+    double n[3] = {e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]};
+    const double len = std::hypot(n[0], n[1], n[2]);
+    return std::abs(((p[0] - pa[0]) * n[0] + (p[1] - pa[1]) * n[1] + (p[2] - pa[2]) * n[2]) / len);
+  };
+  for (size_t t = 0; t < out.indices.size(); t += 3) {
+    bool onA = true, onB = true;
+    for (int k = 0; k < 3; ++k) {
+      const auto &p = out.vertices[out.indices[t + k]].position;
+      onA = onA && plane(0, 1, 2, p) < 1e-5;
+      onB = onB && plane(0, 2, 3, p) < 1e-5;
+    }
+    CHECK((onA || onB));
+  }
+  CHECK(components(out) == 1);
+}
+
+TEST_CASE("clipToCards wraps UVs outside [0,1]") {
+  const AtlasMesh atlas = disk();
+  const Clipped out = clip(atlas, squareCard(-1.0f, 0.0f));
+  CHECK(area3(out) == doctest::Approx(atlasArea(atlas)).epsilon(1e-4));
+  for (const CardVertex &v : out.vertices) {
+    CHECK(v.uv[0] >= -1.0f);
+    CHECK(v.uv[0] <= 0.0f);
+  }
+}
+
+TEST_CASE("clipToCards clips to the card") {
+  // A full atlas spans the texel centres: [0.5, 255.5] / 256. The card shows
+  // the UV quarter [0, 0.5]^2 on 1 m^2, 4 m^2 per UV unit squared.
+  const AtlasMesh atlas = traceAtlas(std::vector<uint8_t>(kSize * kSize, 255), kSize, kSize, 0.5f);
+  const Clipped out = clip(atlas, squareCard(0.0f, 0.0f, 0.5f));
+  const double side = 0.5 - 0.5 / kSize;
+  CHECK(area3(out) == doctest::Approx(side * side * 4.0).epsilon(1e-4));
 }

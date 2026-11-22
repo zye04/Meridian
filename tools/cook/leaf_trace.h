@@ -26,4 +26,19 @@ AtlasMesh traceAtlas(const std::vector<uint8_t> &alpha, uint32_t width, uint32_t
 // In UV units squared.
 double atlasArea(const AtlasMesh &mesh);
 
+struct CardVertex {
+  std::array<float, 3> position;
+  std::array<float, 3> normal;
+  float uv[2];
+};
+
+// Every card triangle (indices into `vertices`) keeps the atlas triangles
+// under its UV triangle (in every integer UV tile it touches), clipped to it
+// and mapped by barycentrics to its position and normal. Output vertices on a
+// card edge are computed from that edge's endpoints in a fixed order, so cards
+// sharing an edge produce bit-identical positions there.
+void clipToCards(const AtlasMesh &atlas, const std::vector<CardVertex> &vertices,
+                 const std::vector<uint32_t> &indices, std::vector<CardVertex> &outVertices,
+                 std::vector<uint32_t> &outIndices);
+
 } // namespace meridian::cook
