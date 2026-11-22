@@ -23,10 +23,18 @@ G19 (#22) plan, this lane ("image-stability"):
 - Step c done (a28c484): `Effects::cutoutMipBias`, default +1 on the masked
   depth pass (ground jitter -8..-11%, forest +1.1 ms; decisions.md). -1 and
   +1 runs in `.superpowers/motion/cutout-{m1,p1}/`.
-- Next, step 2: cloud small-detail smear (quarter-res march + history,
-  measured on a crop of cloud detail, not the whole sky region): A/B
-  half-res march outside the layer, shorter history in motion, outline in
-  motion (`cloud-outline=0` doubles as the G16 check).
+- Neon's deep-research report triaged (`research/2026-11-22-neon-triage.md`,
+  report `research/2026-11-22-neon-deep-research.md`): its top bug (cloud
+  transparency mask) is wrong, DLSS SR ignores the mask; preset K vs M is
+  a valid re-test; leaf dead zone (G13), voxel transmission (G1), jittered
+  contact shadows (G5) confirmed in code. Backlog rows carry the rest.
+- Next, step 2: cloud small-detail smear, re-planned in the triage doc
+  (A/B list 0-5, waiting for the user's OK before any GPU run). Crop
+  baseline (DLAA M): sky_turn1 Laplacian ratio 0.70, jitter 1.19, error
+  2.48 on the `detail` crop.
+- A `cloudpop` terminal (worktree `../meridian-cloudpop`, uncommitted)
+  counts still-camera cloud pops; outline off halves them. Coordinate
+  before running the outline A/B here.
 - Even under DLAA a moving frame differs ~6x more than a still one:
   foliage input is the larger remaining source.
 
