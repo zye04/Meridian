@@ -4063,3 +4063,25 @@ input, falls short.
 - The motion gates' Laplacian minimums (`tools/motion-gates.sh`) were
   anchored to the sharper resolve (not re-run here); the clarity table is
   the gate for this work.
+
+## DLSS DLAA is the default anti-aliasing (2026-11-22)
+
+Supersedes "Native 1440p with our own TAA is the default (2026-11-21)".
+That entry rested on press reports that the Chlorophyll Engine uses no
+upscaler; his own replies say he follows DLSS/FSR guidance (baseline F16).
+At the motion clarity table DLSS DLAA is sharper when still and steadier
+in motion than our TAA even with the stable resolve (forest sideways 5 m/s:
+jitter 7.8 vs 9.2, error 6.5 vs 13.5; meadow: 9.4 vs 11.2, 11.6 vs 12.6),
+and DLAA is how DLSS is commonly shipped as pure anti-aliasing.
+
+- Choice (user, 2026-11-22): `--aa dlss` is the game's default, Super
+  Resolution DLAA at native 1440p (preset M); our TAA, with the stable
+  resolve, stays the fallback (non-NVIDIA GPUs, the licence-clean build)
+  and an A/B (`--aa taa`).
+- Cost: DLAA ~2.3 ms at 1440p against TAA's 0.2 ms. If the 180 fps
+  target needs it back, DLSS Quality (render scale ~0.67) is the lever;
+  judged at the parity route.
+- Input-side instability stays: even under DLAA a moving frame differs
+  ~6x more than a still one (alpha-tested foliage), so the foliage work
+  (mip bias, geometry leaves) and the cloud march's own history still
+  apply.

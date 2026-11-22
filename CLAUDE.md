@@ -140,10 +140,11 @@ in all over the floor; startup prints `Haze layer:`; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
-`--aa taa|dlss` picks the anti-aliasing: our own TAA at native
-resolution (default, taa.comp; the image is native 1440p, no upscaler),
-or DLSS, an A/B (falls back to TAA with the log line `DLSS unavailable:
-<reason>; using TAA` when NGX reports no Super Resolution). `--rr on|off` (default off: Super
+`--aa dlss|taa` picks the anti-aliasing: DLSS (default; DLAA at
+native 1440p unless `--dlss-mode` says otherwise; falls back to TAA with
+the log line `DLSS unavailable: <reason>; using TAA` when NGX reports no
+Super Resolution, e.g. non-NVIDIA GPUs or the `-DMERIDIAN_DLSS=OFF` build), or our
+own TAA at native resolution (taa.comp, the fallback, an A/B). `--rr on|off` (default off: Super
 Resolution DLAA, ~2.3 ms at 1440p against RR's ~4.7, decisions.md) picks
 Ray Reconstruction under DLSS, an A/B
 (preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super
