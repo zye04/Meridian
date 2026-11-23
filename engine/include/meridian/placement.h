@@ -78,7 +78,7 @@ struct PlacementLayer {
   // distant cells instead of them. Far-field layers come first, and their
   // prototypes are in no other layer.
   bool farField = false;
-  std::optional<ParentRamp> parent;
+  std::optional<ParentRamp> parent{};
 };
 ParentRamp parentRamp(const PlacementLayer &parent, float lo, float hi);
 

@@ -248,6 +248,13 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
 // terrain material's forest floor follows it too. kPlacementSeed seeds it.
 constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEdge = 0.08f;
 constexpr uint32_t kPlacementSeed = 1;
+constexpr uint32_t kForestLayerId = 1;
+
+// The forest layer's rule, shared by placeScenery and --score-forest.
+meridian::DensityRule forestRule() {
+  return {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold, kMaskEdge,
+          1.0f / 120.0f, 0.3f};
+}
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h). With farField, distant forest
@@ -407,9 +414,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
 
   std::vector<PlacementLayer> layers;
   if (!forest.empty()) {
-    layers.push_back({1, forest, 6.0f,
-                      {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold,
-                       kMaskEdge, 1.0f / 120.0f, 0.3f},
+    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(),
                       0.8f * treeScale, 1.2f * treeScale, Rotation::Yaw, 0.3f});
     layers.push_back({2, lone, 40.0f,
                       {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
@@ -609,6 +614,8 @@ struct Options {
   std::optional<std::filesystem::path> gradePath;
   // --terrain FILE: the heightfield (default assets/terrain/napf.height).
   std::optional<std::filesystem::path> terrainPath;
+  // --score-forest FILE: score the forest rule against canopy truth, exit.
+  std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
   bool overlayPerf = false;
   // Timed run with real frame times and no input; the CSV goes to benchmarkPath.
@@ -820,6 +827,8 @@ Options parseOptions(int argc, char **argv) {
       options.rayReconstruction = rr == "on";
     } else if (arg == "--terrain" && i + 1 < argc) {
       options.terrainPath = argv[++i];
+    } else if (arg == "--score-forest" && i + 1 < argc) {
+      options.scoreForestPath = argv[++i];
     } else if (arg == "--trees") {
       options.trees = true;
     } else if (arg == "--scatter") {
@@ -957,8 +966,68 @@ Options parseOptions(int argc, char **argv) {
 
 } // namespace
 
+// The forest rule against a canopy truth (tools/canopy-truth.py): a cell is
+// forest when the rule's mean density over a 4x4 grid of points in it is at
+// least one half. Prints precision, recall and F1 of the forest class.
+int scoreForest(const Options &options) {
+  const auto heightPath = options.terrainPath.value_or(
+      std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height");
+  const meridian::Heightfield field = meridian::loadHeightfield(heightPath);
+  std::optional<meridian::GeoChannels> geo;
+  if (std::filesystem::exists(meridian::geoPathFor(heightPath))) {
+    geo = meridian::loadGeoChannels(meridian::geoPathFor(heightPath));
+  }
+  std::ifstream file(*options.scoreForestPath, std::ios::binary);
+  uint32_t header[3] = {};
+  file.read(reinterpret_cast<char *>(header), sizeof(header));
+  const auto [columns, rows, cell] = header;
+  std::vector<uint8_t> truth(size_t{columns} * rows);
+  file.read(reinterpret_cast<char *>(truth.data()), static_cast<std::streamsize>(truth.size()));
+  if (!file || columns * cell != field.width || rows * cell != field.height) {
+    std::fprintf(stderr, "%s does not match the heightfield\n",
+                 options.scoreForestPath->c_str());
+    return 1;
+  }
+  meridian::PlacementLayer layer{};
+  layer.id = kForestLayerId;
+  layer.rule = forestRule();
+  const auto toFixed = [&](float sample, uint32_t size) {
+    const float meters = (sample - 0.5f * static_cast<float>(size - 1)) * field.spacing;
+    return static_cast<int64_t>(std::llround(meters * 65536.0));
+  };
+  uint64_t truePositive = 0, falsePositive = 0, falseNegative = 0, truthForest = 0;
+  for (uint32_t row = 0; row < rows; ++row) {
+    for (uint32_t column = 0; column < columns; ++column) {
+      uint32_t sum = 0;
+      for (int b = 0; b < 4; ++b) {
+        for (int a = 0; a < 4; ++a) {
+          const float sx = static_cast<float>(column * cell) + (a + 0.5f) * cell / 4.0f - 0.5f;
+          const float sz = static_cast<float>(row * cell) + (b + 0.5f) * cell / 4.0f - 0.5f;
+          sum += meridian::densityAt(field, geo ? &*geo : nullptr, layer, kPlacementSeed,
+                                     toFixed(sx, field.width), toFixed(sz, field.height));
+        }
+      }
+      const bool ours = sum / 16 >= 32768;
+      const bool real = truth[size_t{row} * columns + column] != 0;
+      truthForest += real;
+      truePositive += ours && real;
+      falsePositive += ours && !real;
+      falseNegative += !ours && real;
+    }
+  }
+  const double precision = truePositive / std::max(1.0, double(truePositive + falsePositive));
+  const double recall = truePositive / std::max(1.0, double(truePositive + falseNegative));
+  const double f1 = precision + recall > 0.0 ? 2.0 * precision * recall / (precision + recall) : 0.0;
+  std::printf("Forest score: precision %.3f, recall %.3f, F1 %.3f (cells %u, truth forest %.1f%%)\n",
+              precision, recall, f1, columns * rows, 100.0 * truthForest / (columns * rows));
+  return 0;
+}
+
 int main(int argc, char **argv) {
   const Options options = parseOptions(argc, argv);
+  if (options.scoreForestPath) {
+    return scoreForest(options);
+  }
   // Scripted runs ignore the mouse and keyboard so results are repeatable.
   const bool benchmark = options.benchmarkSeconds > 0.0f;
   const bool interactive = options.frames == 0 && !benchmark;

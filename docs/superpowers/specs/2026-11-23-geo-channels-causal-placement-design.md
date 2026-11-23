@@ -184,7 +184,9 @@ teach nothing), not ignored.
    none above it); CPU vs GPU channel reads in the Debug placement check.
 2. `placement check` and `stream check` 0 mismatches on the patch and the
    Napf, with and without `--trees`.
-3. Forest score: baseline (today's mask rule) measured first; the causal
+3. Forest score: baseline (today's mask rule) measured first (2026-11-23,
+   relief patch: precision 0.546, recall 0.320, F1 0.403, truth forest
+   69.4%); the causal
    forest at least 0.2 F1 above it and at least 0.65 F1 (targets to
    revisit once the truth is measured; record both numbers).
 4. Captures on the patch for the user to judge (forest overview from

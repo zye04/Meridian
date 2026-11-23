@@ -222,5 +222,5 @@ Status: plan, awaiting user review (2026-11-23).
 
 ## Notes (filled during execution)
 
-- Baseline F1 (Task 5):
+- Baseline F1 (Task 5): `Forest score: precision 0.546, recall 0.320, F1 0.403 (cells 250000, truth forest 69.4%)` (relief-0.5, today's mask rule; precision under the 69.4% base rate: the noise forest is no better than chance)
 - Tuning rounds (Task 8):
