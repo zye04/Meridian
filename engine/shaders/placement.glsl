@@ -17,6 +17,7 @@ struct PlacementRule {
   int maskLo, maskHi;
   uint clusterPeriod;
   uint clusterAmount;
+  int channels[4][3];
 };
 
 const uint kPlacementLayerSalt = 0x6c617972u;

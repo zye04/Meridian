@@ -83,8 +83,14 @@ struct Factors {
 // h: the nearest sample; dx, dz: its central differences, in sample steps.
 // The mask uses the global seed (layers share it, so complements line up);
 // clustering uses the layer seed (layers clump in different places).
+// 1 - ramp(hi..lo) when lo > hi, as the mask.
+uint32_t rampEither16(int32_t v, int32_t lo, int32_t hi) {
+  return lo <= hi ? smooth16(ramp16(v, lo, hi)) : 0xFFFFu - smooth16(ramp16(v, hi, lo));
+}
+
+// texel: the point's geo channels, or null when the rule reads none.
 Factors densityCore(const PlacementRule &rule, uint32_t seed, uint32_t layerSeed, int32_t x,
-                    int32_t z, int32_t h, int32_t dx, int32_t dz) {
+                    int32_t z, int32_t h, int32_t dx, int32_t dz, const uint8_t *texel) {
   dx = std::clamp(dx, -32767, 32767);
   dz = std::clamp(dz, -32767, 32767);
   const int32_t g2 = dx * dx + dz * dz;
@@ -103,6 +109,11 @@ Factors densityCore(const PlacementRule &rule, uint32_t seed, uint32_t layerSeed
     const uint32_t c =
         smooth16(fbm16(u, v, rule.clusterPeriod, kClusterOctaves, layerSeed ^ kClusterSalt));
     density = mul16(density, 0xFFFFu - mul16(rule.clusterAmount, 0xFFFFu - c));
+  }
+  for (const auto &ramp : rule.channels) {
+    if (ramp[0] >= 0) {
+      density = mul16(density, rampEither16(int32_t{texel[ramp[0]]} * 256, ramp[1], ramp[2]));
+    }
   }
   return {density, mask};
 }
@@ -151,8 +162,9 @@ uint32_t nearestIndex(int32_t x, int32_t origin, uint32_t spacing, uint32_t size
   return std::min(i, size - 1);
 }
 
-Factors densityAtFixed(const Heightfield &heights, const PlacementField &field,
-                       const PlacementRule &rule, uint32_t seed, uint32_t layerSeed, int32_t x,
+Factors densityAtFixed(const Heightfield &heights, const GeoChannels *geo,
+                       const PlacementField &field, const PlacementRule &rule,
+                       const PlacementParent &parent, uint32_t seed, uint32_t layerSeed, int32_t x,
                        int32_t z) {
   const uint32_t i = nearestIndex(x, field.originX, field.spacing, field.width);
   const uint32_t j = nearestIndex(z, field.originZ, field.spacing, field.height);
@@ -161,8 +173,36 @@ Factors densityAtFixed(const Heightfield &heights, const PlacementField &field,
   };
   const uint32_t i0 = i > 0 ? i - 1 : 0, i1 = std::min(i + 1, field.width - 1);
   const uint32_t j0 = j > 0 ? j - 1 : 0, j1 = std::min(j + 1, field.height - 1);
-  return densityCore(rule, seed, layerSeed, x, z, at(i, j), at(i1, j) - at(i0, j),
-                     at(i, j1) - at(i, j0));
+  const uint8_t *texel =
+      geo ? &geo->texels[(size_t{geoTexelIndex(j, geo->ratio, geo->height)} * geo->width +
+                          geoTexelIndex(i, geo->ratio, geo->width)) *
+                         kGeoChannelCount]
+          : nullptr;
+  const int32_t h = at(i, j), dx = at(i1, j) - at(i0, j), dz = at(i, j1) - at(i, j0);
+  Factors factors = densityCore(rule, seed, layerSeed, x, z, h, dx, dz, texel);
+  if (parent.active) {
+    const uint32_t p =
+        densityCore(parent.rule, seed, parent.layerSeed, x, z, h, dx, dz, texel).density;
+    factors.density =
+        mul16(factors.density, rampEither16(static_cast<int32_t>(p), parent.lo, parent.hi));
+  }
+  return factors;
+}
+
+bool readsChannels(const DensityRule &rule) {
+  return std::any_of(rule.channels.begin(), rule.channels.end(),
+                     [](const ChannelRamp &ramp) { return ramp.channel >= 0; });
+}
+
+// Throws unless the layer's rules have the channels they read.
+void checkGeo(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer) {
+  const bool reads = readsChannels(layer.rule) || (layer.parent && readsChannels(layer.parent->rule));
+  if (reads && !geo) {
+    throw std::runtime_error("placement layer reads geo channels, but none were given");
+  }
+  if (geo && !geoMatches(*geo, field)) {
+    throw std::runtime_error("geo channels do not match the heightfield");
+  }
 }
 
 // IEEE half, round to nearest even; scales are positive and far from the
@@ -463,7 +503,37 @@ PlacementRule placementRule(const Heightfield &heights, const DensityRule &rule)
     out.clusterPeriod = period(rule.clusterFrequency);
     out.clusterAmount = static_cast<uint32_t>(clampToInt(rule.clusterAmount * 65535.0, 0, 65535));
   }
+  for (uint32_t r = 0; r < kMaxChannelRamps; ++r) {
+    const ChannelRamp &ramp = rule.channels[r];
+    if (ramp.channel >= static_cast<int32_t>(kGeoChannelCount)) {
+      throw std::runtime_error("channel ramp beyond the geo channels");
+    }
+    out.channels[r][0] = ramp.channel;
+    out.channels[r][1] = clampToInt(ramp.lo * 256.0, -1.0, 65536.0);
+    out.channels[r][2] = clampToInt(ramp.hi * 256.0, -1.0, 65536.0);
+  }
   return out;
+}
+
+PlacementParent placementParent(const Heightfield &field, const PlacementLayer &layer,
+                                uint32_t seed) {
+  PlacementParent out{};
+  if (layer.parent) {
+    out.rule = placementRule(field, layer.parent->rule);
+    out.layerSeed = layerSeed(layer.parent->layerId, seed);
+    out.lo = static_cast<int32_t>(std::lround(std::clamp(layer.parent->lo, 0.0f, 1.0f) * 65535.0f));
+    out.hi = static_cast<int32_t>(std::lround(std::clamp(layer.parent->hi, 0.0f, 1.0f) * 65535.0f));
+    out.active = 1;
+  }
+  return out;
+}
+
+ParentRamp parentRamp(const PlacementLayer &parent, float lo, float hi) {
+  return {parent.id, parent.rule, lo, hi};
+}
+
+uint32_t geoTexelIndex(uint32_t sample, uint32_t ratio, uint32_t channelSize) {
+  return std::min(sample / ratio, channelSize - 1);
 }
 
 std::vector<uint32_t> prototypeThresholds(const PlacementLayer &layer) {
@@ -486,21 +556,25 @@ std::vector<uint32_t> prototypeThresholds(const PlacementLayer &layer) {
   return out;
 }
 
-uint16_t densityAt(const Heightfield &field, const PlacementLayer &layer, uint32_t seed,
-                   int64_t xFixed, int64_t zFixed) {
+uint16_t densityAt(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
+                   uint32_t seed, int64_t xFixed, int64_t zFixed) {
+  checkGeo(field, geo, layer);
   const auto narrow = [](int64_t v) {
     return static_cast<int32_t>(std::clamp<int64_t>(v, INT32_MIN, INT32_MAX));
   };
-  return static_cast<uint16_t>(densityAtFixed(field, placementField(field),
-                                              placementRule(field, layer.rule), seed,
+  return static_cast<uint16_t>(densityAtFixed(field, geo, placementField(field),
+                                              placementRule(field, layer.rule),
+                                              placementParent(field, layer, seed), seed,
                                               layerSeed(layer.id, seed), narrow(xFixed),
                                               narrow(zFixed))
                                    .density);
 }
 
-std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const PlacementLayer &layer,
+std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChannels *geo,
+                                         const PlacementLayer &layer,
                                          const DitherPattern &pattern, uint32_t seed,
                                          int32_t cellX, int32_t cellZ, uint32_t point) {
+  checkGeo(field, geo, layer);
   const std::vector<uint32_t> thresholds = prototypeThresholds(layer);
   if (point >= pattern.points.size() || !cellInRange(cellX, cellZ)) {
     return std::nullopt;
@@ -514,7 +588,8 @@ std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const Placeme
     return std::nullopt;
   }
   const Factors factors =
-      densityAtFixed(field, fixedField, placementRule(field, layer.rule), seed, layerHash, x, z);
+      densityAtFixed(field, geo, fixedField, placementRule(field, layer.rule),
+                     placementParent(field, layer, seed), seed, layerHash, x, z);
   if (pattern.thresholds[point] >= factors.density) {
     return std::nullopt;
   }

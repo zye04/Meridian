@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <meridian/geo.h>
 #include <meridian/placement.h>
 
 #include <algorithm>
@@ -146,10 +147,10 @@ TEST_CASE("densityAt is 0 outside the slope range and full deep inside") {
   rule.slopeMinDeg = 5.0f;
   rule.slopeMaxDeg = 35.0f;
   const PlacementLayer layer = makeLayer(rule);
-  CHECK(densityAt(planeField(65, 2.0f, 0.0f), layer, 1, fixed(10), fixed(3)) == 0);
-  CHECK(densityAt(planeField(65, 2.0f, 50.0f), layer, 1, fixed(10), fixed(3)) == 0);
-  CHECK(densityAt(planeField(65, 2.0f, 20.0f), layer, 1, fixed(10), fixed(3)) == 65535);
-  CHECK(densityAt(planeField(65, 2.0f, 0.0f), makeLayer(openRule()), 1, fixed(10), fixed(3)) ==
+  CHECK(densityAt(planeField(65, 2.0f, 0.0f), nullptr, layer, 1, fixed(10), fixed(3)) == 0);
+  CHECK(densityAt(planeField(65, 2.0f, 50.0f), nullptr, layer, 1, fixed(10), fixed(3)) == 0);
+  CHECK(densityAt(planeField(65, 2.0f, 20.0f), nullptr, layer, 1, fixed(10), fixed(3)) == 65535);
+  CHECK(densityAt(planeField(65, 2.0f, 0.0f), nullptr, makeLayer(openRule()), 1, fixed(10), fixed(3)) ==
         65535);
 }
 
@@ -164,8 +165,8 @@ TEST_CASE("a negative mask edge is the exact complement of the mask") {
   int partial = 0;
   for (int z = -120; z <= 120; z += 3) {
     for (int x = -120; x <= 120; x += 3) {
-      const uint16_t a = densityAt(field, makeLayer(inside), 4, fixed(x), fixed(z));
-      const uint16_t b = densityAt(field, makeLayer(outside), 4, fixed(x), fixed(z));
+      const uint16_t a = densityAt(field, nullptr, makeLayer(inside), 4, fixed(x), fixed(z));
+      const uint16_t b = densityAt(field, nullptr, makeLayer(outside), 4, fixed(x), fixed(z));
       CHECK(a + b == 0xFFFF);
       partial += (a > 0 && b > 0);
     }
@@ -184,9 +185,9 @@ TEST_CASE("densityAt values are pinned (anchors for the GPU comparison)") {
   rule.clusterFrequency = 1.0f / 20.0f;
   rule.clusterAmount = 0.5f;
   const PlacementLayer layer = makeLayer(rule);
-  CHECK(densityAt(field, layer, 8, fixed(10.5f), fixed(-30.25f)) == 39852);
-  CHECK(densityAt(field, layer, 8, fixed(-77.0f), fixed(41.75f)) == 7760);
-  CHECK(densityAt(field, layer, 8, fixed(3.0f), fixed(100.0f)) == 52583);
+  CHECK(densityAt(field, nullptr, layer, 8, fixed(10.5f), fixed(-30.25f)) == 39852);
+  CHECK(densityAt(field, nullptr, layer, 8, fixed(-77.0f), fixed(41.75f)) == 7760);
+  CHECK(densityAt(field, nullptr, layer, 8, fixed(3.0f), fixed(100.0f)) == 52583);
 }
 
 TEST_CASE("prototype weights must sum to a positive total") {
@@ -210,8 +211,8 @@ TEST_CASE("evaluatePoint is deterministic and stays inside the crop") {
     for (int32_t cx = -3; cx <= 2; ++cx) {
       for (uint32_t p = 0; p < pattern.points.size(); ++p) {
         ++total;
-        const auto a = evaluatePoint(field, layer, pattern, 8, cx, cz, p);
-        const auto b = evaluatePoint(field, layer, pattern, 8, cx, cz, p);
+        const auto a = evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p);
+        const auto b = evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p);
         REQUIRE(a.has_value() == b.has_value());
         if (!a) {
           continue;
@@ -245,7 +246,7 @@ TEST_CASE("an all-reject layer keeps nothing") {
   for (int32_t cz = -2; cz <= 1; ++cz) {
     for (int32_t cx = -2; cx <= 1; ++cx) {
       for (uint32_t p = 0; p < pattern.points.size(); ++p) {
-        kept += evaluatePoint(field, layer, pattern, 8, cx, cz, p).has_value();
+        kept += evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p).has_value();
       }
     }
   }
@@ -414,4 +415,96 @@ TEST_CASE("streamSlotCell inverts streamSlot over the window") {
       }
     }
   }
+}
+
+namespace {
+
+// 64x64 samples of 2 m, 4 samples per texel; channel 0 is 0 in texel
+// columns 0..7 and 200 in columns 8..15.
+GeoChannels splitGeo() {
+  GeoChannels geo;
+  geo.width = geo.height = 16;
+  geo.ratio = 4;
+  geo.fieldWidth = geo.fieldHeight = 64;
+  geo.fieldSpacing = 2.0f;
+  geo.texels.assign(16 * 16 * kGeoChannelCount, 0);
+  for (uint32_t j = 0; j < 16; ++j) {
+    for (uint32_t i = 8; i < 16; ++i) {
+      geo.texels[(j * 16 + i) * kGeoChannelCount] = 200;
+    }
+  }
+  return geo;
+}
+
+// Sample i of a 64-wide 2 m field sits at x = (i - 31.5) * 2.
+int64_t sampleX(int i) { return fixed((static_cast<float>(i) - 31.5f) * 2.0f); }
+
+} // namespace
+
+TEST_CASE("a channel ramp keeps only texels inside it") {
+  const Heightfield field = planeField(64, 2.0f, 10.0f);
+  const GeoChannels geo = splitGeo();
+  DensityRule rule = openRule();
+  rule.channels[0] = {0, 100.0f, 150.0f};
+  const PlacementLayer layer = makeLayer(rule);
+  CHECK(densityAt(field, &geo, layer, 1, sampleX(9), 0) == 0);
+  CHECK(densityAt(field, &geo, layer, 1, sampleX(49), 0) == 65535);
+  rule.channels[0] = {0, 150.0f, 100.0f}; // inverted
+  CHECK(densityAt(field, &geo, makeLayer(rule), 1, sampleX(9), 0) == 65535);
+  CHECK(densityAt(field, &geo, makeLayer(rule), 1, sampleX(49), 0) == 0);
+}
+
+TEST_CASE("channel index at the crop edge") {
+  CHECK(geoTexelIndex(63, 4, 16) == 15);
+  CHECK(geoTexelIndex(7499, 2, 3750) == 3749);
+  CHECK(geoTexelIndex(0, 4, 16) == 0);
+  CHECK(geoTexelIndex(100, 4, 16) == 15);
+  const Heightfield field = planeField(64, 2.0f, 10.0f);
+  const GeoChannels geo = splitGeo();
+  DensityRule rule = openRule();
+  rule.channels[0] = {0, 100.0f, 150.0f};
+  CHECK(densityAt(field, &geo, makeLayer(rule), 1, sampleX(63), sampleX(63)) == 65535);
+}
+
+TEST_CASE("a parent ramp follows the parent's density") {
+  DensityRule steep = openRule();
+  steep.slopeMinDeg = 5.0f;
+  steep.slopeMaxDeg = 35.0f;
+  PlacementLayer parent = makeLayer(steep);
+  parent.id = 1;
+  PlacementLayer child = makeLayer(openRule());
+  child.parent = parentRamp(parent, 0.5f, 0.6f);
+  CHECK(densityAt(planeField(65, 2.0f, 20.0f), nullptr, child, 1, fixed(10), fixed(3)) == 65535);
+  CHECK(densityAt(planeField(65, 2.0f, 0.0f), nullptr, child, 1, fixed(10), fixed(3)) == 0);
+  child.parent = parentRamp(parent, 0.6f, 0.5f); // inverted: away from the parent
+  CHECK(densityAt(planeField(65, 2.0f, 20.0f), nullptr, child, 1, fixed(10), fixed(3)) == 0);
+  CHECK(densityAt(planeField(65, 2.0f, 0.0f), nullptr, child, 1, fixed(10), fixed(3)) == 65535);
+}
+
+TEST_CASE("parent density ignores streaming") {
+  const Heightfield field = planeField(129, 2.0f, 10.0f);
+  DensityRule clustered = openRule();
+  clustered.clusterFrequency = 1.0f / 20.0f;
+  clustered.clusterAmount = 1.0f;
+  PlacementLayer staticParent = makeLayer(clustered);
+  staticParent.id = 1;
+  PlacementLayer streamedParent = staticParent;
+  streamedParent.maxDrawDistance = 60.0f;
+  streamedParent.streamFullDensity = 30.0f;
+  PlacementLayer a = makeLayer(openRule()), b = a;
+  a.parent = parentRamp(staticParent, 0.2f, 0.8f);
+  b.parent = parentRamp(streamedParent, 0.2f, 0.8f);
+  int partial = 0;
+  for (int x = -100; x <= 100; x += 7) {
+    const uint16_t da = densityAt(field, nullptr, a, 3, fixed(x), fixed(x / 2));
+    CHECK(da == densityAt(field, nullptr, b, 3, fixed(x), fixed(x / 2)));
+    partial += da > 0 && da < 65535;
+  }
+  CHECK(partial > 0);
+}
+
+TEST_CASE("a channel rule without geo throws") {
+  DensityRule rule = openRule();
+  rule.channels[1] = {3, 10.0f, 20.0f};
+  CHECK_THROWS(densityAt(planeField(64, 2.0f, 10.0f), nullptr, makeLayer(rule), 1, 0, 0));
 }

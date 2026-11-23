@@ -808,7 +808,7 @@ struct GpuPlacementLayer {
   float sinkDepth = 0.0f;
   uint32_t fullRotation = 0;
 };
-static_assert(sizeof(GpuPlacementLayer) == 84);
+static_assert(sizeof(GpuPlacementLayer) == 132);
 
 // Must match the push constants in placement.comp.
 struct PlacementConstants {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <meridian/geo.h>
 #include <meridian/math/vec3.h>
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
@@ -33,10 +34,29 @@ struct Prototype {
 // keeps outside the mask). The edge band also shrinks the scale.
 // Frequencies are in 1/m; 0 disables the noise rule. clusterAmount in 0..1
 // blends density toward clustering noise, which differs per layer.
+// A ramp over one geo channel's byte (geo.h): the factor rises from 0 at
+// lo to 1 at hi; lo > hi gives 1 minus the ramp from hi to lo. channel -1
+// is off.
+struct ChannelRamp {
+  int32_t channel = -1;
+  float lo = 0.0f, hi = 0.0f;
+};
+constexpr uint32_t kMaxChannelRamps = 4;
+
 struct DensityRule {
   float slopeMinDeg, slopeMaxDeg, altitudeMin, altitudeMax, fade;
   float maskFrequency, maskThreshold, maskEdge;
   float clusterFrequency, clusterAmount;
+  std::array<ChannelRamp, kMaxChannelRamps> channels{};
+};
+
+// A ramp over an earlier layer's rule density (0..1) at the same point: the
+// parent's raw rule, without streaming's thinning; lo > hi inverts. One
+// level deep: the parent's own parent is not evaluated.
+struct ParentRamp {
+  uint32_t layerId;
+  DensityRule rule;
+  float lo, hi;
 };
 
 enum class Rotation { Yaw, Full };
@@ -58,7 +78,9 @@ struct PlacementLayer {
   // distant cells instead of them. Far-field layers come first, and their
   // prototypes are in no other layer.
   bool farField = false;
+  std::optional<ParentRamp> parent;
 };
+ParentRamp parentRamp(const PlacementLayer &parent, float lo, float hi);
 
 // Streamed placement: fraction of a layer's points kept at distance d.
 float streamKeepFraction(float distance, float fullDensity, float maxDistance);
@@ -111,18 +133,35 @@ struct PlacementRule {
   int32_t maskLo, maskHi; // 0..65535 noise; lo > hi: 1 - ramp(hi..lo)
   uint32_t clusterPeriod; // 16.16 m; 0 = off
   uint32_t clusterAmount; // 0..65535
+  // Per ramp: channel (-1 off), lo, hi in 1/256 of a byte; lo > hi inverts.
+  int32_t channels[kMaxChannelRamps][3];
 };
-static_assert(sizeof(PlacementField) == 20 && sizeof(PlacementRule) == 52);
+// The parent ramp: the parent's rule and layer seed, lo/hi on its density
+// (0..65535; lo > hi inverts); active 0 = no parent.
+struct PlacementParent {
+  PlacementRule rule;
+  uint32_t layerSeed;
+  int32_t lo, hi;
+  uint32_t active;
+};
+static_assert(sizeof(PlacementField) == 20 && sizeof(PlacementRule) == 100 &&
+              sizeof(PlacementParent) == 116);
 PlacementField placementField(const Heightfield &field);
 PlacementRule placementRule(const Heightfield &field, const DensityRule &rule);
+PlacementParent placementParent(const Heightfield &field, const PlacementLayer &layer,
+                                uint32_t seed);
+// A heightfield sample's geo texel along one axis.
+uint32_t geoTexelIndex(uint32_t sample, uint32_t ratio, uint32_t channelSize);
 // Cumulative weights in 1/65536, last = 65536: pick the first prototype
 // whose entry exceeds the low 16 bits of the point hash. Throws unless the
 // total weight is positive.
 std::vector<uint32_t> prototypeThresholds(const PlacementLayer &layer);
 
 // 0..65535 at fixed-point (x, z), rules evaluated at the nearest sample.
-uint16_t densityAt(const Heightfield &field, const PlacementLayer &layer, uint32_t seed,
-                   int64_t xFixed, int64_t zFixed);
+// geo: the heightfield's channels (geoMatches), or null when no rule of the
+// layer (or its parent) reads a channel; throws otherwise.
+uint16_t densityAt(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
+                   uint32_t seed, int64_t xFixed, int64_t zFixed);
 
 // Rotation: axis-angle (Yaw: axis +Y, angle = yaw). position.y includes the
 // sink depth. prototype is the layer's prototype entry's id.
@@ -136,7 +175,7 @@ struct PlacedPoint {
 };
 // The C++ reference of one pattern point of one cell; nullopt if rejected
 // or outside the heightfield crop.
-std::optional<PlacedPoint> evaluatePoint(const Heightfield &field,
+std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChannels *geo,
                                          const PlacementLayer &layer,
                                          const DitherPattern &pattern, uint32_t seed,
                                          int32_t cellX, int32_t cellZ, uint32_t point);

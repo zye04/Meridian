@@ -68,7 +68,7 @@ void compareRun(const Heightfield &field, const PlacementLayer &layer,
                 const uint32_t *tags, RunStats &stats) {
   uint32_t next = 0;
   for (uint32_t p = 0; p < pattern.points.size(); ++p, ++stats.evaluated) {
-    const auto point = evaluatePoint(field, layer, pattern, seed, cellX, cellZ, p);
+    const auto point = evaluatePoint(field, nullptr, layer, pattern, seed, cellX, cellZ, p);
     if (!point) {
       continue;
     }
