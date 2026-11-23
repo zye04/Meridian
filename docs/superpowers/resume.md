@@ -59,30 +59,58 @@ asset-pack knowledge in the engine, generic (glTF-standard first)
 material features, asset translation in the cook; suspect the engine's
 handling of an asset first (materials spec "Principle").
 
-- G7 done and merged (#7, exposure shade floor 3 EV).
-- Materials spec D3-D6 decided (98c48ee on `g7`): D3 generic second
-  layer, D4 bark 4K + detail textures, D5 specular A/B first, D6 albedo
-  audit as bench step 1.
-- Albedo capture (dc477d2 on `g7`): `--capture-albedo`,
-  `tools/albedo-audit.py`. First pass: leaves match the beech atlas
-  within ~6%; trunks render 0.09-0.13 luminance against 0.03-0.06
-  (beech trunk textures) to 0.12 (branch bark): open. Region means mix
-  materials, so the fidelity gate needs a per-pixel material-ID view
-  (backlog). Capture run-to-run noise 0.46/255 on the ground view
-  (backlog).
-- GI: required for the look (user and Claude agree); stays off only
-  until #31 + #30 land. Motion rows GI on vs off: same sharpness ratio,
-  cost +1.7 ms interior, +2.2 ms edge (`research/2026-11-23-G7-grey-image.md`
-  has the floor/cost numbers).
-- #31 (GI reads the far-field material albedo, kLeafAlbedo removed):
-  lane `../meridian-gi-albedo`, branch `gi-albedo` (b097c78), adding
-  leaf transmission to the palette before merge.
-- Order: #31 -> material-ID fidelity view + trunk check -> #30 (skip the
-  crown term under GI) -> GI default on (side-by-sides, ask user) -> G5
-  contact/micro shadows tuned on the GI image (Bend-style deterministic
-  march lead; "raster leaf shadow blobby" out of scope, note on #5).
+Done and on main (2026-11-23):
+- G7 (#7) exposure shade floor 3 EV.
+- Materials spec D3-D6 decided (98c48ee).
+- Albedo capture `--capture-albedo` + `tools/albedo-audit.py` (dc477d2),
+  `meridian-cook --stats` (1c020d8): texture path exact (KTX2 vs source
+  within 0.3%); leaves match the atlas within ~6%; trunks consistent with
+  the tiling bark. Per-pixel material-ID view deferred (backlog).
+- #31 GI reads the far-field material albedo, reflected + transmitted
+  (f63f597, 89bc219); #30 crown visibility only with GI off (3b6b900).
+  Forest edge with GI: mean L 0.241 -> 0.310, p5 0 -> 0.073, trunk
+  neutral; interior floor 1.5-2.7% of sunflecks (target 1.5-5%). #30
+  stays open for the leaf lighting heuristic.
+- Neon GI foliage research + triage (3b5234d,
+  `research/2026-11-23-gi-foliage-{deep-research,triage}.md`); #32 filed
+  (leaf transmission vs KHR_materials_diffuse_transmission).
+
+WIP, branch `g7` only (NOT on main): **GI on by default** (user approved
+2026-11-23): `game/src/main.cpp` `gi = true`, CLAUDE.md, backlog rows.
+Motion gates were running on it when the session paused:
+`tools/motion-gates.sh build-release .superpowers/g7/gates-gi` (output in
+`.superpowers/g7/gates-gi.txt`; if incomplete, re-run). To finish: check
+every gate passes (absolute minimums, decisions.md "motion gates"); add a
+decisions.md entry "GI probes on by default (2026-11-23)" with the cost
+(+1.7 ms interior, +2.2 ms edge, motion rows unchanged ratio,
+`.superpowers/g7/clarity-{off,gi}.txt`) and the gate table; Debug run
+once; rebase on origin/main, ff-push to main; update "State of main"
+below (it still says GI off).
+
+Next, in order (agreed with the user):
+1. Finish the GI default (above).
+2. #32: leaf transmission per KHR (front (1 - f) base colour, back f);
+   cook calibration of the factor (measured beech tau/rho ~2) is
+   materials-lane work. Before the bitmask pass: it changes leaf
+   brightness everywhere.
+3. Screen-space visibility-bitmask pass (completes the hybrid GI, covers
+   AO #2): write a short plan first and ask the user (structural).
+   Parameters from the triage: radius <= 1.5 m, sector-masked probe fill,
+   material-aware thickness, spatial-first filtering, ~1 ms budget.
+4. G5 (#5) contact/micro shadows, tuned on the GI image (Bend-style
+   deterministic march lead; "raster leaf shadow blobby" out of scope,
+   note on #5).
+5. #30 remainder: intra-crown sun from the prototype voxels (replaces
+   `leafSun`), then recollision multi-scatter.
+- GI colour check from the triage: closed forest shade ~(0.83, 1, 0.62),
+  woodland shade ~(0.64, 1, 1.65) linear RGB normalized to G (Chiao 2000).
 - Captures need the headless 1440p output when the monitor sleeps
-  (memory native-1440-rule; `MERIDIAN-1440`).
+  (memory native-1440-rule; `MERIDIAN-1440`). Lane helpers in
+  `.superpowers/g7/tools/` (cap.sh, rgb.py, oklab-stats.py,
+  forest-clarity.sh, albedo-cap.sh; bash). Capture run-to-run noise is
+  0.46/255 on the ground view (backlog row), not ~1e-6.
+- Worktree `../meridian-gi-albedo` (branch `gi-albedo`) is merged; it can
+  be removed.
 
 ## The work list
 
