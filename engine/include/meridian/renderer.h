@@ -22,6 +22,7 @@ class Window;
 class UpscalerProvider;
 struct Prototype;
 struct PlacementLayer;
+struct GeoChannels;
 
 struct MeshId {
   uint32_t index = 0;
@@ -257,6 +258,9 @@ public:
   // reference. The result replaces any earlier placement. Prototype indices
   // in the layers index `prototypes`. patternCache: a directory for the
   // layers' dither patterns (placement.h, cachedDitherPattern); empty = none.
+  // The heightfield's geo channels (geo.h; geoMatches), for placement rules
+  // that read them: call after setTerrain and before setPlacement.
+  void setGeoChannels(const GeoChannels &geo);
   void setPlacement(std::span<const Prototype> prototypes,
                     std::span<const PlacementLayer> layers, uint32_t seed,
                     const std::filesystem::path &patternCache = {});

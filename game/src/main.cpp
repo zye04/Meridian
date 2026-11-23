@@ -1087,6 +1087,18 @@ int main(int argc, char **argv) {
     terrain = meridian::generateHeightfield({});
   }
   renderer.setTerrain(terrain);
+  // Its geo channels (meridian-cook --geo), which the causal placement
+  // layers read.
+  bool geoChannels = false;
+  if (const auto geoPath = meridian::geoPathFor(heightPath); std::filesystem::exists(geoPath)) {
+    const meridian::GeoChannels geo = meridian::loadGeoChannels(geoPath);
+    if (meridian::geoMatches(geo, terrain)) {
+      renderer.setGeoChannels(geo);
+      geoChannels = true;
+    } else {
+      std::printf("%s does not match the heightfield; ignored\n", geoPath.c_str());
+    }
+  }
   const float floorKm = valleyFloorKm(terrain);
   // Megascans surfaces (docs/assets.md has what each one shows and why it
   // got its role): per role, the variants with their real-world tile sizes

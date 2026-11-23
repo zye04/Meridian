@@ -807,8 +807,9 @@ struct GpuPlacementLayer {
   float scaleMax = 0.0f;
   float sinkDepth = 0.0f;
   uint32_t fullRotation = 0;
+  PlacementParent parent{};
 };
-static_assert(sizeof(GpuPlacementLayer) == 132);
+static_assert(sizeof(GpuPlacementLayer) == 248);
 
 // Must match the push constants in placement.comp.
 struct PlacementConstants {
@@ -820,6 +821,7 @@ struct PlacementConstants {
   VkDeviceAddress counts = 0; // per (cell, layer); offsets after the scan
   VkDeviceAddress instances = 0;
   VkDeviceAddress cells = 0;
+  VkDeviceAddress geo = 0; // uvec2 per geo texel (8 channel bytes); 0 = none
   PlacementField field;
   int32_t gridFirst[2] = {};
   uint32_t gridColumns = 0;
@@ -828,8 +830,10 @@ struct PlacementConstants {
   float minHeight = 0.0f;
   float heightScale = 0.0f;
   float spacing = 0.0f;
+  uint32_t geoSize[3] = {}; // width, height, ratio
+  uint32_t pad = 0;
 };
-static_assert(sizeof(PlacementConstants) == 120);
+static_assert(sizeof(PlacementConstants) == 144);
 
 // One slot's new cell for placement.comp's PLACEMENT_STREAM variant.
 struct StreamUpdate {
@@ -852,6 +856,7 @@ struct StreamConstants {
   VkDeviceAddress coords = 0;
   VkDeviceAddress instances = 0;
   VkDeviceAddress cells = 0;
+  VkDeviceAddress geo = 0; // as PlacementConstants::geo
   PlacementField field;
   uint32_t seed = 0;
   uint32_t staticCount = 0; // the first ring id's index in the placed table
@@ -859,9 +864,9 @@ struct StreamConstants {
   float minHeight = 0.0f;
   float heightScale = 0.0f;
   float spacing = 0.0f;
-  uint32_t pad = 0;
+  uint32_t geoSize[3] = {}; // width, height, ratio
 };
-static_assert(sizeof(StreamConstants) == 128);
+static_assert(sizeof(StreamConstants) == 144);
 
 // Must match the push constants in tlas_fill.comp.
 struct TlasFillConstants {

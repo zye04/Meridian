@@ -283,6 +283,10 @@ struct Renderer::Impl {
 
   // A copy of setTerrain's heightfield: placement reads its samples.
   Heightfield heightfield;
+  // setGeoChannels: the channels on the CPU (the Debug checks' reference)
+  // and on the GPU (a uvec2 per texel).
+  std::optional<GeoChannels> geo;
+  Buffer geoBuffer;
   // Placement (renderer_placement.cpp): the placed table (24-bit ids from
   // kPlacedBase) and one Cell per grid cell; empty until setPlacement.
   Buffer placedInstances;

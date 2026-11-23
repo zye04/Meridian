@@ -62,13 +62,13 @@ struct RunStats {
 // decisions, prototypes and x/z exactly (order included), the float
 // attributes within tolerance. tags (optional, streamed runs): the dither
 // thresholds, which must equal the pattern's with the layer index above.
-void compareRun(const Heightfield &field, const PlacementLayer &layer,
+void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
                 const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
                 uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
                 const uint32_t *tags, RunStats &stats) {
   uint32_t next = 0;
   for (uint32_t p = 0; p < pattern.points.size(); ++p, ++stats.evaluated) {
-    const auto point = evaluatePoint(field, nullptr, layer, pattern, seed, cellX, cellZ, p);
+    const auto point = evaluatePoint(field, geo, layer, pattern, seed, cellX, cellZ, p);
     if (!point) {
       continue;
     }
@@ -126,7 +126,8 @@ std::pair<float, float> instanceHeights(const PlacedInstance *instances, uint32_
 
 // Debug: whole (cell, layer) runs of the GPU table against evaluatePoint
 // until at least 4096 points are compared.
-void checkPlacement(const Heightfield &field, std::span<const PlacementLayer> layers,
+void checkPlacement(const Heightfield &field, const GeoChannels *geo,
+                    std::span<const PlacementLayer> layers,
                     const std::vector<DitherPattern> &patterns, uint32_t seed,
                     const PlacementGrid &grid, const std::vector<uint32_t> &offsets,
                     const std::vector<std::array<float, 4>> &spheres,
@@ -146,7 +147,7 @@ void checkPlacement(const Heightfield &field, std::span<const PlacementLayer> la
     const int32_t cellX = grid.firstX + static_cast<int32_t>(cell % grid.columns);
     const int32_t cellZ = grid.firstZ + static_cast<int32_t>(cell / grid.columns);
     const uint32_t first = offsets[cell * layerCount + l];
-    compareRun(field, layers[l], patterns[l], seed, cellX, cellZ, l, instances + first,
+    compareRun(field, geo, layers[l], patterns[l], seed, cellX, cellZ, l, instances + first,
                offsets[cell * layerCount + l + 1] - first, nullptr, stats);
     const Cell &c = cells[cell];
     bool cellOk = c.firstInstance == offsets[cell * layerCount] &&
@@ -192,12 +193,14 @@ struct PlacementTables {
 };
 
 PlacementTables buildTables(const Heightfield &field, std::span<const PlacementLayer> layers,
-                            size_t prototypeCount, const std::filesystem::path &patternCache) {
+                            uint32_t seed, size_t prototypeCount,
+                            const std::filesystem::path &patternCache) {
   PlacementTables t;
   for (const PlacementLayer &layer : layers) {
     const std::vector<uint32_t> thresholds = prototypeThresholds(layer);
     GpuPlacementLayer gpu;
     gpu.rule = placementRule(field, layer.rule);
+    gpu.parent = placementParent(field, layer, seed);
     gpu.id = layer.id;
     gpu.firstPrototype = static_cast<uint32_t>(t.picks.size() / 2);
     for (size_t i = 0; i < thresholds.size(); ++i) {
@@ -250,12 +253,19 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   if (staticList.empty()) {
     throw std::runtime_error("setPlacement needs a static layer");
   }
+  for (size_t l = 0; l < allLayers.size(); ++l) {
+    const auto &parent = allLayers[l].parent;
+    if (parent && std::none_of(allLayers.begin(), allLayers.begin() + static_cast<ptrdiff_t>(l),
+                               [&](const PlacementLayer &p) { return p.id == parent->layerId; })) {
+      throw std::runtime_error("a placement layer's parent must be an earlier layer");
+    }
+  }
   const std::span<const PlacementLayer> layers = staticList;
   const PlacementGrid grid = placementGrid(field);
   const auto layerCount = static_cast<uint32_t>(layers.size());
   const uint32_t cellCount = grid.columns * grid.rows;
 
-  PlacementTables tables = buildTables(field, layers, prototypes.size(), patternCache);
+  PlacementTables tables = buildTables(field, layers, seed, prototypes.size(), patternCache);
   const std::vector<DitherPattern> &patterns = tables.patterns;
   // Far-field layers first (FarCell::treeCount counts the start of each
   // cell's run), and their prototypes in no other layer.
@@ -329,7 +339,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   // the largest draw distance plus the bounds' reach past a cell.
   Impl::Stream next;
   if (!streamList.empty()) {
-    PlacementTables streamTables = buildTables(field, streamList, prototypes.size(), patternCache);
+    PlacementTables streamTables = buildTables(field, streamList, seed, prototypes.size(), patternCache);
     float radius = 0.0f;
     std::vector<float> layerTable;
     for (const PlacementLayer &layer : streamList) {
@@ -394,6 +404,12 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   constants.bounds = boundsBuffer.address;
   constants.counts = counts.address;
   constants.field = placementField(field);
+  constants.geo = r.geoBuffer.address;
+  if (r.geo) {
+    constants.geoSize[0] = r.geo->width;
+    constants.geoSize[1] = r.geo->height;
+    constants.geoSize[2] = r.geo->ratio;
+  }
   constants.gridFirst[0] = grid.firstX;
   constants.gridFirst[1] = grid.firstZ;
   constants.gridColumns = grid.columns;
@@ -531,7 +547,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     std::printf("placement hash 0x%016llx\n",
                 static_cast<unsigned long long>(
                     fnv1a(0xcbf29ce484222325ull, bytes, instanceBytes + cellBytes)));
-    checkPlacement(field, layers, patterns, seed, grid, offsets, bounds,
+    checkPlacement(field, r.geo ? &*r.geo : nullptr, layers, patterns, seed, grid, offsets, bounds,
                    reinterpret_cast<const PlacedInstance *>(bytes),
                    reinterpret_cast<const Cell *>(bytes + instanceBytes));
     r.destroyBuffer(readback);
@@ -731,6 +747,12 @@ void Renderer::Impl::recordStreamUpdate(VkCommandBuffer cmd, const FrameData &fr
   constants.coords = s.coords.address;
   constants.instances = placedInstances.address;
   constants.cells = cells.address;
+  constants.geo = geoBuffer.address;
+  if (geo) {
+    constants.geoSize[0] = geo->width;
+    constants.geoSize[1] = geo->height;
+    constants.geoSize[2] = geo->ratio;
+  }
   constants.field = placementField(field);
   constants.seed = s.seed;
   constants.staticCount = placedCount;
@@ -796,7 +818,7 @@ void Renderer::Impl::checkStreamUpdate(const FrameData &frame, uint32_t updates)
       bool recordOk = c.instanceCount <= pointCount && c.firstInstance == placedCount + start &&
                       coords[2 * (update.record + k)] == update.cellX &&
                       coords[2 * (update.record + k) + 1] == update.cellZ;
-      compareRun(heightfield, s.layerList[k], s.patterns[k], s.seed, update.cellX, update.cellZ,
+      compareRun(heightfield, geo ? &*geo : nullptr, s.layerList[k], s.patterns[k], s.seed, update.cellX, update.cellZ,
                  k, ring + start, std::min(c.instanceCount, pointCount), tags + start, stats);
       if (recordOk) {
         const auto [minY, maxY] = instanceHeights(ring + start, c.instanceCount, s.spheres, true);
@@ -846,5 +868,16 @@ Renderer::StreamStats Renderer::streamStats() const {
 }
 
 uint32_t Renderer::placedInstanceCount() const { return impl_->placedCount; }
+
+void Renderer::setGeoChannels(const GeoChannels &geo) {
+  Impl &r = *impl_;
+  if (!geoMatches(geo, r.heightfield)) {
+    throw std::runtime_error("setGeoChannels: the channels do not match the terrain");
+  }
+  check(vkDeviceWaitIdle(r.device.device), "vkDeviceWaitIdle");
+  r.destroyBuffer(r.geoBuffer);
+  r.geo = geo;
+  r.geoBuffer = r.uploadStorage(geo.texels.data(), geo.texels.size());
+}
 
 } // namespace meridian

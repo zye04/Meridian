@@ -1407,7 +1407,7 @@ Renderer::~Renderer() {
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->clusterNodePool, &impl_->clusterLevelPool, &impl_->nodeQueues,
         &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
-        &impl_->terrainPyramid, &impl_->placedInstances, &impl_->cells, &impl_->chunks,
+        &impl_->terrainPyramid, &impl_->geoBuffer, &impl_->placedInstances, &impl_->cells, &impl_->chunks,
         &impl_->prototypeTable, &impl_->prototypeMeshTable, &impl_->tlasRecords}) {
     impl_->destroyBuffer(*buffer);
   }

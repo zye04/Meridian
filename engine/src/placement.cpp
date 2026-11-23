@@ -180,7 +180,7 @@ Factors densityAtFixed(const Heightfield &heights, const GeoChannels *geo,
           : nullptr;
   const int32_t h = at(i, j), dx = at(i1, j) - at(i0, j), dz = at(i, j1) - at(i, j0);
   Factors factors = densityCore(rule, seed, layerSeed, x, z, h, dx, dz, texel);
-  if (parent.active) {
+  if (parent.enabled) {
     const uint32_t p =
         densityCore(parent.rule, seed, parent.layerSeed, x, z, h, dx, dz, texel).density;
     factors.density =
@@ -523,7 +523,7 @@ PlacementParent placementParent(const Heightfield &field, const PlacementLayer &
     out.layerSeed = layerSeed(layer.parent->layerId, seed);
     out.lo = static_cast<int32_t>(std::lround(std::clamp(layer.parent->lo, 0.0f, 1.0f) * 65535.0f));
     out.hi = static_cast<int32_t>(std::lround(std::clamp(layer.parent->hi, 0.0f, 1.0f) * 65535.0f));
-    out.active = 1;
+    out.enabled = 1;
   }
   return out;
 }

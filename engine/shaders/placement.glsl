@@ -19,6 +19,13 @@ struct PlacementRule {
   uint clusterAmount;
   int channels[4][3];
 };
+// Must match PlacementParent in placement.h.
+struct PlacementParent {
+  PlacementRule rule;
+  uint layerSeed;
+  int lo, hi;
+  uint enabled;
+};
 
 const uint kPlacementLayerSalt = 0x6c617972u;
 const uint kPlacementMaskSalt = 0x6d61736bu;
@@ -57,6 +64,17 @@ uint placementRamp16(int v, int lo, int hi) {
   return (n >> s) * 0xFFFFu / (d >> s);
 }
 
+// 1 - ramp(hi..lo) when lo > hi, as the mask.
+uint placementRampEither16(int v, int lo, int hi) {
+  return lo <= hi ? placementSmooth16(placementRamp16(v, lo, hi))
+                  : 0xFFFFu - placementSmooth16(placementRamp16(v, hi, lo));
+}
+
+// Byte c of a geo texel's 8 channels packed in a uvec2.
+int placementGeoByte(uvec2 texel, int c) {
+  return int(((c < 4 ? texel.x : texel.y) >> (8u * uint(c & 3))) & 0xFFu);
+}
+
 uint placementBand16(int v, int t[4]) {
   return placementMul16(placementSmooth16(placementRamp16(v, t[0], t[1])),
                         0xFFFFu - placementSmooth16(placementRamp16(v, t[2], t[3])));
@@ -89,10 +107,11 @@ uint placementFbm16(uint u, uint v, uint period, uint octaves, uint salt) {
 
 // h: the nearest sample (placementNearestSample); dx, dz: its central
 // differences (indices clamped to the grid), in sample steps. layerSeed:
-// placementLayerSeed. Returns the density 0..65535; mask: the mask factor
-// alone (it also shrinks the scale at the edge).
+// placementLayerSeed. texel: the point's geo channels (placementGeoByte).
+// Returns the density 0..65535; mask: the mask factor alone (it also
+// shrinks the scale at the edge).
 uint placementDensity(PlacementRule rule, uint seed, uint layerSeed, int x, int z, int h, int dx,
-                      int dz, out uint mask) {
+                      int dz, uvec2 texel, out uint mask) {
   dx = clamp(dx, -32767, 32767);
   dz = clamp(dz, -32767, 32767);
   int g2 = dx * dx + dz * dz;
@@ -113,6 +132,13 @@ uint placementDensity(PlacementRule rule, uint seed, uint layerSeed, int x, int 
     uint c = placementSmooth16(placementFbm16(u, v, rule.clusterPeriod, kPlacementClusterOctaves,
                                               layerSeed ^ kPlacementClusterSalt));
     density = placementMul16(density, 0xFFFFu - placementMul16(rule.clusterAmount, 0xFFFFu - c));
+  }
+  for (int r = 0; r < 4; ++r) {
+    if (rule.channels[r][0] >= 0) {
+      density = placementMul16(
+          density, placementRampEither16(placementGeoByte(texel, rule.channels[r][0]) * 256,
+                                         rule.channels[r][1], rule.channels[r][2]));
+    }
   }
   return density;
 }

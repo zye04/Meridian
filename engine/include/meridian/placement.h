@@ -137,12 +137,12 @@ struct PlacementRule {
   int32_t channels[kMaxChannelRamps][3];
 };
 // The parent ramp: the parent's rule and layer seed, lo/hi on its density
-// (0..65535; lo > hi inverts); active 0 = no parent.
+// (0..65535; lo > hi inverts); enabled 0 = no parent.
 struct PlacementParent {
   PlacementRule rule;
   uint32_t layerSeed;
   int32_t lo, hi;
-  uint32_t active;
+  uint32_t enabled;
 };
 static_assert(sizeof(PlacementField) == 20 && sizeof(PlacementRule) == 100 &&
               sizeof(PlacementParent) == 116);

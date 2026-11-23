@@ -34,10 +34,15 @@ struct PlacementLayer {
     float scaleMax;
     float sinkDepth;
     uint fullRotation;
+    PlacementParent parent;
 };
 
 layout(buffer_reference, std430) readonly buffer HeightWords {
     uint words[];
+};
+// Per geo texel its 8 channel bytes (meridian/geo.h).
+layout(buffer_reference, std430) readonly buffer GeoTexels {
+    uvec2 texels[];
 };
 layout(buffer_reference, std430) readonly buffer PlacementLayers {
     PlacementLayer layers[];
@@ -87,6 +92,7 @@ layout(push_constant) uniform PlacementConstants {
     StreamCoords coords;
     PlacedInstanceBuffer instances;
     CellBuffer cells;
+    GeoTexels geo;
     PlacementField field;
     uint seed;
     // The first ring id's index in the placed table, and the streamed
@@ -96,6 +102,7 @@ layout(push_constant) uniform PlacementConstants {
     float minHeight;
     float heightScale;
     float spacing;
+    uint geoWidth, geoHeight, geoRatio;
 } pc;
 #else
 layout(buffer_reference, std430) buffer PlacementCounts {
@@ -112,6 +119,7 @@ layout(push_constant) uniform PlacementConstants {
     PlacementCounts counts;
     PlacedInstanceBuffer instances;
     CellBuffer cells;
+    GeoTexels geo;
     PlacementField field;
     // Not an ivec2: its 8-byte alignment would open a gap after field.
     int gridFirstX;
@@ -122,6 +130,7 @@ layout(push_constant) uniform PlacementConstants {
     float minHeight;
     float heightScale;
     float spacing;
+    uint geoWidth, geoHeight, geoRatio;
 } pc;
 #endif
 
@@ -167,10 +176,24 @@ bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
     uint i1 = min(s.x + 1u, pc.field.width - 1u);
     uint j0 = s.y > 0u ? s.y - 1u : 0u;
     uint j1 = min(s.y + 1u, pc.field.height - 1u);
-    uint density = placementDensity(
-        layer.rule, pc.seed, layerSeed, p.x, p.y, heightSample(s.x, s.y),
-        heightSample(i1, s.y) - heightSample(i0, s.y),
-        heightSample(s.x, j1) - heightSample(s.x, j0), mask);
+    uvec2 texel = uvec2(0u);
+    if (pc.geoWidth != 0u) {
+        uint gi = min(s.x / pc.geoRatio, pc.geoWidth - 1u);
+        uint gj = min(s.y / pc.geoRatio, pc.geoHeight - 1u);
+        texel = pc.geo.texels[gj * pc.geoWidth + gi];
+    }
+    int h = heightSample(s.x, s.y);
+    int dx = heightSample(i1, s.y) - heightSample(i0, s.y);
+    int dz = heightSample(s.x, j1) - heightSample(s.x, j0);
+    uint density = placementDensity(layer.rule, pc.seed, layerSeed, p.x, p.y, h, dx, dz, texel,
+                                    mask);
+    if (layer.parent.enabled != 0u) {
+        uint parentMask;
+        uint parentDensity = placementDensity(layer.parent.rule, pc.seed, layer.parent.layerSeed,
+                                              p.x, p.y, h, dx, dz, texel, parentMask);
+        density = placementMul16(density, placementRampEither16(int(parentDensity),
+                                                                layer.parent.lo, layer.parent.hi));
+    }
     return placementKeep(pattern.y, density);
 }
 
