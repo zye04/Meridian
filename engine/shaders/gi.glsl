@@ -25,8 +25,9 @@ const uint kGiGroundCount = kGiGroundLevels * uint(kGiGroundTexels * kGiGroundTe
 // far-field march is the passes' main cost with --trees.
 const float kGiMaxDistance = 4000.0;
 const float kGiTreeDistance = 300.0;
-// A meadow's mean linear albedo, where the ground cache has none yet.
-const vec3 kGiGroundAlbedo = vec3(0.06, 0.09, 0.03);
+// Neutral ground albedo where the ground cache has none yet (a typical
+// vegetated ground's luminance, no hue: the hue comes from the cache).
+const vec3 kGiGroundAlbedo = vec3(0.079);
 
 struct GiLevel {
     // First column of the window (world column = floor(x / spacing)); the

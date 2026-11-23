@@ -4242,3 +4242,29 @@ Rejected: percentile-only bounds (a closed canopy with no sunflecks or sky
 in view has no bright pixels to anchor on) and per-biome authored clamps
 (the light already says how open the place is). Cost: one log2 in a
 one-thread pass, a few ALU ops in sky_irradiance.comp.
+
+## GI reads material albedo (2026-11-23)
+
+Principle (materials fidelity spec): the engine lights whatever material it
+is given, no asset-specific constants. `gi_probes.comp` blended foliage
+hits toward a fixed `kLeafAlbedo` (0.09, 0.14, 0.04) and uncached ground
+hits used a fixed meadow albedo, so any other leaf asset, autumn palette or
+planet lit as this beech/meadow. Now `farFieldTransmittanceAlbedo`
+(farfield.glsl) returns, besides transmittance, the mean palette albedo
+along the ray weighted by what each voxel absorbed: per segment
+`T (1 - exp(-sigma dt))` times the voxel's palette entry, summed and divided
+by `1 - T`. It shares the march with `farFieldTransmittance` (and
+`farMarchCell`): the body is `farFieldMarch` / `farMarchCellImpl` with a
+`const bool wantAlbedo`, false in the existing wrappers, so their code is
+unchanged after constant folding. The heuristic (half the crown's leaves
+sunlit, 0.5 weights) stays; it is #30's. Ground fallback (no cache texel
+yet) is now neutral grey 0.079, the Rec.709 luminance of the old meadow
+colour; the terrain material offers no cheap mean albedo in these passes,
+and the cache supplies the hue once it has data. Measured (Release, --trees --gi probes, 2560x1440, before -> after): edge
+OKLab mean L 0.256 -> 0.239, p50 0.099 -> 0.081, `gi probes` 1.26 -> 1.33 ms;
+interior mean L 0.204 -> 0.152, p5 0.102 -> 0.067, p50 0.175 -> 0.118, 1.13 ->
+1.18 ms; EV100 unchanged (10.60). The baked leaf albedo is darker than the
+old constant (0.09, 0.14, 0.04), so the GI shade is darker and less green:
+edge trunk with micro=0 rgb/Y 0.71 1.10 0.86 -> 0.77 1.06 1.11. Whether the
+shade is now too dark is the lighting heuristic's (#30) and the albedo
+audit's question, not tuned here.

@@ -22,8 +22,6 @@ layout(local_size_x = 64) in;
 
 const uint kRays = 64u;
 const float kHysteresis = 0.95;
-// Reflected plus transmitted: a canopy seen from below glows green.
-const vec3 kLeafAlbedo = vec3(0.09, 0.14, 0.04);
 
 shared vec3 partial[4][kRays];
 shared bool traced;
@@ -127,13 +125,14 @@ void main() {
         radiance = skyLuminance(atmospherePosition(origin), direction) * clouds.a + clouds.rgb;
     }
     if (pc.scene.farFieldEnabled != 0u) {
-        float transmittance = farFieldTransmittance(farField, origin, direction, 0.0,
-                                                    hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance,
-                                                    false);
+        vec3 foliageAlbedo;
+        float transmittance = farFieldTransmittanceAlbedo(
+            farField, origin, direction, 0.0,
+            hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance, foliageAlbedo);
         // Leaves above the probe are sunlit more often than the probe is:
         // about half of a crown's leaves see the sun.
         float leafSun = mix(canopySun, 0.5, max(direction.y, 0.0));
-        vec3 leaf = kLeafAlbedo / kPi * (sunAtProbe * (0.5 * leafSun * max(sun.y, 0.0)) +
+        vec3 leaf = foliageAlbedo / kPi * (sunAtProbe * (0.5 * leafSun * max(sun.y, 0.0)) +
                                          0.5 * skyIrradiance);
         radiance = mix(leaf, radiance, transmittance);
     }

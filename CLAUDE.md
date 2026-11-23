@@ -603,8 +603,10 @@ LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
 that is stale, never traced or in this frame's share (hashed over columns and
 slices: 1/8 of the finest level, 1/16 of the next, 1/32 of the coarser); L1 SH
 with hysteresis 0.95, also written packed as half floats for the shading;
-ground hits read last frame's cache; leaves hit along a ray glow green
-(reflected + transmitted sun); read by the scene passes) -> gi ground
+ground hits read last frame's cache (uncached: a neutral grey albedo);
+foliage along a ray (`farFieldTransmittanceAlbedo`: the far-field march
+also returns the absorbed-weighted mean palette albedo, so the glow takes
+the baked material's colour; reflected + transmitted sun); read by the scene passes) -> gi ground
 (gi_ground.comp relights a quarter of the ground cache's texels per frame,
 plus new or stale ones, with this frame's probes) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray

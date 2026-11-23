@@ -200,10 +200,14 @@ const uint kFarMaxCellSteps = 512u;
 // column's own vertical lattice), one voxel segment per step in one loop
 // (nested loops cost registers in the shaders that inline this). Returns
 // where the optical depth reaches `limit` (hitVoxel: the voxel there), or
-// -1 if it doesn't.
-float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin, vec3 direction,
-                   float tStart, float tEnd, float limit, inout float opticalDepth,
-                   out uint hitVoxel) {
+// -1 if it doesn't. With wantAlbedo (a constant at every call site, so the
+// plain march compiles unchanged) each segment also adds its absorbed share,
+// exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette albedo to
+// albedoSum.
+float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
+                       vec3 direction, float tStart, float tEnd, float limit,
+                       inout float opticalDepth, out uint hitVoxel, const bool wantAlbedo,
+                       inout vec3 albedoSum) {
     float v = farVoxelSize(level);
     int n = int(kBrickEdge * farColumnsPerCell(level));
     ivec2 lo = ivec2(cell) * n;
@@ -248,6 +252,11 @@ float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
                                         brickVoxelIndex(uint(voxel.x), uint(k), uint(voxel.y)));
             float extinction = voxelExtinction(packed);
             float segment = extinction * max(end - a, 0.0);
+            if (wantAlbedo) {
+                float taken = min(segment, limit - opticalDepth);
+                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) *
+                             farField.field.palette.albedo[voxelAlbedo(packed)].rgb;
+            }
             if (opticalDepth + segment >= limit) {
                 hitVoxel = packed;
                 return a + (limit - opticalDepth) / extinction;
@@ -279,6 +288,14 @@ float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
     return -1.0;
 }
 
+float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin, vec3 direction,
+                   float tStart, float tEnd, float limit, inout float opticalDepth,
+                   out uint hitVoxel) {
+    vec3 unused = vec3(0.0);
+    return farMarchCellImpl(farField, cell, level, origin, direction, tStart, tEnd, limit,
+                            opticalDepth, hitVoxel, false, unused);
+}
+
 // Rays march L0 for their first 256 m, L1 to 1 km, L2 beyond. Must match
 // kFarRayLevelEnd in farfield.h.
 const float kFarRayLevelEnd0 = 256.0;
@@ -296,9 +313,11 @@ const uint kFarMaxRaySteps = 1024u;
 // coarser; otherwise it descends, and a cell the ray passes through at
 // canopy height marches its bricks at the ray's level (by distance).
 // skipTlasCells: M2b skips the cells its TLAS holds; in M2a no far ray
-// traces trees in the TLAS, so there is nothing to skip.
-float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
-                            float startDistance, float maxDistance, bool skipTlasCells) {
+// traces trees in the TLAS, so there is nothing to skip. wantAlbedo: see
+// farMarchCellImpl; albedoSum is then the absorbed-weighted albedo sum.
+float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                    float startDistance, float maxDistance, bool skipTlasCells,
+                    const bool wantAlbedo, inout vec3 albedoSum) {
     // Heights (canopy extents included) relative to heightBase from here on.
     float heightBase = farField.field.heightBase;
     uint levels = farField.field.pyramidLevels;
@@ -365,8 +384,9 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
                                                : tExit;
                 float b = min(tExit, levelEnd);
                 uint voxel;
-                if (farMarchCell(farField, uvec2(cell), level, origin, direction, t, b,
-                                 kFarOpaqueDepth, opticalDepth, voxel) >= 0.0) {
+                if (farMarchCellImpl(farField, uvec2(cell), level, origin, direction, t, b,
+                                     kFarOpaqueDepth, opticalDepth, voxel, wantAlbedo,
+                                     albedoSum) >= 0.0) {
                     return 0.0;
                 }
                 if (b < tExit) {
@@ -395,6 +415,24 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
         t = tExit;
     }
     return exp(-opticalDepth);
+}
+
+float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                            float startDistance, float maxDistance, bool skipTlasCells) {
+    vec3 unused = vec3(0.0);
+    return farFieldMarch(farField, worldOrigin, direction, startDistance, maxDistance,
+                         skipTlasCells, false, unused);
+}
+
+// Transmittance plus the mean albedo of what the ray crossed, weighted by the
+// light each voxel absorbed (a ray that crosses nothing returns albedo 0).
+float farFieldTransmittanceAlbedo(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                                  float startDistance, float maxDistance, out vec3 albedo) {
+    vec3 sum = vec3(0.0);
+    float transmittance = farFieldMarch(farField, worldOrigin, direction, startDistance,
+                                        maxDistance, false, true, sum);
+    albedo = sum / max(1.0 - transmittance, 1e-6);
+    return transmittance;
 }
 
 // ------------------------------------------------------------ Sun shadow map
