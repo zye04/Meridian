@@ -615,6 +615,48 @@ void cookHeightfield(const std::filesystem::path &input, uint32_t width,
               height, field.minHeight, field.minHeight + field.heightScale * 65535.0f);
 }
 
+// Mean linear colour of a colour texture's base level, alpha-weighted, read
+// the way the renderer reads it (a KTX2 transcoded by Basis Universal) or as
+// the cook's source PNG, so the two can be compared (albedo audit).
+void printTextureStats(const std::filesystem::path &path) {
+  basist::basisu_transcoder_init();
+  basisu::image image;
+  if (path.extension() == ".ktx2") {
+    std::ifstream stream(path, std::ios::binary);
+    const std::vector<uint8_t> file{std::istreambuf_iterator<char>(stream), {}};
+    basist::ktx2_transcoder transcoder;
+    if (!transcoder.init(file.data(), static_cast<uint32_t>(file.size())) ||
+        !transcoder.start_transcoding()) {
+      throw std::runtime_error("not a valid Basis Universal KTX2 file");
+    }
+    image.resize(transcoder.get_width(), transcoder.get_height());
+    if (!transcoder.transcode_image_level(0, 0, 0, image.get_ptr(), image.get_total_pixels(),
+                                          basist::transcoder_texture_format::cTFRGBA32)) {
+      throw std::runtime_error("KTX2 transcoding failed");
+    }
+  } else if (!basisu::load_png(path.string().c_str(), image)) {
+    throw std::runtime_error("cannot read " + path.string());
+  }
+  const auto linear = [](uint8_t v) {
+    const double c = v / 255.0;
+    return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+  };
+  std::array<double, 3> sum{};
+  double weight = 0.0;
+  for (uint32_t i = 0; i < image.get_total_pixels(); ++i) {
+    const basisu::color_rgba &p = image.get_ptr()[i];
+    const double a = p.a / 255.0;
+    for (int c = 0; c < 3; ++c) {
+      sum[c] += a * linear(p[c]);
+    }
+    weight += a;
+  }
+  const double r = sum[0] / weight, g = sum[1] / weight, b = sum[2] / weight;
+  std::printf("%s %ux%u rgb %.4f %.4f %.4f Y %.4f coverage %.3f\n", path.string().c_str(),
+              image.get_width(), image.get_height(), r, g, b,
+              0.2126 * r + 0.7152 * g + 0.0722 * b, weight / image.get_total_pixels());
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -623,6 +665,17 @@ int main(int argc, char **argv) {
       {"opacity", Usage::Data}};
   const bool texture = argc == 5 && std::strcmp(argv[1], "--texture") == 0 &&
                        usages.contains(argv[4]);
+  if (argc >= 3 && std::strcmp(argv[1], "--stats") == 0) {
+    try {
+      for (int i = 2; i < argc; ++i) {
+        printTextureStats(argv[i]);
+      }
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "error: %s\n", error.what());
+      return 1;
+    }
+    return 0;
+  }
   if (argc == 7 && std::strcmp(argv[1], "--heightfield") == 0) {
     try {
       cookHeightfield(argv[2], static_cast<uint32_t>(std::stoul(argv[3])),
@@ -659,7 +712,8 @@ int main(int argc, char **argv) {
                  "       meridian-cook --heightfield <in.f32> <width> <height> "
                  "<spacing> <out.height>\n"
                  "       meridian-cook --tree <in.gltf> <output-dir> --triangles <n> "
-                 "[--bark-texture <dir>]\n");
+                 "[--bark-texture <dir>]\n"
+                 "       meridian-cook --stats <file.ktx2|.png>...\n");
     return 2;
   }
   try {

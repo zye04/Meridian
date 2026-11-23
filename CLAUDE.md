@@ -48,6 +48,7 @@ tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate tabl
 tools/motion-clarity.sh build-release out-dir    # in-motion jitter (frame 120 vs 121, same pose) + smear vs still at user speeds
 ./build/tools/cook/meridian-cook in.gltf assets/Name   # PNG/JPEG -> KTX2 glTF (bakes a lone node's rotation, scale + vertical offset)
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
+./build/tools/cook/meridian-cook --stats a.ktx2 a.png   # mean linear colour (alpha-weighted) as the renderer transcodes it vs the source
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
