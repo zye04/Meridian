@@ -4289,3 +4289,24 @@ Release, 2560x1440, `--trees --gi probes`, after #31: edge mean L 0.241 ->
 olive before #31); interior 0.158 -> 0.162 (the floor has no crown term;
 its shade is 1.5-2.7% of the sunflecks, inside the 1.5-5% measured for
 closed beech canopies). GPU unchanged (gi probes 1.18 / 1.33 ms).
+
+## GI probes on by default (2026-11-23)
+
+User decision after the #31 and #30 fixes. Without GI the forest floor gets
+the open sky's ambient (10-17% of the sunflecks, blue-grey); with the
+probes it sits at 1.5-2.7%, inside the 1.5-5% measured under closed beech
+canopies, and nothing else in the engine gives canopy occlusion or bounce.
+`--gi off` stays as the A/B and the fallback for weaker GPUs (crown sky
+visibility is then the only canopy occlusion). Release, DLAA, 2560x1440:
+- Cost: forest interior +1.7 ms, edge +2.2 ms (gi probes 1.1-1.3, gi
+  ground 0.3, gi albedo <0.1, scene early +0.2-0.45); the gate views
+  (meadow, beech scatter, no forest) +0.5 ms (probes 0.34, ground 0.09).
+- Motion (tools/motion-clarity.sh forest rows, GI off -> on): sharpness
+  ratio to the still 0.90 / 0.88 / 0.91 -> 0.89 / 0.86 / 0.91 (side 5,
+  side 30, turn 1); jitter and error lower with GI, partly because the
+  frame is darker.
+- Motion gates with GI on: laplacian fwd5 ground 0.1271, side5 0.1283,
+  fwd5 beech 0.2837, pitch 0.1306; shimmer crown 1.57, shadow 0.25: all
+  pass. SSIM fwd5 ground 0.972 stays below its 0.98 minimum, the
+  pre-existing failure under DLSS (backlog row; 0.959-0.960 recorded
+  there).

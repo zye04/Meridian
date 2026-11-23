@@ -75,32 +75,22 @@ Done and on main (2026-11-23):
   `research/2026-11-23-gi-foliage-{deep-research,triage}.md`); #32 filed
   (leaf transmission vs KHR_materials_diffuse_transmission).
 
-WIP, branch `g7` only (NOT on main): **GI on by default** (user approved
-2026-11-23): `game/src/main.cpp` `gi = true`, CLAUDE.md, backlog rows.
-Motion gates were running on it when the session paused:
-`tools/motion-gates.sh build-release .superpowers/g7/gates-gi` (output in
-`.superpowers/g7/gates-gi.txt`; if incomplete, re-run). To finish: check
-every gate passes (absolute minimums, decisions.md "motion gates"); add a
-decisions.md entry "GI probes on by default (2026-11-23)" with the cost
-(+1.7 ms interior, +2.2 ms edge, motion rows unchanged ratio,
-`.superpowers/g7/clarity-{off,gi}.txt`) and the gate table; Debug run
-once; rebase on origin/main, ff-push to main; update "State of main"
-below (it still says GI off).
+- GI probes on by default (user approved; motion gates pass except the
+  pre-existing SSIM fwd5 failure, decisions.md "GI probes on by default").
 
 Next, in order (agreed with the user):
-1. Finish the GI default (above).
-2. #32: leaf transmission per KHR (front (1 - f) base colour, back f);
+1. #32: leaf transmission per KHR (front (1 - f) base colour, back f);
    cook calibration of the factor (measured beech tau/rho ~2) is
    materials-lane work. Before the bitmask pass: it changes leaf
    brightness everywhere.
-3. Screen-space visibility-bitmask pass (completes the hybrid GI, covers
+2. Screen-space visibility-bitmask pass (completes the hybrid GI, covers
    AO #2): write a short plan first and ask the user (structural).
    Parameters from the triage: radius <= 1.5 m, sector-masked probe fill,
    material-aware thickness, spatial-first filtering, ~1 ms budget.
-4. G5 (#5) contact/micro shadows, tuned on the GI image (Bend-style
+3. G5 (#5) contact/micro shadows, tuned on the GI image (Bend-style
    deterministic march lead; "raster leaf shadow blobby" out of scope,
    note on #5).
-5. #30 remainder: intra-crown sun from the prototype voxels (replaces
+4. #30 remainder: intra-crown sun from the prototype voxels (replaces
    `leafSun`), then recollision multi-scatter.
 - GI colour check from the triage: closed forest shade ~(0.83, 1, 0.62),
   woodland shade ~(0.64, 1, 1.65) linear RGB normalized to G (Chiao 2000).
@@ -161,7 +151,7 @@ Native 1440p, DLSS DLAA default since 2026-11-22 (own stable TAA = fallback); ra
 `--fov` default 70 deg horizontal; Megascans Trees (alder, beech,
 hornbeam, all variants) under `--trees` (forest edge ~16 ms, #10);
 voxel trees; clouds with outline (default 1); valley-anchored haze; GI
-probes off by default; benchmark route + resemblance metric tools.
+probes on by default (2026-11-23); benchmark route + resemblance metric tools.
 
 ## Unreal
 

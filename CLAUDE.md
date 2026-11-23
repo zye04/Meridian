@@ -203,7 +203,7 @@ voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
 voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (with `--gi probes`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (with `--gi probes`), contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
@@ -308,7 +308,9 @@ than 1 degree off the built map falls back to the per-ray brick march);
 `tlas` traces every tree for every receiver (legacy A/B, to go with the
 TLAS; also what `--far-field off` does). Debug prints `far shadow map check:` (GPU map vs the CPU
 replica) and the first build's ms.
-`--gi off|probes` (default off, until the look is accepted): `probes`
+`--gi off|probes` (default probes since 2026-11-23; off is the A/B and
+the fallback for weaker GPUs, where crown sky visibility is the only canopy
+occlusion of ambient): `probes`
 lights the ambient term from global-illumination probes (spec
 `docs/superpowers/specs/2026-11-20-gi-design.md`): a camera-centred
 clipmap (5 levels, 2-32 m columns, 48^2 columns x 8 slices above the
@@ -601,7 +603,7 @@ transmittance; one texel of every 2x2 block per frame, all when the
 history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
 clouds over it integrated into the scene's ambient irradiance, and the
 LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
-(only with `--gi probes`: gi_probes.comp, one 64-ray workgroup per probe
+(unless `--gi off`: gi_probes.comp, one 64-ray workgroup per probe
 that is stale, never traced or in this frame's share (hashed over columns and
 slices: 1/8 of the finest level, 1/16 of the next, 1/32 of the coarser); L1 SH
 with hysteresis 0.95, also written packed as half floats for the shading;

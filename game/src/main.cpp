@@ -631,7 +631,7 @@ struct Options {
   // Distant forest cells as voxels; off draws every tree (for A/B).
   bool farField = true;
   bool voxelFarShadows = true;
-  bool gi = false;
+  bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
   bool voxelTrees = true;
   bool occlusion = true;
