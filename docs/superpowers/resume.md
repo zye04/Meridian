@@ -54,23 +54,35 @@ Parallel terminals the user opened (check with them / `git worktree list`):
 ## G7 lane (2026-11-23, worktree `../meridian-g7`, branch `g7`)
 
 User steer 2026-11-23: leaves, voxels and lighting come before cloud
-smear. This lane runs sequentially: G7, then the GI default, then G5.
+smear. Principle (user): the engine stands without the game: no
+asset-pack knowledge in the engine, generic (glTF-standard first)
+material features, asset translation in the cook; suspect the engine's
+handling of an asset first (materials spec "Principle").
 
-- Cloud outline default 0 (user decision, 02be388, decisions.md).
-- G7 done (#7): diagnosis `research/2026-11-23-G7-grey-image.md`; fix =
-  exposure shade floor (3 EV over an open landscape's meter, user's look
-  choice). Sub-issues #28 local exposure, #29 floor sky ambient without
-  GI, #30 edge foliage black under GI. Deep research on pure-raster forest
-  lighting + triage: `research/2026-11-23-raster-lighting-*.md`.
-- Next: GI default recommendation (evidence so far: GI fixes the floor
-  ratio, ~2.5% of sun; +1.7 ms interior, +2.2 ms edge; edge foliage goes
-  black, #30). Still to run: `tools/motion-clarity.sh` forest rows with
-  `--gi probes`. Ask the user before changing the default.
-- Then G5 (#5) contact + micro shadows (measure plant bases, rocks, trunk
-  bases on .pfm; Bend-style deterministic march is the research lead).
-  Out of scope: "raster leaf shadow blobby" (leaf-geometry lane; note on #5).
+- G7 done and merged (#7, exposure shade floor 3 EV).
+- Materials spec D3-D6 decided (98c48ee on `g7`): D3 generic second
+  layer, D4 bark 4K + detail textures, D5 specular A/B first, D6 albedo
+  audit as bench step 1.
+- Albedo capture (dc477d2 on `g7`): `--capture-albedo`,
+  `tools/albedo-audit.py`. First pass: leaves match the beech atlas
+  within ~6%; trunks render 0.09-0.13 luminance against 0.03-0.06
+  (beech trunk textures) to 0.12 (branch bark): open. Region means mix
+  materials, so the fidelity gate needs a per-pixel material-ID view
+  (backlog). Capture run-to-run noise 0.46/255 on the ground view
+  (backlog).
+- GI: required for the look (user and Claude agree); stays off only
+  until #31 + #30 land. Motion rows GI on vs off: same sharpness ratio,
+  cost +1.7 ms interior, +2.2 ms edge (`research/2026-11-23-G7-grey-image.md`
+  has the floor/cost numbers).
+- #31 (GI reads the far-field material albedo, kLeafAlbedo removed):
+  lane `../meridian-gi-albedo`, branch `gi-albedo` (b097c78), adding
+  leaf transmission to the palette before merge.
+- Order: #31 -> material-ID fidelity view + trunk check -> #30 (skip the
+  crown term under GI) -> GI default on (side-by-sides, ask user) -> G5
+  contact/micro shadows tuned on the GI image (Bend-style deterministic
+  march lead; "raster leaf shadow blobby" out of scope, note on #5).
 - Captures need the headless 1440p output when the monitor sleeps
-  (memory native-1440-rule); this session created `MERIDIAN-1440`.
+  (memory native-1440-rule; `MERIDIAN-1440`).
 
 ## The work list
 
