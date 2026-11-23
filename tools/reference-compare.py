@@ -4,6 +4,7 @@ luminance of both, their ratio (reference / raster) and rgb normalized to G.
 
     reference-compare.py RASTER.pfm REFERENCE.pfm [--ev RASTER_EV REFERENCE_EV]
                          [--regions FILE --view NAME] [X0 Y0 X1 Y1 ...]
+    reference-compare.py CAPTURE.pfm --constant V   (furnace checks: ratio V / capture)
 
 Both captures are pre-exposed with their run's exposure (the EV100 each run
 prints); exposure goes as 2^-EV100, so the raster is scaled by
@@ -33,7 +34,8 @@ def chroma(rgb):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("raster")
-parser.add_argument("reference")
+parser.add_argument("reference", nargs="?")
+parser.add_argument("--constant", type=float)
 parser.add_argument("--ev", nargs=2, type=float, default=[0.0, 0.0])
 parser.add_argument("--regions")
 parser.add_argument("--view")
@@ -41,7 +43,9 @@ parser.add_argument("rects", nargs="*", type=int)
 args = parser.parse_args()
 
 raster = load_pfm(args.raster) * 2.0 ** (args.ev[0] - args.ev[1])
-reference = load_pfm(args.reference)
+if (args.reference is None) == (args.constant is None):
+    sys.exit("give REFERENCE.pfm or --constant V")
+reference = np.full_like(raster, args.constant) if args.reference is None else load_pfm(args.reference)
 if raster.shape != reference.shape:
     sys.exit(f"sizes differ: {raster.shape[1]}x{raster.shape[0]} vs "
              f"{reference.shape[1]}x{reference.shape[0]}")

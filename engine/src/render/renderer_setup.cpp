@@ -832,7 +832,7 @@ void Renderer::Impl::createMaterialSystem() {
   // Must match material.glsl and dfg_lut.comp.
   VkDescriptorSetLayoutBinding bindings[3]{};
   bindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+                 VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
   // The terrain mesh shader and the terrain normal map's generator read the
   // heightfield from it too.
   bindings[1] = {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures,
@@ -924,7 +924,8 @@ void Renderer::Impl::computeDfgLut() {
                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
   });
   vkDestroyPipeline(device.device, pipeline, nullptr);
