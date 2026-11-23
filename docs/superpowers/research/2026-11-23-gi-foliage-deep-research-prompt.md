@@ -1,0 +1,27 @@
+You are doing deep technical research for a real-time rendering engineer. Output a sourced report, not marketing.
+
+## Goal
+Make a world-space probe GI plus screen-space GI hybrid (no hardware ray tracing) light a dense temperate deciduous forest (beech, hornbeam, alder) correctly in daylight: the light under and inside tree crowns, its colour, and how coarse and fine occlusion combine. Target look: the "Chlorophyll Engine" devlog (YouTube VC_NUxbeA0E, author Toni Macaroni), whose author states a hybrid screen-space + voxel GI and a per-asset voxel opacity volume giving the optical depth of light through each crown plus light scattered between leaves.
+
+## Our engine (context, do not research it)
+Vulkan 1.3, forward shading, mesh shaders, cluster LOD, raster cascaded sun shadows, DLSS DLAA at native 1440p. GI: a camera-centred clipmap of SH L1 irradiance probes (5 levels, 2-32 m spacing, 8 slices following the terrain), 64 rays per probe traced in compute against a heightfield max pyramid and a voxel far field of the trees (4 m voxels at the finest level, each voxel with extinction, a normal and a palette albedo baked from the leaf and bark materials); a 2D ground radiance cache for bounce. A probe ray crossing foliage blends toward "leaf radiance" = albedo/pi x (sun x 0.5 x leafSun + 0.5 x sky irradiance), where leafSun = mix(probe's canopy sun transmittance, 0.5, ray direction y), a hand heuristic. Separately, every tree mesh vertex gets a "crown sky visibility" (transmittance of a uniform leaf medium filling the crown's ellipsoid along 3 rays), which multiplies ambient. A screen-space visibility-bitmask pass (Therrien et al. 2023) is designed but not built. Exposure: histogram, with a floor of 3 EV over an open landscape's meter.
+
+## What we measured (2560x1440, our engine)
+- Without GI the forest floor gets ~10-14% of open light (target from field studies of closed beech canopies: 1.5-5% PAR); with probe GI ~2.5%.
+- With GI, forest-edge foliage and trunks went near-black: the probe irradiance (which already traces the canopy) was multiplied again by the crown sky visibility. Removing the crown term restores them, but trunks then turned olive-green: the probes' foliage term used a fixed green colour. Replacing it with the voxels' baked material albedo (reflectance only) made the shade much darker; adding leaf transmission (albedo x (1 + diffuse transmission)) is in progress.
+- Rendered albedo matches the source textures (beech leaf atlas linear mean RGB 0.038 0.046 0.008; beech tiling bark 0.129 0.117 0.087), so the remaining errors are light transport, not materials.
+
+## Questions (answer each with techniques, numbers and sources)
+1. Foliage in probe/voxel GI without ray tracing: how do shipped engines and papers light vegetation that GI rays hit? Leaf single-scattering albedo (reflectance + transmittance), multiple scattering inside a crown (two-stream / SAIL / radiosity-style canopy models adapted to real time), sun visibility inside a crown from leaf area density (Beer-Lambert with leaf angle distribution, G-function), and how the Chlorophyll-style per-asset opacity volume can provide both. Concrete formulas preferred.
+2. Combining occlusion scales without double counting: coarse probe GI + per-object or per-crown occlusion + screen-space AO/GI. What do Lumen (with DFAO/SSAO), DDGI + SSAO pipelines, Frostbite, Activision, Ubisoft (Avatar: Frontiers of Pandora), Guerrilla (Horizon) and Sucker Punch (Ghost of Tsushima) do? Rules such as "short-range AO only for detail below the probe spacing", bent normals, multi-bounce fits.
+3. Visibility bitmask AO/GI combined with world-space probes: replacing the occluded share of probe light with on-screen bounce, thickness heuristics for foliage and thin trunks, half-resolution + temporal filtering under DLSS/DLAA, measured costs at 1440p, open implementations (XeGTAO-derived, GT-VBAO, engine forks), stability in motion under swaying leaves.
+4. Light leaking and darkness in probe GI under dense canopies: probe placement relative to crowns, visibility/depth tests (DDGI Chebyshev), probe relocation, how irradiance probes avoid black or overbright interiors in forests.
+5. Calibration data for the colour of canopy shade: measured spectra or RGB/chromaticity of diffuse light under deciduous canopies (how green, in visible RGB, not only red/far-red ratios), sunfleck vs shade ratios, and visible-band (R, G, B or 450/550/650 nm) reflectance and transmittance of beech, hornbeam or alder leaves (PROSPECT/LOPEX/ANGERS/EcoSIS data), beech bark, and dry beech leaf litter. Broadband vs visible values must be kept apart.
+6. Engine-side material validation: how Unity (HDRP material validator), Unreal (buffer visualization, material analyzer), Frostbite and others check albedo ranges and colour-space correctness after import; per-pixel material-ID debug views; documented albedo ranges for natural materials with their sources.
+
+## Rules
+- Prefer primary sources: papers, SIGGRAPH/GDC/HPG talks with slides, engine docs, shipped code, field-measurement papers. Give a link for every claim.
+- Mark each claim: VERIFIED (you read the source), SECONDARY (press/forum), or INFERRED (your reasoning).
+- Give costs in ms with the GPU and resolution when sources state them.
+- Say plainly when something is unknown or disputed. Do not invent numbers.
+- End with a ranked list: technique, which question it answers, expected visual gain, cost, risk, sources.
