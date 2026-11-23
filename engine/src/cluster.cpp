@@ -20,7 +20,7 @@ constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
-constexpr uint32_t kCacheVersion = (4u << 16) | MESHOPTIMIZER_VERSION;
+constexpr uint32_t kCacheVersion = (6u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
@@ -241,7 +241,8 @@ uint32_t findRoot(std::vector<uint32_t> &parent, uint32_t i) {
 // Groups are numbered in build order, so a cluster's refined group, and its
 // scale, come before the group the cluster belongs to.
 void keepLeafArea(const MeshData &mesh, ClusterLod &lod, const std::vector<int> &groupOf,
-                  const std::vector<int> &refinedOf, size_t groupCount) {
+                  const std::vector<int> &refinedOf, std::vector<LodBounds> &groups) {
+  const size_t groupCount = groups.size();
   const auto clusterVertex = [&](const Cluster &c, uint32_t t, int k) {
     return lod.vertices[c.firstVertex + lod.triangles[(c.firstTriangle + t) * 3 + k]];
   };
@@ -280,6 +281,7 @@ void keepLeafArea(const MeshData &mesh, ClusterLod &lod, const std::vector<int> 
   std::vector<Vec3> weighted(mesh.vertices.size());
   std::vector<double> weight(mesh.vertices.size());
   std::vector<uint32_t> added(mesh.vertices.size(), UINT32_MAX);
+  std::vector<float> moved(groupCount, 0.0f);
   for (size_t g = 0; g < groupCount; ++g) {
     if (scale[g] == 1.0f) {
       continue;
@@ -331,10 +333,30 @@ void keepLeafArea(const MeshData &mesh, ClusterLod &lod, const std::vector<int> 
           lod.addedPositions.push_back(pieceCenter +
                                        (mesh.vertices[id].position - pieceCenter) * scale[g]);
         }
-        const Vec3 moved = lod.addedPositions[added[id] - mesh.vertices.size()];
+        const Vec3 position = lod.addedPositions[added[id] - mesh.vertices.size()];
+        moved[g] = std::max(moved[g], length(position - mesh.vertices[lod.addedSources[added[id] - mesh.vertices.size()]].position));
         id = added[id];
-        c.boundsRadius = std::max(c.boundsRadius, length(moved - center));
+        c.boundsRadius = std::max(c.boundsRadius, length(position - center));
       }
+    }
+  }
+
+  // Scaling moves the leaves off the simplified surface, so the move counts
+  // as simplification error: a scaled level is drawn only where the move
+  // projects under the LOD threshold. Errors stay monotonic up the DAG.
+  for (size_t g = 0; g < groupCount; ++g) {
+    groups[g].error += moved[g];
+    groups[g].radius += moved[g];
+    for (size_t i : members[g]) {
+      if (refinedOf[i] >= 0) {
+        groups[g].error = std::max(groups[g].error, groups[refinedOf[i]].error);
+      }
+    }
+  }
+  for (size_t i = 0; i < lod.clusters.size(); ++i) {
+    lod.clusters[i].self = groups[groupOf[i]];
+    if (refinedOf[i] >= 0) {
+      lod.clusters[i].refined = groups[refinedOf[i]];
     }
   }
 }
@@ -402,7 +424,7 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
         refined < 0 ? LodBounds{{}, 0.0f, -1.0f} : groups[refined];
   }
   if (mesh.leaf) {
-    keepLeafArea(mesh, lod, clusterGroups, refinedGroups, groups.size());
+    keepLeafArea(mesh, lod, clusterGroups, refinedGroups, groups);
   }
   buildBvh(lod, groupRanges);
   return lod;

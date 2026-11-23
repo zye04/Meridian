@@ -500,7 +500,8 @@ TEST_CASE("leaf meshes keep their area down the cluster LOD") {
     // Without compensation the coarse cut visibly thins the crown.
     CHECK(lost.area < 0.9f * full);
     CHECK(kept.area == doctest::Approx(full).epsilon(0.1));
-    CHECK(kept.triangles == lost.triangles);
+    // The scaling's move counts as LOD error, so the cut may stay finer.
+    CHECK(kept.triangles >= lost.triangles);
   }
 }
 
