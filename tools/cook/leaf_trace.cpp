@@ -409,8 +409,20 @@ void clipToCards(const AtlasMesh &atlas, const std::vector<CardVertex> &vertices
                 normalize(v.normal);
                 outVertices.push_back(v);
               }
+              // The atlas winds every leaf one way in UV; a card whose UVs are
+              // mirrored must take them the other way to keep its own winding,
+              // which double-sided shading reads as the side its normal faces.
+              double polygonArea = 0.0;
+              for (size_t i = 0; i < polygon.size(); ++i) {
+                polygonArea += cross(polygon[i].uv, polygon[(i + 1) % polygon.size()].uv);
+              }
+              const bool flip = (polygonArea > 0.0) != (orientation > 0.0);
               for (uint32_t i = 1; i + 1 < polygon.size(); ++i) {
-                outIndices.insert(outIndices.end(), {first, first + i, first + i + 1});
+                if (flip) {
+                  outIndices.insert(outIndices.end(), {first, first + i + 1, first + i});
+                } else {
+                  outIndices.insert(outIndices.end(), {first, first + i, first + i + 1});
+                }
               }
             }
           }

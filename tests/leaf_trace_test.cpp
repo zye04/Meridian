@@ -227,6 +227,37 @@ TEST_CASE("clipToCards clips to the card") {
   CHECK(area3(out) == doctest::Approx(side * side * 4.0).epsilon(1e-4));
 }
 
+TEST_CASE("clipToCards keeps the card's winding") {
+  const auto faceNormal = [](const std::array<float, 3> &a, const std::array<float, 3> &b,
+                             const std::array<float, 3> &d) {
+    const double e[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    const double f[3] = {d[0] - a[0], d[1] - a[1], d[2] - a[2]};
+    return std::array<double, 3>{e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2],
+                                 e[0] * f[1] - e[1] * f[0]};
+  };
+  for (const bool mirrored : {false, true}) {
+    CAPTURE(mirrored);
+    Card card = squareCard();
+    if (mirrored) {
+      for (CardVertex &v : card.vertices) {
+        v.uv[0] = 1.0f - v.uv[0];
+      }
+    }
+    const auto cardNormal = faceNormal(card.vertices[0].position, card.vertices[1].position,
+                                       card.vertices[2].position);
+    const Clipped out = clip(disk(), card);
+    REQUIRE_FALSE(out.indices.empty());
+    size_t reversed = 0;
+    for (size_t t = 0; t < out.indices.size(); t += 3) {
+      const auto n = faceNormal(out.vertices[out.indices[t]].position,
+                                out.vertices[out.indices[t + 1]].position,
+                                out.vertices[out.indices[t + 2]].position);
+      reversed += n[0] * cardNormal[0] + n[1] * cardNormal[1] + n[2] * cardNormal[2] < 0.0;
+    }
+    CHECK(reversed == 0);
+  }
+}
+
 TEST_CASE("projectedCoverage of half a square") {
   using meridian::cook::projectedCoverage;
   const std::vector<std::array<float, 3>> positions = {
