@@ -22,19 +22,18 @@ import os
 import subprocess
 import sys
 
-# Matches kLeafDiffuseTransmission in tools/cook/tree.cpp: the cook's
-# transmission for a leaf whose translucency map is all white.
-LEAF_TRANSMISSION = 0.35
+# Leaf transmittance over reflectance of the leaves the albedo textures show
+# (mature summer leaves): beech over the visible range, reflectance 5.7%,
+# transmittance 6.4% (EGU2019-6557; young spring leaves ~2). The source
+# factor meridian-cook --tree reads ("the back transmits t times the base
+# colour") and translates to KHR_materials_diffuse_transmission. One value
+# per material: the Mask's B (translucency) is an artist weight, not a
+# measure.
+LEAF_TRANSMITTED_OVER_REFLECTED = 1.1
 
 
 def magick(*args):
     subprocess.run(["magick", *args], check=True)
-
-
-def fx_mean(path, expression):
-    out = subprocess.run(["magick", path, "-fx", expression, "-format", "%[fx:mean]", "info:"],
-                         check=True, capture_output=True, text=True).stdout
-    return float(out)
 
 
 def adjustments(inventory, texture):
@@ -64,7 +63,7 @@ def kind(slot):
 
 
 def build_textures(src, tex_dir, name, files, k, size, adjust):
-    """Writes <name>_color/_normal/_orm.png once; returns (paths, translucency mean)."""
+    """Writes <name>_color/_normal/_orm.png once; returns their paths."""
     color, normal, orm = (os.path.join(tex_dir, name + s + ".png") for s in ("_color", "_normal", "_orm"))
     albedo, mask, nrm = (os.path.join(src, files[r]) for r in ("Albedo", "Mask", "Normal"))
     resize = ["-resize", "%dx%d" % (size, size)]
@@ -81,21 +80,7 @@ def build_textures(src, tex_dir, name, files, k, size, adjust):
         # glTF metallicRoughness: G roughness, B metallic (0); R unused.
         magick(mask, "-alpha", "off", *resize, "-channel", "R", "-evaluate", "set", "100%",
                "-channel", "B", "-evaluate", "set", "0", "+channel", orm)
-    translucency = None
-    if k == "leaf":
-        cache = os.path.join(tex_dir, name + "_translucency.txt")
-        if not os.path.exists(cache):
-            # Mean of B over the leaves (opaque texels with B > 0.1; twigs
-            # are ~0), at 512^2: the engine has one transmission per material,
-            # and a twig's transmission is invisible behind its bark colour.
-            small = os.path.join(tex_dir, name + "_small.png")
-            magick(mask, "-alpha", "off", "-resize", "512x512", small)
-            leaf = "(r>0.5&&b>0.1)"
-            with open(cache, "w") as f:
-                f.write("%f" % (fx_mean(small, leaf + "*b") / max(fx_mean(small, leaf), 1e-6)))
-            os.remove(small)
-        translucency = float(open(cache).read())
-    return (color, normal, orm), translucency
+    return color, normal, orm
 
 
 def main():
@@ -138,7 +123,7 @@ def main():
             if len(files) != 3:
                 sys.exit("%s slot %s: missing textures %s" % (asset["name"], slot["slot"], files))
             tex_name = os.path.splitext(files["Albedo"])[0].split("_T_", 1)[-1].replace("_Albedo", "")
-            (color, normal, orm), translucency = build_textures(
+            color, normal, orm = build_textures(
                 src, tex_dir, tex_name, files, k, a.leaf_size if k == "leaf" else a.bark_size,
                 adjustments(inventory, paths["Albedo"]))
             m = {"name": slot["slot"],
@@ -150,7 +135,7 @@ def main():
                 m.update(alphaMode="MASK", alphaCutoff=0.5, doubleSided=True)
                 # Decoration cards (lichen, knots on the bark) don't transmit.
                 m["extensions"] = {"KHR_materials_diffuse_transmission": {
-                    "diffuseTransmissionFactor": LEAF_TRANSMISSION * translucency if k == "leaf" else 0.0}}
+                    "diffuseTransmissionFactor": LEAF_TRANSMITTED_OVER_REFLECTED if k == "leaf" else 0.0}}
             materials.append(m)
         gltf.update(materials=materials, images=images, textures=textures)
         gltf["extensionsUsed"] = sorted(set(gltf.get("extensionsUsed", [])) | {"KHR_materials_diffuse_transmission"})

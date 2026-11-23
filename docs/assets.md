@@ -196,8 +196,9 @@ What the export holds (verified on Black Alder and European Beech):
   (leaves ~0.42, twigs ~0), A unused. The Albedo's alpha is solid.
   `cook_ready.py` writes the base colour with R as alpha, a
   metallicRoughness map with G as roughness and metallic 0, and
-  `diffuseTransmissionFactor` = 0.35 x the mean B over the leaf texels
-  (decoration 0). That source factor means "the back transmits t times the
+  `diffuseTransmissionFactor` = 1.1 on leaves (mature beech leaves'
+  transmittance over reflectance, decisions.md #32; the Mask's B is an
+  artist weight and not used), decoration 0. That source factor means "the back transmits t times the
   base colour", not KHR's share: `meridian-cook --tree` translates it to
   KHR (`khrLeafTransmission`, tree.h: base colour scaled by 1 + t, reused
   as the transmission colour texture, factor t / (1 + t)).

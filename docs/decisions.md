@@ -4386,3 +4386,20 @@ honour the standard the engine imports; asset semantics belong to the cook.
   mean differences 1.0-1.6/255 (re-encoded textures, voxel back light).
   GPU edge 27.74 -> 27.67 ms, overview 18.57 -> 18.12, ground 20.97 ->
   20.89.
+- Calibration (Megascans Trees only): `cook_ready.py` writes t = 1.1, the
+  measured transmittance over reflectance of mature beech leaves over the
+  visible range (reflectance 5.7%, transmittance 6.4%, EGU2019-6557; young
+  spring leaves ~2, PAR ~2 in Pilarski 2008), instead of 0.35 x the Unreal
+  translucency mask (0.22 on beech). The textures show summer leaves, so
+  the transmission has to be theirs; seasons are a runtime material
+  question, not a cook value. KHR factor 0.524, leaf colour x 2.1, clamping
+  <= 0.03% of channels. Forest edge (Release, DLAA, 2560x1440): mean L
+  0.303 -> 0.361 (default sun), 0.473 -> 0.561 (sun behind, EV100 9.86 ->
+  9.87); the canopy shade reads green instead of near-black, backlit crowns
+  glow. t = 2 was tried and rejected: lime backlight and trunk B/G 0.37.
+- Open: trunks under the canopy take a yellow-green cast from the GI bounce
+  (central trunk B/G 0.63 -> 0.47 with GI probes; 0.99 / 0.95 with `--gi
+  off` before and after, so the bark and the direct light are neutral).
+  Closed-canopy shade light is ~0.62 (Chiao 2000). Whether the probes
+  over-saturate the canopy's bounce is for the reference path tracer
+  (spec 2026-11-23), not tuned by eye.
