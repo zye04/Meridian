@@ -628,6 +628,9 @@ struct Options {
   // The streamed meadow layers (grass mat, tufts, hawkbit, clover); not in the
   // TLAS, so --reference views compare without them.
   bool streamed = true;
+  // --reference: path traced samples per pixel after the --frames warm-up.
+  uint32_t referenceSamples = 0;
+  meridian::ReferenceMode referenceMode = meridian::ReferenceMode::Radiance;
   // Trees are hidden by default (--trees): no tree prototypes, no forest
   // or lone-tree layers, no forest floor in the terrain material.
   bool trees = false;
@@ -820,6 +823,25 @@ Options parseOptions(int argc, char **argv) {
                std::string(argv[i + 1]) == "off") {
       options.placement = false;
       ++i;
+    } else if (arg == "--reference") {
+      const float samples = number(i);
+      if (samples < 1.0f) {
+        throw std::runtime_error("--reference takes a sample count >= 1");
+      }
+      options.referenceSamples = static_cast<uint32_t>(samples);
+    } else if (arg == "--reference-mode") {
+      const std::string value = text(i);
+      using meridian::ReferenceMode;
+      const std::pair<const char *, ReferenceMode> modes[] = {
+          {"radiance", ReferenceMode::Radiance}, {"albedo", ReferenceMode::Albedo},
+          {"white", ReferenceMode::FurnaceWhite}, {"leaf", ReferenceMode::FurnaceLeaf},
+          {"sun", ReferenceMode::FurnaceSun}};
+      const auto *found = std::find_if(std::begin(modes), std::end(modes),
+                                       [&](const auto &m) { return value == m.first; });
+      if (found == std::end(modes)) {
+        throw std::runtime_error("--reference-mode takes radiance, albedo, white, leaf or sun");
+      }
+      options.referenceMode = found->second;
     } else if (arg == "--streamed") {
       const std::string value = text(i);
       if (value != "on" && value != "off") {
@@ -871,7 +893,8 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --streamed on|off, --trees, --no-occlusion, "
+                               "--scatter n, --placement off, --streamed on|off, --reference spp, "
+                               "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-trees on|off, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -909,6 +932,13 @@ Options parseOptions(int argc, char **argv) {
   }
   if (options.albedoCapturePath && !options.capturePath) {
     throw std::runtime_error("--capture-albedo needs --capture");
+  }
+  if (options.referenceSamples > 0 &&
+      (!options.capturePath || options.benchmarkSeconds > 0.0f || options.captureSequence > 0 ||
+       options.cameraVelocity || options.cameraAngularVelocity || options.albedoCapturePath)) {
+    throw std::runtime_error("--reference needs --capture, without --benchmark, "
+                             "--capture-sequence, --capture-albedo or camera velocities "
+                             "(the reference's albedo: --reference-mode albedo)");
   }
   return options;
 }
@@ -1153,11 +1183,14 @@ int main(int argc, char **argv) {
   bool walking = false;
   bool fWasDown = false;
   bool benchmarkDone = false;
+  Clock::time_point referenceStart;
   bool benchmarkWritten = true;
   Clock::time_point benchmarkStart;
 
   while (!window.shouldClose() &&
-         (interactive || (benchmark ? !benchmarkDone : totalFrames < options.frames))) {
+         (interactive || (benchmark ? !benchmarkDone
+                                   : totalFrames < options.frames + static_cast<int>(
+                                                                     options.referenceSamples)))) {
     auto now = Clock::now();
     const float frameMs = std::chrono::duration<float, std::milli>(now - lastFrame).count();
     // Clamped so a long stall (loading, dragging the window) doesn't
@@ -1213,7 +1246,12 @@ int main(int argc, char **argv) {
           scriptedEnd, *options.cameraVelocity, kScriptedStep,
           options.frames - totalFrames);
     }
-    if (options.capturePath && totalFrames == options.frames) {
+    if (options.referenceSamples > 0 && totalFrames == options.frames + 1) {
+      renderer.beginReference(options.referenceMode);
+      referenceStart = Clock::now();
+    }
+    if (options.capturePath &&
+        totalFrames == options.frames + static_cast<int>(options.referenceSamples)) {
       renderer.requestCapture(*options.capturePath);
       if (options.albedoCapturePath) {
         renderer.requestCapture(*options.albedoCapturePath, meridian::CaptureSource::DiffuseAlbedo);
@@ -1248,7 +1286,10 @@ int main(int argc, char **argv) {
         perf.draw(gradePanel.visible());
       }
     }
-    const float frameSeconds = interactive || benchmark ? deltaSeconds : kScriptedStep;
+    // Game time (wind, clouds, weather) stands still while the reference accumulates.
+    const float frameSeconds = interactive || benchmark ? deltaSeconds
+                               : totalFrames > options.frames ? 0.0f
+                                                              : kScriptedStep;
     gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
     weather.update(gameSeconds);
     renderer.setWeather(weather);
@@ -1281,6 +1322,11 @@ int main(int argc, char **argv) {
 
   if (options.weatherMapPath) {
     renderer.dumpWeatherMap(*options.weatherMapPath);
+  }
+  if (options.referenceSamples > 0) {
+    std::printf("Reference: %u spp, total %.1f s, noise %.2f%%\n", renderer.referenceSamples(),
+                std::chrono::duration<double>(Clock::now() - referenceStart).count(),
+                100.0 * renderer.referenceNoise());
   }
   if (!interactive) {
     renderer.printAmbient();

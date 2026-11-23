@@ -10,6 +10,12 @@
 #include "clouds.glsl"
 #include "gi.glsl"
 
+// The pixel the froxel lookups (aerial perspective) take: the fragment's,
+// or a compute shader's own (reference.comp defines it first).
+#ifndef SHADING_PIXEL
+#define SHADING_PIXEL gl_FragCoord.xy
+#endif
+
 const float kGroundAlbedo = 0.1;
 const float kMinPerceptualRoughness = 0.045;
 
@@ -454,7 +460,7 @@ vec3 applyAerialPerspective(vec3 luminance, vec3 relativePosition, float coverag
     }
     float w = sqrt(slice / kAerialPerspectiveSlices);
     vec4 haze = textureLod(aerialPerspectiveLut,
-                           vec3(gl_FragCoord.xy * pc.scene.inverseResolution, w), 0.0);
+                           vec3(SHADING_PIXEL * pc.scene.inverseResolution, w), 0.0);
     transmittance = mix(1.0, haze.a, weight);
     return luminance * transmittance + haze.rgb * (weight * coverage);
 }

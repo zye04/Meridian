@@ -1,0 +1,112 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+// Reference path tracer (--reference): one sample per pixel per dispatch,
+// accumulated over frames into sum / count, written to the upscaler's
+// output so the capture path saves it. Surfaces only: the sky, haze, cloud
+// shadow and sun transmittance are the raster path's lookups.
+#define SURFACE_ALL
+#define MERIDIAN_CUSTOM_PUSH_CONSTANTS
+#define SHADING_PIXEL shadingPixel
+#include "common.glsl"
+
+// Must match ReferenceConstants in gpu_types.h.
+layout(buffer_reference, std430) buffer ReferenceAccumulation {
+    vec4 pixels[];
+};
+
+layout(push_constant) uniform ReferenceConstants {
+    SceneBuffer scene;
+    // Per pixel: rgb sum, sample count in alpha; luminance sum of squares in
+    // the second's red (noise).
+    ReferenceAccumulation sum;
+    ReferenceAccumulation squares;
+    uint frame;
+    // kReferenceRadiance, kReferenceAlbedo, the furnace modes.
+    uint mode;
+    vec3 cameraRight;
+    float tanHalfFovY;
+    vec3 cameraUp;
+    float aspect;
+    vec3 cameraForward;
+    uint width;
+    uint height;
+} pc;
+
+vec2 shadingPixel;
+
+#include "atmosphere.glsl"
+#include "material.glsl"
+#include "terrain.glsl"
+#include "lighting.glsl"
+#include "placement.glsl"
+#include "surface.glsl"
+#include "ray_hit.glsl"
+
+layout(set = 2, binding = 0, rgba16f) uniform writeonly image2D outputImage;
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+const uint kReferenceRadiance = 0u;
+const uint kReferenceAlbedo = 1u;
+const float kRayLength = 1.0e6;
+
+// Uniform in [0, 1) from the pixel, the frame and a per-use index.
+vec2 random2(uvec2 pixel, uint index) {
+    uvec3 h = pcg3d(uvec3(pixel, pc.frame * 64u + index));
+    return vec2(h.xy >> 8u) * (1.0 / 16777216.0);
+}
+
+// The hit's material as the raster path evaluates it.
+Surface hitSurface(RayHit hit) {
+    surfaceIn.relativePosition = hit.position - pc.scene.cameraPosition;
+    surfaceIn.worldPosition = hit.position;
+    surfaceIn.dpdx = vec3(0.0);
+    surfaceIn.dpdy = vec3(0.0);
+    surfaceIn.uv = hit.uv;
+    surfaceIn.tangent = hit.tangent;
+    surfaceIn.tint = hit.tint;
+    surfaceIn.height = hit.height;
+    surfaceIn.streamFade = 1.0;
+    surfaceIn.crownVisibility = 1.0;
+    if (hit.terrain) {
+        vec3 normal = terrainNormal();
+        return pc.scene.terrain.enabled != 0u ? terrainSurface(normal) : proceduralTerrain(normal);
+    }
+    return materialSurface(pc.scene.materials.materials[hit.materialIndex], hit.normal);
+}
+
+// What mesh.frag writes to the diffuse albedo guide: the reflected share.
+vec3 diffuseAlbedo(RayHit hit, Surface s) {
+    vec3 albedo = s.baseColor * (1.0 - s.metallic);
+    if (!hit.terrain) {
+        albedo *= 1.0 - pc.scene.materials.materials[hit.materialIndex].diffuseTransmission;
+    }
+    return albedo;
+}
+
+void main() {
+    uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (pixel.x >= pc.width || pixel.y >= pc.height) {
+        return;
+    }
+    vec2 jitter = random2(pixel, 0u);
+    shadingPixel = vec2(pixel) + jitter;
+    vec2 ndc = (vec2(pixel) + jitter) / vec2(pc.width, pc.height) * 2.0 - 1.0;
+    vec3 direction = normalize(pc.cameraForward + ndc.x * pc.tanHalfFovY * pc.aspect * pc.cameraRight -
+                               ndc.y * pc.tanHalfFovY * pc.cameraUp);
+    vec3 origin = pc.scene.cameraPosition;
+
+    vec3 value = vec3(0.0);
+    RayHit hit = traceClosest(origin, direction, kRayLength);
+    if (pc.mode == kReferenceAlbedo) {
+        value = hit.hit ? diffuseAlbedo(hit, hitSurface(hit)) : vec3(0.5);
+    }
+
+    uint index = pixel.y * pc.width + pixel.x;
+    vec4 sum = pc.sum.pixels[index] + vec4(value, 1.0);
+    float luminance = dot(value, vec3(0.2126, 0.7152, 0.0722));
+    pc.sum.pixels[index] = sum;
+    pc.squares.pixels[index].r += luminance * luminance;
+    imageStore(outputImage, ivec2(pixel), vec4(sum.rgb / sum.a, 1.0));
+}

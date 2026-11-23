@@ -1076,6 +1076,27 @@ struct ContactShadowConstants {
 };
 static_assert(sizeof(ContactShadowConstants) == 16);
 
+// Must match ReferenceConstants in reference.comp.
+struct ReferenceConstants {
+  VkDeviceAddress sceneBuffer = 0;
+  VkDeviceAddress sum = 0;
+  VkDeviceAddress squares = 0;
+  uint32_t frame = 0;
+  uint32_t mode = 0;
+  float cameraRight[3] = {};
+  float tanHalfFovY = 0.0f;
+  float cameraUp[3] = {};
+  float aspect = 0.0f;
+  float cameraForward[3] = {};
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t pad = 0;
+};
+static_assert(offsetof(ReferenceConstants, cameraRight) == 32);
+static_assert(offsetof(ReferenceConstants, cameraUp) == 48);
+static_assert(offsetof(ReferenceConstants, cameraForward) == 64);
+static_assert(offsetof(ReferenceConstants, height) == 80);
+
 // Must match depth_pyramid.comp.
 struct PyramidConstants {
   int32_t sourceSize[2] = {};

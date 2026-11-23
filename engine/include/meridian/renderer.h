@@ -41,6 +41,10 @@ struct InstanceId {
 
 // How a material's alpha (base color alpha) is used, as in glTF.
 enum class ShadowMode { Raster, Rt };
+// What the reference path tracer accumulates (renderer_reference.cpp):
+// radiance, the primary hit's diffuse albedo (as the albedo capture), or a
+// furnace check of the integrator.
+enum class ReferenceMode { Radiance, Albedo, FurnaceWhite, FurnaceLeaf, FurnaceSun };
 
 enum class AlphaMode {
   Opaque,
@@ -333,6 +337,15 @@ public:
   // maps of the placed and hand-placed geometry; Rt traces them in the TLAS
   // (for A/B comparisons).
   void setShadowMode(ShadowMode mode);
+  // Reference path tracer: from the next draw on, every frame adds one path
+  // traced sample per pixel to an accumulation that replaces the upscaler's
+  // output (so captures save it); exposure stops adapting and bloom is
+  // skipped. Clears any earlier accumulation.
+  void beginReference(ReferenceMode mode);
+  uint32_t referenceSamples() const;
+  // Median over 16x16-pixel tiles of the relative standard error of the
+  // tile's mean luminance (waits for the GPU).
+  double referenceNoise();
   // Cascade renders so far (a frame can render several).
   uint32_t sunShadowRenderCount() const;
   // The slowest sun shadows pass over the run, in ms.

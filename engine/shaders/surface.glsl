@@ -45,7 +45,11 @@ vec3 terrainNormal() {
     Terrain terrain = pc.scene.terrain;
     vec2 size = vec2(float(terrain.width), float(terrain.height));
     vec2 uv = (surfaceIn.worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
+#ifdef SURFACE_FRAGMENT
     vec2 xz = texture(textures[terrain.normalTexture], uv).rg;
+#else
+    vec2 xz = textureLod(textures[terrain.normalTexture], uv, 0.0).rg;
+#endif
     // The sampler mirrors like the heights, but a mirrored copy's slopes
     // point the other way.
     xz *= 1.0 - 2.0 * mod(floor(uv), 2.0);

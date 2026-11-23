@@ -103,7 +103,7 @@ foreach(source
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp
     clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
-    cloud_shadow_blur.comp sky_capture.comp voxel.mesh voxel_instance.mesh)
+    cloud_shadow_blur.comp sky_capture.comp voxel.mesh voxel_instance.mesh reference.comp)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
@@ -152,6 +152,7 @@ add_library(meridian STATIC
     src/placement.cpp
     src/shadow_cascades.cpp
     src/render/renderer_clouds.cpp
+    src/render/renderer_reference.cpp
     src/render/renderer_gi.cpp
     src/render/renderer_shadows.cpp
     src/render/renderer_farfield.cpp

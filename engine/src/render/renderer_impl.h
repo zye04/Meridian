@@ -138,6 +138,18 @@ struct Renderer::Impl {
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
   ShadowMode shadowMode = ShadowMode::Raster;
+  // Reference path tracer (renderer_reference.cpp): accumulation per pixel
+  // (rgb sum + count, luminance sum of squares), display-sized.
+  bool referencing = false;
+  ReferenceMode referenceMode = ReferenceMode::Radiance;
+  uint32_t referenceCount = 0;
+  Buffer referenceSum;
+  Buffer referenceSquares;
+  VkDescriptorSetLayout referenceSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool referencePool = VK_NULL_HANDLE;
+  VkDescriptorSet referenceSet = VK_NULL_HANDLE;
+  VkPipelineLayout referenceLayout = VK_NULL_HANDLE;
+  VkPipeline referencePipeline = VK_NULL_HANDLE;
   // Each cascade's rendered window, the sun it was rendered for and what
   // plan chose for this frame. shadowStale: instances or placement changed.
   std::array<Image, kShadowCascades> shadowMaps;
@@ -520,6 +532,9 @@ struct Renderer::Impl {
   void createMaterialSystem();
   void computeDfgLut();
   void createClouds();
+  void createReference();
+  void destroyReference();
+  void dispatchReference(VkCommandBuffer cmd, const Camera &camera, VkDeviceAddress scene);
   void destroyClouds();
   void createGi();
   void destroyGi();

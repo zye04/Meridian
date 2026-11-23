@@ -1418,9 +1418,18 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->historyValid = true;
   endPass("aa");
 
+  // --- Reference path tracer: one more sample per pixel, its mean over the
+  // upscaler's output (the scene passes above still run: they keep the sky,
+  // cloud shadow and terrain shadow inputs current).
+  if (impl_->referencing) {
+    impl_->dispatchReference(cmd, camera, frame.sceneBuffer.address);
+    vkCmdPipelineBarrier2(cmd, &postDependency);
+    endPass("reference");
+  }
+
   // --- Glare: blends a heavy-tailed blur of the output back into it, before
   // the exposure meter, which should see the glare as the eye does.
-  if (impl_->effects.bloom && impl_->bloom.intensity > 0.0f) {
+  if (impl_->effects.bloom && impl_->bloom.intensity > 0.0f && !impl_->referencing) {
     const BloomConstants bloomConstants{impl_->bloom.scatter,
                                         impl_->bloom.intensity};
     auto bloomPass = [&](VkPipeline pipeline, VkDescriptorSet set,
@@ -1462,21 +1471,24 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // --- Auto-exposure: histogram of the resolved frame, then adaptation.
   // The new exposure is used by the next frame's scene pass.
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    impl_->histogramPipeline);
   vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                           impl_->postLayout, 0, 1, &postSet, 0, nullptr);
   vkCmdPushConstants(cmd, impl_->postLayout,
                      VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                      0, sizeof(postConstants), &postConstants);
-  // One thread per 2x2 pixels (see histogram.comp).
-  vkCmdDispatch(cmd, (extent.width + 31) / 32, (extent.height + 31) / 32, 1);
-  vkCmdPipelineBarrier2(cmd, &postDependency);
+  // The reference accumulates under the exposure its warm-up settled on.
+  if (!impl_->referencing) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      impl_->histogramPipeline);
+    // One thread per 2x2 pixels (see histogram.comp).
+    vkCmdDispatch(cmd, (extent.width + 31) / 32, (extent.height + 31) / 32, 1);
+    vkCmdPipelineBarrier2(cmd, &postDependency);
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    impl_->exposurePipeline);
-  vkCmdDispatch(cmd, 1, 1, 1);
-  vkCmdPipelineBarrier2(cmd, &postDependency);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      impl_->exposurePipeline);
+    vkCmdDispatch(cmd, 1, 1, 1);
+    vkCmdPipelineBarrier2(cmd, &postDependency);
+  }
   endPass("exposure");
 
   // --- Tonemap pass: resolved HDR -> swapchain image, through the grade

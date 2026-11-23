@@ -111,6 +111,24 @@ validation error):
 ./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--trees] [--lod-error PX] --capture out.png [--frames N]
 ```
 
+`--reference SPP` (with `--capture`; not with `--benchmark`,
+`--capture-sequence`, `--capture-albedo` or camera velocities) is the
+reference path tracer (spec `2026-11-23-reference-path-tracer-design.md`,
+renderer_reference.cpp, reference.comp): after the `--frames` warm-up the
+exposure and game time freeze and every frame adds one path traced sample
+per pixel (TLAS + heightfield, materials through surface.glsl as the raster
+path) to an accumulation that replaces the upscaler's output, bloom off;
+after SPP samples the capture saves it and the run prints `Reference: N
+spp, total S s, noise P%` (median over 16x16 tiles of the relative standard
+error of the tile mean); `reference` in `GPU passes:` is one sample's ms.
+`--reference-mode radiance|albedo|white|leaf|sun` (default radiance):
+`albedo` accumulates the primary hit's diffuse albedo (compare with a raster
+`--capture-albedo`); `white`, `leaf`, `sun` are the integrator's furnace
+checks. Compare against a raster capture with `--effects pom=0 --bloom 0 0`
+(and `--streamed off` where meadow shows) via `tools/reference-compare.py`.
+Known differences: the reference's terrain is the bilinear heightfield
+(no near detail displacement), blended materials trace as opaque, distant
+trees are their full geometry (the raster's voxels are what is judged).
 `--capture-albedo FILE.pfm` (with `--capture`) also saves the linear
 diffuse albedo the shading used on the same frame (scene attachment 3,
 kept alive for the run by `Renderer::enableAlbedoCapture`; the sky reads
