@@ -218,8 +218,11 @@ float terrainRayDistance(SceneBuffer scene, vec3 origin, vec3 direction, float m
     // Cell lookups are nudged across the boundary the last step exited
     // through (a position computed there can round to just before it), and
     // only on that axis: nudging the other could cross into the next row.
+    // A ray that starts on a boundary (odd-metre coordinates lie on the 2 m
+    // samples, GI probe columns among them) takes the cell it moves into:
+    // the one behind would exit at once, which reads as an edge cell.
     const float kNudge = 0.01;
-    vec2 nudge = vec2(0.0);
+    vec2 nudge = kNudge * vec2(equal(g0, floor(g0)));
 
     float s = 0.0;
     uint level = 0u;

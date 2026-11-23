@@ -4571,3 +4571,17 @@ Measured (ratio reference / raster per 4x4 cell, mean |ln ratio|):
   bright: the tuft darkening was hiding the GI sky term there (backlog).
 - Contact shadows off on top: sunward column 1.08 / 1.05 / 1.14 / 0.95 but
   other cells overshoot (0.82); kept (backlog).
+
+## Terrain march: rays that start on a sample line (2026-11-23)
+
+The reference missed the terrain around the forest interior: the camera
+(85, -53) lies exactly on a 2 m sample (odd-metre coordinates do), so at s = 0
+`terrainRayDistance` took the cell on the positive side of the boundary; for a
+ray toward -x or -z that cell exits at once, which the march reads as an edge
+cell (exit 1e30) and solves its bilinear patch over the whole ray: a hit at 0
+or a miss. The finest GI level's probe columns (2 m, centres at odd metres)
+start every ray there too. Fix: the start is nudged across any boundary it lies
+on, as the march already does after each step. A Python twin of the march over
+napf.height: 42 of 300 random downward rays from the interior camera and 124 of
+300 from the default start disagreed with a 0.25 m brute march, 0 after. Edge
+view against the reference: backlit 0.128 -> 0.121 (GI), front 0.069 either way.
