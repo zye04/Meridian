@@ -15,7 +15,8 @@ session rebuilt the main checkout under a capture once).
   on a sample line (also every finest-level GI probe).
 - Interior gate now runs: floor 1.1-2.6x dark, square sunflecks (backlog).
 
-Next: interior sun-path ablation (backlog row), then front-lit residuals
+Next (user, 2026-11-23): wait for the terrain lane to land, then the interior
+sun-path ablation (backlog row) on its terrain, then front-lit residuals
 (canopy-edge GI sky term, silvery leaves), then the bitmask pass.
 
 ## Session 2026-11-23 evening (Pro account, inline)
