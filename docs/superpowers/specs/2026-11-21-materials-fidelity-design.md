@@ -1,8 +1,8 @@
 # Materials and texture fidelity (Pillar 1: G6, G12)
 
-Status: draft for user review (leaf geometry, section 2, decided
-2026-11-22; three decisions below still open)
-Date: 2026-11-21, revised 2026-11-22
+Status: approved (leaf geometry decided 2026-11-22; D3-D6 decided
+2026-11-23)
+Date: 2026-11-21, revised 2026-11-23
 Programme: `2026-11-21-chlorophyll-parity-programme-design.md` (Pillar 1)
 Audit: `2026-11-21-look-gap-audit.md` (G6, G12; leaf geometry also
 bears on G9, G13, G14, G18, G19). Issues #6, #12.
@@ -24,15 +24,28 @@ measured data (F20); trees and bushes fully triangles or voxels, only
 grass and small ground cover alpha tested (F17), and "alpha grass still
 smears a little, trees don't" (F16).
 
+## Principle: the engine stands without the game (user, 2026-11-23)
+
+The engine knows no asset pack or source format. It exposes generic
+material features, standard glTF semantics and extensions first
+(`COLOR_0`, `KHR_materials_specular`, `KHR_materials_diffuse_transmission`),
+a generic mechanism only where no standard covers the need. Everything
+specific to a source (Megascans MA_Foliage, Unreal material instances,
+exporter quirks) is translated in the cook (`tools/`). When a texture,
+model or albedo looks wrong, suspect the engine's handling of the asset
+(import, colour space, sampling, tint, shading) before the asset itself:
+validation checks what the engine renders against the source first.
+
 ## Decisions
 
 | # | Decision | State |
 |---|---|---|
 | D1 | Tree leaf and decoration cards become opaque leaf triangles at cook time, traced from the atlas opacity (section 2). Trees then carry no alpha test; grass, flowers, ferns and the streamed meadow stay masked. | **Decided 2026-11-22** (user chose approach A, section 2) |
 | D2 | Tree geometry budget: ~30M cooked triangles over all tree prototypes (~2x today's 13.7M), by cutting variants from 55 to ~30 rather than pruning leaves hard or keeping every variant. | **Decided 2026-11-22** (Claude's call, delegated by the user) |
-| D3 | Trunk-base blend: trunk-base-only extension (`blendTexture` + `blendRange`) or a general layer system (section 1). | Open, default trunk-base-only |
-| D4 | Texture caps: bark 4K + detail textures, virtual texturing deferred (section 3). | Open, default as recommended |
-| D5 | `specularFactor`: only if the A/B shows a visible change (section 1). | Open, A/B first |
+| D3 | Layer blend: one generic second material layer masked by a vertex attribute (engine), onto which the cook maps MA_Foliage's trunk-base `COLOR_0.A` blend; no trunk- or Megascans-specific engine code, no N-layer system until a second use needs it (section 1). | **Decided 2026-11-23** (Claude's call under the principle above, delegated by the user) |
+| D4 | Texture caps: bark 4K + detail textures, virtual texturing deferred (section 3). | **Decided 2026-11-23** (user) |
+| D5 | `specularFactor` as `KHR_materials_specular`: only if the A/B shows a visible change (section 1). | **Decided 2026-11-23** (user: A/B first) |
+| D6 | Albedo audit as bench step 1: rendered albedo against the source texture (engine fidelity, a gate), then against measured physical ranges (asset plausibility, informational) (section 5). | **Decided 2026-11-23** (user) |
 
 ## 1. Import standard per asset class
 
@@ -58,9 +71,11 @@ primitives and blend base-colour/normal toward the bark layer in
 `mesh.frag` with the same stable dither as the voxel coverage; (c) the
 Decoration cards (lichen, knots) are alpha cards, traced into opaque
 geometry with the leaves (section 2). Option
-(b) needs a second texture slot per material: decision for the user,
-default is a trunk-base-only extension (`blendTexture` + `blendRange`), not
-a general layer system (est. ~1 day).
+(b) needs a second texture slot per material. Decided (D3): the engine
+gets a generic second layer (its own base-colour/normal textures, blended
+by a vertex attribute through a range, with the stable dither); the cook
+keeps `COLOR_0.A` on the primitives MA_Foliage blends and maps it onto
+that layer (est. ~1 day).
 
 **Specular factor.** Hypothesis (open): fixed F0 0.04 against MI specular
 0.2-0.3 (Unreal F0 0.016-0.024, about half) gives the silvery sheen.
@@ -363,6 +378,19 @@ a placed sample (a bench placement: one prototype, flat ground, fixed sun
 and exposure via `--sun`, `--clouds off`, `--placement`-free) and writes
 a contact sheet. Deterministic; same capture rules as the other gates.
 
+**Albedo audit (D6, runs first).** A capture flag writes the diffuse
+albedo the shading used (scene attachment 3, forced on for that run), and
+`tools/albedo-audit.py` reports, per class region, the rendered mean
+linear albedo next to (1) the source texture's mean (alpha-weighted for
+cards; the engine-fidelity gate: colour space, dropped adjustments, tint,
+mip bias must not move it beyond a tolerance set from the first run; a
+per-texel comparison needs a UV/material-ID debug view, added only if
+region means are inconclusive) and (2)
+measured physical albedo ranges with sources (informational: an outlier
+points at the asset or the cook's mapping). Mismatches are reported to the
+user before any fix; every later lighting calibration is judged on audited
+albedo.
+
 **Gates** (numbers set from the first run, rule: judged beside the
 scan): no validation errors; mean luminance and OKLCh stats within the
 resemblance-metric band (commit c23bd60) of the scan at 1 m; alpha area
@@ -386,7 +414,9 @@ Budget: no more than +0.3 ms GPU at the forest edge from this pillar
 
 ## Order of work
 
-1. Bench script and first captures (no engine change): baseline,
+1. Albedo audit (D6): capture flag + `tools/albedo-audit.py`, run on
+   the forest edge, interior, a rock and a meadow view; report.
+   Then the bench script and first captures: baseline,
    including section 2's card baselines (motion stability, crown coverage
    across LOD, forest edge ms, tree memory).
 2. Leaf geometry (section 2): G14's variants checked first; trace + clip
@@ -398,7 +428,7 @@ Budget: no more than +0.3 ms GPU at the forest edge from this pillar
    Pillar 2's foliage model).
 5. Bark 4K cap and detail textures; anisotropy check at grazing.
 6. Toksvig at cook time for bark/ground/rock; re-cook.
-7. Trunk-base blend; seedlings stay skipped.
+7. Layer blend (D3: generic second layer; the cook maps the trunk base onto it); seedlings stay skipped.
 8. Docs: assets.md standard, decisions.md entries, backlog row for VT.
 
 ## Left to the planner
