@@ -162,8 +162,8 @@ Weather: `--weather clear|fair|broken|overcast` (default `fair`),
 `--time-scale X` (game seconds per real second), `--weather-front
 SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
-with the wind). Capture runs print the exposure (EV100) and the sky
-irradiance with clouds and clear (x sun), and the weather at the camera (coverage,
+with the wind). Capture runs print the exposure (EV100), the sky
+irradiance with clouds and clear (x sun), the open-ground illuminance (lux) that bounds the exposure, and the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
 `--clouds off` skips the cloud march, composite, cloud shadows and sky
 capture (A/B). Ambient light (diffuse irradiance, the specular sky
@@ -664,7 +664,10 @@ half-display RGBA16F mip chain down to ~1/128, tent upsamples mixing each
 coarser level in by `scatter`, then `output` = mix(output, level 0,
 `intensity`), in place; energy-conserving, before the exposure meter so
 it meters the glare as the eye does; `Renderer::setBloom`, intensity 0
-skips it) -> luminance histogram + exposure adaptation (compute) -> grade
+skips it) -> luminance histogram + exposure adaptation (compute; the
+target is mean-to-grey, bounded above by the 95th percentile and below by
+3 EV over an open landscape's meter at the camera's light, the
+open-ground illuminance sky_irradiance.comp writes) -> grade
 LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->

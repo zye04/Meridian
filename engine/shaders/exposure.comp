@@ -25,6 +25,15 @@ const float kMeanToGreyEv = 0.8;
 // L ~0.87.
 const float kHighlightPercentile = 0.95;
 const float kHighlightMax = 2.0;
+// Shade: the exposure never rises more than this above the one an open,
+// sunlit landscape would meter at the camera's light
+// (SkyIrradianceBuffer.openIlluminance). Mean-to-grey metering alone lifts
+// a forest interior back to mid-grey; real canopy shade is 1.5-5% of open
+// light (G7, research/2026-11-23-G7-grey-image.md). The reflectance is a
+// vegetated landscape's: with it the open start view's own meter (EV100
+// 13.56) and this model (13.39) agree.
+const float kOpenReflectance = 0.09;
+const float kMaxShadeLiftEv = 3.0;
 
 void main() {
     uint total = 0u;
@@ -62,8 +71,10 @@ void main() {
         target = logSum / weightSum + log2(100.0 / 12.5) -
                  kMeanToGreyEv;
         // exposure = 1 / (1.2 * 2^EV100), so L * exposure <= max.
-        target = max(target, highlightLog - log2(1.2 * kHighlightMax)) -
-                 post.exposureCompensation;
+        float openLuminance = kOpenReflectance / 3.14159265 * post.skyIrradiance.openIlluminance;
+        float openEv = log2(max(openLuminance, 1e-6) * 100.0 / 12.5) - kMeanToGreyEv;
+        target = max(target, highlightLog - log2(1.2 * kHighlightMax));
+        target = max(target, openEv - kMaxShadeLiftEv) - post.exposureCompensation;
         target = clamp(target, kMinEv100, kMaxEv100);
     }
 

@@ -1457,6 +1457,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   postConstants.histogram = impl_->histogramBuffer.address;
   postConstants.exposure = impl_->exposureBuffer.address;
   postConstants.exposureCompensation = camera.exposureCompensation;
+  postConstants.skyIrradiance = impl_->skyIrradianceBuffer.address;
 
   // --- Auto-exposure: histogram of the resolved frame, then adaptation.
   // The new exposure is used by the next frame's scene pass.

@@ -15,6 +15,19 @@ layout(buffer_reference, std430) buffer ExposureBuffer {
     float previousExposure;
 };
 
+// Sky irradiance on an upward-facing surface (sun illuminance 1), integrated
+// each frame from the sky-view LUT with the sky capture's clouds over it,
+// and from the sky-view LUT alone (the clear sky that lights the clouds).
+// Must match SkyIrradiance in C++.
+layout(buffer_reference, std430) buffer SkyIrradianceBuffer {
+    vec3 irradiance;
+    // Illuminance (lux) on open, upward-facing ground at the camera: the sun
+    // through the atmosphere and the cloud shadow, plus the sky. The
+    // exposure's lower bound.
+    float openIlluminance;
+    vec3 clearIrradiance;
+};
+
 // The histogram covers log2 luminance from 2^-10 (deep night) to 2^20
 // (brighter than sunlit snow) in 256 bins.
 const float kMinLogLuminance = -10.0;

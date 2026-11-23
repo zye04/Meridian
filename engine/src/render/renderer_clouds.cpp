@@ -537,9 +537,10 @@ void Renderer::printAmbient() {
   std::memcpy(&state, static_cast<const char *>(readback.mapped) + sizeof(sky), sizeof(state));
   impl_->destroyBuffer(readback);
   std::printf("Exposure EV100 %.2f; sky irradiance (%.4f, %.4f, %.4f), clear sky (%.4f, %.4f, "
-              "%.4f) x sun\n",
+              "%.4f) x sun; open ground %.0f lux\n",
               state.ev100, sky.irradiance[0], sky.irradiance[1], sky.irradiance[2],
-              sky.clearIrradiance[0], sky.clearIrradiance[1], sky.clearIrradiance[2]);
+              sky.clearIrradiance[0], sky.clearIrradiance[1], sky.clearIrradiance[2],
+              sky.openIlluminance);
 }
 
 } // namespace meridian

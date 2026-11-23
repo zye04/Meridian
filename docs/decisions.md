@@ -4216,3 +4216,29 @@ a still camera under DLAA the outline drives most of the sky's pops
 residual noise, and it is a suspect for the blocky distant clouds (G16).
 The effect stays (`--effects cloud-outline=1`, the G panel slider,
 `effectCloudOutline`) for A/B; a grade file without the key now gets 0.
+
+## Exposure: shade lift floor (G7, 2026-11-23)
+
+Measured (research/2026-11-23-G7-grey-image.md): mean-to-grey metering
+lifted forest views 3.4-4 EV over the open start view (5.5 with GI
+probes), so every forest came out at OKLab L ~0.55 with no darks (p5 0.43;
+the Chlorophyll frames 0.15-0.24), whatever the canopy did to the light.
+`exposure.comp` now also bounds the target from below: never more than
+`kMaxShadeLiftEv` = 3 over the EV of an open landscape of reflectance 0.09
+lit by `openIlluminance` (sky_irradiance.comp: sun through the atmosphere
+and the cloud shadow at the camera, plus the sky with clouds, on
+upward-facing ground). An incident-light bound, like a photographer
+metering the open light and opening up for shade; it follows the weather
+and time of day and never binds at night. Reflectance 0.09 makes the
+model agree with the open start view's own meter (13.39 vs 13.56); 0.18
+put the bound a full EV lower than the chosen look.
+
+The 3 EV is the user's look choice among emulated caps on the GI interior
+(4 EV: L 0.32 / p5 0.18; 3 EV: 0.21 / 0.10, "most photoreal", trunks very
+dark). Readable shade at that cap is local exposure's job (follow-up), not
+a looser cap. Open views are unchanged (the bound sits ~3 EV under their
+meter); forests darken: interior EV100 10.21 -> 10.60, edge 9.57 -> 10.60.
+Rejected: percentile-only bounds (a closed canopy with no sunflecks or sky
+in view has no bright pixels to anchor on) and per-biome authored clamps
+(the light already says how open the place is). Cost: one log2 in a
+one-thread pass, a few ALU ops in sky_irradiance.comp.

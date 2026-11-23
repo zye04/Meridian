@@ -285,14 +285,6 @@ struct AtmosphereParameters {
     float mieBackgroundExpScale;
 };
 
-// Sky irradiance on an upward-facing surface (sun illuminance 1), integrated
-// each frame from the sky-view LUT with the sky capture's clouds over it,
-// and from the sky-view LUT alone (the clear sky that lights the clouds).
-layout(buffer_reference, std430) buffer SkyIrradianceBuffer {
-    vec3 irradiance;
-    vec3 clearIrradiance;
-};
-
 // Must match GpuTerrainLayer in C++.
 struct TerrainLayer {
     uint baseColor;

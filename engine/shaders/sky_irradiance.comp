@@ -56,5 +56,11 @@ void main() {
     if (index == 0u) {
         pc.scene.skyIrradiance.irradiance = kPi * partial[0] / 256.0;
         pc.scene.skyIrradiance.clearIrradiance = kPi * partialClear[0] / 256.0;
+        float sunCos = dot(up, pc.scene.sunDirection);
+        vec3 sun = transmittanceToSun(viewHeight, sunCos) * max(sunCos, 0.0) *
+                   cloudShadow(pc.scene.cameraPosition);
+        pc.scene.skyIrradiance.openIlluminance =
+            dot(pc.scene.sunIlluminance * (sun + pc.scene.skyIrradiance.irradiance),
+                vec3(0.2126, 0.7152, 0.0722));
     }
 }

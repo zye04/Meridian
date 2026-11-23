@@ -18,4 +18,5 @@ layout(push_constant) uniform PostConstants {
     HistogramBuffer histogram;
     ExposureBuffer exposure;
     float exposureCompensation;
+    SkyIrradianceBuffer skyIrradiance;
 } post;

@@ -1144,11 +1144,11 @@ constexpr uint8_t kShadowCasterMask = 0x01;
 constexpr uint8_t kNonCasterMask = 0x02;
 constexpr uint8_t kFarFieldCasterMask = 0x04;
 
-// Must match SkyIrradianceBuffer in common.glsl (std430: each vec3 takes 16
+// Must match SkyIrradianceBuffer in exposure.glsl (std430: each vec3 takes 16
 // bytes).
 struct SkyIrradiance {
   float irradiance[3];
-  float pad = 0.0f;
+  float openIlluminance = 0.0f;
   float clearIrradiance[3];
   float pad1 = 0.0f;
 };
@@ -1177,8 +1177,9 @@ struct PostConstants {
   VkDeviceAddress histogram = 0;
   VkDeviceAddress exposure = 0;
   float exposureCompensation = 0.0f;
+  VkDeviceAddress skyIrradiance = 0;
 };
-static_assert(sizeof(PostConstants) == 32);
+static_assert(sizeof(PostConstants) == 40);
 
 // Must match GradeBuffer in grade_lut.comp: Grade with the white balance as
 // a matrix and the exposure as a scale, both computed on the CPU.
