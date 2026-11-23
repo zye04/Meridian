@@ -24,8 +24,6 @@ Next, proposed (ask the user):
    then the bitmask pass), each checked with `tools/reference-compare.py`.
 2. Backlit through-leaf light (leaf lane), same check.
 3. Terrain research triage (user wants terrain next after this lane).
-4. Housekeeping: `assets/**/*.pre-khr` and `SM_*.neutral` / `.pre-khr`
-   tree folders are pre-#32 backups (~8 GB); delete once the user OKs.
 
 ## Session 2026-11-22 (Pro account, inline work, no lanes)
 
