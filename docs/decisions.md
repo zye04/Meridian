@@ -4522,3 +4522,12 @@ std on pasture, metres on ravine walls) and also sharpens hillsides
 engine already renders 0.5 m data unchanged. The next choice is how to get
 such relief everywhere: stored 0.5 m data near the player (a height
 clipmap) or synthesis trained on the real patch.
+
+Follow-up, same day (user approved): the detail noise is off by default
+(`Effects::terrainDetail = false`; `--effects terrain-detail=1` or the G
+panel brings it back for A/B). On the Napf's pasture the bare 2 m surface
+was as real as the 0.5 m data at midday, and the noise's isotropic bumps
+read as artificial under a low sun. Next in the lane: geo-maps in the cook
+and causal placement (triage plan steps 2-3), developed on the 0.5 m patch;
+a height clipmap for 0.5 m everywhere when the showcase needs the full
+area.

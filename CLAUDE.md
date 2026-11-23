@@ -69,7 +69,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 `G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
-parallax self-shadow, terrain detail on/off (the 0.3 m noise on the two finest levels), micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
+parallax self-shadow, terrain detail on/off (the 0.3 m noise on the two finest levels; off by default since the relief test), micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
 (off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, cut-out mip bias -2..2, stable TAA on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
@@ -211,7 +211,7 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=1,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
