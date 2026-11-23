@@ -30,8 +30,10 @@ G19 (#22) plan, this lane ("image-stability"):
   contact shadows (G5) confirmed in code. Backlog rows carry the rest.
 - Next, step 2: cloud small-detail smear, re-planned in the triage doc
   (A/B list 0-5). Step 0 done (crop rows in motion-clarity.sh). Step 1
-  (user OK) running: preset M and K tables into
-  `.superpowers/motion/preset-{M,K}{,.txt}` (L dropped for usage). Crop
+  (preset M vs K, L dropped for usage) stopped by the user at the usage
+  limit after 5 of 56 captures: re-run both tables from scratch
+  (`tools/motion-clarity.sh build-release .superpowers/motion/preset-M
+  --dlss-preset M`, same for K). Crop
   baseline (DLAA M): sky_turn1 Laplacian ratio 0.70, jitter 1.19, error
   2.48 on the `detail` crop.
 - `cloudpop` (worktree `../meridian-cloudpop`, paused WIP, no commits;
