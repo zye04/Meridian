@@ -19,10 +19,18 @@ Landed on main:
   `research/2026-11-23-terrain-pcg-deep-research.md` (recommends cook-time
   geomorphology maps + surface clipmap + runtime weather layer).
 
+- GI canopy radiance (spec/plan `2026-11-23-gi-canopy-radiance*`): probe
+  rays light foliage at the hit (sun + sky marches, leaf phase,
+  recollision). Edge trunk 2.1x -> 0.97x of the reference, B/G 0.89 (ref
+  0.84), front error 14.5% -> 6.6%, +0.17 ms. Found by ablation; the
+  backlit error is the direct path's (same with `--gi off`). The reference
+  misses the terrain around the forest interior (backlog).
+
 Next, proposed (ask the user):
-1. Fix the GI canopy bounce against the reference (#30 intra-crown sun,
-   then the bitmask pass), each checked with `tools/reference-compare.py`.
-2. Backlit through-leaf light (leaf lane), same check.
+1. Backlit direct path (mesh.frag transmission, shadow cascades over
+   leaves): own design, checked against the reference (backlog row).
+2. Reference terrain hole at the interior view (backlog), so interior views
+   can be judged; then the bitmask pass.
 3. Terrain lane: triaged in `research/2026-11-23-terrain-triage.md`
    (direction agreed, nothing built); start at its plan step 1, the 0.5 m
    relief test.

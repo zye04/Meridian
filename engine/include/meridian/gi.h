@@ -40,4 +40,10 @@ struct ShL1 {
 void addRadianceSample(ShL1 &sh, Vec3 direction, Vec3 radiance, float weight);
 Vec3 shIrradiance(const ShL1 &sh, Vec3 normal);
 
+// Bi-Lambertian leaves with a spherical leaf-angle distribution (Shultis &
+// Myneni 1988): the area scattering phase function over pi G (G = 1/2), so
+// it integrates over the sphere to reflectance + transmittance. cosBeta is
+// between the light's travel direction and the scattered direction.
+float leafPhase(float cosBeta, float reflectance, float transmittance);
+
 } // namespace meridian

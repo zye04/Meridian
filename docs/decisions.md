@@ -4454,3 +4454,55 @@ bindless materials, the heightfield march).
   0.3 m deeper), blended materials trace as opaque, streamed meadow layers
   are absent (`--streamed off` on both sides), the sky in primary misses
   is the 64^2 capture's clouds.
+
+## GI probes: foliage lit where the ray meets it (2026-11-23)
+
+Spec `superpowers/specs/2026-11-23-gi-canopy-radiance-design.md`, plan
+`superpowers/plans/2026-11-23-gi-canopy-radiance.md`. The reference path
+tracer measured the forest edge's shaded trunk at 2.1x its luminance and too
+green (B/G 0.61 vs 0.84) under the probes. An ablation against the
+reference (one term neutralized per variant, Release, 2560x1440, `--trees
+--effects pom=0 --bloom 0 0 --streamed off`, reference 1024 spp) placed it:
+with the probes' foliage radiance zeroed the trunk was 0.87x the reference
+(occlusion of sky and ground right), so the foliage radiance itself was ~10x
+too bright. `albedo (1 + t) / pi (sun 0.5 leafSun sun.y + 0.5 sky)` lit every
+leaf a probe ray meets as an outer, sunlit, sky-exposed one, while the leaves
+seen from below are the shaded underside; its sky half alone was 4.6x too
+bright. Reflectance-only albedo and a 1 m ray start changed nothing.
+
+Now (`gi_probes.comp`, `farFieldTransmittanceScatter` in farfield.glsl):
+the albedo march also returns the absorbed-weighted mean reflected rgb,
+transmitted rgb and hit distance; from that point the sun's transmittance
+(far-field march, at most 64 m) and the sky's (straight up). The sun term
+uses the area scattering phase of bi-Lambertian leaves with a spherical
+leaf-angle distribution (Shultis & Myneni 1988, over pi G with G = 1/2, so
+it integrates to rho + tau; `leafPhase` in gi.h is the tested CPU
+reference): looking toward the sun shows transmission, away reflection; a
+volume, so no `sun.y` factor. The sky term is isotropic, omega / (2 pi)
+E_sky T_up. Multiple scattering in the crown by the spectral invariant
+(p-theory, Knyazikhin, Huang et al. 2007): source / (1 - p omega), p = 1 -
+T_up. `leafSun` and the per-probe canopy sun march are gone. Rejected: the
+far shadow map for the sun term (8 m, binary at 0.5 opacity), a lighting
+volume baked over the voxels (most code, stalls on sun motion), the
+prototype voxels (the 4 m world voxels already land within ~10%).
+
+Measured against the reference (ratio reference / raster per 4x4 cell):
+- Edge front: mean |ln ratio| 0.145 -> 0.066, 14 of 16 cells within
+  0.9-1.1 (before 7); trunk 0.47 -> 0.97 of the reference's luminance, B/G
+  0.61 -> 0.89 (reference 0.84). Left: canopy against the bright
+  background 0.84 (cell 3,0, the foliage term overshoots there), foreground
+  leaves 1.09-1.14 (also with the foliage zeroed: leaf shading, backlog).
+- Edge backlit (`--sun -0.9 0.4 0.15`): probe-lit columns 2-3 0.223 ->
+  0.217; the frame stays 0.38 because the sunward side is 1.4-2.5x too dark
+  with or without GI (the direct path, backlog). The old over-bright
+  foliage had partly masked it.
+- Multiple scattering: front 0.0642 vs 0.0633 without (a wash), backlit
+  0.391 vs 0.403; kept.
+- Interior: the reference misses the terrain around that view (backlog), so
+  judged on the raster alone: floor shade 5.4% -> 2.4% of the sunflecks
+  (closed beech canopy 1.5-5%), now neutral (B/G 0.99) rather than olive.
+- Cost: `gi probes` 1.40 -> 1.57 ms median on the edge view. The sun march
+  to `kGiTreeDistance` (300 m) cost +0.59 ms (it runs until the ray clears
+  the highest canopy anywhere); capping it at 64 m (`kGiLeafSunDistance`)
+  measured no worse against the reference (128 m: 1.74 ms, front 0.062,
+  backlit 0.41).

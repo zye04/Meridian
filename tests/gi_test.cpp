@@ -85,3 +85,22 @@ TEST_CASE("gi sh irradiance of an upper hemisphere stays non-negative") {
     CHECK(e.z >= 0.0f);
   }
 }
+
+TEST_CASE("leafPhase integrates to the scattering albedo") {
+  const std::array<std::array<float, 2>, 3> leaves{{{0.1f, 0.1f}, {0.05f, 0.2f}, {0.3f, 0.0f}}};
+  for (const auto &[r, t] : leaves) {
+    constexpr int kSteps = 4096;
+    double sum = 0.0;
+    for (int i = 0; i < kSteps; ++i) {
+      const double b = (i + 0.5) * kPi / kSteps;
+      sum += leafPhase(static_cast<float>(std::cos(b)), r, t) * std::sin(b);
+    }
+    CHECK(2.0 * kPi * sum * kPi / kSteps == doctest::Approx(r + t).epsilon(1e-3));
+  }
+}
+
+TEST_CASE("leafPhase forward is transmission, backward is reflection") {
+  CHECK(leafPhase(1.0f, 0.0f, 0.2f) > 0.0f);
+  CHECK(leafPhase(1.0f, 0.2f, 0.0f) == doctest::Approx(0.0f));
+  CHECK(leafPhase(-1.0f, 0.2f, 0.0f) > leafPhase(-1.0f, 0.0f, 0.2f));
+}

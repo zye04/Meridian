@@ -197,6 +197,12 @@ uint voxelAlbedo(uint voxel) {
 
 const uint kFarMaxCellSteps = 512u;
 
+struct FarScatterSum {
+    vec3 reflected;
+    vec3 transmitted;
+    float meanDistance;
+};
+
 // Marches a cell's brick columns at `level` along origin + t direction over
 // [tStart, tEnd], voxels constant inside, adding to opticalDepth: a DDA over
 // the cell's voxel columns in x/z, and in each column over its layers (the
@@ -205,12 +211,12 @@ const uint kFarMaxCellSteps = 512u;
 // where the optical depth reaches `limit` (hitVoxel: the voxel there), or
 // -1 if it doesn't. With wantAlbedo (a constant at every call site, so the
 // plain march compiles unchanged) each segment also adds its absorbed share,
-// exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette scatter
-// albedo (reflected + transmitted) to albedoSum.
+// exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette
+// reflected and transmitted rgb and the segment's mid distance to `scatter`.
 float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
                        vec3 direction, float tStart, float tEnd, float limit,
                        inout float opticalDepth, out uint hitVoxel, const bool wantAlbedo,
-                       inout vec3 albedoSum) {
+                       inout FarScatterSum scatter) {
     float v = farVoxelSize(level);
     int n = int(kBrickEdge * farColumnsPerCell(level));
     ivec2 lo = ivec2(cell) * n;
@@ -258,9 +264,11 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
             if (wantAlbedo) {
                 float taken = min(segment, limit - opticalDepth);
                 uint entry = voxelAlbedo(packed);
-                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) *
-                             (farField.field.palette.albedo[entry].rgb +
-                              farField.field.palette.albedo[farField.field.paletteSize + entry].rgb);
+                float absorbed = exp(-opticalDepth) * (1.0 - exp(-taken));
+                scatter.reflected += absorbed * farField.field.palette.albedo[entry].rgb;
+                scatter.transmitted +=
+                    absorbed * farField.field.palette.albedo[farField.field.paletteSize + entry].rgb;
+                scatter.meanDistance += absorbed * 0.5 * (a + end);
             }
             if (opticalDepth + segment >= limit) {
                 hitVoxel = packed;
@@ -296,7 +304,7 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
 float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin, vec3 direction,
                    float tStart, float tEnd, float limit, inout float opticalDepth,
                    out uint hitVoxel) {
-    vec3 unused = vec3(0.0);
+    FarScatterSum unused = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
     return farMarchCellImpl(farField, cell, level, origin, direction, tStart, tEnd, limit,
                             opticalDepth, hitVoxel, false, unused);
 }
@@ -319,10 +327,10 @@ const uint kFarMaxRaySteps = 1024u;
 // canopy height marches its bricks at the ray's level (by distance).
 // skipTlasCells: M2b skips the cells its TLAS holds; in M2a no far ray
 // traces trees in the TLAS, so there is nothing to skip. wantAlbedo: see
-// farMarchCellImpl; albedoSum is then the absorbed-weighted albedo sum.
+// farMarchCellImpl; scatter then holds the absorbed-weighted sums.
 float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                     float startDistance, float maxDistance, bool skipTlasCells,
-                    const bool wantAlbedo, inout vec3 albedoSum) {
+                    const bool wantAlbedo, inout FarScatterSum scatter) {
     // Heights (canopy extents included) relative to heightBase from here on.
     float heightBase = farField.field.heightBase;
     uint levels = farField.field.pyramidLevels;
@@ -391,7 +399,7 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                 uint voxel;
                 if (farMarchCellImpl(farField, uvec2(cell), level, origin, direction, t, b,
                                      kFarOpaqueDepth, opticalDepth, voxel, wantAlbedo,
-                                     albedoSum) >= 0.0) {
+                                     scatter) >= 0.0) {
                     return 0.0;
                 }
                 if (b < tExit) {
@@ -424,20 +432,24 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
 
 float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                             float startDistance, float maxDistance, bool skipTlasCells) {
-    vec3 unused = vec3(0.0);
+    FarScatterSum unused = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
     return farFieldMarch(farField, worldOrigin, direction, startDistance, maxDistance,
                          skipTlasCells, false, unused);
 }
 
-// Transmittance plus the mean scatter albedo (reflected + transmitted) of
-// what the ray crossed, weighted by the light each voxel absorbed (a ray that
-// crosses nothing returns albedo 0).
-float farFieldTransmittanceAlbedo(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
-                                  float startDistance, float maxDistance, out vec3 albedo) {
-    vec3 sum = vec3(0.0);
+// Transmittance plus, over what the ray crossed and weighted by the light
+// each voxel absorbed, the mean palette reflected and transmitted rgb and the
+// mean distance (all 0 for a ray that crosses nothing).
+float farFieldTransmittanceScatter(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
+                                   float startDistance, float maxDistance, out vec3 reflected,
+                                   out vec3 transmitted, out float meanDistance) {
+    FarScatterSum sum = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
     float transmittance = farFieldMarch(farField, worldOrigin, direction, startDistance,
                                         maxDistance, false, true, sum);
-    albedo = sum / max(1.0 - transmittance, 1e-6);
+    float absorbed = max(1.0 - transmittance, 1e-6);
+    reflected = sum.reflected / absorbed;
+    transmitted = sum.transmitted / absorbed;
+    meanDistance = sum.meanDistance / absorbed;
     return transmittance;
 }
 

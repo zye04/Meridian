@@ -636,11 +636,13 @@ that is stale, never traced or in this frame's share (hashed over columns and
 slices: 1/8 of the finest level, 1/16 of the next, 1/32 of the coarser); L1 SH
 with hysteresis 0.95, also written packed as half floats for the shading;
 ground hits read last frame's cache (uncached: a neutral grey albedo);
-foliage along a ray (`farFieldTransmittanceAlbedo`: the far-field march
-also returns the absorbed-weighted mean palette scatter albedo, the entry's
-reflected rgb plus its transmitted rgb (the palette's second half), so the
-glow takes the material's colour and its transmitted light; reflected +
-transmitted sun); read by the scene passes) -> gi ground
+foliage along a ray is lit where the ray meets it
+(`farFieldTransmittanceScatter`: the far-field march also returns the
+absorbed-weighted mean palette reflected and transmitted rgb and hit
+distance; from that point a sun march (at most 64 m) and an upward sky
+march, the spherical-leaf phase toward the probe (`leafPhase`, gi.h is its
+CPU reference) and recollision 1 / (1 - p albedo) with p = 1 - sky
+visibility); read by the scene passes) -> gi ground
 (gi_ground.comp relights a quarter of the ground cache's texels per frame,
 plus new or stale ones, with this frame's probes) -> early scene
 pass into HDR RGBA16F + RG16F motion + R8 transparency mask + the Ray

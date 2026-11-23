@@ -25,6 +25,10 @@ const uint kGiGroundCount = kGiGroundLevels * uint(kGiGroundTexels * kGiGroundTe
 // far-field march is the passes' main cost with --trees.
 const float kGiMaxDistance = 4000.0;
 const float kGiTreeDistance = 300.0;
+// The sun march from a foliage hit stops here: past a crown or two the ray
+// has cleared the canopy (the full kGiTreeDistance cost +0.4 ms for no
+// measured gain against the reference).
+const float kGiLeafSunDistance = 64.0;
 // Neutral ground albedo where the ground cache has none yet (a typical
 // vegetated ground's luminance, no hue: the hue comes from the cache).
 const vec3 kGiGroundAlbedo = vec3(0.079);
@@ -192,6 +196,16 @@ vec3 giIrradiance(GiSample s, vec3 n, vec3 fallback) {
     return vec3(giIrradianceChannel(s.sh[0], n), giIrradianceChannel(s.sh[1], n),
                 giIrradianceChannel(s.sh[2], n)) +
            s.remaining * fallback;
+}
+
+// Bi-Lambertian spherical-leaf phase over pi G; leafPhase in gi.h is the CPU
+// reference.
+vec3 leafPhase(float cosBeta, vec3 reflectance, vec3 transmittance) {
+    float c = clamp(cosBeta, -1.0, 1.0);
+    float b = acos(c);
+    vec3 gamma = (reflectance + transmittance) / (3.0 * kPi) * (sin(b) - b * c) +
+                 transmittance / kPi * c;
+    return gamma / (0.5 * kPi);
 }
 
 // The ground cache's radiance at `xz` (w: how much of it the cache holds,

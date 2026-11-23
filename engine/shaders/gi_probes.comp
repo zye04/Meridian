@@ -28,7 +28,6 @@ shared bool traced;
 shared vec3 probePosition;
 shared float probeBase;
 shared bool fresh;
-shared float canopySun;
 shared vec3 sunAtProbe;
 
 // A rotation that changes every frame (deterministic), from a hashed axis
@@ -79,11 +78,6 @@ void main() {
                                : stored.base;
             probeBase = base;
             probePosition = vec3(centre.x, base + giSliceHeight(level, float(slice)), centre.y);
-            canopySun = 1.0;
-            if (pc.scene.farFieldEnabled != 0u && pc.scene.sunDirection.y > 0.0) {
-                canopySun = farFieldTransmittance(farField, probePosition,
-                                                  pc.scene.sunDirection, 0.0, kGiTreeDistance, false);
-            }
             vec3 atmosphere = atmospherePosition(probePosition);
             float height = length(atmosphere);
             sunAtProbe = transmittanceToSun(height, dot(atmosphere / height, pc.scene.sunDirection)) *
@@ -125,15 +119,30 @@ void main() {
         radiance = skyLuminance(atmospherePosition(origin), direction) * clouds.a + clouds.rgb;
     }
     if (pc.scene.farFieldEnabled != 0u) {
-        vec3 foliageAlbedo;
-        float transmittance = farFieldTransmittanceAlbedo(
+        vec3 reflected, transmitted;
+        float meanDistance;
+        float transmittance = farFieldTransmittanceScatter(
             farField, origin, direction, 0.0,
-            hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance, foliageAlbedo);
-        // Leaves above the probe are sunlit more often than the probe is:
-        // about half of a crown's leaves see the sun.
-        float leafSun = mix(canopySun, 0.5, max(direction.y, 0.0));
-        vec3 leaf = foliageAlbedo / kPi * (sunAtProbe * (0.5 * leafSun * max(sun.y, 0.0)) +
-                                         0.5 * skyIrradiance);
+            hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance, reflected, transmitted,
+            meanDistance);
+        vec3 leaf = vec3(0.0);
+        if (transmittance < 0.99) {
+            // Light the foliage where the ray meets it: the sun and sky that
+            // reach that point through the canopy, the leaf phase toward the
+            // probe, and the light recolliding inside the crown (spectral
+            // invariant, recollision probability from the escape upward).
+            vec3 q = origin + meanDistance * direction;
+            float sunVisible = sun.y > 0.0
+                ? farFieldTransmittance(farField, q, sun, 0.0, kGiLeafSunDistance, false)
+                : 0.0;
+            float skyVisible =
+                farFieldTransmittance(farField, q, vec3(0.0, 1.0, 0.0), 0.0, kGiTreeDistance, false);
+            vec3 albedo = reflected + transmitted;
+            vec3 single = sunAtProbe * sunVisible * leafPhase(dot(sun, direction), reflected, transmitted) +
+                          albedo / (2.0 * kPi) * skyVisible * skyIrradiance;
+            float recollision = min(1.0 - skyVisible, 0.95);
+            leaf = single / (1.0 - recollision * albedo);
+        }
         radiance = mix(leaf, radiance, transmittance);
     }
 

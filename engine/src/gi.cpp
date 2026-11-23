@@ -70,4 +70,13 @@ Vec3 shIrradiance(const ShL1 &sh, Vec3 normal) {
           irradianceChannel(c[0].z, c[1].z, c[2].z, c[3].z, normal)};
 }
 
+float leafPhase(float cosBeta, float reflectance, float transmittance) {
+  constexpr float pi = std::numbers::pi_v<float>;
+  const float c = std::clamp(cosBeta, -1.0f, 1.0f);
+  const float b = std::acos(c);
+  const float gamma = (reflectance + transmittance) / (3.0f * pi) * (std::sin(b) - b * c) +
+                      transmittance / pi * c;
+  return gamma / (0.5f * pi);
+}
+
 } // namespace meridian
