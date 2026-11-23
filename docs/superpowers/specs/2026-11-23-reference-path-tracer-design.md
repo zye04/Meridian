@@ -1,6 +1,6 @@
 # Reference path tracer (`--reference`)
 
-Status: approved (2026-11-23), plan next
+Status: implemented (2026-11-23), see decisions.md "Reference path tracer"
 
 ## Why
 

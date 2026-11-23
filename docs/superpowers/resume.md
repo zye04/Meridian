@@ -1,6 +1,31 @@
-# Resume here (entry point; updated 2026-11-22)
+# Resume here (entry point; updated 2026-11-23)
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
+
+## Session 2026-11-23 evening (Pro account, inline)
+
+Landed on main:
+- #32 closed: leaf transmission per KHR_materials_diffuse_transmission
+  (e1c3803, look-neutral re-encode in the cook), Megascans Trees calibrated
+  to measured mature beech t = 1.1 (59e21a0).
+- Reference path tracer (`--reference SPP`, `--reference-mode`), spec and
+  plan `2026-11-23-reference-path-tracer*`, decisions.md entry: shared
+  `surface.glsl`, `ray_hit.glsl`, `reference.comp`,
+  `tools/reference-compare.py`, `--streamed off`. Furnace checks pass; it
+  found the fragment-only DFG binding (fixed).
+- First comparison: GI probes make shaded trunks 2.1x too bright and too
+  green (the #32 tint is theirs); backlit canopy 1.8x too dark (backlog).
+- Neon terrain research stored, not triaged:
+  `research/2026-11-23-terrain-pcg-deep-research.md` (recommends cook-time
+  geomorphology maps + surface clipmap + runtime weather layer).
+
+Next, proposed (ask the user):
+1. Fix the GI canopy bounce against the reference (#30 intra-crown sun,
+   then the bitmask pass), each checked with `tools/reference-compare.py`.
+2. Backlit through-leaf light (leaf lane), same check.
+3. Terrain research triage (user wants terrain next after this lane).
+4. Housekeeping: `assets/**/*.pre-khr` and `SM_*.neutral` / `.pre-khr`
+   tree folders are pre-#32 backups (~8 GB); delete once the user OKs.
 
 ## Session 2026-11-22 (Pro account, inline work, no lanes)
 

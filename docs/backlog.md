@@ -39,6 +39,8 @@ per gap so none is lost; remove a row when its gap is resolved.
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
+| GI probes over-brighten and over-saturate the canopy bounce: shaded trunk at the forest edge 2.1x the reference's luminance, B/G 0.61 vs 0.84 | Trunks and understory read yellow-green and lit under canopies; #32's open tint | Reference path tracer, first comparison (decisions.md 2026-11-23) | With #30 (intra-crown sun, multi-scatter) and the bitmask pass, checked against the reference |
+| Backlit canopy 1.8x too dark against the reference (trunks 1.2x) | Through-leaf light is under-transmitted in the raster; backlit forests look heavy | Reference path tracer, first comparison | Leaf shading lane (G1/G13, #30), checked against the reference |
 | DLSS gets no `InPreExposure`: colour is pre-exposed by last frame's GPU exposure, so its history is not rescaled while exposure adapts (TAA v2 rescales) | A/B only (`--aa dlss`; native TAA is the default). Needs a CPU-side pre-exposure (e.g. a one-frame-late readback); the 310.9.16 guide says exposure affects only presets J/K, the default M is unaffected | Task 1.3 review | If DLSS becomes the default or a sun-to-shade A/B smears |
 | Upscaler history reset on camera cuts: `historyValid` goes false only in `createSwapchain`, no hook for teleports or cutscenes | Predates DLSS; TAA and DLSS (and Ray Reconstruction, Task 1.5) all need it | Task 1.3 review | Before a teleport or cutscene feature |
 | Fallback paths need the shadow denoiser | Under `--aa taa` and `--rr off`, soft RT sun shadows use 1 ray/pixel accumulated by TAA or DLSS SR; leaf shadows shimmer in motion (TAA beech crown/shadow 2.41/1.76 /255 at 1440p; Ray Reconstruction, the default, gives 1.41/0.35). Fallback-only work | User screenshots 2026-11-20; Task 1.5 | Motion-clarity Tasks 3.2a-3.2b, the denoiser running under TAA and DLSS SR |
@@ -140,6 +142,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
+| Reference path tracer gaps: no streamed meadow layers in the TLAS (`--streamed off` on both sides), blended materials trace as opaque, terrain without the near detail displacement, sky and clouds are lookups (primary misses show the 64^2 sky capture), no denoiser | Comparisons must avoid those surfaces or accept the difference | Reference path tracer spec non-goals and Task 4 findings | Streamed ring into the TLAS when meadow lighting is judged; the rest as needed |
 | TLAS build scratch (228 MiB) stays allocated | The TLAS is rebuilt only when instances change, yet its scratch is kept for the whole run | M2a Task 5 review | M2b (memory accounting) |
 | Debug startup ~95 s with placement | Slow iteration | M2a Task 4 | Use `--placement off`; optimize model loading later |
 | Ground material costs ~1.1-1.4 ms on steep slopes | Budget | M1 | M5 |

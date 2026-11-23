@@ -1,6 +1,6 @@
 # Reference Path Tracer Implementation Plan
 
-Status: draft (2026-11-23), awaiting user review
+Status: done (2026-11-23)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

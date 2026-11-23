@@ -4403,3 +4403,54 @@ honour the standard the engine imports; asset semantics belong to the cook.
   Closed-canopy shade light is ~0.62 (Chiao 2000). Whether the probes
   over-saturate the canopy's bounce is for the reference path tracer
   (spec 2026-11-23), not tuned by eye.
+
+## Reference path tracer (2026-11-23)
+
+Spec `superpowers/specs/2026-11-23-reference-path-tracer-design.md`, plan
+`superpowers/plans/2026-11-23-reference-path-tracer.md`. Every lighting
+question had been judged against photos and measured ranges, which can
+reject an outlier but cannot say whether an approximation is right (#32's
+trunk tint). Unreal and Unity HDRP ship a path tracer for this; we had the
+pieces (TLAS of every placed instance with full-detail BLAS, ray queries,
+bindless materials, the heightfield march).
+
+- Approach (user choice among three): a compute path tracer inside the
+  renderer (`reference.comp`, ray queries), sharing material evaluation
+  with the raster path: mesh.frag's material and terrain functions moved
+  to `surface.glsl` behind a `SurfaceInput` (raster output unchanged: mean
+  OKLab L equal, pixel differences inside run-to-run noise). Rejected: a
+  ray-tracing pipeline (no infrastructure, nothing gained with bindless
+  materials) and an offline renderer export (independent of our material
+  code but a large exporter; later, to validate materials themselves).
+- Scope (user decision): surfaces only. Sky, haze, sun transmittance,
+  cloud shadow and the sky capture are the raster path's lookups, used as
+  incoming light.
+- Path: camera ray jittered in the pixel; closest hit in the TLAS (alpha
+  tested, both caster masks) or the heightfield; next-event estimation of
+  the sun disk with a TLAS + heightfield shadow ray; the raster BSDF (Lambert
+  front, KHR transmission back, GGX with energy compensation), one lobe per
+  bounce picked by albedo; Russian roulette from bounce 3, 16 bounces (256
+  for the furnace checks: 64 lost 3-5% in a white canopy); misses read the
+  sky LUT behind the sky capture's clouds; aerial perspective on the camera
+  segment; the raster's occlusion approximations left out.
+- Checks: albedo of the primary hits vs the raster albedo capture within 2%
+  per cell on the forest edge; white furnace 0.994-0.999, half-transmitting
+  leaf furnace 0.995-1.007, sun estimate vs closed form 0.999; noise halves
+  from 16 to 64 samples; at 1024 samples 0.07-0.94% noise (2% backlit),
+  ~23 ms per sample on the gate views.
+- It found an engine bug at once: the DFG table's descriptor binding was
+  fragment-only, so compute shaders read 0 and GGX energy compensation
+  exploded (~80x on sunlit ground); the binding now includes compute.
+- First comparison, forest edge (Release, 2560x1440, `--effects pom=0
+  --bloom 0 0`, reference 1024 spp): the shaded central trunk is 0.0175
+  with B/G 0.84 in the reference, 0.0373 / 0.61 with GI probes (2.1x
+  bright, too green), 0.0282 / 1.00 with GI off. #32's trunk tint is the
+  probes' error: they over-brighten and over-saturate the canopy bounce.
+  Backlit (`--sun -0.9 0.4 0.15`) the raster canopy is 1.8x too dark and
+  trunks 1.2x, so through-leaf light is under-transmitted in the raster.
+  Overview albedo: far voxel trees 2-12% brighter in the reference.
+- Known differences: the reference terrain is the bilinear heightfield
+  without the near detail displacement (raster buries object bases up to
+  0.3 m deeper), blended materials trace as opaque, streamed meadow layers
+  are absent (`--streamed off` on both sides), the sky in primary misses
+  is the 64^2 capture's clouds.

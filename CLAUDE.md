@@ -453,6 +453,8 @@ engine/src/render/         renderer internals:
   renderer_gi.cpp          GI probe and ground cache buffers, clipmap
                            windows per frame, the ground relight, probe
                            trace and albedo feedback dispatches
+  renderer_reference.cpp   reference path tracer: accumulation buffers,
+                           its pipeline, the per-frame dispatch, noise
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -485,7 +487,12 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            and voxels, voxel_instance.mesh/.frag draw
                            them (voxel_band.frag: the switch band's
                            dither); lighting.glsl: the shading
-                           mesh.frag and voxel.frag share.
+                           mesh.frag, the voxel shaders and reference.comp
+                           share; surface.glsl: material and terrain
+                           surface evaluation (mesh.frag's and ray hits',
+                           through SurfaceInput); ray_hit.glsl
+                           (traceClosest: TLAS + heightfield hit) and
+                           reference.comp, the reference path tracer.
                            wind.glsl (windVelocity, windOffset, gust),
                            weather.glsl (weatherAt: history lookup),
                            clouds.glsl (tileable noise, weatherMapAt +
@@ -856,7 +863,7 @@ barriers account for that.
   never shadows itself where the smooth normal faces the sun). Pyramid
   level 0 bounds each bilinear cell. The quadtree root is level 16 (~524 km
   half-size), covering the horizon up to ~20 km altitude.
-  Parallax occlusion mapping (`parallaxHit` in mesh.frag) marches the
+  Parallax occlusion mapping (`parallaxHit` in surface.glsl) marches the
   dominant ground layer's height (`TerrainLayer::heightScale`, meters,
   from the Megascans JSON) and shifts every layer's sample position
   (`terrainParallax`) by the same world offset; depth, motion vectors and
@@ -938,7 +945,7 @@ barriers account for that.
   `docs/assets.md`. The rock placement layer and the terrain material's
   rock blend share `kRockNormalY` (renderer.h); the forest layers and the
   material's forest floor share the forest mask (`kMaskFrequency`...,
-  main.cpp; `forestMask` in mesh.frag runs placement.glsl's mask).
+  main.cpp; `forestMask` in surface.glsl runs placement.glsl's mask).
 - Dither patterns are cached in `assets/placement-cache/dither-<layer
   id>-<points>.bin` (`cachedDitherPattern`, placement.h; the game passes
   the directory to `setPlacement`): header = magic, format version, seed,
