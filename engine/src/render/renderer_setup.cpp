@@ -190,6 +190,10 @@ void Renderer::Impl::createSwapchain() {
             << (dlss ? (aaSettings.rayReconstruction ? "DLSS Ray Reconstruction" : "DLSS")
                      : "TAA")
             << "\n";
+  // A reference run restarts on the new output image and size.
+  if (referencing) {
+    resetReference();
+  }
 }
 
 void Renderer::Impl::createDepthPyramid() {

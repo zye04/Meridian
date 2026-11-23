@@ -217,6 +217,11 @@ vec3 skyAlong(vec3 origin, vec3 direction) {
 
 vec3 offsetAlong(RayHit hit, vec3 direction) {
     float eps = 1.0e-3 + 1.0e-5 * hit.t;
+    // Above a heightfield is outside it, whatever the slope: a downhill ray
+    // offset along -up would start under the terrain and re-hit at once.
+    if (hit.terrain) {
+        return hit.position + vec3(0.0, eps, 0.0);
+    }
     return hit.position + hit.geometricNormal * (dot(direction, hit.geometricNormal) >= 0.0 ? eps : -eps);
 }
 

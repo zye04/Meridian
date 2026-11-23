@@ -534,6 +534,7 @@ struct Renderer::Impl {
   void createClouds();
   void createReference();
   void destroyReference();
+  void resetReference();
   void dispatchReference(VkCommandBuffer cmd, const Camera &camera, VkDeviceAddress scene);
   void destroyClouds();
   void createGi();

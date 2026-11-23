@@ -940,6 +940,13 @@ Options parseOptions(int argc, char **argv) {
                              "--capture-sequence, --capture-albedo or camera velocities "
                              "(the reference's albedo: --reference-mode albedo)");
   }
+  // The reference traces display pixels, while the haze froxels it reads are
+  // indexed in render pixels.
+  if (options.referenceSamples > 0 &&
+      ((options.dlssMode && *options.dlssMode != meridian::DlssMode::Dlaa) ||
+       (options.renderScale && *options.renderScale < 1.0f))) {
+    throw std::runtime_error("--reference needs native rendering (DLAA or --render-scale 1)");
+  }
   return options;
 }
 

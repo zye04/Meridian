@@ -56,7 +56,16 @@ void Renderer::Impl::destroyReference() {
 }
 
 void Renderer::beginReference(ReferenceMode mode) {
-  Impl &impl = *impl_;
+  impl_->referenceMode = mode;
+  impl_->resetReference();
+  impl_->referencing = true;
+}
+
+// Sizes the accumulation to the display, clears it and points the output
+// binding at the current output image; again after a swapchain recreation,
+// which replaces both.
+void Renderer::Impl::resetReference() {
+  Impl &impl = *this;
   check(vkDeviceWaitIdle(impl.device.device), "vkDeviceWaitIdle");
   const VkExtent2D extent = impl.swapchain.extent;
   const VkDeviceSize bytes = VkDeviceSize{extent.width} * extent.height * 16;
@@ -84,9 +93,7 @@ void Renderer::beginReference(ReferenceMode mode) {
   write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
   write.pImageInfo = &info;
   vkUpdateDescriptorSets(impl.device.device, 1, &write, 0, nullptr);
-  impl.referenceMode = mode;
   impl.referenceCount = 0;
-  impl.referencing = true;
 }
 
 uint32_t Renderer::referenceSamples() const { return impl_->referenceCount; }
