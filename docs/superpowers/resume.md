@@ -102,6 +102,28 @@ Next, in order (agreed with the user):
 - Worktree `../meridian-gi-albedo` (branch `gi-albedo`) is merged; it can
   be removed.
 
+## Leaf-geometry lane (2026-11-23, worktree `../meridian-leafgeo`, branch `leaf-geometry`)
+
+Merged to main (38cb67a): the Megascans Trees' leaves are traced opaque
+geometry (plan `plans/2026-11-22-leaf-geometry.md` done; decisions.md
+"Tree leaves as opaque geometry" has the fixes and the numbers). Main's
+shared `assets/source/megascans/{blackalder,europeanbeech,europeanhornbeam}`
+now hold the 30 traced variants; the 25 dropped card cooks are parked in
+`assets/source/megascans/_cards-dropped/` (delete once nobody needs the
+card A/B). Cluster cache version 6.
+
+Other worktrees: rebase on main before running `--trees`. An older binary
+loads the traced hornbeam through MikkTSpace's O(n^2) degenerate path
+(minutes per tree, 30+ min startup; fixed in 280f6c2).
+
+Next for this area (user priorities 2026-11-23: leaves, voxels, lighting):
+1. Seamless voxel switch (G1): a seam gate first (cluster vs voxel look at
+   the switch distance, still and moving), then the band with opaque
+   leaves (backlog row: clusters draw whole under dithered voxels) and the
+   voxels' look (grey speckle).
+2. Leaf shading: still-camera jitter 1.02 -> 1.35 with traced leaves
+   (backlog), G18 specular AA, G13 back faces, G15 roughness.
+
 ## The work list
 
 - **Programme:** `docs/superpowers/specs/2026-11-21-chlorophyll-parity-programme-design.md`
@@ -149,7 +171,7 @@ Next, in order (agreed with the user):
 
 Native 1440p, DLSS DLAA default since 2026-11-22 (own stable TAA = fallback); raster sun shadows default;
 `--fov` default 70 deg horizontal; Megascans Trees (alder, beech,
-hornbeam, all variants) under `--trees` (forest edge ~16 ms, #10);
+hornbeam, 30 variants, traced opaque leaves) under `--trees`;
 voxel trees; clouds with outline (default 1); valley-anchored haze; GI
 probes on by default (2026-11-23); benchmark route + resemblance metric tools.
 
