@@ -223,9 +223,21 @@ void main() {
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }
 #ifndef TERRAIN
-    if (leaf && dot(sh.N, sh.L) < 0.0 && dot(geometricNormal, sh.L) < 0.0) {
-        addTransmittedSun(sh, transmitted, clamp(-dot(sh.N, sh.L), 0.0, 1.0),
-                          sunVisibility(worldPosition, -geometricNormal));
+    // A thin surface's lit side is the geometric one; where the shading
+    // normal disagrees, its Lambert lobes take |N.L| instead of nothing
+    // (pbrt: lobe by the geometric normal, BSDF in the shading frame).
+    // A fading plant's normal is blended up, toward the terrain's; it keeps
+    // transmission only where both normals face away.
+    if (leaf) {
+        float NgoL = dot(geometricNormal, sh.L);
+        float NoL = dot(sh.N, sh.L);
+        if (NgoL < 0.0 && (NoL < 0.0 || inStreamFade >= 1.0)) {
+            addTransmittedSun(sh, transmitted, min(abs(NoL), 1.0),
+                              sunVisibility(worldPosition, -geometricNormal));
+        } else if (NoL <= 0.0) {
+            addTransmittedSun(sh, sh.diffuseColor, min(-NoL, 1.0),
+                              sunVisibility(worldPosition, geometricNormal));
+        }
     }
 #endif
 

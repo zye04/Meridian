@@ -4531,3 +4531,43 @@ read as artificial under a low sun. Next in the lane: geo-maps in the cook
 and causal placement (triage plan steps 2-3), developed on the 0.5 m patch;
 a height clipmap for 0.5 m everywhere when the showcase needs the full
 area.
+
+## Backlit canopy: leaf sun side and crowns without tuft occlusion (2026-11-23)
+
+Spec `superpowers/specs/2026-11-23-backlit-direct-design.md`. The reference
+put the backlit forest edge (`--sun -0.9 0.4 0.15`) at 1.4-2.5x the raster
+on the sunward side, the same with `--gi off`. Ablation (Release,
+2560x1440, `--trees --effects pom=0 --bloom 0 0 --streamed off`, references
+1024 spp, a one-bounce reference for the direct part):
+
+- Ambient is right: the reference's indirect light matches the raster's
+  ambient within ~15% per cell. The error was direct sun, 90-100% of it in
+  3-9% of the pixels, at 10-40x the cell mean.
+- Not the cause: the sun cascades (`--shadows rt` is darker still), voxel
+  trees, LOD error; forcing the through-leaf sun unshadowed overshoots most
+  cells and still leaves those pixels under 25%.
+- Normal mismatch: where a leaf's shading normal and geometric normal
+  disagree about the sun's side, the reference evaluated the front lobe for
+  light arriving behind the face (a leak) and the raster gave no sun at all
+  (transmission needed both normals facing away). Now both follow pbrt's
+  rule: the lit side is the geometric normal's, the BSDF is evaluated in the
+  shading frame, a thin surface's Lambert lobe on that side takes |N.L|, GGX
+  only where both normals face the sun. Rejected: gating only the reference
+  (raster leaves stay unlit there), geometric normals for leaf lighting
+  (flat). Furnace checks unchanged (white and leaf 0.999-1.004, sun 0.9994).
+- Tuft occlusion on crowns: `plantOcclusion` (2026-11-20, for grass tufts)
+  applied to every leaf material, so a crown's lower leaves lost up to 75%
+  of their ambient and, through the micro shadow, most of a low sun. Crowns
+  (leaf meshes over 4 m tall, the crown visibility's test) now send height
+  1; their occlusion is the crown visibility or the GI probes'. Rejected:
+  taking plant occlusion out of every plant's sun (tufts keep their look).
+
+Measured (ratio reference / raster per 4x4 cell, mean |ln ratio|):
+- Backlit: 0.368 -> 0.130 (0.288 of the old raster against the new
+  reference, so most of it is the raster); sunward column 1.90 / 2.41 /
+  2.43 / 2.02 -> 1.10 / 1.21 / 1.38 / 1.20.
+- Front: 0.066 -> 0.068 (noise); foreground leaves 1.09 / 1.13 -> 1.01 /
+  1.06; canopy against the bright background (cells 2,0-3,0, 2,1) now 9-19%
+  bright: the tuft darkening was hiding the GI sky term there (backlog).
+- Contact shadows off on top: sunward column 1.08 / 1.05 / 1.14 / 0.95 but
+  other cells overshoot (0.82); kept (backlog).

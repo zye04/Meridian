@@ -261,11 +261,18 @@ vec3 tracePath(vec3 origin, vec3 direction, uvec2 pixel) {
             vec3 L = sunDiskDirection(pc.scene, u.x, u.y);
             float NoL = dot(N, L);
             vec3 sun = sunAt(hit.position);
+            // The lit side is the geometric normal's (mesh.frag's rule): a
+            // thin surface's Lambert lobes take |N.L| where the shading
+            // normal disagrees, GGX only where both face the sun.
+            float NgoL = dot(hit.geometricNormal, L);
+            bool thin = any(greaterThan(l.transmitted, vec3(0.0)));
             vec3 f = vec3(0.0);
-            if (NoL > 0.0) {
+            if (NgoL > 0.0 && NoL > 0.0) {
                 f = l.diffuse / kPi + (l.specular ? specularBrdf(l, N, V, L, energyCompensation)
                                                   : vec3(0.0));
-            } else {
+            } else if (NgoL > 0.0 && thin) {
+                f = l.diffuse / kPi;
+            } else if (NgoL < 0.0) {
                 f = l.transmitted / kPi;
             }
             if (any(greaterThan(f, vec3(0.0))) && any(greaterThan(sun, vec3(0.0)))) {

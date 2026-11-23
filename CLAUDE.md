@@ -540,7 +540,8 @@ docs/                      see "Docs" at the top
 Plant micro occlusion: leaf materials (`diffuseTransmission > 0`, the
 Megascans plants, which ship no AO) get an occlusion that darkens toward
 the tuft base (height 0..1 from the vertex's object-space y over the mesh
-bound's top, varying location 8; mesh.vert sends 1), scaled by the micro
+bound's top, varying location 8; mesh.vert sends 1, and so does mesh.mesh for
+crowns, leaf meshes over 4 m tall), scaled by the micro
 shadow strength: ambient and back irradiance via `s.occlusion`, sun
 diffuse at half weight. Tree crowns (meshes over 4 m tall) also get a crown
 sky visibility per vertex (mesh.mesh `crownVisibility`, location 12: the
@@ -549,6 +550,10 @@ leaf mesh's bounding box, `MeshInfo` half extents, along three rays up and
 outward), ambient only, same strength scale, and only with GI off (the
 probes trace the canopy themselves; both would occlude it twice); a placed
 tree's bark uses its leaf mesh's crown.
+A leaf's sunlit side is its geometric normal's (mesh.frag, reference.comp:
+pbrt's rule): where the shading normal disagrees, the Lambert lobe on that
+side (front diffuse or transmission) takes |N.L|, GGX only where both face
+the sun.
 
 ## Frame (renderer_frame.cpp, in order)
 

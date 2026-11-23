@@ -109,6 +109,10 @@ void main() {
         }
     }
 
+    // Only tufts darken toward their base (plantOcclusion); a crown's leaves
+    // are occluded by the crown itself (crown visibility or the GI probes).
+    bool tuft = mesh.halfExtentY < kCrownMinHalfHeight;
+
     // Normals use the inverse transpose so non-uniform scale stays correct.
     mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
     float lodError = max(cluster.refinedError, 0.0) * instance.scale;
@@ -135,7 +139,7 @@ void main() {
         outTerrainSun[i] = terrainSun;
         outVoxelBlend[i] = voxelBlend;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
-        outHeight[i] = clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0);
+        outHeight[i] = tuft ? clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0) : 1.0;
         outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
