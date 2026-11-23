@@ -252,7 +252,7 @@ constexpr uint32_t kPlacementSeed = 1;
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
-void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
+void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -453,7 +453,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField) {
                              Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f},
                              Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, 1.0f, 1.5f, 120.0f, 30.0f},
                              Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f}}) {
-    if (!patch.variants.empty()) {
+    if (!patch.variants.empty() && (streamed || patch.streamFullDensity == 0.0f)) {
       layers.push_back({patch.id, patch.variants, patch.footprint,
                         {0.0f, patch.slopeMax, -1e9f, 1e9f, 0.4f, patch.patchFrequency,
                          patch.patchThreshold, 0.08f, 1.0f / 6.0f, patch.clusterAmount},
@@ -625,6 +625,9 @@ struct Options {
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
   bool placement = true;
+  // The streamed meadow layers (grass mat, tufts, hawkbit, clover); not in the
+  // TLAS, so --reference views compare without them.
+  bool streamed = true;
   // Trees are hidden by default (--trees): no tree prototypes, no forest
   // or lone-tree layers, no forest floor in the terrain material.
   bool trees = false;
@@ -817,6 +820,12 @@ Options parseOptions(int argc, char **argv) {
                std::string(argv[i + 1]) == "off") {
       options.placement = false;
       ++i;
+    } else if (arg == "--streamed") {
+      const std::string value = text(i);
+      if (value != "on" && value != "off") {
+        throw std::runtime_error("--streamed takes on or off");
+      }
+      options.streamed = value == "on";
     } else if (arg == "--far-field" && i + 1 < argc &&
                std::string(argv[i + 1]) == "off") {
       options.farField = false;
@@ -862,7 +871,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --trees, --no-occlusion, "
+                               "--scatter n, --placement off, --streamed on|off, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-trees on|off, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -1046,7 +1055,7 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer, options.trees, options.farField);
+    placeScenery(renderer, options.trees, options.farField, options.streamed);
   }
 
   meridian::Weather weather(1, meridian::weatherPreset(options.weather));

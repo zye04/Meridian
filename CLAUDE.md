@@ -285,7 +285,9 @@ trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
 textures, ~8.7 s of it); use it for captures that
-don't need placement. Debug runs print `placement check:` (GPU table vs
+don't need placement. `--streamed off` drops only the streamed meadow layers
+(grass mat, tufts, hawkbit, clover; not in the TLAS), so a raster capture
+shows what `--reference` traces; the static table and its hash are unchanged. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
