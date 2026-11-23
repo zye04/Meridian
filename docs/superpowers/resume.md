@@ -2,6 +2,22 @@
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
 
+## Session 2026-11-23 night (canopy lighting lane, worktree `../meridian-canopy`)
+
+Spike captures, 1024 spp references (edge `reffix-*` with the new leaf rule,
+interior `refint-front`) and cap.sh / cmp.sh / variant.sh in
+`../meridian-canopy/.superpowers/spike-backlit/` (own build: a parallel
+session rebuilt the main checkout under a capture once).
+- Backlit direct path done (be08624): leaf sun side by the geometric
+  normal (raster + reference), no tuft occlusion on crowns. Backlit 0.368 ->
+  0.121 mean |ln ratio|, front 0.069 (decisions.md).
+- Reference terrain hole fixed (d8b3354): the march mishandled rays starting
+  on a sample line (also every finest-level GI probe).
+- Interior gate now runs: floor 1.1-2.6x dark, square sunflecks (backlog).
+
+Next: interior sun-path ablation (backlog row), then front-lit residuals
+(canopy-edge GI sky term, silvery leaves), then the bitmask pass.
+
 ## Session 2026-11-23 evening (Pro account, inline)
 
 Landed on main:
