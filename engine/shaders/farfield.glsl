@@ -78,6 +78,7 @@ layout(buffer_reference, std430) readonly buffer FarPyramidBuffer {
     float tops[];
 };
 
+// rgb: mean reflectance, a: mean diffuse transmission of the baked material.
 layout(buffer_reference, std430) readonly buffer FarPaletteBuffer {
     vec4 albedo[];
 };
@@ -202,8 +203,8 @@ const uint kFarMaxCellSteps = 512u;
 // where the optical depth reaches `limit` (hitVoxel: the voxel there), or
 // -1 if it doesn't. With wantAlbedo (a constant at every call site, so the
 // plain march compiles unchanged) each segment also adds its absorbed share,
-// exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette albedo to
-// albedoSum.
+// exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette scatter
+// albedo (reflectance rgb * (1 + diffuse transmission a)) to albedoSum.
 float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
                        vec3 direction, float tStart, float tEnd, float limit,
                        inout float opticalDepth, out uint hitVoxel, const bool wantAlbedo,
@@ -254,8 +255,9 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
             float segment = extinction * max(end - a, 0.0);
             if (wantAlbedo) {
                 float taken = min(segment, limit - opticalDepth);
-                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) *
-                             farField.field.palette.albedo[voxelAlbedo(packed)].rgb;
+                vec4 entry = farField.field.palette.albedo[voxelAlbedo(packed)];
+                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) * entry.rgb *
+                             (1.0 + entry.a);
             }
             if (opticalDepth + segment >= limit) {
                 hitVoxel = packed;
@@ -424,8 +426,9 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
                          skipTlasCells, false, unused);
 }
 
-// Transmittance plus the mean albedo of what the ray crossed, weighted by the
-// light each voxel absorbed (a ray that crosses nothing returns albedo 0).
+// Transmittance plus the mean scatter albedo (reflected + transmitted) of
+// what the ray crossed, weighted by the light each voxel absorbed (a ray that
+// crosses nothing returns albedo 0).
 float farFieldTransmittanceAlbedo(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                                   float startDistance, float maxDistance, out vec3 albedo) {
     vec3 sum = vec3(0.0);

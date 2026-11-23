@@ -350,6 +350,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   std::vector<FarTemplates> templates(prototypes.size());
   std::vector<std::array<double, 3>> colorSums(paletteSize, {0.0, 0.0, 0.0});
   std::vector<double> hitSums(paletteSize, 0.0);
+  std::vector<double> transmissionSums(paletteSize, 0.0);
   constexpr uint32_t kRays = 3 * kFarBakeRays * kFarBakeRays;
   double bakeMs = 0.0;
   // The mid tier: every prototype's voxels, concatenated (gpu_types.h).
@@ -422,6 +423,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
           bestHits = hits;
         }
         hitSums[bake.paletteBase + slot] += hits;
+        transmissionSums[bake.paletteBase + slot] +=
+            hits *
+            materials[meshes[prototypes[bake.prototype].meshes[slot].index].materialIndex]
+                .diffuseTransmission;
         for (int c = 0; c < 3; ++c) {
           colorSums[bake.paletteBase + slot][c] += v.slotColor[slot][c];
         }
@@ -632,7 +637,9 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                     static_cast<float>(colorSums[e][1] / hitSums[e]),
                     static_cast<float>(colorSums[e][2] / hitSums[e])};
     }
-    paletteData.insert(paletteData.end(), {palette[e].x, palette[e].y, palette[e].z, 1.0f});
+    const float transmission =
+        hitSums[e] > 0.0 ? static_cast<float>(transmissionSums[e] / hitSums[e]) : 0.0f;
+    paletteData.insert(paletteData.end(), {palette[e].x, palette[e].y, palette[e].z, transmission});
   }
 
   // ---------------------------------------------------------------- Splat
