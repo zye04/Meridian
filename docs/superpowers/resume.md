@@ -23,7 +23,9 @@ Next, proposed (ask the user):
 1. Fix the GI canopy bounce against the reference (#30 intra-crown sun,
    then the bitmask pass), each checked with `tools/reference-compare.py`.
 2. Backlit through-leaf light (leaf lane), same check.
-3. Terrain research triage (user wants terrain next after this lane).
+3. Terrain lane: triaged in `research/2026-11-23-terrain-triage.md`
+   (direction agreed, nothing built); start at its plan step 1, the 0.5 m
+   relief test.
 
 ## Session 2026-11-22 (Pro account, inline work, no lanes)
 
