@@ -51,6 +51,27 @@ Parallel terminals the user opened (check with them / `git worktree list`):
 - Leaf geometry design (cards -> opaque triangles at cook time), folded
   into `specs/2026-11-21-materials-fidelity-design.md`: docs only.
 
+## G7 lane (2026-11-23, worktree `../meridian-g7`, branch `g7`)
+
+User steer 2026-11-23: leaves, voxels and lighting come before cloud
+smear. This lane runs sequentially: G7, then the GI default, then G5.
+
+- Cloud outline default 0 (user decision, 02be388, decisions.md).
+- G7 done (#7): diagnosis `research/2026-11-23-G7-grey-image.md`; fix =
+  exposure shade floor (3 EV over an open landscape's meter, user's look
+  choice). Sub-issues #28 local exposure, #29 floor sky ambient without
+  GI, #30 edge foliage black under GI. Deep research on pure-raster forest
+  lighting + triage: `research/2026-11-23-raster-lighting-*.md`.
+- Next: GI default recommendation (evidence so far: GI fixes the floor
+  ratio, ~2.5% of sun; +1.7 ms interior, +2.2 ms edge; edge foliage goes
+  black, #30). Still to run: `tools/motion-clarity.sh` forest rows with
+  `--gi probes`. Ask the user before changing the default.
+- Then G5 (#5) contact + micro shadows (measure plant bases, rocks, trunk
+  bases on .pfm; Bend-style deterministic march is the research lead).
+  Out of scope: "raster leaf shadow blobby" (leaf-geometry lane; note on #5).
+- Captures need the headless 1440p output when the monitor sleeps
+  (memory native-1440-rule); this session created `MERIDIAN-1440`.
+
 ## The work list
 
 - **Programme:** `docs/superpowers/specs/2026-11-21-chlorophyll-parity-programme-design.md`
