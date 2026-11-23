@@ -4204,3 +4204,15 @@ finer near cascade or bicubic lookup, a look decision).
   own LOD: the shadow map doesn't move with the camera jitter. Once tree
   leaves are opaque geometry (entry above) the bias touches only grass,
   flowers, ferns and the meadow, and the forest cost goes with it.
+
+## Cloud outline off by default (2026-11-23)
+
+User decision: `Effects::cloudOutline` defaults to 0 (was 1, "Cloud
+outline and motion-adaptive resolve" above). The user's own saved grade
+already ran with it at 0. Evidence that it costs more than it gives: with
+a still camera under DLAA the outline drives most of the sky's pops
+(cloudpop worktree, `1119 1356 -431 -1.55 0.35`: 21.3 pops per frame at
+1, 9.7 at 0; 12.9 / 8.3 with frozen clouds), it amplifies the resolve's
+residual noise, and it is a suspect for the blocky distant clouds (G16).
+The effect stays (`--effects cloud-outline=1`, the G panel slider,
+`effectCloudOutline`) for A/B; a grade file without the key now gets 0.
