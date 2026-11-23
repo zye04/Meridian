@@ -167,6 +167,7 @@ add_library(meridian STATIC
     src/render/vulkan_util.cpp
     src/gi.cpp
     src/terrain.cpp
+    src/geo.cpp
     src/texture.cpp
     src/weather.cpp
     src/vma.cpp
