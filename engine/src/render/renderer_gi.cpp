@@ -12,10 +12,19 @@ static_assert(kGiVolumeBytes ==
 void Renderer::setGiMode(GiMode mode) {
   impl_->giReset = impl_->giReset || mode != impl_->giMode;
   impl_->giMode = mode;
-  if (mode != GiMode::Off && impl_->diffuseAlbedo.image == VK_NULL_HANDLE) {
-    check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
-    impl_->destroySwapchain();
-    impl_->createSwapchain();
+  impl_->ensureDiffuseAlbedo();
+}
+
+void Renderer::enableAlbedoCapture() {
+  impl_->albedoCapture = true;
+  impl_->ensureDiffuseAlbedo();
+}
+
+void Renderer::Impl::ensureDiffuseAlbedo() {
+  if ((giMode != GiMode::Off || albedoCapture) && diffuseAlbedo.image == VK_NULL_HANDLE) {
+    check(vkDeviceWaitIdle(device.device), "vkDeviceWaitIdle");
+    destroySwapchain();
+    createSwapchain();
   }
 }
 

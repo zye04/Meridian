@@ -121,10 +121,11 @@ void Renderer::Impl::createSwapchain() {
   if (!dlss) {
     upscaler = std::make_unique<TaaUpscaler>(*this, display);
   }
-  constexpr VkImageUsageFlags kGuideUsage =
-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  constexpr VkImageUsageFlags kGuideUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                            VK_IMAGE_USAGE_SAMPLED_BIT |
+                                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   // The GI's albedo feedback reads the diffuse albedo too.
-  if (upscaler->wantsGuides() || giMode != GiMode::Off) {
+  if (upscaler->wantsGuides() || giMode != GiMode::Off || albedoCapture) {
     diffuseAlbedo = createRenderImage(kAlbedoFormat, kGuideUsage,
                                       VK_IMAGE_ASPECT_COLOR_BIT);
   }

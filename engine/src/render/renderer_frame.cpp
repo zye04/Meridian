@@ -43,8 +43,9 @@ float halfToFloat(uint16_t h) {
 
 // Portable Float Map: RGB float, rows bottom to top; a negative scale means
 // little-endian, which the host is.
+template <typename Texel, typename ToFloat>
 bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
-             const uint16_t *rgba) {
+             const Texel *rgba, ToFloat toFloat) {
   std::FILE *file = std::fopen(path.c_str(), "wb");
   if (!file) {
     return false;
@@ -54,8 +55,7 @@ bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
   for (uint32_t y = extent.height; y-- > 0;) {
     for (uint32_t x = 0; x < extent.width; ++x) {
       for (uint32_t c = 0; c < 3; ++c) {
-        row[x * 3 + c] =
-            halfToFloat(rgba[(size_t{y} * extent.width + x) * 4 + c]);
+        row[x * 3 + c] = toFloat(rgba[(size_t{y} * extent.width + x) * 4 + c]);
       }
     }
     std::fwrite(row.data(), sizeof(float), row.size(), file);
@@ -616,8 +616,8 @@ void Renderer::setWeather(const Weather &weather) {
 
 void Renderer::setCloudsEnabled(bool enabled) { impl_->cloudsEnabled = enabled; }
 
-void Renderer::requestCapture(const std::filesystem::path &path) {
-  impl_->capturePath = path;
+void Renderer::requestCapture(const std::filesystem::path &path, CaptureSource source) {
+  (source == CaptureSource::Display ? impl_->capturePath : impl_->albedoCapturePath) = path;
 }
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
@@ -1587,6 +1587,33 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
   impl_->slotPassCount[frameSlot] = passCount;
 
+  // The diffuse albedo is in SHADER_READ_ONLY since the scene pass ended;
+  // the next frame starts it from UNDEFINED, so it isn't transitioned back.
+  Buffer albedoBuffer;
+  const bool albedoCapturing =
+      impl_->albedoCapturePath.has_value() && impl_->diffuseAlbedo.image != VK_NULL_HANDLE;
+  if (impl_->albedoCapturePath && !albedoCapturing) {
+    std::fprintf(stderr, "Albedo capture failed: no albedo target (enableAlbedoCapture)\n");
+    impl_->albedoCapturePath.reset();
+  }
+  if (albedoCapturing) {
+    albedoBuffer = impl_->createBuffer(
+        VkDeviceSize{renderExtent.width} * renderExtent.height * 4,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    transitionImage(cmd, {impl_->diffuseAlbedo.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0,
+                          VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT});
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {renderExtent.width, renderExtent.height, 1};
+    vkCmdCopyImageToBuffer(cmd, impl_->diffuseAlbedo.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, albedoBuffer.buffer, 1,
+                           &region);
+  }
+
   // Optional capture: copy the finished frame into a CPU-readable buffer.
   // A .pfm capture takes the linear HDR image the tonemap pass read instead.
   Buffer captureBuffer;
@@ -1680,6 +1707,20 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     }
   }
 
+  if (albedoCapturing) {
+    check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
+          "vkWaitForFences");
+    check(vmaInvalidateAllocation(impl_->allocator, albedoBuffer.allocation, 0, VK_WHOLE_SIZE),
+          "vmaInvalidateAllocation");
+    if (!savePfm(*impl_->albedoCapturePath, renderExtent,
+                 static_cast<const uint8_t *>(albedoBuffer.mapped),
+                 [](uint8_t v) { return v / 255.0f; })) {
+      std::fprintf(stderr, "Capture failed: %s\n", impl_->albedoCapturePath->c_str());
+    }
+    impl_->destroyBuffer(albedoBuffer);
+    impl_->albedoCapturePath.reset();
+  }
+
   if (capturing) {
     check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
           "vkWaitForFences");
@@ -1689,7 +1730,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     bool saved = false;
     if (hdrCapture) {
       saved = savePfm(*impl_->capturePath, extent,
-                      static_cast<const uint16_t *>(captureBuffer.mapped));
+                      static_cast<const uint16_t *>(captureBuffer.mapped), halfToFloat);
     } else {
       // The swapchain is BGRA8 sRGB, already display-encoded; PNG wants RGBA.
       basisu::image png(extent.width, extent.height);

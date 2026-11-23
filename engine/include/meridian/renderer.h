@@ -115,6 +115,11 @@ struct ForestMask {
 // foot of rock; rock on cliffs. Flat ground above the snow line is snow.
 enum class GiMode { Off, Probes };
 
+// What requestCapture saves: the displayed frame (PNG, or the linear HDR
+// image the tonemap read for a .pfm path), or the linear diffuse albedo the
+// shading used (render-sized .pfm; needs enableAlbedoCapture).
+enum class CaptureSource { Display, DiffuseAlbedo };
+
 enum class TerrainRole { Grass, Clover, Mud, Soil, ForestPath, ForestFloor, Gravel, Scree, Rock, Count };
 constexpr int kMaxTerrainLayers = 16;
 
@@ -364,8 +369,14 @@ public:
   AaSettings antiAliasing() const;
 
   // Saves the next drawn frame (after tonemapping) as a PNG. For automated
-  // visual checks; stalls that frame until the GPU is done.
-  void requestCapture(const std::filesystem::path &path);
+  // visual checks; stalls that frame until the GPU is done. Each source
+  // holds its own request, so one frame can save both.
+  void requestCapture(const std::filesystem::path &path,
+                      CaptureSource source = CaptureSource::Display);
+  // Keeps the diffuse albedo target even when neither the upscaler nor GI
+  // needs it, so the albedo can be captured. Call before the first frame:
+  // later it recreates the targets, which resets temporal history.
+  void enableAlbedoCapture();
 
   // Debug: waits for the GPU, then saves the weather map the last frame drew
   // as a PNG (R coverage, G type, B precipitation; row 0 = north) and prints

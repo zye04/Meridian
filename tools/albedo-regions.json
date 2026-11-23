@@ -1,0 +1,53 @@
+{
+  "_views": "edge: 600 1205.6 -400 -1.55 0.02 --trees; interior: 85 1158.6 -53 -1.55 0.25 --trees; rock: 1944.3 953.4 -1923.9 -1.55 -0.4; at 2560x1440",
+  "edge": {
+    "trunk-a": {
+      "rect": [
+        430,
+        680,
+        445,
+        720
+      ],
+      "class": "bark"
+    },
+    "trunk-b": {
+      "rect": [
+        2426,
+        980,
+        2448,
+        1020
+      ],
+      "class": "bark"
+    },
+    "canopy": {
+      "rect": [
+        100,
+        100,
+        1200,
+        500
+      ],
+      "class": "leaf"
+    }
+  },
+  "rock": {
+    "rock": {
+      "rect": [
+        1500,
+        480,
+        1800,
+        640
+      ],
+      "class": "rock"
+    },
+    "grass": {
+      "rect": [
+        200,
+        1000,
+        900,
+        1300
+      ],
+      "class": "grass"
+    }
+  },
+  "_note": "Region means mix materials in natural views (a canopy rect holds leaves and branch bark), so 'source' ratios are only meaningful on single-material rects; the fidelity gate needs a material-ID view or the bench (materials spec D6)."
+}

@@ -109,6 +109,12 @@ validation error):
 ./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--trees] [--lod-error PX] --capture out.png [--frames N]
 ```
 
+`--capture-albedo FILE.pfm` (with `--capture`) also saves the linear
+diffuse albedo the shading used on the same frame (scene attachment 3,
+kept alive for the run by `Renderer::enableAlbedoCapture`; the sky reads
+0.5); `python3 -I tools/albedo-audit.py FILE.pfm tools/albedo-regions.json
+VIEW` prints per-region mean albedo against approximate physical ranges
+and, for single-material rects, a source texture (materials spec D6).
 A `.pfm` capture path writes the linear HDR image the tonemap reads
 (the upscaler's output, pre-exposed) instead, for luminance ratios.
 

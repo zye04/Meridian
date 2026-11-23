@@ -619,6 +619,8 @@ struct Options {
   // Also saves <capture stem>_NNN.png every this many frames (sequences).
   int captureSequence = 0;
   std::optional<std::filesystem::path> capturePath;
+  // The linear diffuse albedo of the --capture frame (.pfm), for the albedo audit.
+  std::optional<std::filesystem::path> albedoCapturePath;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
@@ -724,6 +726,8 @@ Options parseOptions(int argc, char **argv) {
       options.cameraAngularVelocity = {number(i), 0.0f};
     } else if (arg == "--capture-sequence") {
       options.captureSequence = static_cast<int>(number(i));
+    } else if (arg == "--capture-albedo" && i + 1 < argc) {
+      options.albedoCapturePath = argv[++i];
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--windowed") {
@@ -867,7 +871,8 @@ Options parseOptions(int argc, char **argv) {
                                "--windowed, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
-                               "--capture file.png|file.pfm, --capture-sequence n, --frames n)");
+                               "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-sequence n, "
+                               "--frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
@@ -892,6 +897,9 @@ Options parseOptions(int argc, char **argv) {
   }
   if (options.captureSequence > 0 && !options.capturePath) {
     throw std::runtime_error("--capture-sequence needs --capture");
+  }
+  if (options.albedoCapturePath && !options.capturePath) {
+    throw std::runtime_error("--capture-albedo needs --capture");
   }
   return options;
 }
@@ -939,6 +947,9 @@ int main(int argc, char **argv) {
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
   renderer.setGiMode(options.gi ? meridian::GiMode::Probes : meridian::GiMode::Off);
+  if (options.albedoCapturePath) {
+    renderer.enableAlbedoCapture();
+  }
   renderer.setVoxelTrees(options.voxelTrees);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
@@ -1195,6 +1206,9 @@ int main(int argc, char **argv) {
     }
     if (options.capturePath && totalFrames == options.frames) {
       renderer.requestCapture(*options.capturePath);
+      if (options.albedoCapturePath) {
+        renderer.requestCapture(*options.albedoCapturePath, meridian::CaptureSource::DiffuseAlbedo);
+      }
     } else if (options.captureSequence > 0 && totalFrames % options.captureSequence == 0) {
       char suffix[24];
       std::snprintf(suffix, sizeof(suffix), "_%03d.png",

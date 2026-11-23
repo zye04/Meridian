@@ -503,8 +503,11 @@ struct Renderer::Impl {
   std::vector<GpuMesh> meshes;
 
   std::optional<std::filesystem::path> capturePath;
+  std::optional<std::filesystem::path> albedoCapturePath;
+  bool albedoCapture = false;
 
   void createSwapchain();
+  void ensureDiffuseAlbedo();
   void destroySwapchain();
   void createBloomChain();
   void createFrames();
