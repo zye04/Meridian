@@ -43,6 +43,7 @@ ctest --test-dir build                           # or ./build/tests/tests
 # the build uses ccache and mold automatically when installed (no setup needed)
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
 ./tools/fetch-sample-assets.sh                   # test models into assets/; also the Napf terrain (225 tiles, needs magick)
+./tools/fetch-relief-patch.sh                    # 4x4 km Napf patch at 0.5 m and 2 m (relief-{0.5,2}.height; view (x, z) on napf.height = (x - 500, z - 500))
 python3 -I tools/image-gates.py laplacian motion.png   # laplacian|ratio|shimmer|ssim|diff
 tools/motion-gates.sh build-release out-dir      # motion/shimmer/SSIM gate table, GPU passes
 tools/motion-clarity.sh build-release out-dir    # in-motion jitter (frame 120 vs 121, same pose) + smear vs still at user speeds
@@ -68,7 +69,7 @@ Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 
 `G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
 sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
 section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
-parallax self-shadow, micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
+parallax self-shadow, terrain detail on/off (the 0.3 m noise on the two finest levels), micro shadows on/off + strength (also darkens plant bases, below), contact shadows on/off
 (off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, cut-out mip bias -2..2, stable TAA on/off), with Save, Load, Reset and a "show built-in
 grade" A/B box. It frees the cursor and freezes the camera while open;
 changes apply at once. Save writes the grade file,
@@ -210,7 +211,7 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
@@ -300,7 +301,7 @@ and ~59 s to Debug startup on the first run only: the patterns are cached,
 see Gotchas), plus forests and lone trees with `--trees`
 (~2.65M instances), which loads the rocks (and with `--trees` the
 trees) as prototypes: Debug startup
-~95 s, Release ~18 s. `--placement off` skips it (Release ~11 s:
+~95 s, Release ~18 s. `--terrain FILE` loads another heightfield instead of `assets/terrain/napf.height` (e.g. the relief patch). `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
 textures, ~8.7 s of it); use it for captures that
 don't need placement. `--streamed off` drops only the streamed meadow layers

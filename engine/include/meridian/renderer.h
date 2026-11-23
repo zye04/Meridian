@@ -195,6 +195,7 @@ struct Effects {
   bool parallax = true;           // terrain parallax occlusion mapping
   float parallaxDepth = 1.0f;     // multiplier on each layer's physical depth, 0..4
   bool parallaxSelfShadow = true; // the sun's shadow inside the parallax relief
+  bool terrainDetail = true;      // procedural relief on the two finest terrain levels
   bool microShadows = true;
   float microShadowStrength = 1.0f; // 0..1
   bool contactShadows = true;       // off skips the pass

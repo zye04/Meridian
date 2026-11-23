@@ -289,7 +289,8 @@ struct GpuTerrain {
   int32_t forestMaskLo = 0;
   int32_t forestMaskHi = 0;
   uint32_t forestMaskSeed = 0;
-  uint32_t padding[2] = {}; // keeps the next SceneData member 16-byte aligned
+  float detailScale = 1.0f; // terrain_detail.glsl: 0 turns the detail relief off
+  uint32_t padding = 0; // keeps the next SceneData member 16-byte aligned
 };
 static_assert(sizeof(GpuTerrain) == 1040);
 

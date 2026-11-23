@@ -566,7 +566,7 @@ meridian::Atmosphere atmosphereFor(Haze haze, float valleyFloorKm) {
 }
 
 // "pom=0,micro=0,contact=0": comma-separated name=value over the defaults.
-// Names: pom, pom-depth, pom-shadow, micro, micro-strength, contact,
+// Names: pom, pom-depth, pom-shadow, terrain-detail, micro, micro-strength, contact,
 // contact-length, bloom (on/off are 0/1).
 meridian::Effects parseEffects(const std::string &text) {
   meridian::Effects e;
@@ -585,6 +585,7 @@ meridian::Effects parseEffects(const std::string &text) {
     if (name == "pom") e.parallax = value != 0.0f;
     else if (name == "pom-depth") e.parallaxDepth = value;
     else if (name == "pom-shadow") e.parallaxSelfShadow = value != 0.0f;
+    else if (name == "terrain-detail") e.terrainDetail = value != 0.0f;
     else if (name == "micro") e.microShadows = value != 0.0f;
     else if (name == "micro-strength") e.microShadowStrength = value;
     else if (name == "contact") e.contactShadows = value != 0.0f;
@@ -606,6 +607,8 @@ struct Options {
   // Grade file (see overlay.h) to load in any run; interactive runs also
   // load the default one.
   std::optional<std::filesystem::path> gradePath;
+  // --terrain FILE: the heightfield (default assets/terrain/napf.height).
+  std::optional<std::filesystem::path> terrainPath;
   bool overlayGrade = false;
   bool overlayPerf = false;
   // Timed run with real frame times and no input; the CSV goes to benchmarkPath.
@@ -815,6 +818,8 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--rr takes on or off");
       }
       options.rayReconstruction = rr == "on";
+    } else if (arg == "--terrain" && i + 1 < argc) {
+      options.terrainPath = argv[++i];
     } else if (arg == "--trees") {
       options.trees = true;
     } else if (arg == "--scatter") {
@@ -1002,9 +1007,10 @@ int main(int argc, char **argv) {
   renderer.setCloudsEnabled(options.clouds);
 
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
-  const auto heightPath = std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height";
+  const auto heightPath = options.terrainPath.value_or(
+      std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height");
   meridian::Heightfield terrain;
-  if (std::filesystem::exists(heightPath)) {
+  if (options.terrainPath || std::filesystem::exists(heightPath)) {
     terrain = meridian::loadHeightfield(heightPath);
   } else {
     std::printf("Missing assets/terrain/napf.height; terrain is procedural (see "

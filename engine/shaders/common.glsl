@@ -349,7 +349,9 @@ struct Terrain {
     int forestMaskLo;
     int forestMaskHi;
     uint forestMaskSeed;
-    uint padding[2];
+    // Multiplies the detail relief (terrain_detail.glsl); 0 = off.
+    float detailScale;
+    uint padding;
 };
 
 // Must match GpuWind in C++; functions in wind.glsl. The 10 m wind (direction

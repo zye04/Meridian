@@ -61,6 +61,7 @@ std::string lookToJson(const Look &look) {
                            ",\n  \"effectParallax\": " + number(e.parallax) +
                            ",\n  \"effectParallaxDepth\": " + number(e.parallaxDepth) +
                            ",\n  \"effectParallaxSelfShadow\": " + number(e.parallaxSelfShadow) +
+                           ",\n  \"effectTerrainDetail\": " + number(e.terrainDetail) +
                            ",\n  \"effectMicroShadows\": " + number(e.microShadows) +
                            ",\n  \"effectMicroShadowStrength\": " + number(e.microShadowStrength) +
                            ",\n  \"effectContactShadows\": " + number(e.contactShadows) +
@@ -91,6 +92,7 @@ Look lookFromJson(std::string_view json, const Look &base) {
   e.parallax = flag("effectParallax", b.parallax);
   e.parallaxDepth = meridian::jsonNumber(json, "effectParallaxDepth").value_or(b.parallaxDepth);
   e.parallaxSelfShadow = flag("effectParallaxSelfShadow", b.parallaxSelfShadow);
+  e.terrainDetail = flag("effectTerrainDetail", b.terrainDetail);
   e.microShadows = flag("effectMicroShadows", b.microShadows);
   e.microShadowStrength =
       meridian::jsonNumber(json, "effectMicroShadowStrength").value_or(b.microShadowStrength);
@@ -209,6 +211,7 @@ GradePanel::Changes GradePanel::draw() {
   };
   effect("parallax", fx.parallax, &fx.parallaxDepth, 4.0f, "depth x");
   effect("parallax self-shadow", fx.parallaxSelfShadow, nullptr, 0.0f, "");
+  effect("terrain detail", fx.terrainDetail, nullptr, 0.0f, "");
   effect("micro shadows", fx.microShadows, &fx.microShadowStrength, 1.0f, "strength");
   effect("contact shadows", fx.contactShadows, &fx.contactLength, 3.0f, "length x");
   slider("cloud outline", fx.cloudOutline, 0.0f, 3.0f, changes.effects);

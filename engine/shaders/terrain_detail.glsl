@@ -16,8 +16,8 @@ float terrainLodRange(Terrain t, uint level) {
 // Detail displacement weight: 1 within level 0's range, 0 from the end of
 // level 1's, so level >= 2 vertices are exactly the heightfield.
 float terrainDetailWeight(Terrain t, float distanceToCamera) {
-    return 1.0 - smoothstep(terrainLodRange(t, 0u), terrainLodRange(t, 1u),
-                            distanceToCamera);
+    return t.detailScale * (1.0 - smoothstep(terrainLodRange(t, 0u), terrainLodRange(t, 1u),
+                                             distanceToCamera));
 }
 
 float terrainHash(ivec2 cell, uint seed) {
