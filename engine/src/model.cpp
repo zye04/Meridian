@@ -18,16 +18,23 @@ namespace {
 
 // --- Tangent generation (MikkTSpace)
 
+// MikkTSpace matches every triangle with two equal corners against all the
+// others (O(n^2)): 50k of them in a million-triangle leaf mesh took minutes.
+// They cover no pixels, so only the other triangles are handed to it.
+struct TangentFaces {
+  MeshData *mesh;
+  std::vector<uint32_t> faces;
+};
+
 int faceCount(const SMikkTSpaceContext *context) {
-  auto *mesh = static_cast<MeshData *>(context->m_pUserData);
-  return static_cast<int>(mesh->indices.size() / 3);
+  return static_cast<int>(static_cast<TangentFaces *>(context->m_pUserData)->faces.size());
 }
 
 int verticesOfFace(const SMikkTSpaceContext *, int) { return 3; }
 
-const Vertex &faceVertex(const SMikkTSpaceContext *context, int face, int vert) {
-  auto *mesh = static_cast<MeshData *>(context->m_pUserData);
-  return mesh->vertices[mesh->indices[static_cast<size_t>(face) * 3 + vert]];
+Vertex &faceVertex(const SMikkTSpaceContext *context, int face, int vert) {
+  auto *data = static_cast<TangentFaces *>(context->m_pUserData);
+  return data->mesh->vertices[data->mesh->indices[static_cast<size_t>(data->faces[face]) * 3 + vert]];
 }
 
 void position(const SMikkTSpaceContext *context, float out[], int face, int vert) {
@@ -55,8 +62,7 @@ void texCoord(const SMikkTSpaceContext *context, float out[], int face, int vert
 // guarantee by splitting vertices at UV seams.
 void setTangent(const SMikkTSpaceContext *context, const float tangent[],
                 float sign, int face, int vert) {
-  auto *mesh = static_cast<MeshData *>(context->m_pUserData);
-  Vertex &v = mesh->vertices[mesh->indices[static_cast<size_t>(face) * 3 + vert]];
+  Vertex &v = faceVertex(context, face, vert);
   v.tangent[0] = tangent[0];
   v.tangent[1] = tangent[1];
   v.tangent[2] = tangent[2];
@@ -64,6 +70,17 @@ void setTangent(const SMikkTSpaceContext *context, const float tangent[],
 }
 
 void generateTangents(MeshData &mesh) {
+  TangentFaces data{&mesh, {}};
+  const auto same = [](const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+  for (size_t f = 0; f < mesh.indices.size() / 3; ++f) {
+    const Vec3 &a = mesh.vertices[mesh.indices[f * 3]].position;
+    const Vec3 &b = mesh.vertices[mesh.indices[f * 3 + 1]].position;
+    const Vec3 &c = mesh.vertices[mesh.indices[f * 3 + 2]].position;
+    if (!same(a, b) && !same(a, c) && !same(b, c)) {
+      data.faces.push_back(static_cast<uint32_t>(f));
+    }
+  }
+
   SMikkTSpaceInterface interface{};
   interface.m_getNumFaces = faceCount;
   interface.m_getNumVerticesOfFace = verticesOfFace;
@@ -74,7 +91,7 @@ void generateTangents(MeshData &mesh) {
 
   SMikkTSpaceContext context{};
   context.m_pInterface = &interface;
-  context.m_pUserData = &mesh;
+  context.m_pUserData = &data;
   genTangSpaceDefault(&context);
 }
 
