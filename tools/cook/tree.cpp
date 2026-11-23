@@ -420,17 +420,6 @@ void hsvToRgb(const float hsv[3], float rgb[3]) {
   }
 }
 
-uint8_t linearToSrgb8(float linear) {
-  const float c = std::clamp(linear, 0.0f, 1.0f);
-  const float s = c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-  return static_cast<uint8_t>(std::lround(s * 255.0f));
-}
-
-float srgb8ToLinear(uint8_t value) {
-  const float s = value / 255.0f;
-  return s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
-}
-
 // Tints of the species leaf color: a few percent of hue and brightness.
 basisu::image leafPalette(const float linear[3]) {
   float hsv[3];
@@ -551,9 +540,42 @@ float alphaCutoff(const fastgltf::Material &material) {
   return material.alphaMode == fastgltf::AlphaMode::Mask ? material.alphaCutoff : 0.5f;
 }
 
-// A textured material's maps, re-encoded. Leaves transmit by the source's
-// diffuse transmission (its texture averaged over the opaque texels, as the
-// engine has no transmission map) or the default.
+// The source's leaf transmission t, as the source tools write it (Unreal's
+// translucency, tools/unreal/cook_ready.py): the back transmits t times the
+// base colour. Its texture is averaged over the opaque texels, as the engine
+// has no transmission factor map.
+template <typename SourceImage>
+float sourceLeafTransmission(const fastgltf::Material &from, const std::string &name,
+                             const basisu::image &color, bool traced, float cutoff,
+                             SourceImage &&sourceImage) {
+  if (!from.diffuseTransmission) {
+    return kLeafDiffuseTransmission;
+  }
+  float transmission = from.diffuseTransmission->diffuseTransmissionFactor;
+  if (const auto &texture = from.diffuseTransmission->diffuseTransmissionTexture) {
+    const basisu::image &map = sourceImage(texture->textureIndex);
+    const bool sameSize = map.get_width() == color.get_width() &&
+                          map.get_height() == color.get_height();
+    if (traced && !sameSize) {
+      std::printf("%s: transmission map and base color differ in size; averaging the whole "
+                  "map\n", name.c_str());
+    }
+    double sum = 0.0;
+    size_t opaque = 0;
+    for (uint32_t i = 0; i < map.get_total_pixels(); ++i) {
+      if (!traced || !sameSize || color.get_ptr()[i].a >= cutoff * 255.0f) {
+        sum += map.get_ptr()[i].a / 255.0;
+        ++opaque;
+      }
+    }
+    transmission *= opaque ? static_cast<float>(sum / opaque) : 0.0f;
+  }
+  return transmission;
+}
+
+// A textured material's maps, re-encoded. A leaf's transmission becomes
+// KHR_materials_diffuse_transmission (khrLeafTransmission): its base color
+// texture, scaled, is also the transmission color texture.
 template <typename SourceImage, typename CookTexture>
 void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::string &name,
                           fastgltf::Material &material, SourceImage &&sourceImage,
@@ -561,23 +583,26 @@ void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::
   const basisu::image &color = sourceImage(from.pbrData.baseColorTexture->textureIndex);
   const bool traced = tracedMaterial(from, leaf, color);
   const float cutoff = alphaCutoff(from);
-  material.pbrData.baseColorTexture =
-      cookTexture(*from.pbrData.baseColorTexture, Usage::Color, name + "_color");
+  const float transmission =
+      leaf ? sourceLeafTransmission(from, name, color, traced, cutoff, sourceImage) : 0.0f;
+  const KhrLeafTransmission khr = khrLeafTransmission(transmission);
+  material.pbrData.baseColorTexture = cookTexture(*from.pbrData.baseColorTexture, Usage::Color,
+                                                  name + "_color", khr.colorScale);
   if (from.pbrData.metallicRoughnessTexture) {
     material.pbrData.metallicRoughnessTexture =
-        cookTexture(*from.pbrData.metallicRoughnessTexture, Usage::Data, name + "_orm");
+        cookTexture(*from.pbrData.metallicRoughnessTexture, Usage::Data, name + "_orm", 1.0f);
   }
   if (from.occlusionTexture) {
     fastgltf::OcclusionTextureInfo occlusion;
     static_cast<fastgltf::TextureInfo &>(occlusion) =
-        cookTexture(*from.occlusionTexture, Usage::Data, name + "_occlusion");
+        cookTexture(*from.occlusionTexture, Usage::Data, name + "_occlusion", 1.0f);
     occlusion.strength = from.occlusionTexture->strength;
     material.occlusionTexture = std::move(occlusion);
   }
   if (from.normalTexture) {
     fastgltf::NormalTextureInfo normal;
     static_cast<fastgltf::TextureInfo &>(normal) =
-        cookTexture(*from.normalTexture, Usage::Normal, name + "_normal");
+        cookTexture(*from.normalTexture, Usage::Normal, name + "_normal", 1.0f);
     normal.scale = from.normalTexture->scale;
     material.normalTexture = std::move(normal);
   }
@@ -585,32 +610,14 @@ void cookTexturedMaterial(const fastgltf::Material &from, bool leaf, const std::
     std::printf("Textured wood material %s\n", name.c_str());
     return;
   }
-  float transmission = kLeafDiffuseTransmission;
-  if (from.diffuseTransmission) {
-    transmission = from.diffuseTransmission->diffuseTransmissionFactor;
-    if (const auto &texture = from.diffuseTransmission->diffuseTransmissionTexture) {
-      const basisu::image &map = sourceImage(texture->textureIndex);
-      const bool sameSize = map.get_width() == color.get_width() &&
-                            map.get_height() == color.get_height();
-      if (traced && !sameSize) {
-        std::printf("%s: transmission map and base color differ in size; averaging the whole "
-                    "map\n", name.c_str());
-      }
-      double sum = 0.0;
-      size_t opaque = 0;
-      for (uint32_t i = 0; i < map.get_total_pixels(); ++i) {
-        if (!traced || !sameSize || color.get_ptr()[i].a >= cutoff * 255.0f) {
-          sum += map.get_ptr()[i].a / 255.0;
-          ++opaque;
-        }
-      }
-      transmission *= opaque ? static_cast<float>(sum / opaque) : 0.0f;
-    }
-  }
   material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
-  material.diffuseTransmission->diffuseTransmissionFactor = transmission;
-  std::printf("Textured leaf material %s: %s, diffuse transmission %.3f\n", name.c_str(),
-              traced ? "traced" : "opaque", transmission);
+  material.diffuseTransmission->diffuseTransmissionFactor = khr.factor;
+  material.diffuseTransmission->diffuseTransmissionColorTexture =
+      material.pbrData.baseColorTexture;
+  std::printf("Textured leaf material %s: %s, transmits %.3f x base color (diffuse transmission "
+              "%.3f, color x %.3f)\n",
+              name.c_str(), traced ? "traced" : "opaque", transmission, khr.factor,
+              khr.colorScale);
 }
 
 } // namespace
@@ -1026,10 +1033,10 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     barkArm = writer.addTexture(encodeKtx2(arm, Usage::Data, jobPool), "bark_arm");
   }
 
-  std::map<std::pair<size_t, Usage>, size_t> encoded;
+  std::map<std::tuple<size_t, Usage, float>, size_t> encoded;
   const std::filesystem::path textureCache = outDir.parent_path() / ".ktx2-cache";
   const auto cookTexture = [&](const fastgltf::TextureInfo &info, Usage usage,
-                               const std::string &name) {
+                               const std::string &name, float colorScale) {
     const size_t texCoord =
         info.transform ? info.transform->texCoordIndex.value_or(info.texCoordIndex)
                        : info.texCoordIndex;
@@ -1037,10 +1044,17 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
       throw std::runtime_error(name + " reads TEXCOORD_" + std::to_string(texCoord) +
                                "; the tree cook keeps only TEXCOORD_0");
     }
-    const basisu::image &image = sourceImage(info.textureIndex);
-    const auto [it, inserted] =
-        encoded.emplace(std::pair{*source.textures[info.textureIndex].imageIndex, usage}, 0);
+    const auto [it, inserted] = encoded.emplace(
+        std::tuple{*source.textures[info.textureIndex].imageIndex, usage, colorScale}, 0);
     if (inserted) {
+      basisu::image image = sourceImage(info.textureIndex);
+      if (colorScale != 1.0f) {
+        const double clamped = scaleLinearColor(image, colorScale);
+        if (clamped > 0.0) {
+          std::printf("%s: %.2f%% of color channels clamp at x %.3f\n", name.c_str(),
+                      100.0 * clamped, colorScale);
+        }
+      }
       it->second = writer.addTexture(cachedEncode(image, usage, jobPool, -1, textureCache), name);
     }
     fastgltf::TextureInfo out = info;
@@ -1065,14 +1079,17 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
         cookTexturedMaterial(from, leaf, name, material, sourceImage, cookTexture);
       }
     } else if (leaf) {
-      material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
-      material.diffuseTransmission->diffuseTransmissionFactor = kLeafDiffuseTransmission;
-      const float color[3] = {from.pbrData.baseColorFactor[0], from.pbrData.baseColorFactor[1],
-                              from.pbrData.baseColorFactor[2]};
-      const size_t palette = writer.addTexture(
-          encodeKtx2(leafPalette(color), Usage::Color, jobPool), name + "_tint");
+      const KhrLeafTransmission khr = khrLeafTransmission(kLeafDiffuseTransmission);
+      basisu::image tint = leafPalette(from.pbrData.baseColorFactor.data());
+      scaleLinearColor(tint, khr.colorScale);
+      const size_t palette =
+          writer.addTexture(encodeKtx2(tint, Usage::Color, jobPool), name + "_tint");
       material.pbrData.baseColorFactor = {1.0f, 1.0f, 1.0f, from.pbrData.baseColorFactor[3]};
       material.pbrData.baseColorTexture = fastgltf::TextureInfo{palette, 0, {}};
+      material.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
+      material.diffuseTransmission->diffuseTransmissionFactor = khr.factor;
+      material.diffuseTransmission->diffuseTransmissionColorTexture =
+          material.pbrData.baseColorTexture;
     } else if (barkColor) {
       for (int c = 0; c < 3; ++c) {
         material.pbrData.baseColorFactor[c] =

@@ -173,4 +173,29 @@ std::vector<uint8_t> encodeKtx2(const basisu::image &image, Usage usage,
   return {ktx2.begin(), ktx2.end()};
 }
 
+uint8_t linearToSrgb8(float linear) {
+  const float c = std::clamp(linear, 0.0f, 1.0f);
+  const float s = c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+  return static_cast<uint8_t>(std::lround(s * 255.0f));
+}
+
+float srgb8ToLinear(uint8_t value) {
+  const float s = value / 255.0f;
+  return s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+}
+
+double scaleLinearColor(basisu::image &image, float scale) {
+  size_t clamped = 0;
+  for (uint32_t i = 0; i < image.get_total_pixels(); ++i) {
+    basisu::color_rgba &texel = image.get_ptr()[i];
+    for (int c = 0; c < 3; ++c) {
+      const float linear = srgb8ToLinear(texel[c]) * scale;
+      clamped += linear > 1.0f ? 1 : 0;
+      texel[c] = linearToSrgb8(linear);
+    }
+  }
+  return image.get_total_pixels() ? static_cast<double>(clamped) / (3.0 * image.get_total_pixels())
+                                   : 0.0;
+}
+
 } // namespace meridian::cook

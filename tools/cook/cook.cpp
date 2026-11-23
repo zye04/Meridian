@@ -298,19 +298,27 @@ PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &d
       o.b = 0;
       o.a = 255;
     }
+    // The translucency is how much of the base colour the back transmits;
+    // as KHR_materials_diffuse_transmission (khrLeafTransmission) the base
+    // colour scales up and doubles as the transmission colour.
+    const float translucencyMean = opaque ? static_cast<float>(translucency / opaque) : 0.0f;
+    const KhrLeafTransmission khr = khrLeafTransmission(translucencyMean);
+    const double clamped = scaleLinearColor(color, khr.colorScale);
     result.replaced[*orImage] = std::move(ort);
     result.replaced[*colorImage] = std::move(color);
     result.masks.insert(*colorImage);
-    const float factor = opaque ? static_cast<float>(translucency / opaque) : 0.0f;
     m.occlusionTexture.reset();
     m.pbrData.metallicFactor = 0.0f;
     m.alphaMode = fastgltf::AlphaMode::Mask;
     m.alphaCutoff = 0.5f;
     m.doubleSided = true;
     m.diffuseTransmission = fastgltf::MaterialDiffuseTransmission{};
-    m.diffuseTransmission->diffuseTransmissionFactor = factor;
-    std::printf("Plant material %s: mean translucency %.3f over %zu opaque texels\n",
-                std::string(m.name).c_str(), factor, opaque);
+    m.diffuseTransmission->diffuseTransmissionFactor = khr.factor;
+    m.diffuseTransmission->diffuseTransmissionColorTexture = m.pbrData.baseColorTexture;
+    std::printf("Plant material %s: mean translucency %.3f over %zu opaque texels (diffuse "
+                "transmission %.3f, color x %.3f, %.2f%% of channels clamp)\n",
+                std::string(m.name).c_str(), translucencyMean, opaque, khr.factor, khr.colorScale,
+                100.0 * clamped);
   }
   if (!plant) {
     return result;

@@ -351,6 +351,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   std::vector<std::array<double, 3>> colorSums(paletteSize, {0.0, 0.0, 0.0});
   std::vector<double> hitSums(paletteSize, 0.0);
   std::vector<double> transmissionSums(paletteSize, 0.0);
+  std::vector<std::array<double, 3>> transmissionColorSums(paletteSize, {0.0, 0.0, 0.0});
   constexpr uint32_t kRays = 3 * kFarBakeRays * kFarBakeRays;
   double bakeMs = 0.0;
   // The mid tier: every prototype's voxels, concatenated (gpu_types.h).
@@ -429,6 +430,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                 .diffuseTransmission;
         for (int c = 0; c < 3; ++c) {
           colorSums[bake.paletteBase + slot][c] += v.slotColor[slot][c];
+          transmissionColorSums[bake.paletteBase + slot][c] += v.slotTransmissionColor[slot][c];
         }
       }
       grid.albedo[i] = static_cast<uint8_t>(bake.paletteBase + best);
@@ -629,18 +631,30 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                 protoBakeMs, protoBuildMs);
   }
 
+  // Entries 0..paletteSize-1: (reflected diffuse rgb, diffuse transmission
+  // factor); entries paletteSize..: (transmitted rgb, 0), the factor times
+  // the transmission colour (farfield.glsl).
   std::vector<Vec3> palette(paletteSize, Vec3{0.5f, 0.5f, 0.5f});
-  std::vector<float> paletteData;
+  std::vector<float> paletteData, transmittedData;
   for (uint32_t e = 0; e < paletteSize; ++e) {
-    if (hitSums[e] > 0.0) {
-      palette[e] = {static_cast<float>(colorSums[e][0] / hitSums[e]),
-                    static_cast<float>(colorSums[e][1] / hitSums[e]),
-                    static_cast<float>(colorSums[e][2] / hitSums[e])};
-    }
     const float transmission =
         hitSums[e] > 0.0 ? static_cast<float>(transmissionSums[e] / hitSums[e]) : 0.0f;
+    Vec3 transmitted{};
+    if (hitSums[e] > 0.0) {
+      const double reflected = (1.0 - transmission) / hitSums[e];
+      const double through = transmission / hitSums[e];
+      palette[e] = {static_cast<float>(colorSums[e][0] * reflected),
+                    static_cast<float>(colorSums[e][1] * reflected),
+                    static_cast<float>(colorSums[e][2] * reflected)};
+      transmitted = {static_cast<float>(transmissionColorSums[e][0] * through),
+                     static_cast<float>(transmissionColorSums[e][1] * through),
+                     static_cast<float>(transmissionColorSums[e][2] * through)};
+    }
     paletteData.insert(paletteData.end(), {palette[e].x, palette[e].y, palette[e].z, transmission});
+    transmittedData.insert(transmittedData.end(),
+                           {transmitted.x, transmitted.y, transmitted.z, 0.0f});
   }
+  paletteData.insert(paletteData.end(), transmittedData.begin(), transmittedData.end());
 
   // ---------------------------------------------------------------- Splat
 

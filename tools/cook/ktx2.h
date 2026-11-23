@@ -26,6 +26,11 @@ basisu::image decode(const std::vector<uint8_t> &bytes);
 // Mips 1.. of an alpha-tested image whose mask is in `channel`: each keeps
 // mip 0's fraction of texels above 0.5.
 std::vector<basisu::image> coverageMips(const basisu::image &image, Usage usage, int channel);
+uint8_t linearToSrgb8(float linear);
+float srgb8ToLinear(uint8_t value);
+// Multiplies an sRGB image's colour by `scale` in linear light, clamped at 1,
+// alpha kept. Returns the share of colour channels that clamped.
+double scaleLinearColor(basisu::image &image, float scale);
 std::vector<uint8_t> encodeKtx2(const basisu::image &image, Usage usage,
                                 basisu::job_pool &jobPool, int coverageChannel = -1);
 

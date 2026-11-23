@@ -54,6 +54,9 @@ void main() {
 
     Surface s;
     s.baseColor = scene.farField.field.palette.albedo[voxelAlbedo(voxel.x)].rgb;
+    vec3 transmitted =
+        scene.farField.field.palette
+            .albedo[scene.farField.field.paletteSize + voxelAlbedo(voxel.x)].rgb;
     s.alpha = 1.0;
     s.metallic = 0.0;
     s.perceptualRoughness = kVoxelPerceptualRoughness;
@@ -69,7 +72,9 @@ void main() {
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
-    if (sh.NoL > 0.0) {
+    float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
+    bool backLit = backNoL > 0.0 && any(greaterThan(transmitted, vec3(0.0)));
+    if (sh.NoL > 0.0 || backLit) {
         vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
         vec3 sunLocal = normalize(toLocal * rayDirection);
         PrototypeVoxels box = scene.protoVoxels.prototypes.prototypes[instance.meshOrPrototype];
@@ -78,11 +83,16 @@ void main() {
             world + rayDirection * (protoBoxExit(box, inLocal, sunLocal) * scale + kExitBias);
         float visibility = float(inBrick.y >> 31) * exp(-selfDepth) *
                            traceSunVisibility(exitPoint, exitPoint, rayDirection, 0.0, false,
-                                              exitPoint - scene.cameraPosition, s.normal);
-        addSunLight(sh, visibility, 1.0);
-        sunRadiance = sh.diffuseLight + sh.specularLight;
+                                              exitPoint - scene.cameraPosition,
+                                              backLit ? -s.normal : s.normal);
+        if (sh.NoL > 0.0) {
+            addSunLight(sh, visibility, 1.0);
+            sunRadiance = sh.diffuseLight + sh.specularLight;
+        }
+        addTransmittedSun(sh, transmitted, backNoL, visibility);
     }
     addAmbientLight(sh, s.occlusion);
+    addTransmittedAmbient(sh, transmitted, s.occlusion);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);

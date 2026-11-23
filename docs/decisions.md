@@ -4345,3 +4345,44 @@ visibility is then the only canopy occlusion). Release, DLAA, 2560x1440:
   pass. SSIM fwd5 ground 0.972 stays below its 0.98 minimum, the
   pre-existing failure under DLSS (backlog row; 0.959-0.960 recorded
   there).
+
+## Leaf transmission per KHR_materials_diffuse_transmission (#32, 2026-11-23)
+
+The engine imports `KHR_materials_diffuse_transmission` but lit a leaf's
+front with the full base colour and its back with base colour x factor.
+The extension (Khronos, release candidate) defines the factor as the share
+of diffuse light transmitted instead of reflected, and the back's colour as
+its own `diffuseTransmissionColor` (factor x texture, default white),
+independent of the base colour: diffuse = mix(BRDF(baseColor),
+BTDF(diffuseTransmissionColor), factor). Engine-stands-alone principle:
+honour the standard the engine imports; asset semantics belong to the cook.
+
+- Engine: `MaterialData`/`GpuMaterial` gain the transmission colour factor
+  and texture (model.cpp imports both; the texture shares the material's
+  UV transform). mesh.frag scales the front's diffuse colour by (1 - f) and
+  lights the back with f x transmission colour (x tint, x (1 - metallic)):
+  `addTransmittedSun` / `addTransmittedAmbient` (lighting.glsl), shared with
+  the voxels. The diffuse albedo guide is the reflected (1 - f) albedo.
+  `addTransmittedAmbient` reuses `addAmbientLight`'s probe sample (`Shading.gi`,
+  evaluated toward -N): a second `giSample` cost the voxel trees pass ~1 ms
+  on the forest overview.
+- Far field: the bake also sums each slot's transmission colour; the
+  palette's first half is (reflected rgb = mean base x (1 - f), f), the
+  second half (transmitted rgb = mean transmission colour x f, 0). The GI
+  scatter albedo is reflected + transmitted. voxel.frag and
+  voxel_instance.frag now transmit the sun and ambient through back-lit
+  voxels (before: front only), as the clusters do, so the switch matches.
+- Cook: sources give "the back transmits t times the base colour" (Unreal's
+  translucency in tools/unreal/cook_ready.py, the plants' ORT translucency,
+  the 0.35 default). `khrLeafTransmission` (tree.h) re-encodes that exactly:
+  base colour x (1 + t), also the transmission colour texture, factor
+  t / (1 + t); the front still reflects the source colour, the back
+  transmits t times it. Texels whose scaled colour passes 1 clamp (they
+  cannot both reflect ~100% and transmit): goldenrods 4.95% of channels,
+  clovers 0.55%, poppy 0.45%, the trees <= 0.02%.
+- Verified look-neutral (Release, DLAA, 2560x1440, --trees, old binary and
+  cooks vs new): OKLab mean L edge 0.303 / 0.303, overview 0.569 / 0.569,
+  meadow ground 0.571 / 0.571; overview p5 0.334 -> 0.341 (back-lit voxels);
+  mean differences 1.0-1.6/255 (re-encoded textures, voxel back light).
+  GPU edge 27.74 -> 27.67 ms, overview 18.57 -> 18.12, ground 20.97 ->
+  20.89.

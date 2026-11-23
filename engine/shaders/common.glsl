@@ -31,6 +31,8 @@ struct Material {
     uint emissiveTexture;
     uint flags;
     float diffuseTransmission;
+    uint diffuseTransmissionColorTexture;
+    vec3 diffuseTransmissionColor;
 };
 
 layout(buffer_reference, std430) readonly buffer MaterialBuffer {

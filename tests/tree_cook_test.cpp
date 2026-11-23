@@ -456,7 +456,10 @@ TEST_CASE("cookTree keeps a textured leaf material's UVs through simplification 
     sawLeaves = true;
     CHECK(material.alphaMode == fastgltf::AlphaMode::Opaque);
     REQUIRE(material.pbrData.baseColorTexture);
-    CHECK(material.diffuseTransmission);
+    REQUIRE(material.diffuseTransmission);
+    REQUIRE(material.diffuseTransmission->diffuseTransmissionColorTexture);
+    CHECK(material.diffuseTransmission->diffuseTransmissionColorTexture->textureIndex ==
+          material.pbrData.baseColorTexture->textureIndex);
 
     const auto &positionAccessor =
         asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
@@ -672,5 +675,13 @@ TEST_CASE("coverageMips keeps alpha-test coverage clear of the threshold") {
     }
     CHECK(static_cast<double>(above) / mip.get_total_pixels() ==
           doctest::Approx(0.75).epsilon(0.1));
+  }
+}
+
+TEST_CASE("leaf transmission keeps the front's reflectance and the back's share as KHR") {
+  for (const float t : {0.0f, 0.217f, 0.35f, 2.0f}) {
+    const meridian::cook::KhrLeafTransmission khr = meridian::cook::khrLeafTransmission(t);
+    CHECK((1.0f - khr.factor) * khr.colorScale == doctest::Approx(1.0f));
+    CHECK(khr.factor * khr.colorScale == doctest::Approx(t));
   }
 }

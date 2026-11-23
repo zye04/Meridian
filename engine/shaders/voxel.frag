@@ -97,6 +97,7 @@ void main() {
 
     Surface s;
     s.baseColor = field.palette.albedo[voxelAlbedo(voxel)].rgb;
+    vec3 transmitted = field.palette.albedo[field.paletteSize + voxelAlbedo(voxel)].rgb;
     s.alpha = 1.0;
     s.metallic = 0.0;
     s.perceptualRoughness = kVoxelPerceptualRoughness;
@@ -112,17 +113,23 @@ void main() {
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
-    if (sh.NoL > 0.0) {
+    float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
+    bool backLit = backNoL > 0.0 && any(greaterThan(transmitted, vec3(0.0)));
+    if (sh.NoL > 0.0 || backLit) {
         vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
         vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
-        addSunLight(sh, traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart, true,
-                                           relative, s.normal),
-                    1.0);
-        sunRadiance = sh.diffuseLight + sh.specularLight;
+        float visibility = traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart,
+                                              true, relative, backLit ? -s.normal : s.normal);
+        if (sh.NoL > 0.0) {
+            addSunLight(sh, visibility, 1.0);
+            sunRadiance = sh.diffuseLight + sh.specularLight;
+        }
+        addTransmittedSun(sh, transmitted, backNoL, visibility);
     }
     addAmbientLight(sh, s.occlusion);
+    addTransmittedAmbient(sh, transmitted, s.occlusion);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);

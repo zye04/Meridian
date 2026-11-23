@@ -1023,8 +1023,9 @@ struct FarBakeVoxel {
   uint32_t slotHits[2];
   float normal[4];
   float slotColor[kFarBakeSlots][4];
+  float slotTransmissionColor[kFarBakeSlots][4];
 };
-static_assert(sizeof(FarBakeVoxel) == 160);
+static_assert(sizeof(FarBakeVoxel) == 288);
 
 // The prototype voxels (protovoxel.h), concatenated over the prototypes.
 // Must match protovoxel.glsl.
@@ -1274,9 +1275,12 @@ struct GpuMaterial {
   uint32_t emissiveTexture = kNoTexture;
   uint32_t flags = 0;
   float diffuseTransmission = 0.0f;
-  uint32_t pad[1] = {};
+  uint32_t diffuseTransmissionColorTexture = kNoTexture;
+  Vec3 diffuseTransmissionColor;
+  float pad = 0.0f;
 };
-static_assert(sizeof(GpuMaterial) == 80);
+static_assert(sizeof(GpuMaterial) == 96);
+static_assert(offsetof(GpuMaterial, diffuseTransmissionColor) == 80);
 
 inline uint32_t textureIndex(const std::optional<TextureId> &texture) {
   return texture ? texture->index : kNoTexture;
@@ -1299,6 +1303,8 @@ inline GpuMaterial toGpu(const MaterialData &m) {
   g.alphaCutoff = m.alphaCutoff;
   g.flags = m.alphaMode == AlphaMode::Mask ? kMaterialAlphaMask : 0u;
   g.diffuseTransmission = m.diffuseTransmission;
+  g.diffuseTransmissionColorTexture = textureIndex(m.diffuseTransmissionColorTexture);
+  g.diffuseTransmissionColor = m.diffuseTransmissionColor;
   return g;
 }
 constexpr VkShaderStageFlags kScenePushStages =

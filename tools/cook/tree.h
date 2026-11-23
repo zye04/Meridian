@@ -16,6 +16,20 @@ constexpr uint32_t kLeafPaletteSize = 16;
 // (leaf, foliage, needle, two-sided) when an exporter drops both flags.
 bool isLeafMaterial(const fastgltf::Material &material);
 
+// Leaf transmission given as "the back transmits t times the base colour"
+// (Unreal's translucency, the cook's default), as
+// KHR_materials_diffuse_transmission: base colour and transmission colour
+// both base x (1 + t), factor t / (1 + t). The front still reflects the base
+// colour and the back transmits t times it.
+struct KhrLeafTransmission {
+  float factor;
+  float colorScale;
+};
+inline KhrLeafTransmission khrLeafTransmission(float transmittedOverReflected) {
+  return {transmittedOverReflected / (1.0f + transmittedOverReflected),
+          1.0f + transmittedOverReflected};
+}
+
 struct TreeCookResult {
   size_t sourceTriangles, triangles;
   double leafAreaBefore, leafAreaAfter;

@@ -78,7 +78,9 @@ layout(buffer_reference, std430) readonly buffer FarPyramidBuffer {
     float tops[];
 };
 
-// rgb: mean reflectance, a: mean diffuse transmission of the baked material.
+// Entry i < paletteSize: rgb the mean reflected diffuse albedo, a the
+// diffuse transmission factor of the baked material; entry paletteSize + i:
+// rgb its transmitted albedo (factor x transmission colour).
 layout(buffer_reference, std430) readonly buffer FarPaletteBuffer {
     vec4 albedo[];
 };
@@ -204,7 +206,7 @@ const uint kFarMaxCellSteps = 512u;
 // -1 if it doesn't. With wantAlbedo (a constant at every call site, so the
 // plain march compiles unchanged) each segment also adds its absorbed share,
 // exp(-opticalDepth) (1 - exp(-segment)), times the voxel's palette scatter
-// albedo (reflectance rgb * (1 + diffuse transmission a)) to albedoSum.
+// albedo (reflected + transmitted) to albedoSum.
 float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
                        vec3 direction, float tStart, float tEnd, float limit,
                        inout float opticalDepth, out uint hitVoxel, const bool wantAlbedo,
@@ -255,9 +257,10 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
             float segment = extinction * max(end - a, 0.0);
             if (wantAlbedo) {
                 float taken = min(segment, limit - opticalDepth);
-                vec4 entry = farField.field.palette.albedo[voxelAlbedo(packed)];
-                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) * entry.rgb *
-                             (1.0 + entry.a);
+                uint entry = voxelAlbedo(packed);
+                albedoSum += exp(-opticalDepth) * (1.0 - exp(-taken)) *
+                             (farField.field.palette.albedo[entry].rgb +
+                              farField.field.palette.albedo[farField.field.paletteSize + entry].rgb);
             }
             if (opticalDepth + segment >= limit) {
                 hitVoxel = packed;

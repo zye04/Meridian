@@ -197,7 +197,10 @@ What the export holds (verified on Black Alder and European Beech):
   `cook_ready.py` writes the base colour with R as alpha, a
   metallicRoughness map with G as roughness and metallic 0, and
   `diffuseTransmissionFactor` = 0.35 x the mean B over the leaf texels
-  (the engine has one transmission per material; decoration 0).
+  (decoration 0). That source factor means "the back transmits t times the
+  base colour", not KHR's share: `meridian-cook --tree` translates it to
+  KHR (`khrLeafTransmission`, tree.h: base colour scaled by 1 + t, reused
+  as the transmission colour texture, factor t / (1 + t)).
 - **Normal maps are already OpenGL (green up)**, as glTF wants, although
   Unreal itself is DirectX: measured by the curl of the map
   (corr(dNx/drow, dNy/dcol) = -0.16 to -0.30, the sign of the known-GL
@@ -242,9 +245,11 @@ and the translucency in B, cooked as data).
   (the fern has only that one) also binds it as occlusion (opacity as AO).
   The cook rebuilds them: base color alpha = opacity, ORT's R and B set to
   255 and 0 (roughness in G, no metal), occlusion unbound, alpha MASK 0.5,
-  double-sided, and `KHR_materials_diffuse_transmission` factor = the mean
-  translucency over the opaque texels (0.05 to 0.43 per plant, in the cook
-  log). Translucency has no texture of its own, as with the leaves.
+  double-sided, and `KHR_materials_diffuse_transmission` from the mean
+  translucency t over the opaque texels (0.05 to 0.43 per plant, in the cook
+  log): as for the trees, base colour x (1 + t), also the transmission
+  colour texture, factor t / (1 + t). The translucency map itself is
+  averaged (the engine has no transmission factor texture).
 - Normals are OpenGL (green up): over the billboards' opaque texels the
   mean G is 0.5 to 0.9 (side views, leaves face up), the same pipeline as
   the ground surfaces. The cook leaves them as they are.

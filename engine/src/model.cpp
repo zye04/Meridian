@@ -249,7 +249,9 @@ UvTransform materialUvTransform(const fastgltf::Material &m) {
       textureInfo(m.pbrData.baseColorTexture),
       textureInfo(m.pbrData.metallicRoughnessTexture),
       textureInfo(m.normalTexture), textureInfo(m.occlusionTexture),
-      textureInfo(m.emissiveTexture)};
+      textureInfo(m.emissiveTexture),
+      m.diffuseTransmission ? textureInfo(m.diffuseTransmission->diffuseTransmissionColorTexture)
+                            : nullptr};
   std::optional<UvTransform> shared;
   for (const fastgltf::TextureInfo *info : infos) {
     if (!info) {
@@ -413,6 +415,10 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
     material.doubleSided = m.doubleSided;
     if (m.diffuseTransmission) {
       material.diffuseTransmission = m.diffuseTransmission->diffuseTransmissionFactor;
+      const auto &color = m.diffuseTransmission->diffuseTransmissionColorFactor;
+      material.diffuseTransmissionColor = {color.x(), color.y(), color.z()};
+      material.diffuseTransmissionColorTexture = textures.get(
+          textureInfo(m.diffuseTransmission->diffuseTransmissionColorTexture), ColorSpace::Srgb);
     }
     materials.push_back(renderer.createMaterial(material));
   }

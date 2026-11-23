@@ -958,6 +958,18 @@ void main() {
     }
 #endif
     Shading sh = beginShading(s, inRelativePosition);
+#ifndef TERRAIN
+    bool leaf = material.diffuseTransmission > 0.0;
+    vec3 transmitted = vec3(0.0);
+    if (leaf) {
+        vec3 transmissionColor = material.diffuseTransmissionColor * inTint;
+        if (material.diffuseTransmissionColorTexture != kNoTexture) {
+            transmissionColor *= sampleTexture(material.diffuseTransmissionColorTexture, inUv).rgb;
+        }
+        transmitted = transmissionColor * (material.diffuseTransmission * (1.0 - s.metallic));
+        sh.diffuseColor *= 1.0 - material.diffuseTransmission;
+    }
+#endif
 
     // Offset shadow rays along the true triangle normal: the smooth shading
     // normal can point below the surface and make the ray hit its own
@@ -997,12 +1009,9 @@ void main() {
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }
 #ifndef TERRAIN
-    bool leaf = material.diffuseTransmission > 0.0;
     if (leaf && dot(sh.N, sh.L) < 0.0 && dot(geometricNormal, sh.L) < 0.0) {
-        float visibility = sunVisibility(worldPosition, -geometricNormal);
-        sh.diffuseLight += sh.diffuseColor / kPi * sh.sunAtSurface *
-                           (clamp(-dot(sh.N, sh.L), 0.0, 1.0) * visibility) *
-                           material.diffuseTransmission;
+        addTransmittedSun(sh, transmitted, clamp(-dot(sh.N, sh.L), 0.0, 1.0),
+                          sunVisibility(worldPosition, -geometricNormal));
     }
 #endif
 
@@ -1012,15 +1021,7 @@ void main() {
     addAmbientLight(sh, s.occlusion);
 #ifndef TERRAIN
     if (leaf) {
-        vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
-        vec3 groundIrradiance =
-            kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
-        vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -sh.N.y * 0.5 + 0.5);
-        if (pc.scene.giMode != 0u) {
-            backIrradiance = giIrradiance(giSample(sh.worldPosition, -sh.N), -sh.N, backIrradiance);
-        }
-        sh.diffuseLight += sh.diffuseColor / kPi * backIrradiance * material.diffuseTransmission *
-                           multiBounceOcclusion(s.occlusion, sh.diffuseColor);
+        addTransmittedAmbient(sh, transmitted, s.occlusion);
     }
 #endif
 

@@ -330,6 +330,8 @@ struct Shading {
     // its diffuse with alpha but keeps its full reflection.
     vec3 diffuseLight;
     vec3 specularLight;
+    // addAmbientLight's probe sample (GI on), reused by addTransmittedAmbient.
+    GiSample gi;
 };
 
 // `relativePosition` is the flat world's, relative to the camera.
@@ -392,9 +394,9 @@ void addAmbientLight(inout Shading sh, float occlusion) {
     vec3 R = reflect(-sh.V, sh.N);
     vec3 roughIrradiance = skyIrradiance;
     if (pc.scene.giMode != 0u) {
-        GiSample gi = giSample(sh.worldPosition, sh.N);
-        diffuseIrradiance = giIrradiance(gi, sh.N, diffuseIrradiance);
-        roughIrradiance = giIrradiance(gi, R, skyIrradiance);
+        sh.gi = giSample(sh.worldPosition, sh.N);
+        diffuseIrradiance = giIrradiance(sh.gi, sh.N, diffuseIrradiance);
+        roughIrradiance = giIrradiance(sh.gi, R, skyIrradiance);
     }
     vec4 cloudsInR = skyCaptureAt(R);
     // Where the probes see less than the open sky and ground would along R
@@ -414,6 +416,27 @@ void addAmbientLight(inout Shading sh, float occlusion) {
                        multiBounceOcclusion(occlusion, sh.diffuseColor);
     sh.specularLight += specularReflectance * skyRadiance *
                         multiBounceOcclusion(specularOcclusion, sh.f0);
+}
+
+// Thin-surface diffuse transmission (KHR_materials_diffuse_transmission):
+// light through the back face, `transmitted` = factor x transmission colour.
+// The caller scales the front's diffuse colour by (1 - factor).
+void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float visibility) {
+    sh.diffuseLight += transmitted / kPi * sh.sunAtSurface * (backNoL * visibility);
+}
+
+// After addAmbientLight: a thin surface's two sides read the same probes, so
+// its sample serves the back direction too.
+void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) {
+    vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
+    vec3 groundIrradiance =
+        kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
+    vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -sh.N.y * 0.5 + 0.5);
+    if (pc.scene.giMode != 0u) {
+        backIrradiance = giIrradiance(sh.gi, -sh.N, backIrradiance);
+    }
+    sh.diffuseLight += transmitted / kPi * backIrradiance *
+                       multiBounceOcclusion(occlusion, sh.diffuseColor);
 }
 
 // Aerial perspective: haze between the camera and the point as displayed
