@@ -23,10 +23,11 @@ import numpy as np
 
 # Approximate visible-band luminance albedo (linear). Informational, not a
 # gate: published charts (e.g. Lagarde's DONTNOD PBR chart) list broadband
-# values, which run higher than visible reflectance for vegetation.
+# values, which run higher than visible reflectance for vegetation; leaf and
+# bark follow Pilarski et al. 2008 PAR data (research/2026-11-23-gi-foliage-*).
 RANGES = {
     "leaf": (0.03, 0.15),
-    "grass": (0.05, 0.25),
+    "grass": (0.05, 0.18),
     "bark": (0.05, 0.30),
     "soil": (0.05, 0.30),
     "litter": (0.05, 0.25),
