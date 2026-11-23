@@ -7,6 +7,7 @@
 // normal maps keep unit-length normals in every mip.
 
 #include "coverage.h"
+#include "geo.h"
 #include "ktx2.h"
 #include "tree.h"
 
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -696,6 +698,34 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if ((argc == 5 || argc == 6) && std::strcmp(argv[1], "--geo") == 0) {
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      const meridian::GeoChannels geo = meridian::cook::cookGeo(
+          meridian::loadHeightfield(argv[2]), static_cast<uint32_t>(std::stoul(argv[4])),
+          argc == 6 ? std::stof(argv[5]) : 47.0f);
+      meridian::saveGeoChannels(geo, argv[3]);
+      const double seconds =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      std::printf("Wrote %s (%ux%u, ratio %u) in %.1f s\n", argv[3], geo.width, geo.height,
+                  geo.ratio, seconds);
+      for (uint32_t c = 0; c < meridian::kGeoChannelCount; ++c) {
+        uint32_t lo = 255, hi = 0;
+        double sum = 0.0;
+        for (size_t k = c; k < geo.texels.size(); k += meridian::kGeoChannelCount) {
+          lo = std::min<uint32_t>(lo, geo.texels[k]);
+          hi = std::max<uint32_t>(hi, geo.texels[k]);
+          sum += geo.texels[k];
+        }
+        std::printf("  channel %u: min %u, mean %.1f, max %u\n", c, lo,
+                    sum / (double(geo.width) * geo.height), hi);
+      }
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "error: %s\n", error.what());
+      return 1;
+    }
+    return 0;
+  }
   if (argc == 3 && std::strcmp(argv[1], "--coverage") == 0) {
     try {
       std::printf("%10s %10s %8s %12s\n", "distance", "coverage", "ratio", "triangles");
@@ -732,6 +762,7 @@ int main(int argc, char **argv) {
                  "<color|data|normal>\n"
                  "       meridian-cook --heightfield <in.f32> <width> <height> "
                  "<spacing> <out.height>\n"
+                 "       meridian-cook --geo <in.height> <out.geo> <ratio> [latitude]\n"
                  "       meridian-cook --tree <in.gltf> <output-dir> --triangles <n> "
                  "[--bark-texture <dir>]\n"
                  "       meridian-cook --stats <file.ktx2|.png>...\n"

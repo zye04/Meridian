@@ -1,6 +1,9 @@
 #include <doctest/doctest.h>
 #include "geo.h"
 
+#include <meridian/geo.h>
+#include <meridian/terrain.h>
+
 #include <cmath>
 #include <functional>
 
@@ -76,4 +79,66 @@ TEST_CASE("flat plane gives finite wetness") {
   for (float v : twi.v) {
     CHECK(std::isfinite(v));
   }
+}
+
+TEST_CASE("topographic position is positive on a ridge and negative in a bowl") {
+  const Grid ridge =
+      makeGrid(41, 41, 2.0f, [](float x, float) { return 100.0f - 0.5f * std::abs(x - 40.0f); });
+  const Grid bowl = makeGrid(41, 41, 2.0f, [](float x, float z) {
+    return 100.0f + 0.01f * ((x - 40.0f) * (x - 40.0f) + (z - 40.0f) * (z - 40.0f));
+  });
+  CHECK(at(meridian::cook::topographicPosition(ridge, 10.0f), 20, 20) > 1.0f);
+  CHECK(at(meridian::cook::topographicPosition(bowl, 10.0f), 20, 20) < -0.2f);
+}
+
+TEST_CASE("south slope gets more sun than north at 47 N") {
+  // South = +z (row index grows southward).
+  const Grid south = makeGrid(41, 41, 4.0f, [](float, float z) { return 500.0f - 0.4f * z; });
+  const Grid north = makeGrid(41, 41, 4.0f, [](float, float z) { return 500.0f + 0.4f * z; });
+  const float s = at(meridian::cook::sunExposure(south, 47.0f), 20, 20);
+  const float n = at(meridian::cook::sunExposure(north, 47.0f), 20, 20);
+  CHECK(s > 1.1f);
+  CHECK(n < 0.8f);
+  const Grid flat = makeGrid(41, 41, 4.0f, [](float, float) { return 500.0f; });
+  CHECK(at(meridian::cook::sunExposure(flat, 47.0f), 20, 20) == doctest::Approx(1.0f));
+}
+
+TEST_CASE("sun exposure is finite at any latitude") {
+  const Grid cone = makeGrid(41, 41, 4.0f, [](float x, float z) {
+    return 1000.0f - 0.8f * std::hypot(x - 80.0f, z - 80.0f);
+  });
+  for (float latitude : {89.0f, -60.0f, 0.0f}) {
+    for (float v : meridian::cook::sunExposure(cone, latitude).v) {
+      CHECK(std::isfinite(v));
+      CHECK(v >= 0.0f);
+    }
+  }
+}
+
+TEST_CASE("talus lies below a cliff step and not above it") {
+  // Plateau in the north, a 30 m cliff at z = 40..44 m, a gentle plain south of it.
+  const Grid step = makeGrid(21, 41, 2.0f, [](float, float z) {
+    if (z < 40.0f) {
+      return 150.0f - 0.01f * z;
+    }
+    if (z < 44.0f) {
+      return 150.0f - 7.5f * (z - 40.0f);
+    }
+    return 120.0f - 0.05f * (z - 44.0f);
+  });
+  const Grid t = meridian::cook::talus(step);
+  CHECK(at(t, 10, 25) > 0.0f);  // just below the foot
+  CHECK(at(t, 10, 10) == 0.0f); // on the plateau
+  CHECK(at(t, 10, 21) == 0.0f); // on the cliff face: scree lies below the foot
+  CHECK(at(t, 10, 25) > at(t, 10, 38));
+}
+
+TEST_CASE("cookGeo refuses a ratio that does not divide the width") {
+  const auto field = meridian::quantizeHeightfield(std::vector<float>(10 * 8, 100.0f), 10, 8, 0.5f);
+  CHECK_THROWS(meridian::cook::cookGeo(field, 4, 47.0f));
+  const meridian::GeoChannels geo = meridian::cook::cookGeo(
+      meridian::quantizeHeightfield(std::vector<float>(8 * 8, 100.0f), 8, 8, 0.5f), 4, 47.0f);
+  CHECK(geo.width == 2);
+  CHECK(geo.ratio == 4);
+  CHECK(geo.texels.size() == 2 * 2 * meridian::kGeoChannelCount);
 }
