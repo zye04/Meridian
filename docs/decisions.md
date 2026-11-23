@@ -4506,3 +4506,19 @@ Measured against the reference (ratio reference / raster per 4x4 cell):
   the highest canopy anywhere); capping it at 64 m (`kGiLeafSunDistance`)
   measured no worse against the reference (128 m: 1.74 ms, front 0.062,
   backlit 0.41).
+
+## Terrain relief test: real 0.5 m vs 2 m (2026-11-23)
+
+Question (terrain triage, plan step 1): does real sub-2 m relief make
+eye-height ground look more real? Test: a 4x4 km swissALTI3D patch at
+0.5 m and 2 m (same tiles, same year, `tools/fetch-relief-patch.sh`),
+captured from four eye-height views at midday and with an 8 degree side
+sun, against 2 m with and without the detail noise
+(`--effects terrain-detail=0`, new; `--terrain FILE`, new). Result
+(research/2026-11-23-terrain-triage.md, "Step 1 result"): yes, clearly
+under grazing light; real relief is anisotropic and slope-aligned (~0.1 m
+std on pasture, metres on ravine walls) and also sharpens hillsides
+50-500 m out, while the isotropic detail noise reads as artificial. The
+engine already renders 0.5 m data unchanged. The next choice is how to get
+such relief everywhere: stored 0.5 m data near the player (a height
+clipmap) or synthesis trained on the real patch.

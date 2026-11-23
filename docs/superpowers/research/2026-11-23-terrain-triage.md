@@ -121,3 +121,41 @@ Eye-height photos of the ground on the local mountain (open ground, forest
 floor, slopes, path edges, several distances, soft and direct sun): the
 close-range reference for this lane, as the Chlorophyll frames are for the
 overall look.
+
+## Step 1 result: relief test (2026-11-23)
+
+Patch: swissALTI3D E 2637..2640, N 1203..1206 (16 tiles, 2025 and 2022
+surveys, each 0.5 m tile with the 2 m tile of the same year),
+`tools/fetch-relief-patch.sh` -> `relief-0.5.height` (8000^2) and
+`relief-2.height` (2000^2), same area and centre. Checks: heights at the
+start, summit and two other points agree with `napf.height` within 1 cm
+(0.5 m within 0.6 m on a steep slope); the 2 m grid is the exact 4x4 box
+mean of the 0.5 m one (mean difference 0.000 m); no steps at tile edges.
+The engine needed nothing for 0.5 m spacing (level 0's 0.5 m quads land on
+samples); new are `--terrain FILE` and `--effects terrain-detail=0`.
+
+Statistics: the 0.5 m data minus the bilinear 2 m surface, std per 32 m
+block: median 0.115 m, p90 0.21 m, p99 0.85 m, max 3.7 m. Blocks above
+~0.8 m are all slopes over 40 degrees (the Napf's Nagelfluh ravines);
+pasture carries ~0.1 m.
+
+Captures (`docs/images/relief-test-2026-11-23/`, rows: 2 m + detail noise
+(today), 2 m bare, 0.5 m bare; `--placement off`; midday and an 8 degree
+sun from the side; views in `views.txt`: name, camera on 0.5 m, camera y on
+2 m, low sun):
+
+- Low sun on a 21 degree pasture slope (`slope-low.jpg`) decides it: the
+  detail noise is an isotropic blob field that reads as artificial; 2 m
+  bare is flat; 0.5 m shows soft undulations along the contours and,
+  50-500 m out, gullies, a path cut and small slumps that 2 m blurs.
+- Ravine (51 degrees, `ravine-mid.jpg`): ledges and a stepped hollow at
+  0.5 m, mush at 2 m.
+- Ridge top and valley floor at midday: 0.5 m ~ 2 m bare; the detail
+  noise adds bumps the real ground does not have.
+
+Verdict: relief matters, and its character (anisotropic, slope-aligned,
+sparse on pasture, strong on steep ground) matters more than its
+amplitude. Today's isotropic noise is worse than none on open pasture. The
+gain also reaches mid-distance hillsides, where the detail noise never
+acts. Caveat: the shadow-height map's 4 m texels cast no shadows of the
+0.5 m relief; what shows is normals, silhouettes and contact shadows.
