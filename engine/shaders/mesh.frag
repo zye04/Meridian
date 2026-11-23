@@ -865,8 +865,12 @@ float plantOcclusion(Material m) {
                pc.scene.microShadowStrength);
 }
 
-// Ambient only: the sun has its own shadow test.
+// Ambient only: the sun has its own shadow test. GI probes trace the canopy
+// already, so applying the crown on top would occlude it twice.
 float crownOcclusion() {
+    if (pc.scene.giMode != 0u) {
+        return 1.0;
+    }
     return mix(1.0, inCrownVisibility, pc.scene.microShadowStrength);
 }
 #endif

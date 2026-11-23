@@ -4275,3 +4275,17 @@ baked leaf palette is simply darker than the old constant (0.09, 0.14,
 0.04). Edge trunk with micro=0 rgb/Y 0.71 1.10 0.86 -> 0.78 1.06 1.07. Whether
 the shade is too dark is the lighting heuristic's (#30) and the albedo
 audit's question, not tuned here.
+
+## GI: crown visibility only without GI (#30, 2026-11-23)
+
+Under `--gi probes` the tree ambient was the probe irradiance, which
+already traces the canopy through the far-field voxels, multiplied again by
+the per-vertex crown sky visibility (mesh.frag `crownOcclusion`): the
+canopy occluded twice, so forest-edge leaves and trunks went near-black
+(#30). The crown term now applies only with GI off, where it is the only
+canopy occlusion; the plant-base micro occlusion stays in both modes.
+Release, 2560x1440, `--trees --gi probes`, after #31: edge mean L 0.241 ->
+0.310, p5 0.000 -> 0.073; trunk rgb/Y 0.78 1.06 1.06 (neutral; it read
+olive before #31); interior 0.158 -> 0.162 (the floor has no crown term;
+its shade is 1.5-2.7% of the sunflecks, inside the 1.5-5% measured for
+closed beech canopies). GPU unchanged (gi probes 1.18 / 1.33 ms).

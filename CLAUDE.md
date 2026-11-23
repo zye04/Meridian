@@ -515,8 +515,9 @@ diffuse at half weight. Tree crowns (meshes over 4 m tall) also get a crown
 sky visibility per vertex (mesh.mesh `crownVisibility`, location 12: the
 transmittance of a uniform leaf medium filling the ellipsoid inside the
 leaf mesh's bounding box, `MeshInfo` half extents, along three rays up and
-outward), ambient only, same strength scale; a placed tree's bark uses its
-leaf mesh's crown.
+outward), ambient only, same strength scale, and only with GI off (the
+probes trace the canopy themselves; both would occlude it twice); a placed
+tree's bark uses its leaf mesh's crown.
 
 ## Frame (renderer_frame.cpp, in order)
 
