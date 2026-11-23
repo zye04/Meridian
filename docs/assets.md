@@ -170,12 +170,20 @@ these; `PivotPainter/*_PP` are the same meshes with wind pivots),
      assets/source/megascans/<species>/SM_<Pack>_Forest_01 --triangles 1000000
    ```
 
-   (one cook per Forest, Field and Sapling variant; seedlings are skipped).
+   (one cook per kept variant; seedlings are skipped). The cook traces
+   the leaf and decoration cards' alpha into opaque leaf geometry
+   (`Traced leaf material` lines; decisions.md "Tree leaves as opaque
+   geometry"). Kept variants and budgets (`--triangles`), 30 trees, 28.7M
+   triangles: Forest 1.2M (beech 1.5M), Field 1.2M (beech Field_01 4M,
+   alder Field_02 2M), Sapling 0.3M; alder Forest 01 03 04 06 08, Field
+   01 02 04, Sapling 02 05 06; beech Forest 01 03 05 06 08, Field 01,
+   Sapling 01 02 04; hornbeam Forest 01 02 05 08 10, Field 01 03, Sapling
+   01 03 05. `meridian-cook --coverage tree.gltf` prints its crown coverage
+   across the cluster LOD cut (>= 0.95 up to the voxel switch).
 3. `--trees` picks every cooked variant up (main.cpp `addUnrealTrees`,
    weights in decisions.md); a new species needs a line there. Hornbeam:
    `--folder /Game/EuropeanHornbeam/Geometry/SimpleWind --species
-   europeanhornbeam`, cooked with `--triangles 2000000` like the beech
-   (1M fails on the beech: its wood alone is over).
+   europeanhornbeam`.
 
 What the export holds (verified on Black Alder and European Beech):
 

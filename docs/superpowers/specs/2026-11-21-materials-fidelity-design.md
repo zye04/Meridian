@@ -1,7 +1,7 @@
 # Materials and texture fidelity (Pillar 1: G6, G12)
 
-Status: approved (leaf geometry decided 2026-11-22; D3-D6 decided
-2026-11-23)
+Status: approved (leaf geometry decided 2026-11-22, implemented
+2026-11-23; D3-D6 decided 2026-11-23)
 Date: 2026-11-21, revised 2026-11-23
 Programme: `2026-11-21-chlorophyll-parity-programme-design.md` (Pillar 1)
 Audit: `2026-11-21-look-gap-audit.md` (G6, G12; leaf geometry also

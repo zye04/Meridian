@@ -1,7 +1,6 @@
 # Tree Leaves as Opaque Geometry Implementation Plan
 
-Status: paused WIP (branch `leaf-geometry`, worktree `../meridian-leafgeo`,
-2026-11-22 late; usage window). Not merged. Resume notes at the end.
+Status: done 2026-11-23 (merged; decisions.md "Tree leaves as opaque geometry").
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

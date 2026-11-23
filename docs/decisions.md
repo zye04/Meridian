@@ -4088,8 +4088,9 @@ and DLAA is how DLSS is commonly shipped as pure anti-aliasing.
 
 ## Tree leaves as opaque geometry, traced from the atlas (2026-11-22)
 
-Status: decided, not implemented (spec
-`2026-11-21-materials-fidelity-design.md` section 2, D1 and D2).
+Status: implemented 2026-11-23 (spec
+`2026-11-21-materials-fidelity-design.md` section 2, D1 and D2; plan
+`plans/2026-11-22-leaf-geometry.md`).
 
 - **Problem:** the Megascans Trees' leaves and decoration are
   alpha-tested cards. Their cut-out edge depends on a texture fetch whose
@@ -4141,6 +4142,40 @@ Status: decided, not implemented (spec
   voxel switch (baseline on cards first; fallback: area-preserving
   pruning per cluster DAG level, then an earlier voxel switch), forest
   edge GPU ms not above today's, tree memory under the cap.
+- **Implemented:** the trace is a filled marching-squares mesh of the
+  alpha at the cutoff, simplified by meshoptimizer (planar, absolute
+  error), not Douglas-Peucker + earcut: the same outline tolerance, holes
+  and nesting for free, no new dependency. Leaf outlines are coarsened
+  2 -> 5 mm before pruning leaves to fit a tree's budget. 30 variants
+  (assets.md), 28.7M triangles. `meridian-cook --coverage` measures crown
+  coverage across the cluster LOD cut.
+- **What it took to hold the crowns:** (1) simplification drops disjoint
+  leaves, thinning a crown with distance (alder Forest_01 0.62 of its
+  full-detail coverage at the voxel switch): each group's simplified
+  pieces are scaled about their centres to keep the group's leaf area
+  (stochastic simplification's area rule, Cook et al. 2007), at most 4x;
+  (2) that move must count as LOD error, or the cut draws scaled levels
+  where they are wrong by tens of pixels (sprigs grew into metre-wide
+  shards from a 16x cap on, pale plates at 4x); with the move added to
+  the group's error, monotonic up the DAG, every traced tree keeps >= 0.95
+  of its coverage up to its switch (beech Field_01 0.97 at 169 m,
+  Forest_01 0.95 at 345 m) at the cost of a finer cut near the switch
+  (beech Field_01 471k triangles at 169 m, cards 225k); (3) the trace
+  must keep each card's winding: on cards with mirrored UVs (every beech
+  and hornbeam card) the leaves came out wound against their normals,
+  double-sided shading then turned the normal away from the camera and
+  grazing Fresnel made whole crowns white-blue at distance. Loading also
+  exposed MikkTSpace's O(n^2) handling of degenerate triangles (the
+  hornbeam's outline slivers): tangent generation skips them.
+- **Measured** (Release, DLAA, 2560x1440, main with GI probes, cards
+  then traced): GPU ms forest edge 28.5 -> 27.3, interior 11.6 -> 11.5,
+  open view toward the summit 19.3 -> 20.1, forest overview 18.0 -> 18.5;
+  the overview's crowns are dense instead of sparse cards. Motion
+  (`motion-clarity.sh` forest rows): jitter side5 7.55 -> 6.79, side30
+  9.38 -> 8.82, turn1 4.40 -> 4.27; error side5 6.20 -> 5.97, side30 7.44
+  -> 7.54, turn1 4.51 -> 4.66; the still camera's jitter rises 1.02 ->
+  1.35 (sub-pixel opaque leaves under DLAA's jitter; backlog). Debug
+  checks pass, 0 validation errors.
 
 ## Cloud shadow map grid moves with the clouds (2026-11-22)
 

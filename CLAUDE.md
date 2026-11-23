@@ -288,7 +288,7 @@ don't need placement. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
-trees, 0x5dc566c95239a00c with `--trees` and the Megascans Trees (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+trees, 0x1e6e4d7edf517787 with `--trees` and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
@@ -628,7 +628,8 @@ under it aren't shaded; the late pass orders its lists the same way; then the vo
 workgroup, each a camera-facing quad of the cube's projected area,
 voxel_instance.frag shades it flat (no discard, so early depth holds;
 trees in the switch band take voxel_band.frag's dither discard, which
-the masked clusters' depth pass complements); then
+the masked clusters' depth pass complements; opaque clusters, such as the
+traced tree leaves, draw whole there, under the dithered voxels); then
 the far field pass: voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
 and writes the hit's depth (conservative, depth_less), motion and the
