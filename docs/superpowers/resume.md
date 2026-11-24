@@ -11,11 +11,16 @@ in `docs/decisions.md`.
 At most three, each answered in chat (the user opens no documents); the
 agent writes the answer into the spec or here.
 
-1. The saved grade file overrides the starting grade (G panel Reset +
-   Save): keep the saved grade or reset to the starting one?
-2. Board issues #9 (G9, native TAA vs DLSS, moot since DLAA is the
-   default) and #17 (G14, giant leaf cards, replaced by traced leaves):
-   close both? Recommendation: close.
+None open.
+
+Decided by the user 2026-11-24, not yet applied: reset the saved grade file
+to the starting grade (the file `~/.config/meridian/grade.json` overrides
+the starting grade in every interactive run). To apply, either delete the
+file (`rm ~/.config/meridian/grade.json`; a missing file means the
+defaults, and the sun, haze and fov it holds reset too), or open the game,
+press `G`, click Reset, then Save. Whoever next runs the game
+interactively does it; it was not done in the docs lane. Board issues #9
+and #17 were already closed on 2026-11-24 with a reason comment each.
 
 No spec waits for approval: the broadleaf forest floor spec is decided
 and sequenced, the GTAO spec is superseded (rewrite after the visibility

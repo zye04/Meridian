@@ -53,7 +53,11 @@ Docs, read on demand:
   buffer, far tile tier, wind) get a spec and a plan; everything else gets
   a backlog row, the change and a decisions.md entry.
 - Every lane report ends with the same five parts, numbers at 2560x1440:
-  done, measured, look (image paths), needs from the user, next.
+  done, measured, look (image paths), needs from the user, next. It also
+  carries: the commit hashes; for each number, the exact command and its
+  raw output line; the `Render WxH` line of the run; image paths for every
+  look claim; and a "not checked" list (everything the report does not
+  prove).
 
 ## Commands
 
