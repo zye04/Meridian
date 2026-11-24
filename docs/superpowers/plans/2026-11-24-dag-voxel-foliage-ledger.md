@@ -178,3 +178,4 @@ OKLCh fly frame 010 (magick <frame> -flip q2/fly010_<b>.png; python3 -I tools/re
     grass L p5                    0.164    0.174   -0.011
     grass L p95                   0.897    0.902   -0.005
 Fly steps (python3 -I .superpowers/g1/q2/fly_steps.py): mean 27.39 33.83 peak 48.98 53.43
+Lit-fraction check (python3 -I .superpowers/g1/q2/mask_classes.py): g1 T8 lit 6.9% crown 25.5% shadowed ground 67.6% (means crown 111.0, shadowed 83.5); main rt lit 17.3% crown 11.5% shadowed 71.2% (100.7, 82.7). The caster pass applies coverage (voxel_bricks.comp noise < opacity along the sun in shadowView), so no caster change. User 2026-11-24: far palette kept (accepted deviation), darker forest accepted; Task 7 closed.

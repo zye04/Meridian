@@ -1,7 +1,27 @@
 # DAG Voxel Foliage Implementation Plan
 
-Status: in progress, paused 2026-11-24 on branch `g1` (pushed). Done: Tasks
-0-5, 6, 6a-6c. Next: Task 9's VRAM/overflow items first (below), then 7, 8, 9.
+Status: in progress on branch `g1` (pushed). Done: Tasks 0-8, 6a-6c, and
+Task 9's measurements (ledger). Open: the independent delta review of
+ebfc444..7a46bf4 and the Task 9 closeout (docs, merge, issue #1 and #11).
+
+## User decisions (2026-11-24)
+
+- **Far-field palette, accepted deviation**: the far field keeps one
+  palette entry per mesh slot (`kFarSlots` = 8, reflected and transmitted
+  colour each), not Task 6's per-voxel albedo and transmission; revisit with
+  the far tile tier. Evidence: far horizon side-by-side
+  `.superpowers/g1/look/q1_far_forest_g1_top_main_bottom.jpg`.
+- **Darker forest, accepted for merge** as the correct shadowing; brightness
+  is a lighting and grade matter later, not a g1 change. Evidence: fly frame
+  010 against main ray traced (`--shadows rt`), OKLCh, g1 - ray traced vs
+  ray traced - main raster: far canopy L +0.001 / -0.021, h -0.3 / +1.7 deg;
+  near canopy L -0.010 / -0.066, h +1.0 / +19.0 deg; understory L +0.021 /
+  -0.135, h +1.5 / +92.9 deg. Overview ground mask (main raster's lit gaps,
+  4.24% of the frame): ground mean g1 96.67, ray traced 101.21, main raster
+  144.84; on g1 the mask is lit 6.9%, crown 25.5%, shadowed ground 67.6%
+  (ray traced 17.3 / 11.5 / 71.2: the voxel crowns cover more of the gaps
+  from above, the shadowing matches).
+- Task 7 is closed with these two answers; no voxel shading tuning.
 Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
 (copy of the git-ignored `.superpowers/sdd/` ledger).
 

@@ -4857,3 +4857,32 @@ gate protects).
 - **Cost** (all five cascades in one frame, `sun shadows:` max): edge 84.7
   ms against main's 80.6, overview 27.0 against 40.7.
 
+## Voxels inside the cluster DAG (G1, 2026-11-24)
+
+- **What**: tree models carry voxel levels inside their cluster LOD DAG
+  (vendored clusterlod.h hook, `cluster.cpp`); distant foliage switches per
+  cluster group from triangles to voxels drawn as camera-facing quads lit
+  through the leaf model, cast into the sun cascades (entry above), and the
+  far field's templates come from the same voxelizer. Spec
+  `specs/2026-11-24-dag-voxel-foliage-design.md`, plan and ledger beside it.
+- **Measured against main, 1440p** (plan ledger, evidence index): forest
+  edge 24.5 ms against 37.1, summit 20.4 / 32.0, overview 22.4 / 25.2,
+  interior looking up 18.1 / 21.8, fly-toward 24.4 / 32.9, far horizon 26.0
+  / 31.7; high overview 48.8 / 47.2 (main's image drops 463,757 entries, the
+  criterion is waived there); device-local peak 14261 MiB (all heaps 14357,
+  main 14743); warm startup 81.2 s / 85.5 s; forest still jitter 0.49 / 2.66.
+- **Far-field palette, an accepted deviation (user)**: one palette entry
+  per mesh slot (`kFarSlots` = 8, reflected and transmitted colour), not
+  per-voxel albedo and transmission as the plan's Task 6 said; revisit with
+  the far tile tier.
+- **The darker forest is accepted as correct shadowing (user)**: against
+  main ray traced (`--shadows rt`) on fly frame 010, OKLCh, g1's residual is
+  at most L 0.021, C 0.001, h 1.5 deg per region, while main's raster is
+  brighter by L 0.021-0.135 and less blue by up to 93 deg of hue in the
+  understory (more shadow raises the sky's share of the light). Overview
+  ground (main raster's lit gaps): g1 96.67, ray traced 101.21, main raster
+  144.84; there g1's mask reads lit 6.9%, crown 25.5%, shadowed 67.6%
+  against 17.3 / 11.5 / 71.2 ray traced: voxel crowns cover more of the
+  gaps from above, the shadowing matches. Brightness is a lighting and grade
+  matter, not a g1 change.
+
