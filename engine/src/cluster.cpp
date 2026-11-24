@@ -31,7 +31,7 @@ constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 8;
+constexpr uint32_t kVoxelizerVersion = 9;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -666,7 +666,10 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
     lod.clusters[i].refined =
         refined < 0 ? LodBounds{{}, 0.0f, -1.0f} : groups[refined];
   }
-  if (mesh.leaf) {
+  // Voxels keep a voxelizing mesh's leaves from thinning; scaling its
+  // simplified leaves up (to 16x area) only overdraws (the forest edge's
+  // early scene pass 188 ms against 6.5 ms without).
+  if (mesh.leaf && !(voxels && mesh.voxelize)) {
     // Voxel clusters have no area to keep: the leaf move applies to triangle
     // replacements only.
     std::vector<int> triangleRefined = refinedGroups;

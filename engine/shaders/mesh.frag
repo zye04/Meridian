@@ -37,7 +37,6 @@ layout(location = 12) in float inCrownVisibility;
 layout(location = 11) flat in float inTerrainSun;
 #endif
 #ifdef ALPHA_MASK
-// The weight of the instance's voxel representation (mesh.mesh).
 #endif
 
 #ifdef ALPHA_MASK

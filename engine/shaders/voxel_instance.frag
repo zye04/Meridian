@@ -69,7 +69,11 @@ void main() {
     s.baseColor = albedo;
     s.alpha = 1.0;
     s.metallic = 0.0;
-    s.perceptualRoughness = voxelRoughness(voxel);
+    // The leaves' normals spread around the lobe axis: their highlights
+    // spread as much (Toksvig), or the flat axis glints where no leaf would.
+    float alpha = voxelRoughness(voxel) * voxelRoughness(voxel);
+    float spread = 2.0 * (1.0 - voxelAlignment(voxel));
+    s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + spread, 1.0)));
     s.occlusion = 0.5 * (up + sides);
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;
