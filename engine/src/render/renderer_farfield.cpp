@@ -33,7 +33,10 @@ constexpr double kMiB = 1.0 / (1 << 20);
 // L2) plus its sink depth.
 constexpr float kFarBaseMargin = 32.0f;
 // A splat slice's accumulators stay within this many bytes.
-constexpr VkDeviceSize kFarSliceBytes = VkDeviceSize{1} << 30;
+// 256 MiB, not 1 GiB: the splat's transient buffers set the startup memory
+// peak, and more slices cost little (decisions.md "Cull list caps from measured
+// need").
+constexpr VkDeviceSize kFarSliceBytes = VkDeviceSize{1} << 28;
 constexpr uint64_t kFarSliceBricks =
     kFarSliceBytes / (kBrickVoxels * kFarChannels * sizeof(uint32_t));
 

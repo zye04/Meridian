@@ -776,6 +776,11 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
     upload.grown = impl_->grownPool(upload.pool, upload.offset + upload.bytes, upload.usage);
     grows |= upload.grown.buffer != VK_NULL_HANDLE;
   }
+  if (grows) {
+    const Impl::MemoryUse use = impl_->memoryUse();
+    impl_->loadPeak.deviceLocal = std::max(impl_->loadPeak.deviceLocal, use.deviceLocal);
+    impl_->loadPeak.all = std::max(impl_->loadPeak.all, use.all);
+  }
 
   impl_->submitNow([&](VkCommandBuffer cmd) {
     if (grows) {

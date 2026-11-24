@@ -734,11 +734,13 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
   const uint32_t records = r.placedCount + static_cast<uint32_t>(r.instances.size());
   std::printf("TLAS: %u records (%.0f MiB of records), TLAS %.0f MiB, scratch %.0f MiB, "
               "build %.1f ms; %zu prototype BLAS %.0f MiB (%.0f MiB before compaction, "
-              "%.0f ms); cell margin %.1f m; device memory allocated %.0f MiB (all heaps %.0f MiB)\n",
+              "%.0f ms); cell margin %.1f m; device memory allocated %.0f MiB (all heaps %.0f MiB), "
+              "at peak while models loaded %.0f MiB (all heaps %.0f MiB)\n",
               records, VkDeviceSize{records} * sizeof(VkAccelerationStructureInstanceKHR) * kMiB,
               r.tlas.size * kMiB, scratch.size * kMiB, buildMs,
               r.prototypeBlas.size(), blasBytes * kMiB, builtBytes * kMiB, blasMs, margin,
-              use.deviceLocal * kMiB, use.all * kMiB);
+              use.deviceLocal * kMiB, use.all * kMiB, r.loadPeak.deviceLocal * kMiB,
+              r.loadPeak.all * kMiB);
 }
 
 void Renderer::Impl::destroyStreamBuffers(Stream &s) {

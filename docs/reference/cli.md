@@ -278,7 +278,7 @@ window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin, then VMA's blocks on the
 device-local heaps and, in brackets, on all heaps including system
-memory); the far field's line gives the same pair at its peak. `--far-field off` draws
+memory, now and at the peak while models loaded); the far field's line gives the same pair at its peak. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
 `--voxel-lod on|off` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage

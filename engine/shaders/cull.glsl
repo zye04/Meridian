@@ -5,14 +5,14 @@
 
 // Work items: up to 64 clusters of one instance, culled by one cluster_cull
 // workgroup. x: instance; y: first cluster | (count - 1) << 26.
-const uint kMaxWorkItems = 1u << 21;
+const uint kMaxWorkItems = 2310000u;
 const uint kClustersPerWorkItem = 64u;
 
 // The BVH traversal's node queues, (instance, node) entries: phase 0 reads
 // depth d from queue d % 2 and writes depth d + 1 to the other; phase 1
 // reads depth 0 from queue 2 (the instance cull's seeds plus the nodes
 // phase 0 found occluded), then continues like phase 0.
-const uint kMaxTraversalNodes = 1u << 21;
+const uint kMaxTraversalNodes = 1970000u;
 const uint kBvhDepths = 12u;
 
 layout(buffer_reference, std430) buffer NodeQueueBuffer {

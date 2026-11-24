@@ -4809,3 +4809,26 @@ Chosen (medium confidence on the numbers):
 Rejected: no budget (the g1 overshoot would have merged unnoticed), and a
 lower resolution or texture cap as the first lever (it trades the look the
 gate protects).
+
+## Cull list caps from measured need (G1, 2026-11-24)
+
+- **Caps = the most any evidence view needs at 1440p, plus 50%**, not
+  powers of two (nothing in the code needs them): measured with the caps
+  raised and every frame's counts (the first frame, without occlusion
+  history, needs the most). Work items 2310000 (summit 1537911), traversal
+  nodes 1970000 (summit 1308284), voxel clusters 2330000 (summit 1546756),
+  voxel quads 24660000 (fly-toward 16435665). The margin is wide because a
+  full voxel list leaves holes where main drew triangles (backlog).
+- **The high overview (1119 4354 -431) is left dropping**, with a warning:
+  it needs 13615592 voxel clusters per phase, 5477393 work items and
+  3154414 nodes, about 965 MB of lists at +50% (device-local peak ~14.5
+  GB, over the 14.4 GB gate), and draws in 82.4 ms uncapped against main's
+  47.2. Fewer clusters at that distance is the far tile tier's job.
+- **Paid for by smaller far-field splat slices**: `kFarSliceBytes` 1 GiB
+  -> 256 MiB (slices 7/2/1 -> 30/5/1, splat 335 ms, image unchanged within
+  repeat-run noise); device-local peak 14671 -> 13874 MiB before the caps,
+  14014 MiB with them (all heaps 14110, main 14743).
+- **Memory figures are device-local** (VMA blocks on DEVICE_LOCAL heaps;
+  the all-heaps total in brackets), and the peak now covers model load
+  (sampled when a pool grows: 13114 MiB, below the far-field peak).
+

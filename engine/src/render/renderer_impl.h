@@ -653,6 +653,9 @@ struct Renderer::Impl {
     VkDeviceSize all = 0;
   };
   MemoryUse memoryUse() const;
+  // The largest memoryUse while models load (a growing pool's old and new
+  // buffers coexist), printed with the TLAS line.
+  MemoryUse loadPeak;
   void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {
