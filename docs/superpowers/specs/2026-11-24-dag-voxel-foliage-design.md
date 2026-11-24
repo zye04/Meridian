@@ -1,6 +1,7 @@
 # Voxels inside the cluster LOD hierarchy (G1) — design
 
-Status: design, awaiting user approval (2026-11-24).
+Status: approved by the user 2026-11-24 (CPU voxelizer; acceptance criteria
+below); plan next.
 
 Issue #1 (G1, distant forests read as grey speckle); also closes the
 backlog rows "Voxel switch band with opaque leaves", "Far-field bake needs
@@ -58,8 +59,8 @@ What makes the voxels visible today:
    distance.
 2. A voxel represents what the triangles it replaces look like on screen:
    coverage per view direction, colour, transmission, normal spread.
-3. No switch visible still or in motion (gates Q1-Q3), no visible voxels at
-   any distance (Q4), far forests consistent with near ones (Q5).
+3. No switch visible still or in motion, no visible voxels at
+   any distance, far forests consistent with near ones (Acceptance).
 4. Faster than today in every tree-heavy view (gates P1-P3), and a faster
    startup (no ray-query bake).
 5. One voxel source: the far field's cell bricks, the GI probes' foliage
@@ -120,6 +121,16 @@ What makes the voxels visible today:
   changes.
 - **B'. Per-cluster switch over today's per-prototype voxel grids.**
   Dropped: two data sets that never quite match is the seam B removes.
+- **GPU voxelizer** (considered with the user, 2026-11-24). Set aside: the
+  voxels are built once per model into the `.clusters` cache, never per
+  frame or per warm start, so the GPU would only speed up a first build;
+  the build is a sequential per-group loop (voxelize, compare errors, retry
+  coarser, decide what the next level comes from) that would become GPU
+  round trips; a CPU build is deterministic, testable against a CPU
+  reference and runs in the cook tool without a GPU (Nanite and the
+  Chlorophyll author both voxelize in their CPU builders). Fallback if the
+  first build measures too slow: move only the inner ray-triangle tests to
+  a compute shader, the decisions stay on the CPU.
 
 ## Design
 
@@ -180,7 +191,7 @@ grass as voxels stays its own backlog row); rocks and models never do.
   everything under it (voxels are sticky upward; nothing is ever built from
   voxels and triangles mixed). Whether `keepLeafArea` is still needed below
   the voxel levels is measured (it exists to fight thinning, which the
-  voxels now take over); remove it if Q1 passes without.
+  voxels now take over); remove it if the switch looks the same without.
 - Voxelization runs on the CPU from the original (finest) triangles of the
   group, never from simplified triangles. Starting point: the `farm-cpuvox`
   prototype (branch restored on origin), which voxelizes one whole-tree
@@ -220,7 +231,7 @@ gates need it):
   (KHR_materials_diffuse_transmission, as the triangles' leaves).
 - Normal distribution: mean normal plus its spread (length of the
   unnormalized mean, or SGGX-style second moments; builder's call by
-  gate Q1), from the hits' geometric and shading normals.
+  the acceptance captures), from the hits' geometric and shading normals.
 - Roughness: mean perceptual roughness of the hits (for the sky specular;
   matters for the silvery-leaf backlog row).
 
@@ -253,7 +264,7 @@ cluster record.
   workgroup) or uses task-shader amplification; builder's call by P2.
 - Coverage: a voxel's opacity along the view is `1 - exp(-depth along the
   view)`. How partial opacity reaches the screen without speckle is the
-  core quality question, decided by gates Q1-Q4 between two candidates:
+  core quality question, decided by the acceptance captures between two candidates:
   (a) today's stable hash per (instance, voxel), now at ~1 px so DLAA
   resolves it spatially, and (b) a hash that also cycles with the jitter
   phase (a fixed sequence, so a still camera converges and never boils).
@@ -278,7 +289,7 @@ cluster record.
   DAG voxels (albedo RGB, transmission, normal spread), so `voxel.frag`'s
   far-cell march, the GI probes' `farFieldTransmittanceScatter` and the far
   shadow map shade foliage with the same model. The far-cell switch (a
-  cell whose 4 m voxel is under ~1 px) is gated like the near switch (Q5).
+  cell whose 4 m voxel is under ~1 px) is judged like the near switch.
 
 ### 7. Shadows
 
@@ -297,65 +308,66 @@ far-cell casting stays.
 for the seam gates: `--voxel-lod off`). Docs (CLAUDE.md, the reference
 docs, decisions.md) say what replaced them.
 
-## Gates (measured against main before the change; the baseline run is the
-first task)
+## Acceptance (user, 2026-11-24)
 
-Quality (Release 2560x1440, DLAA, `--trees`):
+The user's criteria, simple and final:
 
-- **Q1 Switch, still.** The same views with voxels on and `--voxel-lod off`
-  (triangles everywhere, LOD error 0 for the trees where needed) at
-  distances that straddle the switch (forest edge, summit ridge at 0.3-1.5
-  km), against full detail (`--lod-error 0` with triangles): per-crown region mean luminance within 3%, OKLCh chroma within 3%,
-  coverage (alpha from the albedo capture's non-sky mask) within 3%.
-- **Q2 Switch, moving.** Fly-toward sequences across the switch distances
-  (`--capture-sequence`): the frame-to-frame difference at switch frames
-  no higher than at neighbouring frames (no pop), and the user's eye on
-  the sequence.
-- **Q3 Stability.** `tools/motion-clarity.sh` forest rows: still-camera
-  jitter and in-motion error no worse than the triangles' at the same
-  views.
-- **Q4 No visible voxels.** Distant forests (forest overview, high
-  overview, summit horizon) against the full-detail triangles
-  (`--voxel-lod off --lod-error 0`): region luminance ratio within 5%, and
-  the forest crop's high-frequency energy (Laplacian std) no higher than
-  the triangles' (speckle shows as excess high frequency). Side-by-side
-  for the user.
-- **Ground truth.** The voxels' target is the full-detail triangles as the
-  raster draws them, in every gate: the voxels must be indistinguishable
-  from the triangles. The reference path tracer is reported beside Q4 for
-  information; where the triangles themselves miss it, that is the
-  canopy-lighting lane's problem, not a voxel gate (the quality loop does
-  not change the triangle path). One lighting difference is by design and
-  measured by Q1: triangles self-shadow through the cascades, voxels
-  through their baked axis depths and then the cascades from where the sun
-  ray leaves the box, so a voxel tree never receives its own cascade
-  shadow twice.
-- **Q5 Far switch.** Same as Q1-Q2 across the voxel-cluster to far-cell
-  switch.
+1. **No noticeable voxelization** at any distance: no squares near the
+   switch, no speckle or grey noise far out, forests keep their density
+   and colour.
+2. **No noticeable voxel level swaps**: neither triangles to voxels nor
+   one voxel level to the next nor voxels to far cells pops, still or in
+   motion.
+3. **Proper lighting and shadows** for the photorealistic target: voxels
+   lit like the leaves they replace (sun, transmission, sky and GI,
+   self-shadow), and distant trees cast shadows.
 
-Performance (Release, same `Render WxH`, `GPU_RUNS` medians):
+Rigour without a test matrix (the user: "no need to do a million tests,
+but the code has to be good, performance has to be good"):
+
+- Unit tests only where logic is new and checkable on the CPU: the
+  voxelizer against brute-force rays, levels keeping coverage, the LOD cut
+  covering every surface once over mixed triangle/voxel levels
+  (`selectClustersBvh`).
+- Evidence for the user's eye, batched: side-by-side captures of voxels vs
+  full-detail triangles (`--voxel-lod off --lod-error 0`) at the switch
+  distances (forest edge, summit ridge) and far out (forest overview, high
+  overview, summit horizon), plus one fly-toward sequence across all
+  switches. The voxels' target is the full-detail triangles as the raster
+  draws them; the reference path tracer is information only (where the
+  triangles miss it, that is the canopy-lighting lane's problem). Cheap
+  numbers back the eye where they help (region luminance ratio, Laplacian
+  std of the forest crop, `tools/motion-clarity.sh` forest rows), not as
+  extra gates.
+- One lighting difference is by design: triangles self-shadow through the
+  cascades, voxels through their baked axis depths and then the cascades
+  from where the sun ray leaves the box, so a voxel tree never receives its
+  own cascade shadow twice.
+
+Performance (Release, same `Render WxH`, medians of a few runs), measured
+on main first:
 
 - **P1** Parity route (`--trees`): no segment slower than the baseline.
-- **P2** Tree passes (cull, traverse, cluster cull, scene early/late tree
+- **P2** Tree passes (cull, traverse, cluster cull, the scene passes' tree
   share, voxel draw, far field) at forest edge, forest overview and
-  summit: at least 20% cheaper than the baseline in total; report per pass.
-- **P3** Release startup no slower (expected faster: no bake), VRAM for
-  geometry + voxels reported against today, `.clusters` cache size and
-  first build time reported.
+  summit: at least 20% cheaper in total; reported per pass.
+- **P3** Release startup no slower (expected faster: no bake); geometry +
+  voxel VRAM, `.clusters` size and first build time reported.
 
 ## Order of work (for the plan)
 
-0. Baseline: the gate views and numbers on main, plus `--voxel-lod off`
-   semantics on today's path (`--voxel-trees off`) so Q1 can be measured
-   before and after.
+0. Baseline: the evidence views and P1-P3 numbers on main (today's
+   `--voxel-trees off` stands in for `--voxel-lod off`).
 1. meshoptimizer to the latest release; cache version bump.
 2. Voxelizer in the DAG build (CPU), payload, voxel levels, cache v7;
    unit tests: coverage vs brute-force rays, mips keep coverage, the cut
    covers each surface point once (`selectClustersBvh` over mixed levels).
 3. GPU: voxel clusters through traversal and cull, voxel draw lists,
    the voxel raster and shading; old per-tree path removed.
-4. Quality loop on Q1-Q4 (coverage candidate, normal spread, 1 vs 2 px).
-5. Far field from DAG voxels; bake removed; Q5.
+4. Quality loop to the acceptance criteria (coverage candidate, normal
+   spread, 1 vs 2 px).
+5. Far field from DAG voxels; bake removed; the far switch judged the same
+   way.
 6. Shadows from voxel clusters (G11).
 7. Performance pass to P1-P3; docs, decisions.md entry, backlog rows
    closed, Status lines.
