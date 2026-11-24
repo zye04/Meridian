@@ -149,6 +149,7 @@ add_library(meridian STATIC
     src/frame_stats.cpp
     src/farfield.cpp
     src/protovoxel.cpp
+    src/voxelize.cpp
     src/grade.cpp
     src/model.cpp
     src/placement.cpp

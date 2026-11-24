@@ -1,5 +1,6 @@
 #include <meridian/texture.h>
 
+#include <algorithm>
 #include <basisu_transcoder.h>
 
 #include <fstream>
@@ -53,7 +54,9 @@ TextureData loadKtx2(const std::vector<uint8_t> &file, ColorSpace colorSpace) {
   return texture;
 }
 
-TextureData loadKtx2(const std::filesystem::path &path, ColorSpace colorSpace) {
+namespace {
+
+std::vector<uint8_t> readFile(const std::filesystem::path &path) {
   std::ifstream stream(path, std::ios::binary | std::ios::ate);
   if (!stream) {
     throw std::runtime_error("cannot open " + path.string());
@@ -62,7 +65,45 @@ TextureData loadKtx2(const std::filesystem::path &path, ColorSpace colorSpace) {
   stream.seekg(0);
   stream.read(reinterpret_cast<char *>(file.data()),
               static_cast<std::streamsize>(file.size()));
-  return loadKtx2(file, colorSpace);
+  return file;
+}
+
+} // namespace
+
+CpuImage loadKtx2Rgba8(const std::vector<uint8_t> &file, uint32_t maxSize) {
+  initTranscoder();
+  basist::ktx2_transcoder transcoder;
+  if (!transcoder.init(file.data(), static_cast<uint32_t>(file.size())) ||
+      !transcoder.start_transcoding()) {
+    throw std::runtime_error("not a valid Basis Universal KTX2 file");
+  }
+  uint32_t level = 0;
+  while (level + 1 < transcoder.get_levels() &&
+         std::max(transcoder.get_width(), transcoder.get_height()) >> level > maxSize) {
+    ++level;
+  }
+  basist::ktx2_image_level_info info;
+  if (!transcoder.get_image_level_info(info, level, 0, 0)) {
+    throw std::runtime_error("bad KTX2 mip level");
+  }
+  CpuImage image;
+  image.width = info.m_orig_width;
+  image.height = info.m_orig_height;
+  image.rgba.resize(size_t{image.width} * image.height * 4);
+  if (!transcoder.transcode_image_level(level, 0, 0, image.rgba.data(),
+                                        image.width * image.height,
+                                        basist::transcoder_texture_format::cTFRGBA32)) {
+    throw std::runtime_error("KTX2 transcoding to RGBA8 failed");
+  }
+  return image;
+}
+
+CpuImage loadKtx2Rgba8(const std::filesystem::path &path, uint32_t maxSize) {
+  return loadKtx2Rgba8(readFile(path), maxSize);
+}
+
+TextureData loadKtx2(const std::filesystem::path &path, ColorSpace colorSpace) {
+  return loadKtx2(readFile(path), colorSpace);
 }
 
 } // namespace meridian
