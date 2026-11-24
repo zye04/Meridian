@@ -1,6 +1,6 @@
 #pragma once
 
-// Far-field forests (docs/superpowers/specs/2026-11-20-far-field-design.md):
+// Far-field forests (docs/superpowers/archive/specs/2026-11-20-far-field-design.md):
 // per 64 m placement cell, sparse columns of 4^3-voxel bricks at three
 // levels, splatted at load from the placed table and per-prototype
 // templates. This is the CPU side: voxel and column packing, the template

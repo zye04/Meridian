@@ -232,7 +232,7 @@ the trees back (hidden by default). Capture runs print validation errors,
 - Megascans trees, ground surfaces, the Fab cliff and their import tools:
   `docs/assets.md`. The rock placement layer and the terrain material's
   rock blend share `kRockNormalY` (renderer.h). Placement layers are
-  causal (spec `2026-11-23-geo-channels-causal-placement-design.md`):
+  causal (spec `docs/superpowers/archive/specs/2026-11-23-geo-channels-causal-placement-design.md`):
   rules read the `.geo` channels (`DensityRule::channels`) and an earlier
   layer's density (`PlacementLayer::parent`); without a `.geo` the game
   skips channel layers. The forest floor follows the forest layer

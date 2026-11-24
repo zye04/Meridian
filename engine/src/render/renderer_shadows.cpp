@@ -1,7 +1,7 @@
 // Raster sun shadows: cascaded depth maps of the placed and hand-placed
 // geometry, rendered through the cluster cull chain from the sun and cached
 // until the camera leaves a cascade's window, the sun moves or the geometry
-// changes. See docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md.
+// changes. See docs/superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md.
 #include "renderer_impl.h"
 
 #include <cmath>
