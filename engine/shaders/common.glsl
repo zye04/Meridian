@@ -115,8 +115,9 @@ struct ClusterInfo {
     // The mesh it belongs to: placed instances name only a prototype.
     uint mesh;
     // A voxel cluster's lattice edge (> 0; firstTriangle and triangleCount
-    // are then its bricks, voxel_lod.glsl, and vertexCount is 1 when the
-    // group it replaces is triangles); 0 for triangles, -1 for triangles
+    // are then its bricks, voxel_lod.glsl, vertexCount is 1 when the group
+    // it replaces is triangles and firstVertex is its coverage seed,
+    // voxel_bricks.comp); 0 for triangles, -1 for triangles
     // whose group voxel clusters replace.
     float voxelEdge;
 };

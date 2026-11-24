@@ -33,6 +33,10 @@ struct MeshData {
   // Part of a model that gets voxel levels in its cluster DAG
   // (voxelizesModel).
   bool voxelize = false;
+  // Seeds its voxel clusters' coverage hash (voxel_bricks.comp): from the
+  // cluster cache key and the primitive's index, so a rebuild or another
+  // load order keeps the pattern. Not cached.
+  uint32_t voxelSeed = 0;
 };
 
 // A model gets voxel levels when it holds a tree crown: a foliage mesh

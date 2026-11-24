@@ -12,7 +12,8 @@
 // reservation per 64 bricks. Bricks outside the frustum are skipped; a voxel
 // draws where a stable hash of instance, brick and voxel is below its
 // opacity along the view (coverage; stable, so a still view never boils;
-// keyed on the brick's place, not its pool index),
+// keyed on the brick's lattice place, edge and the cluster's seed, not its
+// pool index),
 // unless the model hides it from the camera (kVoxelHiddenDepth). The
 // terrain's sun visibility is marched once from the cluster's centre (as
 // cluster_cull.comp does per small cluster; a voxel cluster spans one
@@ -127,11 +128,14 @@ void main() {
                                                  : (instance.transform * vec4(local, 1.0)).xyz -
                                                        scene.cameraPosition));
             float opacity = voxelViewOpacity(voxelDepths(pools.voxels.voxels[slot]), view);
-            // Keyed on where the brick is (lattice origin, edge, mesh), not its
-            // pool index, so a cache rebuild or a new load order keeps the pattern.
+            // Keyed on where the brick is (lattice origin, edge) and the
+            // cluster's seed (firstVertex: the mesh's seed and the cluster's
+            // index in its hierarchy), not pool or mesh upload indices, so a
+            // cache rebuild or a new load order keeps the pattern, and two
+            // clusters sharing a brick roll independently.
             uint place = pcg3d(uvec3(uint(brick.originX), uint(brick.originY),
                                      uint(brick.originZ) ^ floatBitsToUint(v)) ^
-                               uvec3(cluster.mesh)).x;
+                               uvec3(cluster.firstVertex)).x;
             float noise = float(pcg3d(uvec3(entry.x, place, i)).x) * (1.0 / 4294967296.0);
             if (noise < opacity &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {

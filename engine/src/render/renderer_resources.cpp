@@ -511,6 +511,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
         info.firstTriangle = impl_->voxelBrickCount + c.firstBrick;
         info.triangleCount = c.brickCount;
         info.voxelEdge = c.voxelEdge;
+        info.firstVertex = data.voxelSeed ^ uint32_t(i);
         // 1: the refined side switches at the threshold itself (made from
         // triangles), else at kVoxelPixels times it.
         info.vertexCount = thresholds[i].refined < thresholds[i].self ? 1u : 0u;

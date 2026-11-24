@@ -310,6 +310,12 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
                                         voxels.primitiveMaterial, voxels.imageOf);
   std::filesystem::path cache = gltf;
   cache.replace_extension(clusterCacheExtension());
+  for (size_t i = 0; i < meshes.size(); ++i) {
+    uint64_t z = key + (i + 1) * 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    meshes[i].voxelSeed = uint32_t((z ^ (z >> 31)) >> 32);
+  }
   auto cached = readClusterCache(cache, key);
   bool valid = cached && cached->size() == meshes.size();
   for (size_t i = 0; valid && i < meshes.size(); ++i) {

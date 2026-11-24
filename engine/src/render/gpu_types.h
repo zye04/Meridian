@@ -649,7 +649,9 @@ struct ClusterInfo {
   uint32_t mesh = 0;
   // A voxel cluster's lattice edge (> 0): then firstTriangle and
   // triangleCount are its bricks in the voxel brick pool (GpuVoxelBrick)
-  // and vertexCount is 1 when the group it replaces is triangles.
+  // and vertexCount is 1 when the group it replaces is triangles;
+  // firstVertex is its coverage seed (MeshData::voxelSeed ^ its index in
+  // the mesh's ClusterLod), stable across cache rebuilds and load order.
   // 0 for triangles, -1 for triangles whose group voxel clusters replace
   // (with voxel LOD off that group is never replaced).
   float voxelEdge = 0.0f;
