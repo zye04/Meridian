@@ -1564,6 +1564,13 @@ int main(int argc, char **argv) {
                 "%.0f deg, gustiness %.2f (game time %.0f s)\n",
                 here.coverage, here.type, here.wind.speed10m, from, here.wind.gustiness,
                 gameSeconds);
+    std::fflush(stdout);
+    if (renderer.droppedCullEntryCount() > 0) {
+      std::fprintf(stderr,
+                   "WARNING: %u entries dropped by full cull lists in the last frame: the "
+                   "image is incomplete\n",
+                   renderer.droppedCullEntryCount());
+    }
   }
   return renderer.validationErrorCount() == 0 && benchmarkWritten ? 0 : 1;
 }

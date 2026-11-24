@@ -645,6 +645,14 @@ struct Renderer::Impl {
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
   // Writes the voxel pools' addresses into voxelPoolInfo.
   void writeVoxelPoolInfo();
+  void readBackCounters(VkCommandBuffer cmd, const FrameData &frame);
+  // VMA's allocated blocks on the device-local heaps (VRAM), and on all
+  // heaps (system memory too).
+  struct MemoryUse {
+    VkDeviceSize deviceLocal = 0;
+    VkDeviceSize all = 0;
+  };
+  MemoryUse memoryUse() const;
   void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {

@@ -403,12 +403,12 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   std::array<double, kFarLevels> splatMs{};
   std::vector<float> cellBottom(cellCount, std::numeric_limits<float>::max());
   std::vector<float> cellTop(cellCount, -std::numeric_limits<float>::max());
-  VkDeviceSize peakTransient = 0, peakAllocated = 0;
+  VkDeviceSize peakTransient = 0, peakAllocated = 0, peakAll = 0;
   const auto samplePeak = [&](VkDeviceSize transient) {
     peakTransient = std::max(peakTransient, transient);
-    VmaTotalStatistics stats;
-    vmaCalculateStatistics(allocator, &stats);
-    peakAllocated = std::max(peakAllocated, stats.total.statistics.blockBytes);
+    const MemoryUse use = memoryUse();
+    peakAllocated = std::max(peakAllocated, use.deviceLocal);
+    peakAll = std::max(peakAll, use.all);
   };
   const VkDeviceSize fixedTransient =
       templateBuffer.size + templateVoxelBuffer.size + cellData.size + readback.size;
@@ -721,14 +721,14 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
               "%.0f MiB "
               "(bricks %.0f/%.0f/%.0f, columns %.0f/%.0f/%.0f); peak transient %.0f "
               "MiB, "
-              "device memory allocated at peak %.0f MiB; templates %.0f ms, splat %.0f ms "
+              "device memory allocated at peak %.0f MiB (all heaps %.0f MiB); templates %.0f ms, splat %.0f ms "
               "(L0/L1/L2 %.0f/%.0f/%.0f), total %.0f ms; %u lost deposits\n",
               brickCounts[0], brickCounts[1], brickCounts[2], voxelsIn(0), voxelsIn(1), voxelsIn(2),
               occupiedColumns[0], occupiedColumns[1], occupiedColumns[2], treeCells, sliceCounts[0],
               sliceCounts[1], sliceCounts[2], resident * kMiB, farVoxels[0].size * kMiB,
               farVoxels[1].size * kMiB, farVoxels[2].size * kMiB, farColumns[0].size * kMiB,
               farColumns[1].size * kMiB, farColumns[2].size * kMiB, peakTransient * kMiB,
-              peakAllocated * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
+              peakAllocated * kMiB, peakAll * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
               msSince(loadStart), lostDeposits);
 
   destroyBuffer(templateBuffer);

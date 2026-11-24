@@ -64,10 +64,12 @@ void main() {
     float occlusion = 1.0;
     if (scene.giMode == 0u) {
         float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
-        float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, vec3(1.0, 0.0, 0.0))) +
-                              exp(-voxelBoxDepth(axisWord, vec3(-1.0, 0.0, 0.0))) +
-                              exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, 1.0))) +
-                              exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, -1.0))));
+        vec3 east = normalize(toLocal * vec3(1.0, 0.0, 0.0));
+        vec3 south = normalize(toLocal * vec3(0.0, 0.0, 1.0));
+        float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, east)) +
+                              exp(-voxelBoxDepth(axisWord, -east)) +
+                              exp(-voxelBoxDepth(axisWord, south)) +
+                              exp(-voxelBoxDepth(axisWord, -south)));
         occlusion = mix(1.0, 0.5 * (up + sides), scene.microShadowStrength);
     }
 

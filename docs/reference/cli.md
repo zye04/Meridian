@@ -171,7 +171,10 @@ sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlu
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry), per list: chunks, work items, clusters, terrain nodes, bvh
-nodes.
+nodes (the voxel lists' drops are in the total only); a nonzero total also
+ends the run with a `WARNING: N entries dropped by full cull lists` line on
+stderr. A GPU-only buffer placed outside device memory prints `warning: a N
+MiB GPU buffer is outside device memory` when it is created.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
 voxels), `voxel trees N (bricks B, voxels V)` (voxel clusters drawn,
@@ -273,7 +276,9 @@ regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 trees, 0x5353fab653ec154d with `--trees`, both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
-before and after compaction, cell margin). `--far-field off` draws
+before and after compaction, cell margin, then VMA's blocks on the
+device-local heaps and, in brackets, on all heaps including system
+memory); the far field's line gives the same pair at its peak. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
 `--voxel-lod on|off` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage

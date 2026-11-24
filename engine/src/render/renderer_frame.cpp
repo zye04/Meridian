@@ -327,13 +327,19 @@ void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  if (phase == 1 && !shadow) {
-    const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
-    vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
-    // A fence wait alone doesn't make device writes visible to the host.
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
-  }
+}
+
+// The main view's counters to the host, after the late voxel expansion (its
+// counts and drops are counters too). The shaders reach the counters by
+// device address, which synchronization validation does not track.
+void Renderer::Impl::readBackCounters(VkCommandBuffer cmd, const FrameData &frame) {
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+  const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
+  vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
+  // A fence wait alone doesn't make device writes visible to the host.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
 }
 
 // Reduces the scene depth into the pyramid, one level per dispatch.
@@ -1237,6 +1243,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
   impl_->expandVoxelBricks(cmd, frame, 1);
+  impl_->readBackCounters(cmd, frame);
   endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,

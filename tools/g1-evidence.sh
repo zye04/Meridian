@@ -8,7 +8,7 @@
 set -euo pipefail
 build=$1 out=$2
 shift 2
-off=${VOXEL_OFF_FLAG:---voxel-trees off}
+off=${VOXEL_OFF_FLAG:---voxel-lod off}
 mkdir -p "$out"
 game=("$build/game/game" --trees "$@")
 

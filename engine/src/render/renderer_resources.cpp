@@ -62,6 +62,21 @@ Buffer Renderer::Impl::grownPool(const Buffer &pool, VkDeviceSize bytes,
                       usage, 0);
 }
 
+Renderer::Impl::MemoryUse Renderer::Impl::memoryUse() const {
+  VmaTotalStatistics stats;
+  vmaCalculateStatistics(allocator, &stats);
+  const VkPhysicalDeviceMemoryProperties *properties = nullptr;
+  vmaGetMemoryProperties(allocator, &properties);
+  MemoryUse use;
+  use.all = stats.total.statistics.blockBytes;
+  for (uint32_t h = 0; h < properties->memoryHeapCount; ++h) {
+    if (properties->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+      use.deviceLocal += stats.memoryHeap[h].statistics.blockBytes;
+    }
+  }
+  return use;
+}
+
 void Renderer::Impl::trimPools() {
   struct Trim {
     Buffer &pool;
@@ -572,6 +587,10 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       total(impl_->voxelBrickCount, brickCount) > UINT32_MAX ||
       total(impl_->voxelCount, voxelCount) > UINT32_MAX) {
     throw std::runtime_error("geometry pool offsets exceed 32 bits");
+  }
+  // A voxel quad entry packs its pool brick above the 6-bit voxel index.
+  if (total(impl_->voxelBrickCount, brickCount) > (uint64_t{1} << 26)) {
+    throw std::runtime_error("more voxel bricks than a quad entry can index (2^26)");
   }
   if (total(impl_->clusterCount, clusterCount) > kMaxClusterIndex) {
     throw std::runtime_error("more clusters than work items can index (kMaxClusterIndex)");
