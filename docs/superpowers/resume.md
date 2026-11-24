@@ -1,4 +1,4 @@
-# Resume here (entry point; updated 2026-11-23)
+# Resume here (entry point; updated 2026-11-24)
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
 
@@ -11,6 +11,29 @@ CLAUDE.md claims), leftover temp files, and worktrees/branches/folders no
 longer needed (~58 worktrees in ../meridian-*). Show the user the cleanup
 list before deleting anything. Other work (broadleaf spec, GTAO decisions,
 geo lane) waits until this is done.
+
+## Session 2026-11-24 (terrain lane: geo channels, merged)
+
+Terrain lane steps 1-3 landed on main (plan
+`plans/2026-11-23-geo-channels-causal-placement.md`, done; decisions.md
+"Terrain relief test" and "Geo channels and causal placement"):
+- Relief test: real 0.5 m relief beats 2 m under grazing light; the 0.3 m
+  detail noise is off by default (`--effects terrain-detail=1` A/B).
+- `meridian-cook --geo` channels beside every `.height` (napf.geo,
+  relief-*.geo); placement rules read them and an earlier layer's density.
+- Forest follows the Napf's land use (slopes 14-34 degrees, sunny slopes
+  cleared), scored against swissSURFACE3D canopy (`--score-forest`: kappa
+  -0.225 -> 0.461). New scree layer; meadow plants by sun and wetness.
+- Cost accepted by the user: parity route 41.1 -> 27.9 fps is the new
+  baseline (more forest); the performance lane takes it (backlog). The
+  default start view now looks into forest on the ridge.
+- Worktree `../meridian-geo` (branch `geo`) is merged and can go in the
+  housekeeping cleanup. Deferred minors from the final review: no
+  maxPushConstantsSize check (placement push constants are 144 B); the
+  forest-floor bake sits half a sample off its texel centre.
+- Next for the lane: step 4 (fine relief synthesis against the 0.5 m
+  patch) or the 0.5 m height clipmap; the broadleaf floor's group 2 and
+  the canopy lane's interior ablation were waiting on this merge.
 
 ## Session 2026-11-24 (broadleaf forest floor, brainstorm)
 
