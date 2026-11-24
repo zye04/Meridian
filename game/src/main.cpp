@@ -9,6 +9,7 @@
 #include <meridian/placement.h>
 #include "geo_channels.h"
 #include <meridian/renderer.h>
+#include <meridian/shadow_cascades.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
 #include <meridian/weather.h>
@@ -1572,17 +1573,18 @@ int main(int argc, char **argv) {
     for (const bool cascades : {false, true}) {
       const meridian::CullNeed need = renderer.cullNeed(cascades);
       std::printf("cull list need, %s, most in a frame: chunks %u, work items %u, bvh nodes %u, "
-                  "drawn clusters %u, voxel clusters %u, voxel quads %u; %u dropped\n",
+                  "drawn clusters %u, voxel clusters %u, voxel quads %u, terrain nodes %u, "
+                  "retest clusters %u; %u dropped\n",
                   cascades ? "sun shadow cascades" : "main view", need.chunks, need.workItems,
                   need.traversalNodes, need.drawnClusters, need.voxelClusters, need.voxelQuads,
-                  need.dropped);
+                  need.terrainNodes, need.retestClusters, need.dropped);
     }
-    for (uint32_t i = 0; i < 5; ++i) {
+    for (uint32_t i = 0; i < meridian::kShadowCascades; ++i) {
       const meridian::CullNeed need = renderer.cascadeCullNeed(i);
-      std::printf("cull list need, cascade %u: work items %u, bvh nodes %u, drawn clusters %u, "
-                  "voxel clusters %u, voxel quads %u; %u dropped\n",
-                  i, need.workItems, need.traversalNodes, need.drawnClusters, need.voxelClusters,
-                  need.voxelQuads, need.dropped);
+      std::printf("cull list need, cascade %u: chunks %u, work items %u, bvh nodes %u, drawn "
+                  "clusters %u, voxel clusters %u, voxel quads %u; %u dropped\n",
+                  i, need.chunks, need.workItems, need.traversalNodes, need.drawnClusters,
+                  need.voxelClusters, need.voxelQuads, need.dropped);
     }
     std::fflush(stdout);
     if (renderer.droppedCullEntryCount() > 0) {

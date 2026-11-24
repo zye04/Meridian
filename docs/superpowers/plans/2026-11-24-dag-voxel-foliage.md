@@ -22,6 +22,11 @@ ebfc444..7a46bf4 and the Task 9 closeout (docs, merge, issue #1 and #11).
   (ray traced 17.3 / 11.5 / 71.2: the voxel crowns cover more of the gaps
   from above, the shadowing matches).
 - Task 7 is closed with these two answers; no voxel shading tuning.
+- **Caster LOD of one texel in every sun cascade, kept** (the cascade
+  overflow fix, decisions.md "Caster LOD of one texel in every cascade"):
+  the user saw the 0.25 against 1 texel side by side
+  (`.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg`) and found them nearly
+  identical.
 Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
 (copy of the git-ignored `.superpowers/sdd/` ledger).
 

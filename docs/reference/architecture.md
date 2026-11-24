@@ -217,7 +217,9 @@ and voxel_instance.mesh the voxel quads (orthographic, facing the sun, depth
 only), cull none, slope-scaled bias; the
 coarsest cascade (`shadowFarCells`) skips every cell's trees and casts its
 far cell instead: voxel.mesh's box, voxel_shadow.frag marching the bricks
-along the sunlight to opacity 0.5) ->
+along the sunlight to opacity 0.5; after each cascade's culls and voxel
+expansion its DrawCounters are copied to readback slot 1 + i, and the
+frame's `cascadesRead` mask records which cascades rendered) ->
 DrawCounters reset -> terrain select (terrain_select.comp, CDLOD: one
 indirect dispatch per quadtree level from the root, level 16, down to 0;
 frustum test against the node's min/max-pyramid bounds; split while the
@@ -312,7 +314,11 @@ frustum + pyramid; the newly visible
 and phase 0's queued nodes go through the traversal (nodes tested against
 the new pyramid) and the cluster cull, and phase 0's queued clusters are
 retested against the new pyramid; writes the per-instance visibility
-buffer) ->
+buffer; then the late voxel expansion, and the main view's DrawCounters
+are copied to readback slot 0. The CPU reads a frame's slots once its fence
+signals (`readCounters`; `drainStatistics` reads the frames still in
+flight at the end of a capture run): last-frame statistics, and the run's
+most drops and per-list need, main view and cascades) ->
 late scene pass (load; late lists (masked depth, opaque, masked shaded), the late voxel clusters, then blended instances CPU-sorted back
 to front, mesh.vert) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it, each texel's ray

@@ -224,6 +224,9 @@ struct CullNeed {
   uint32_t drawnClusters = 0;
   uint32_t voxelClusters = 0;
   uint32_t voxelQuads = 0;
+  // Main view only (terrain_select.comp; the late pass's retest list).
+  uint32_t terrainNodes = 0;
+  uint32_t retestClusters = 0;
   uint32_t dropped = 0;
 };
 

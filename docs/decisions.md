@@ -4915,5 +4915,7 @@ gate protects).
   unchanged; OKLCh edge canopy/understory L -0.005/-0.007 (0.25:
   -0.004/-0.007), fly-toward canopy L +0.005 (0.25: +0.011). Near dappled
   shade, canopy from 40 m above: mean 84.78 -> 85.42, look side-by-side
-  `.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg` (a look question).
+  `.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg`.
+- **User, 2026-11-24: keep one texel in every cascade** (saw the side by
+  side, found the two nearly identical).
 

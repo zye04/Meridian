@@ -111,7 +111,7 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
   }
   const bool sunMoved = sunDirection.x != shadowSun.x || sunDirection.y != shadowSun.y ||
                         sunDirection.z != shadowSun.z;
-  const bool full = shadowStale || sunMoved || shadowRefresh;
+  const bool full = shadowStale || sunMoved;
   shadowSun = sunDirection;
   shadowStale = false;
   shadowBasis = lightBasis(sunDirection);
@@ -121,8 +121,13 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
   toFloat3(out.v, shadowBasis.v);
   toFloat3(out.d, shadowBasis.d);
   for (uint32_t i = 0; i < kShadowCascades; ++i) {
-    if (full || !shadowRendered[i] || needsRecenter(i, shadowWindows[i], shadowBasis, eye)) {
-      shadowWindows[i] = cascadeWindow(i, shadowBasis, eye, shadowCasterTop, sunDirection);
+    const bool recenter =
+        full || !shadowRendered[i] || needsRecenter(i, shadowWindows[i], shadowBasis, eye);
+    // --shadow-refresh re-renders every cascade in its current window.
+    if (recenter || shadowRefresh) {
+      if (recenter) {
+        shadowWindows[i] = cascadeWindow(i, shadowBasis, eye, shadowCasterTop, sunDirection);
+      }
       shadowRendered[i] = true;
       shadowPlanned[i] = true;
       ++shadowRenderCount;

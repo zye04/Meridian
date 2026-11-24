@@ -125,6 +125,8 @@ void accumulateNeed(CullNeed &need, const DrawCounters &c) {
     need.voxelClusters = std::max(need.voxelClusters, c.voxelDispatch[phase][0]);
     need.voxelQuads = std::max(need.voxelQuads, c.voxelQuads[phase][0]);
   }
+  need.terrainNodes = std::max(need.terrainNodes, c.terrainNodes);
+  need.retestClusters = std::max(need.retestClusters, c.retestCount);
   need.dropped = std::max(need.dropped, c.overflow);
 }
 
