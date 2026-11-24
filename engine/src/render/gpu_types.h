@@ -1318,6 +1318,8 @@ struct FrameData {
   // frame rendered.
   Buffer drawCountReadback;
   uint32_t cascadesRead = 0;
+  // Submitted, its counters not read yet (readCounters).
+  bool countersPending = false;
   // GpuWeather::history: kWeatherHistoryCapacity WeatherHistorySamples.
   Buffer weatherHistory;
   // The streamed slots to update this frame (StreamUpdate), CPU-written;

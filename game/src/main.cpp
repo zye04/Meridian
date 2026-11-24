@@ -1524,6 +1524,7 @@ int main(int argc, char **argv) {
                 100.0 * renderer.referenceNoise());
   }
   if (!interactive) {
+    renderer.drainStatistics();
     renderer.printAmbient();
     std::printf("sun shadows: %u cascade renders, max %.2f ms\n", renderer.sunShadowRenderCount(),
                 renderer.sunShadowMaxMs());

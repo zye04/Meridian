@@ -655,6 +655,7 @@ struct Renderer::Impl {
   // cascade i).
   void readBackCounters(VkCommandBuffer cmd, const FrameData &frame, const Buffer &counters,
                         uint32_t slot);
+  void readCounters(FrameData &frame);
   // VMA's allocated blocks on the device-local heaps (VRAM), and on all
   // heaps (system memory too).
   struct MemoryUse {

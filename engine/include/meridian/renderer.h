@@ -331,6 +331,9 @@ public:
   // The cull lists' need over the run: the main view's, and the largest of
   // the sun shadow cascades'.
   CullNeed cullNeed(bool cascades) const;
+  // Waits for the frames still in flight and reads their counters, so the
+  // statistics above cover every frame drawn (call before reporting).
+  void drainStatistics();
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
   // Far cells drawn as voxels in a recent frame.

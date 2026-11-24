@@ -663,6 +663,69 @@ void Renderer::requestCapture(const std::filesystem::path &path, CaptureSource s
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
 
+// A submitted frame's counters, once its fence has signalled: the last
+// frame's statistics, and the run's most drops and need.
+void Renderer::Impl::readCounters(FrameData &frame) {
+  check(vmaInvalidateAllocation(allocator, frame.drawCountReadback.allocation,
+                                0, VK_WHOLE_SIZE),
+        "vmaInvalidateAllocation");
+  const auto *counters =
+      static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
+  drawnInstances = counters->instances;
+  drawnTriangles = counters->triangles;
+  // Drops and need: the most in any frame of the run, cascades included.
+  std::array<uint32_t, 5> drops{};
+  std::copy(std::begin(counters->drops), std::end(counters->drops), drops.begin());
+  uint32_t overflow = counters->overflow;
+  accumulateNeed(mainNeed, *counters);
+  for (uint32_t i = 0; i < kShadowCascades; ++i) {
+    if (frame.cascadesRead & (1u << i)) {
+      const DrawCounters &cascade = counters[1 + i];
+      accumulateNeed(cascadeNeed, cascade);
+      overflow += cascade.overflow;
+      for (size_t list = 0; list < drops.size(); ++list) {
+        drops[list] += cascade.drops[list];
+      }
+    }
+  }
+  droppedEntries = std::max(droppedEntries, overflow);
+  for (size_t list = 0; list < drops.size(); ++list) {
+    droppedByList[list] = std::max(droppedByList[list], drops[list]);
+  }
+  drawnTerrainNodes = counters->terrainNodes;
+  drawnCells = counters->cells;
+  drawnFarCells = counters->farTasks[0];
+  drawnVoxelTrees = 0;
+  drawnVoxelBricks = 0;
+  drawnVoxelQuads = 0;
+  for (uint32_t phase = 0; phase < 2; ++phase) {
+    drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
+    drawnVoxelBricks += counters->voxelBricks[phase];
+    drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
+  }
+  drawnVoxelArea = counters->voxelArea / 16.0;
+  drawnSubpixelVoxels = counters->voxelSubpixel;
+  visitedBvhNodes = counters->bvhNodes;
+  drawnClusters = 0;
+  for (const auto &lists : counters->meshTasks) {
+    for (const auto &tasks : lists) {
+      drawnClusters += tasks[0];
+    }
+  }
+  frame.countersPending = false;
+}
+
+void Renderer::drainStatistics() {
+  for (uint32_t k = 0; k < kFramesInFlight; ++k) {
+    FrameData &frame = impl_->frames[(impl_->frameNumber + k) % kFramesInFlight];
+    if (frame.countersPending) {
+      check(vkWaitForFences(impl_->device.device, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences");
+      impl_->readCounters(frame);
+    }
+  }
+}
+
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     float deltaSeconds) {
   VkDevice dev = impl_->device.device;
@@ -724,53 +787,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         static_cast<float>(timestamps[slotPasses] - timestamps[0]) *
         msPerTick;
   }
-  if (impl_->frameNumber >= kFramesInFlight) {
-    check(vmaInvalidateAllocation(impl_->allocator, frame.drawCountReadback.allocation,
-                                  0, VK_WHOLE_SIZE),
-          "vmaInvalidateAllocation");
-    const auto *counters =
-        static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
-    impl_->drawnInstances = counters->instances;
-    impl_->drawnTriangles = counters->triangles;
-    // Drops and need: the most in any frame of the run, cascades included.
-    std::array<uint32_t, 5> drops{};
-    std::copy(std::begin(counters->drops), std::end(counters->drops), drops.begin());
-    uint32_t overflow = counters->overflow;
-    accumulateNeed(impl_->mainNeed, *counters);
-    for (uint32_t i = 0; i < kShadowCascades; ++i) {
-      if (frame.cascadesRead & (1u << i)) {
-        const DrawCounters &cascade = counters[1 + i];
-        accumulateNeed(impl_->cascadeNeed, cascade);
-        overflow += cascade.overflow;
-        for (size_t list = 0; list < drops.size(); ++list) {
-          drops[list] += cascade.drops[list];
-        }
-      }
-    }
-    impl_->droppedEntries = std::max(impl_->droppedEntries, overflow);
-    for (size_t list = 0; list < drops.size(); ++list) {
-      impl_->droppedByList[list] = std::max(impl_->droppedByList[list], drops[list]);
-    }
-    impl_->drawnTerrainNodes = counters->terrainNodes;
-    impl_->drawnCells = counters->cells;
-    impl_->drawnFarCells = counters->farTasks[0];
-    impl_->drawnVoxelTrees = 0;
-    impl_->drawnVoxelBricks = 0;
-    impl_->drawnVoxelQuads = 0;
-    for (uint32_t phase = 0; phase < 2; ++phase) {
-      impl_->drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
-      impl_->drawnVoxelBricks += counters->voxelBricks[phase];
-      impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
-    }
-    impl_->drawnVoxelArea = counters->voxelArea / 16.0;
-    impl_->drawnSubpixelVoxels = counters->voxelSubpixel;
-    impl_->visitedBvhNodes = counters->bvhNodes;
-    impl_->drawnClusters = 0;
-    for (const auto &lists : counters->meshTasks) {
-      for (const auto &tasks : lists) {
-        impl_->drawnClusters += tasks[0];
-      }
-    }
+  if (frame.countersPending) {
+    impl_->readCounters(frame);
   }
 
   uint32_t imageIndex = 0;
@@ -1769,6 +1787,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   submit.pSignalSemaphoreInfos = &signalInfo;
   check(vkQueueSubmit2(impl_->graphicsQueue, 1, &submit, frame.renderFence),
         "vkQueueSubmit2");
+  frame.countersPending = true;
 
   if (gradeReadback.buffer != VK_NULL_HANDLE) {
     check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),

@@ -171,7 +171,8 @@ sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlu
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry or shadow; the most in any frame of the run, main view plus the
-sun shadow cascades rendered that frame), per list: chunks, work items,
+sun shadow cascades rendered that frame, every frame drawn included: the
+run waits for the frames still in flight before it reports), per list: chunks, work items,
 clusters, terrain nodes, bvh nodes (the voxel lists' drops are in the total
 only); a nonzero total also ends the run with a `WARNING: up to N entries
 dropped by full cull lists in a frame` line on stderr. Two `cull list need,
