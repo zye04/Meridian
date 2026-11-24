@@ -186,6 +186,8 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
 // builds with different versions sharing one assets/ keep separate files
 // instead of rebuilding each other's (e.g. ".v00080406.10.clusters").
 std::string clusterCacheExtension();
+uint32_t clusterCacheVersion();
+uint32_t voxelizerVersion();
 void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
                        const std::vector<ClusterLod> &lods);
 std::optional<std::vector<ClusterLod>>

@@ -5,6 +5,7 @@
 #include <array>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -163,12 +164,12 @@ TEST_CASE("cluster cache round-trips") {
   std::filesystem::remove(file);
 }
 
-TEST_CASE("cluster cache file name carries the cache version") {
+TEST_CASE("cluster cache file name carries the cache and voxelizer versions") {
   const std::string extension = clusterCacheExtension();
-  // ".v<cache version, 8 hex>.<voxelizer version>.clusters"
-  CHECK(extension[10] == '.');
-  CHECK(extension.starts_with(".v"));
-  CHECK(extension.ends_with(".clusters"));
+  char expected[64];
+  std::snprintf(expected, sizeof(expected), ".v%08x.%u.clusters", clusterCacheVersion(),
+                voxelizerVersion());
+  CHECK(extension == expected);
   CHECK(std::filesystem::path("a/tree.gltf").replace_extension(extension).filename().string() ==
         "tree" + extension);
 }

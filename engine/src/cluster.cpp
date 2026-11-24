@@ -769,6 +769,10 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
   }
 }
 
+uint32_t clusterCacheVersion() { return kCacheVersion; }
+
+uint32_t voxelizerVersion() { return kVoxelizerVersion; }
+
 std::string clusterCacheExtension() {
   char extension[32];
   std::snprintf(extension, sizeof(extension), ".v%08x.%u.clusters", kCacheVersion,

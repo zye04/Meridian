@@ -307,3 +307,30 @@ TEST_CASE("combined grids add coincident voxels' optical depths, as independent 
   CHECK(v->depth[2] == doctest::Approx(std::min(va->depth[2] + vb->depth[2], kOpaque)));
   CHECK(both.bricks.size() == 1);
 }
+
+TEST_CASE("a slanted plane blocks the analytic share of each voxel's rays") {
+  // z = 0.75 x over x, y in [0, 4], edge 1: rays sit at (n + 0.5) / 4.
+  std::vector<VoxelTriangle> tris = {tri({0, 0, 0}, {4, 0, 3}, {4, 4, 3}),
+                                     tri({0, 0, 0}, {4, 4, 3}, {0, 4, 0})};
+  const VoxelMaterial material{};
+  const VoxelGrid grid = voxelize(tris, {&material, 1}, 1.0f);
+  const auto depth = [](float blocked) { return -std::log(1.0f - blocked); };
+  const VoxelPayload *low = voxelAt(grid, 1, 1, 0), *high = voxelAt(grid, 1, 1, 1);
+  const VoxelPayload *next = voxelAt(grid, 2, 1, 1);
+  REQUIRE(low);
+  REQUIRE(high);
+  REQUIRE(next);
+  // Along z, column x in [1, 2): x = 1.125 hits at z = 0.84 (voxel 0), the
+  // other three columns of rays at z = 1.03, 1.22, 1.41 (voxel 1).
+  CHECK(low->depth[2] == doctest::Approx(depth(4.0f / 16.0f)));
+  CHECK(high->depth[2] == doctest::Approx(depth(12.0f / 16.0f)));
+  // Along x, x = z / 0.75: rows z = 0.125..0.875 hit at x = 0.17, 0.5, 0.83
+  // (voxel 0) and 1.17 (voxel 1); rows z = 1.125..1.875 at x = 1.5, 1.83
+  // (voxel 1) and 2.17, 2.5 (voxel 2).
+  CHECK(low->depth[0] == doctest::Approx(depth(4.0f / 16.0f)));
+  CHECK(high->depth[0] == doctest::Approx(depth(8.0f / 16.0f)));
+  CHECK(next->depth[0] == doctest::Approx(depth(8.0f / 16.0f)));
+  // The plane contains y: rays along y never hit it.
+  CHECK(low->depth[1] == 0.0f);
+  CHECK(high->depth[1] == 0.0f);
+}
