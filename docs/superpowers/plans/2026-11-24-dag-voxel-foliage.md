@@ -1,6 +1,28 @@
 # DAG Voxel Foliage Implementation Plan
 
-Status: ready (2026-11-24), awaiting the user's review.
+Status: in progress, paused 2026-11-24 on branch `g1` (pushed). Done: Tasks
+0-5, 6, 6a-6c. Next: Task 9's VRAM/overflow items first (below), then 7, 8, 9.
+Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
+(copy of the git-ignored `.superpowers/sdd/` ledger).
+
+## Resume (paused 2026-11-24)
+
+Findings from the last runs (ledger has details):
+- All G1 evidence before 2026-11-24 15:00 ran at 1920x1080 (monitor off,
+  Hyprland fallback), not 1440p. Re-measure main and g1 at 1440p.
+- At 1440p the forest overview (`--camera 700 1450 -400 -1.55 -0.5
+  --trees`) overflows `kMaxVoxelQuads` (8388608, ~0.95M dropped): fix
+  before judging the look (Task 7) or GPU time.
+- g1 peaks at 16.1-16.7 GB device memory on the 16 GB RTX 4080 (main 14.4
+  GB); the far-field splat then takes ~56 s at startup (main 0.36 s). The
+  voxel pools' VRAM is the first Task 9 item.
+- Repeat-run noise with `--trees`: 0.3/255 at the forest edge, 4.3/255 at
+  the overflowing overview. Judge A/Bs against a repeat run, not zero.
+- Other lanes' main builds share `assets/` and rewrite the `.clusters`
+  caches (main kCacheVersion 7, g1 8): models rebuild when lanes alternate.
+- Task 6's Debug far-field check (`build/game/game` at the overview with
+  `--trees`, the far-field Debug checks) was started but not finished.
+- Task 6c's look verdict (voxel canopy brightness under GI) moves to Task 7.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
