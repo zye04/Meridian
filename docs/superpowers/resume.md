@@ -2,11 +2,24 @@
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
 
+## FIRST, before anything else: housekeeping lane (user, 2026-11-24)
+
+Absolute top priority after the usage reset. Make it evident what is done,
+where things stand and what is planned; find stale docs (specs/plans whose
+Status lines lie, resume.md sections, backlog rows already resolved,
+CLAUDE.md claims), leftover temp files, and worktrees/branches/folders no
+longer needed (~58 worktrees in ../meridian-*). Show the user the cleanup
+list before deleting anything. Other work (broadleaf spec, GTAO decisions,
+geo lane) waits until this is done.
+
 ## Session 2026-11-24 (broadleaf forest floor, brainstorm)
 
 User downloaded the Megascans European Broadleaf Forest pack (66 zips in
 ~/Downloads). Design written: `specs/2026-11-24-broadleaf-forest-floor-design.md`
-(approach A, builder check folded in). Next: user reviews and approves the
+(approach A, builder check folded in). Open: GTAO spec's 3 decisions
+(waiting since 2026-11-21): user asked what they are; Claude proposed
+re-checking its double-darkening section against the GI probes (default
+since 2026-11-23) first. Next: user reviews and approves the
 spec, then writing-plans (group 1 now: cook, audit, photos; group 2 after
 the geo lane merges).
 
