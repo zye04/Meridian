@@ -1538,6 +1538,12 @@ int main(int argc, char **argv) {
                 drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
                 renderer.placedInstanceCount(),
                 renderer.validationErrorCount());
+    if (renderer.drawnVoxelQuadCount() > 0) {
+      std::printf("voxel quads %u: area %.0f px = %.2f x the render's pixels, %.1f%% under 1 px\n",
+                  renderer.drawnVoxelQuadCount(), renderer.drawnVoxelQuadArea(),
+                  renderer.drawnVoxelQuadComplexity(),
+                  100.0 * renderer.drawnSubpixelVoxelQuads() / renderer.drawnVoxelQuadCount());
+    }
     const meridian::Renderer::StreamStats stream = renderer.streamStats();
     std::printf("streamed: %u layers, window %ux%u, ring %u slots, %u live\n", stream.layers,
                 stream.window, stream.window, stream.ringInstances, stream.live);

@@ -27,6 +27,8 @@ shared uint keptPool[64];
 shared uint quadCount;
 shared uint threadQuads[64];
 shared uint quadFirst;
+shared uint areaSum;
+shared uint subpixelSum;
 
 // Whether the terrain lets the sun reach a point (world), one ray toward a
 // point of the sun's disk fixed per brick.
@@ -78,6 +80,8 @@ void main() {
     if (i == 0u) {
         vec3 world = (instance.transform * vec4(cluster.boundsCenter, 1.0)).xyz;
         keptFirst = terrainSun(world, entry.y, entry.x);
+        areaSum = 0u;
+        subpixelSum = 0u;
     }
     barrier();
     uint sun = keptFirst << 31;
@@ -106,6 +110,7 @@ void main() {
         // brick (a bit per brick), then one reservation for the batch.
         uint kept = keptCount;
         uvec2 drawnMask = uvec2(0u);
+        uint area = 0u, subpixel = 0u;
         for (uint k = 0u; k < kept; ++k) {
             uint pool = keptPool[k];
             VoxelBrick brick = pools.bricks.bricks[pool];
@@ -121,8 +126,22 @@ void main() {
             if (noise < opacity &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {
                 drawnMask[k >> 5] |= 1u << (k & 31u);
+                // voxel_instance.mesh's quad, in pixels.
+                vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
+                vec4 center = scene.viewProjection * displayedPosition(scene, relative);
+                float spread = abs(view.x) + abs(view.y) + abs(view.z);
+                vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * abs(scene.projectionScale);
+                float pixels = center.w > 0.0
+                                   ? halfSize.x * halfSize.y /
+                                         (center.w * center.w * scene.inverseResolution.x *
+                                          scene.inverseResolution.y)
+                                   : 0.0;
+                area += uint(min(pixels, 65536.0) * 16.0 + 0.5);
+                subpixel += pixels < 1.0 ? 1u : 0u;
             }
         }
+        atomicAdd(areaSum, area);
+        atomicAdd(subpixelSum, subpixel);
         threadQuads[i] = bitCount(drawnMask.x) + bitCount(drawnMask.y);
         barrier();
         if (i == 0u) {
@@ -150,5 +169,9 @@ void main() {
             }
         }
         barrier();
+    }
+    if (i == 0u) {
+        atomicAdd(cull.counters.counters[kCounterVoxelArea], areaSum);
+        atomicAdd(cull.counters.counters[kCounterVoxelSubpixel], subpixelSum);
     }
 }

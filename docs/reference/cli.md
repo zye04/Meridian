@@ -175,7 +175,9 @@ nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
 voxels), `voxel trees N (bricks B, voxels V)` (voxel clusters drawn,
-their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
+their bricks and voxel quads, both phases; when any draw, a `voxel quads N:
+area A px = D x the render's pixels, S% under 1 px` line follows: the quads'
+screen area, depth complexity and sub-pixel share), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
 with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,

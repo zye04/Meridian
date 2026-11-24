@@ -387,6 +387,8 @@ struct Renderer::Impl {
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;
+  double drawnVoxelArea = 0.0;
+  uint32_t drawnSubpixelVoxels = 0;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;

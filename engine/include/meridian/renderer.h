@@ -323,6 +323,11 @@ public:
   // Their bricks and voxels drawn (both phases).
   uint32_t drawnVoxelBrickCount() const;
   uint32_t drawnVoxelQuadCount() const;
+  // Their screen area in pixels, that over the render's pixels (depth
+  // complexity), and how many cover under one pixel.
+  double drawnVoxelQuadArea() const;
+  double drawnVoxelQuadComplexity() const;
+  uint32_t drawnSubpixelVoxelQuads() const;
   // Cluster group BVH nodes the traversal visited in a recent frame.
   uint32_t visitedBvhNodeCount() const;
 

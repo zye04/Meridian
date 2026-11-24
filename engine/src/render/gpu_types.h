@@ -748,8 +748,12 @@ struct DrawCounters {
   uint32_t voxelBricks[2];
   uint32_t voxelQuads[2][2];
   uint32_t voxelDrops;
+  // The listed voxel quads' screen area in 1/16 px, and how many cover
+  // under one pixel (voxel_bricks.comp; both phases).
+  uint32_t voxelArea;
+  uint32_t voxelSubpixel;
 };
-static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths + 25) * 4);
+static_assert(sizeof(DrawCounters) == (56 + 8 * kBvhDepths + 27) * 4);
 // The shaders index DrawCounters as a uint array (cull.glsl,
 // terrain_select.comp).
 static_assert(offsetof(DrawCounters, meshTasks) == 6 * 4);
@@ -772,6 +776,7 @@ static_assert(offsetof(DrawCounters, voxelTasks) == 158 * 4);
 static_assert(offsetof(DrawCounters, voxelBricks) == 170 * 4);
 static_assert(offsetof(DrawCounters, voxelQuads) == 172 * 4);
 static_assert(offsetof(DrawCounters, voxelDrops) == 176 * 4);
+static_assert(offsetof(DrawCounters, voxelArea) == 177 * 4);
 
 // Must match InstanceData in common.glsl.
 struct InstanceData {

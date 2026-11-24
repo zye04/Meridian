@@ -502,6 +502,12 @@ uint32_t Renderer::drawnVoxelTreeCount() const { return impl_->drawnVoxelTrees; 
 uint32_t Renderer::drawnVoxelBrickCount() const { return impl_->drawnVoxelBricks; }
 
 uint32_t Renderer::drawnVoxelQuadCount() const { return impl_->drawnVoxelQuads; }
+double Renderer::drawnVoxelQuadArea() const { return impl_->drawnVoxelArea; }
+double Renderer::drawnVoxelQuadComplexity() const {
+  return impl_->drawnVoxelArea /
+         (double(impl_->renderExtent.width) * impl_->renderExtent.height);
+}
+uint32_t Renderer::drawnSubpixelVoxelQuads() const { return impl_->drawnSubpixelVoxels; }
 
 uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
@@ -707,6 +713,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
       impl_->drawnVoxelBricks += counters->voxelBricks[phase];
       impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
     }
+    impl_->drawnVoxelArea = counters->voxelArea / 16.0;
+    impl_->drawnSubpixelVoxels = counters->voxelSubpixel;
     impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
               impl_->droppedByList.begin());

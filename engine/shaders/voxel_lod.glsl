@@ -19,6 +19,8 @@ const uint kCounterVoxelTasks = 158u;
 const uint kCounterVoxelBricks = 170u;
 const uint kCounterVoxelQuads = 172u;
 const uint kCounterVoxelDrops = 176u;
+const uint kCounterVoxelArea = 177u;
+const uint kCounterVoxelSubpixel = 178u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 1u << 20;
