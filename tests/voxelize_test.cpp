@@ -230,3 +230,31 @@ TEST_CASE("the normal moment of aligned leaves has alignment 1, of a sphere of l
   REQUIRE(vs != nullptr);
   CHECK(normalLobe(*vs).alignment < 0.45f);
 }
+
+TEST_CASE("a packed voxel round-trips within its quantization") {
+  VoxelPayload v;
+  v.depth[0] = 0.5f, v.depth[1] = 2.0f, v.depth[2] = 3.4f;
+  v.albedo = {0.04f, 0.09f, 0.02f};
+  v.transmission = {0.10f, 0.20f, 0.03f};
+  v.roughness = 0.6f;
+  const Vec3 axis = normalize(Vec3{0.3f, 0.8f, -0.5f});
+  const float a = 0.7f, rest = (1.0f - a) / 2.0f; // eigenvalues a, rest, rest
+  v.moment[0] = rest + (a - rest) * axis.x * axis.x;
+  v.moment[1] = rest + (a - rest) * axis.y * axis.y;
+  v.moment[2] = rest + (a - rest) * axis.z * axis.z;
+  v.moment[3] = (a - rest) * axis.x * axis.y;
+  v.moment[4] = (a - rest) * axis.x * axis.z;
+  v.moment[5] = (a - rest) * axis.y * axis.z;
+  const VoxelPayload u = unpackVoxelPayload(packVoxelPayload(v));
+  for (int i = 0; i < 3; ++i) {
+    CHECK(std::abs(u.depth[i] - v.depth[i]) <= 1.0f / 32.0f);
+  }
+  // sqrt encoding: dark albedo within ~2% relative + 1/255^2 absolute.
+  CHECK(u.albedo.y == doctest::Approx(0.09f).epsilon(0.03));
+  CHECK(u.albedo.z == doctest::Approx(0.02f).epsilon(0.06));
+  CHECK(u.transmission.x == doctest::Approx(0.10f).epsilon(0.03));
+  CHECK(u.roughness == doctest::Approx(0.6f).epsilon(0.01));
+  const NormalLobe lobe = normalLobe(u);
+  CHECK(std::abs(dot(lobe.axis, axis)) > 0.999f);
+  CHECK(lobe.alignment == doctest::Approx(0.7f).epsilon(0.01));
+}

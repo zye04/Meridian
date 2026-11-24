@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 
 using namespace meridian;
 
@@ -518,4 +519,203 @@ TEST_CASE("added leaf vertices survive the cluster cache") {
   REQUIRE(read->front().addedPositions.size() == lod.addedPositions.size());
   CHECK(std::memcmp(read->front().addedPositions.data(), lod.addedPositions.data(),
                     lod.addedPositions.size() * sizeof(Vec3)) == 0);
+}
+
+namespace {
+
+// A 6 m crown of disjoint leaf quads around (0, 5, 0) on a 4 m trunk
+// cylinder: what the DAG voxel levels are for.
+MeshData leafCrown(uint32_t leaves, uint32_t seed) {
+  MeshData mesh;
+  uint32_t state = seed * 747796405u + 2891336453u;
+  const auto rnd = [&] {
+    state = state * 747796405u + 2891336453u;
+    return float((state >> 8) & 0xFFFFFF) / float(0x1000000);
+  };
+  for (uint32_t i = 0; i < leaves; ++i) {
+    Vec3 c{rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1};
+    if (length(c) > 1.0f) {
+      --i;
+      continue;
+    }
+    c = Vec3{c.x * 3.0f, 5.0f + c.y * 3.0f, c.z * 3.0f};
+    const Vec3 n = normalize(Vec3{rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1 + 1e-3f});
+    const Vec3 a = normalize(cross(n, Vec3{0.31f, 0.53f, 0.79f}));
+    const Vec3 b = cross(n, a);
+    const float s = 0.08f + 0.06f * rnd();
+    const uint32_t base = uint32_t(mesh.vertices.size());
+    for (int k = 0; k < 4; ++k) {
+      Vertex v;
+      v.position = c + a * (k == 1 || k == 2 ? s : -s) + b * (k >= 2 ? s : -s);
+      v.normal = n;
+      v.uvX = k == 1 || k == 2 ? 1.0f : 0.0f;
+      v.uvY = k >= 2 ? 1.0f : 0.0f;
+      mesh.vertices.push_back(v);
+    }
+    mesh.indices.insert(mesh.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+  }
+  mesh.leaf = true;
+  mesh.voxelize = true;
+  return mesh;
+}
+
+const ClusterLod &cachedCrown() {
+  static const VoxelMaterial material{};
+  static const ClusterLod lod = [] {
+    const MeshData mesh = leafCrown(6000, 1);
+    const VoxelSource source{{&material, 1}};
+    return buildClusterLod(mesh, &source);
+  }();
+  return lod;
+}
+
+bool isVoxel(const Cluster &c) { return c.brickCount > 0; }
+
+} // namespace
+
+TEST_CASE("voxel levels appear above a crown's triangles and stay voxels") {
+  const ClusterLod &lod = cachedCrown();
+  size_t voxels = 0;
+  for (const Cluster &c : lod.clusters) {
+    voxels += isVoxel(c);
+  }
+  CHECK(voxels > 0);
+  CHECK(!lod.bricks.empty());
+  // A triangle cluster is never made from voxels.
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c) || c.refinedGroup < 0) {
+      continue;
+    }
+    for (const Cluster &child : lod.clusters) {
+      if (int32_t(child.group) == c.refinedGroup) {
+        CHECK(!isVoxel(child));
+      }
+    }
+  }
+  // Voxel errors are their lattice edges: powers of two.
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      CHECK(std::exp2(std::round(std::log2(c.voxelEdge))) == c.voxelEdge);
+      CHECK(c.refined.error >= c.voxelEdge); // the leaf-area move may raise it
+    }
+  }
+}
+
+TEST_CASE("the mixed DAG is consistent and monotonic, so the cut covers the surface once") {
+  // lodVisible draws a group's members while its bounds project over the
+  // threshold and its replacements once they don't: exactly one side is
+  // drawn if every member shares the group's bounds, every replacement
+  // shares them as its refined bounds, and no cluster's own error projects
+  // larger than its group's from any camera.
+  const ClusterLod &lod = cachedCrown();
+  std::map<uint32_t, LodBounds> groupBounds;
+  for (const Cluster &c : lod.clusters) {
+    const auto [it, inserted] = groupBounds.emplace(c.group, c.self);
+    CHECK(std::memcmp(&it->second, &c.self, sizeof(LodBounds)) == 0);
+  }
+  for (const Cluster &c : lod.clusters) {
+    if (c.refinedGroup < 0) {
+      continue;
+    }
+    REQUIRE(groupBounds.count(uint32_t(c.refinedGroup)) == 1);
+    CHECK(std::memcmp(&groupBounds[uint32_t(c.refinedGroup)], &c.refined, sizeof(LodBounds)) == 0);
+    for (float distance : {0.5f, 5.0f, 20.0f, 100.0f, 500.0f, 3000.0f}) {
+      for (const Vec3 dir : {Vec3{0, 0, 1}, normalize(Vec3{1, 1, 0})}) {
+        const Vec3 camera = Vec3{0.0f, 5.0f, 0.0f} + dir * distance;
+        CHECK(projectedErrorPixels(c.self, camera, 1.0f, 1.2f, 0.1f, 1440.0f) >=
+              projectedErrorPixels(c.refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f));
+      }
+    }
+  }
+}
+
+TEST_CASE("selectClustersBvh equals lodVisible over mixed levels") {
+  checkTraversal(cachedCrown(), {0.0f, 5.0f, 0.0f});
+}
+
+TEST_CASE("a voxel cluster's error scales with instance scale like a triangle cluster's") {
+  const ClusterLod &lod = cachedCrown();
+  const auto voxel = std::find_if(lod.clusters.begin(), lod.clusters.end(), isVoxel);
+  REQUIRE(voxel != lod.clusters.end());
+  const Vec3 camera{0.0f, 5.0f, 5000.0f};
+  const float one = projectedErrorPixels(voxel->refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f);
+  const float two = projectedErrorPixels(voxel->refined, camera, 2.0f, 1.2f, 0.1f, 1440.0f);
+  CHECK(two == doctest::Approx(2.0f * one).epsilon(0.01));
+}
+
+TEST_CASE("a continuous surface keeps every triangle level; voxels only where it ends") {
+  static const VoxelMaterial material{};
+  MeshData grid = bumpyGrid(100);
+  const ClusterLod plain = buildClusterLod(grid);
+  grid.voxelize = true;
+  const VoxelSource source{{&material, 1}};
+  const ClusterLod lod = buildClusterLod(grid, &source);
+  size_t triangleClusters = 0, voxelClusters = 0;
+  for (const Cluster &c : lod.clusters) {
+    (isVoxel(c) ? voxelClusters : triangleClusters)++;
+  }
+  CHECK(triangleClusters == plain.clusters.size());
+  CHECK(voxelClusters <= 8); // its last group: the regions around the lattice origin
+}
+
+TEST_CASE("the cluster source key changes when a voxelized texture changes") {
+  std::vector<MeshData> meshes{leafCrown(10, 2)};
+  std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};
+  const uint64_t a = clusterSourceKey(meshes, textures);
+  textures[0][2] = 9;
+  CHECK(clusterSourceKey(meshes, textures) != a);
+  meshes[0].voxelize = false;
+  textures[0][2] = 3;
+  CHECK(clusterSourceKey(meshes, textures) != a);
+}
+
+TEST_CASE("voxel bricks and axis depths round-trip the cluster cache") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  bakeModelAxisDepths(lods);
+  const auto file = cacheFile("meridian_voxel_round_trip.clusters");
+  writeClusterCache(file, 7, lods);
+  const auto read = readClusterCache(file, 7);
+  REQUIRE(read);
+  CHECK(std::memcmp((*read)[0].bricks.data(), lods[0].bricks.data(),
+                    lods[0].bricks.size() * sizeof(VoxelBrickRef)) == 0);
+  CHECK(std::memcmp((*read)[0].voxels.data(), lods[0].voxels.data(),
+                    lods[0].voxels.size() * sizeof(PackedVoxel)) == 0);
+  CHECK((*read)[0].voxelAxis == lods[0].voxelAxis);
+  std::filesystem::remove(file);
+}
+
+TEST_CASE("a crown voxel's optical depth out of the model grows toward the crown's centre") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  bakeModelAxisDepths(lods);
+  REQUIRE(lods[0].voxelAxis.size() == lods[0].voxels.size());
+  // Over the finest voxel level: voxels on the +x side see more crown toward
+  // -x (the axis depth nibble 1) than toward +x (nibble 0).
+  float edge = FLT_MAX;
+  for (const Cluster &c : lods[0].clusters) {
+    if (isVoxel(c)) {
+      edge = std::min(edge, c.voxelEdge);
+    }
+  }
+  double towardCentre = 0, outward = 0;
+  for (const Cluster &c : lods[0].clusters) {
+    if (!isVoxel(c) || c.voxelEdge != edge) {
+      continue;
+    }
+    for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
+      const VoxelBrickRef &brick = lods[0].bricks[b];
+      uint32_t voxel = brick.firstVoxel;
+      for (uint32_t i = 0; i < 64; ++i) {
+        if (!((brick.occupied >> i) & 1u)) {
+          continue;
+        }
+        const float x = (brick.origin[0] + float(i % 4) + 0.5f) * edge;
+        const uint32_t axis = lods[0].voxelAxis[voxel++];
+        if (x > 1.5f) {
+          outward += axis & 0xF;
+          towardCentre += (axis >> 4) & 0xF;
+        }
+      }
+    }
+  }
+  CHECK(towardCentre > 2.0 * outward);
 }

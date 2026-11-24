@@ -1,8 +1,10 @@
 #pragma once
 
 #include <meridian/math/vec3.h>
+#include <meridian/voxelize.h>
 
 #include <cstdint>
+#include <span>
 #include <filesystem>
 #include <optional>
 #include <vector>
@@ -35,6 +37,15 @@ struct Cluster {
   uint32_t vertexCount = 0;
   uint32_t firstTriangle = 0;
   uint32_t triangleCount = 0;
+  // A voxel cluster (brickCount > 0, no triangles): bricks firstBrick.. of
+  // ClusterLod::bricks on the lattice of edge voxelEdge (voxelize.h).
+  uint32_t firstBrick = 0;
+  uint32_t brickCount = 0;
+  float voxelEdge = 0.0f;
+  // The group this cluster is a member of (replaced together by `self`) and
+  // the group it was made from (-1 for original geometry).
+  uint32_t group = 0;
+  int32_t refinedGroup = -1;
 };
 
 // A node of a BVH over one DAG level's cluster groups. Leaves are groups:
@@ -78,9 +89,35 @@ struct ClusterLod {
   // appendClusterVertices adds them to the mesh.
   std::vector<uint32_t> addedSources;
   std::vector<Vec3> addedPositions;
+  // The voxel clusters' bricks and voxels, and per voxel the optical depth
+  // from its centre out of the model along +x, -x, +y, -y, +z, -z (4 bits
+  // each, steps of kVoxelAxisDepthStep; bakeModelAxisDepths).
+  std::vector<VoxelBrickRef> bricks;
+  std::vector<PackedVoxel> voxels;
+  std::vector<uint32_t> voxelAxis;
 };
 
-ClusterLod buildClusterLod(const MeshData &mesh);
+constexpr float kVoxelAxisDepthStep = 0.5f;
+
+// What a mesh's voxel levels are made of: its material, by index into
+// materials (images decoded on the CPU).
+struct VoxelSource {
+  std::span<const VoxelMaterial> materials;
+  uint32_t material = 0;
+};
+
+// With voxels (and mesh.voxelize), groups whose voxels beat their simplified
+// triangles become voxel clusters: the lattice edge is the largest power of
+// two at or under the triangles' error but not under the group's children's,
+// and the voxels must not outnumber the triangles they replace. Above such a
+// group the levels are voxels, an octree of 4^3-brick regions, each level
+// doubling the edge (mergeVoxelGrid).
+ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels = nullptr);
+
+// Fills every ClusterLod::voxelAxis of one model's meshes: the optical depth
+// through all of the model's voxels at the same edge, from each voxel's
+// centre out along the six axis directions.
+void bakeModelAxisDepths(std::vector<ClusterLod> &meshes);
 
 // Simplification error in pixels on a screen `screenHeight` pixels tall,
 // for bounds already placed in world space and uniformly scaled by `scale`

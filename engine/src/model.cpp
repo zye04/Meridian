@@ -284,29 +284,29 @@ UvTransform materialUvTransform(const fastgltf::Material &m) {
 // exceed 1. We map 1.0 to the luminance of a bright display (1000 cd/m^2).
 constexpr float kEmissiveLuminance = 1000.0f;
 
-// FNV-1a over the loaded geometry: the cluster cache stays valid exactly as
-// long as the vertices and indices it refers to are unchanged.
-uint64_t geometryKey(const std::vector<MeshData> &meshes) {
-  uint64_t hash = 14695981039346656037ull;
-  const auto mix = [&](const void *data, size_t bytes) {
-    const auto *p = static_cast<const unsigned char *>(data);
-    for (size_t i = 0; i < bytes; ++i) {
-      hash = (hash ^ p[i]) * 1099511628211ull;
-    }
-  };
-  for (const MeshData &mesh : meshes) {
-    const uint64_t counts[] = {mesh.vertices.size(), mesh.indices.size(), mesh.leaf};
-    mix(counts, sizeof(counts));
-    mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
-    mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
-  }
-  return hash;
-}
+
+// What a voxelized model's primitives sample on the CPU: per glTF material
+// (the last entry is the default material), and the texture bytes the cache
+// key covers. Images are decoded only when the clusters are built.
+struct VoxelInputs {
+  std::vector<VoxelMaterial> materials;
+  std::vector<uint32_t> primitiveMaterial;
+  std::vector<std::vector<uint8_t>> textureBytes;
+  std::vector<CpuImage> images; // decoded textureBytes, same order
+  // Per material: indices into images for base colour, transmission colour,
+  // metallic-roughness (-1: none).
+  std::vector<std::array<int, 3>> imageOf;
+};
+
+// Voxels sample textures at this size at most (a leaf atlas texel is then a
+// few millimetres to a centimetre, finer than any voxel).
+constexpr uint32_t kVoxelTextureSize = 512;
 
 // Fills every primitive's cluster hierarchy from the cache next to the
 // glTF, building and caching them when it is missing or stale.
-void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &meshes) {
-  const uint64_t key = geometryKey(meshes);
+void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &meshes,
+                  VoxelInputs &voxels) {
+  const uint64_t key = clusterSourceKey(meshes, voxels.textureBytes);
   std::filesystem::path cache = gltf;
   cache.replace_extension(".clusters");
   auto cached = readClusterCache(cache, key);
@@ -322,10 +322,25 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
     return;
   }
   std::printf("Building clusters for %s\n", gltf.string().c_str());
+  for (const std::vector<uint8_t> &bytes : voxels.textureBytes) {
+    voxels.images.push_back(loadKtx2Rgba8(bytes, kVoxelTextureSize));
+  }
+  for (size_t m = 0; m < voxels.imageOf.size(); ++m) {
+    const auto image = [&](int i) { return i < 0 ? nullptr : &voxels.images[size_t(i)]; };
+    voxels.materials[m].baseColor = image(voxels.imageOf[m][0]);
+    voxels.materials[m].transmissionColorImage = image(voxels.imageOf[m][1]);
+    voxels.materials[m].metallicRoughness = image(voxels.imageOf[m][2]);
+  }
   std::vector<ClusterLod> lods;
-  for (MeshData &mesh : meshes) {
-    mesh.clusters = buildClusterLod(mesh);
-    lods.push_back(mesh.clusters);
+  for (size_t i = 0; i < meshes.size(); ++i) {
+    const VoxelSource source{voxels.materials,
+                             voxels.primitiveMaterial.empty() ? 0 : voxels.primitiveMaterial[i]};
+    meshes[i].clusters = buildClusterLod(meshes[i], &source);
+    lods.push_back(meshes[i].clusters);
+  }
+  bakeModelAxisDepths(lods);
+  for (size_t i = 0; i < meshes.size(); ++i) {
+    meshes[i].clusters.voxelAxis = lods[i].voxelAxis;
   }
   for (MeshData &mesh : meshes) {
     appendClusterVertices(mesh);
@@ -443,7 +458,62 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
                                         : 0.0f);
     }
   }
-  loadClusters(path, primitives);
+  VoxelInputs voxels;
+  {
+    std::vector<uint8_t> foliage;
+    for (const fastgltf::Mesh &mesh : asset.meshes) {
+      for (const fastgltf::Primitive &primitive : mesh.primitives) {
+        const fastgltf::Material *m =
+            primitive.materialIndex ? &asset.materials[*primitive.materialIndex] : nullptr;
+        foliage.push_back(m && ((m->diffuseTransmission &&
+                                 m->diffuseTransmission->diffuseTransmissionFactor > 0.0f) ||
+                                m->alphaMode == fastgltf::AlphaMode::Mask));
+        voxels.primitiveMaterial.push_back(
+            primitive.materialIndex ? uint32_t(*primitive.materialIndex)
+                                    : uint32_t(asset.materials.size()));
+      }
+    }
+    if (voxelizesModel(primitives, foliage)) {
+      std::map<size_t, int> imageIndex;
+      const auto image = [&](const fastgltf::TextureInfo *info) {
+        if (!info || !asset.textures[info->textureIndex].basisuImageIndex) {
+          return -1;
+        }
+        const size_t source = *asset.textures[info->textureIndex].basisuImageIndex;
+        const auto [it, inserted] = imageIndex.emplace(source, int(voxels.textureBytes.size()));
+        if (inserted) {
+          voxels.textureBytes.push_back(imageBytes(asset, asset.images[source], directory));
+        }
+        return it->second;
+      };
+      for (const fastgltf::Material &m : asset.materials) {
+        VoxelMaterial v;
+        v.baseColorFactor = {m.pbrData.baseColorFactor[0], m.pbrData.baseColorFactor[1],
+                             m.pbrData.baseColorFactor[2]};
+        v.alphaMask = m.alphaMode == fastgltf::AlphaMode::Mask;
+        v.alphaCutoff = m.alphaCutoff;
+        v.roughnessFactor = m.pbrData.roughnessFactor;
+        std::array<int, 3> images = {image(textureInfo(m.pbrData.baseColorTexture)), -1,
+                                     image(textureInfo(m.pbrData.metallicRoughnessTexture))};
+        if (m.diffuseTransmission) {
+          v.diffuseTransmission = m.diffuseTransmission->diffuseTransmissionFactor;
+          const auto &color = m.diffuseTransmission->diffuseTransmissionColorFactor;
+          v.transmissionColor = {color.x(), color.y(), color.z()};
+          images[1] = image(textureInfo(m.diffuseTransmission->diffuseTransmissionColorTexture));
+        }
+        voxels.materials.push_back(v);
+        voxels.imageOf.push_back(images);
+      }
+      voxels.materials.push_back({});
+      voxels.imageOf.push_back({-1, -1, -1});
+      for (MeshData &primitive : primitives) {
+        primitive.voxelize = true;
+      }
+    } else {
+      voxels.primitiveMaterial.clear();
+    }
+  }
+  loadClusters(path, primitives, voxels);
   std::vector<std::vector<MeshId>> meshes(asset.meshes.size());
   size_t next = 0;
   for (size_t i = 0; i < asset.meshes.size(); ++i) {

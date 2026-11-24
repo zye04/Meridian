@@ -100,4 +100,32 @@ float bruteForceOpticalDepth(std::span<const VoxelTriangle> triangles,
                              std::span<const VoxelMaterial> materials, Vec3 voxelLo,
                              float edge, int axis, int raysPerSide);
 
+// A voxel as the GPU reads it (GpuVoxel, gpu_types.h), 16 bytes:
+// depthSpread: optical depth along x, y, z (8 bits each, steps of 1/16) and
+// the normal lobe's alignment (8 bits over [1/3, 1]); albedoRoughness and
+// transmission: RGB as sqrt(linear) in 8 bits each (dark leaves keep their
+// precision), roughness in the albedo word's top byte; normal: the lobe axis,
+// octahedral 2 x 16 bits.
+struct PackedVoxel {
+  uint32_t depthSpread = 0;
+  uint32_t albedoRoughness = 0;
+  uint32_t transmission = 0;
+  uint32_t normal = 0;
+};
+static_assert(sizeof(PackedVoxel) == 16);
+PackedVoxel packVoxelPayload(const VoxelPayload &voxel);
+// The payload back from its packed form; the moment is rebuilt from the lobe
+// (axis, alignment), which is all the packing keeps of it.
+VoxelPayload unpackVoxelPayload(const PackedVoxel &voxel);
+
+// A brick of a voxel cluster: voxel i (x + 4 (y + 4 z)) present when bit i of
+// occupied is set, stored at firstVoxel + the number of present voxels below
+// it. origin is the lattice index of voxel 0.
+struct VoxelBrickRef {
+  int32_t origin[3] = {};
+  uint32_t firstVoxel = 0;
+  uint64_t occupied = 0;
+};
+static_assert(sizeof(VoxelBrickRef) == 24);
+
 } // namespace meridian

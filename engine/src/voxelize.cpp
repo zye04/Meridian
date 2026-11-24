@@ -405,4 +405,84 @@ float bruteForceOpticalDepth(std::span<const VoxelTriangle> triangles,
   return depthFromBlocked(float(blocked) / float(raysPerSide * raysPerSide));
 }
 
+namespace {
+
+uint32_t unorm(float v, uint32_t bits) {
+  const float max = float((1u << bits) - 1u);
+  return uint32_t(std::lround(std::clamp(v, 0.0f, 1.0f) * max));
+}
+
+// Octahedral encoding of a unit vector to 2 x 16 bits.
+uint32_t packOctahedral(Vec3 n) {
+  const float s = std::abs(n.x) + std::abs(n.y) + std::abs(n.z);
+  float x = n.x / s, y = n.y / s;
+  if (n.z < 0.0f) {
+    const float ox = (1.0f - std::abs(y)) * (x >= 0.0f ? 1.0f : -1.0f);
+    const float oy = (1.0f - std::abs(x)) * (y >= 0.0f ? 1.0f : -1.0f);
+    x = ox, y = oy;
+  }
+  return unorm(x * 0.5f + 0.5f, 16) | unorm(y * 0.5f + 0.5f, 16) << 16;
+}
+
+Vec3 unpackOctahedral(uint32_t p) {
+  float x = float(p & 0xFFFF) / 65535.0f * 2.0f - 1.0f;
+  float y = float(p >> 16) / 65535.0f * 2.0f - 1.0f;
+  const float z = 1.0f - std::abs(x) - std::abs(y);
+  if (z < 0.0f) {
+    const float ox = (1.0f - std::abs(y)) * (x >= 0.0f ? 1.0f : -1.0f);
+    const float oy = (1.0f - std::abs(x)) * (y >= 0.0f ? 1.0f : -1.0f);
+    x = ox, y = oy;
+  }
+  return normalize(Vec3{x, y, z});
+}
+
+uint32_t packSqrtRgb(Vec3 c) {
+  return unorm(std::sqrt(std::max(c.x, 0.0f)), 8) | unorm(std::sqrt(std::max(c.y, 0.0f)), 8) << 8 |
+         unorm(std::sqrt(std::max(c.z, 0.0f)), 8) << 16;
+}
+
+Vec3 unpackSqrtRgb(uint32_t p) {
+  const auto channel = [&](int shift) {
+    const float s = float((p >> shift) & 0xFF) / 255.0f;
+    return s * s;
+  };
+  return {channel(0), channel(8), channel(16)};
+}
+
+} // namespace
+
+PackedVoxel packVoxelPayload(const VoxelPayload &v) {
+  const NormalLobe lobe = normalLobe(v);
+  PackedVoxel p;
+  for (int i = 0; i < 3; ++i) {
+    p.depthSpread |= std::min<uint32_t>(255, uint32_t(std::lround(v.depth[i] * 16.0f))) << (8 * i);
+  }
+  p.depthSpread |= unorm((lobe.alignment - 1.0f / 3.0f) * 1.5f, 8) << 24;
+  p.albedoRoughness = packSqrtRgb(v.albedo) | unorm(v.roughness, 8) << 24;
+  p.transmission = packSqrtRgb(v.transmission);
+  p.normal = packOctahedral(lobe.axis);
+  return p;
+}
+
+VoxelPayload unpackVoxelPayload(const PackedVoxel &p) {
+  VoxelPayload v;
+  for (int i = 0; i < 3; ++i) {
+    v.depth[i] = float((p.depthSpread >> (8 * i)) & 0xFF) / 16.0f;
+  }
+  v.albedo = unpackSqrtRgb(p.albedoRoughness);
+  v.roughness = float(p.albedoRoughness >> 24) / 255.0f;
+  v.transmission = unpackSqrtRgb(p.transmission);
+  const float a = float(p.depthSpread >> 24) / 255.0f / 1.5f + 1.0f / 3.0f;
+  const float rest = (1.0f - a) * 0.5f;
+  const Vec3 n = unpackOctahedral(p.normal);
+  v.moment[0] = rest + (a - rest) * n.x * n.x;
+  v.moment[1] = rest + (a - rest) * n.y * n.y;
+  v.moment[2] = rest + (a - rest) * n.z * n.z;
+  v.moment[3] = (a - rest) * n.x * n.y;
+  v.moment[4] = (a - rest) * n.x * n.z;
+  v.moment[5] = (a - rest) * n.y * n.z;
+  v.coverage = coverageOf(v.depth);
+  return v;
+}
+
 } // namespace meridian

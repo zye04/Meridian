@@ -5,6 +5,11 @@
 #include <clusterlod.h>
 
 #include <algorithm>
+#include <cmath>
+#include <array>
+#include <map>
+#include <numeric>
+#include <bit>
 #include <cfloat>
 #include <cstring>
 #include <fstream>
@@ -24,6 +29,14 @@ constexpr uint32_t kCacheVersion = (7u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
+// Bump when voxelize's output or the voxel levels' rules change for the same
+// inputs.
+constexpr uint32_t kVoxelizerVersion = 1;
+// Voxels replace a group's triangles at no worse an error when they number
+// at most this many per triangle the group draws now (a voxel draws as one
+// quad). Not per simplified triangle: sloppy simplification of disjoint
+// leaves deletes leaves, which is the thinning the voxels exist to stop.
+constexpr double kVoxelPrimitiveRatio = 2.0;
 static_assert(sizeof(ClusterBvhNode) == 48 && sizeof(ClusterLevelInfo) == 16);
 
 template <typename T> void writeArray(std::ofstream &out, const std::vector<T> &v) {
@@ -361,9 +374,240 @@ void keepLeafArea(const MeshData &mesh, ClusterLod &lod, const std::vector<int> 
   }
 }
 
+// The voxel levels of one mesh's DAG, built through clodBuild's voxel hooks
+// (third_party/clusterlod): decide voxelizes a group's original triangles,
+// attach emits the octree of voxel levels above the group it replaced.
+struct VoxelLevels {
+  const MeshData &mesh;
+  const VoxelSource &source;
+  ClusterLod &lod;
+  std::vector<LodBounds> &groups;
+  std::vector<GroupRange> &groupRanges;
+  std::vector<int> &refinedGroups;
+  std::vector<int> &clusterGroups;
+  std::vector<VoxelGrid> pending;
+
+  static int decide(void *context, const unsigned int *indices, size_t indexCount, float minError,
+                    float maxError, size_t triangles, float *voxelError) {
+    return static_cast<VoxelLevels *>(context)->decide(indices, indexCount, minError, maxError,
+                                                       triangles, voxelError);
+  }
+  static void attach(void *context, int token, int group, clodBounds bounds, int depth) {
+    static_cast<VoxelLevels *>(context)->attach(token, group, bounds, depth);
+  }
+
+  int decide(const unsigned int *indices, size_t indexCount, float minError, float maxError,
+             size_t triangles, float *voxelError) {
+    // The coarsest edge no worse than the triangles, but not finer than what
+    // the children already show (errors stay monotonic up the DAG).
+    const float floorEdge = std::exp2(std::ceil(std::log2(std::max(minError, 1e-4f))));
+    float edge = maxError == FLT_MAX ? floorEdge : std::exp2(std::floor(std::log2(maxError)));
+    edge = std::max(edge, floorEdge);
+    if (edge > maxError) {
+      return -1;
+    }
+    // A voxel per edge^2 of surface at least (one facing the axis), so
+    // groups whose area alone needs far more voxels than triangles are
+    // continuous surfaces that simplify well: skip voxelizing them.
+    double area = 0.0;
+    std::vector<VoxelTriangle> source(indexCount / 3);
+    for (size_t t = 0; t < source.size(); ++t) {
+      VoxelTriangle &v = source[t];
+      for (int k = 0; k < 3; ++k) {
+        const Vertex &vertex = mesh.vertices[indices[t * 3 + k]];
+        v.p[k] = vertex.position;
+        v.n[k] = vertex.normal;
+        v.uv[k][0] = vertex.uvX;
+        v.uv[k][1] = vertex.uvY;
+      }
+      v.material = this->source.material;
+      area += 0.5 * length(cross(v.p[1] - v.p[0], v.p[2] - v.p[0]));
+    }
+    if (maxError == FLT_MAX) {
+      // Stuck: start where the surface alone fits the triangle budget.
+      edge = std::max(edge, float(std::exp2(std::ceil(std::log2(
+                                std::sqrt(area / double(std::max<size_t>(triangles, 1))))))));
+    } else if (area / (double(edge) * edge) > 8.0 * double(triangles)) {
+      return -1;
+    }
+    VoxelGrid grid = voxelize(source, this->source.materials, edge);
+    const auto count = [](const VoxelGrid &g) {
+      size_t n = 0;
+      for (const VoxelBrick &brick : g.bricks) {
+        n += std::popcount(brick.occupied);
+      }
+      return n;
+    };
+    size_t voxels = count(grid);
+    if (voxels == 0) {
+      return -1;
+    }
+    if (maxError == FLT_MAX) {
+      // Simplification is stuck: these triangles would draw at every
+      // distance (sub-pixel leaves that thin and shimmer). Voxels always
+      // take over, coarse enough to cost no more than the triangles.
+      while (voxels > triangles) {
+        grid = mergeVoxelGrid(grid);
+        edge *= 2.0f;
+        voxels = count(grid);
+      }
+    } else if (voxels > size_t(kVoxelPrimitiveRatio * double(triangles))) {
+      return -1;
+    }
+    *voxelError = edge;
+    pending.push_back(std::move(grid));
+    return int(pending.size() - 1);
+  }
+
+  struct Region {
+    std::array<int64_t, 3> key;
+    std::vector<uint32_t> bricks; // into the level's grid
+  };
+
+  static int64_t floorDiv(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+  // A level's voxel clusters: the bricks of each aligned 4^3-brick region.
+  static std::vector<Region> regions(const VoxelGrid &grid) {
+    std::map<std::array<int64_t, 3>, Region> byKey;
+    for (uint32_t b = 0; b < grid.bricks.size(); ++b) {
+      const VoxelBrick &brick = grid.bricks[b];
+      const std::array<int64_t, 3> key = {floorDiv(brick.origin[0], 16),
+                                          floorDiv(brick.origin[1], 16),
+                                          floorDiv(brick.origin[2], 16)};
+      Region &r = byKey[key];
+      r.key = key;
+      r.bricks.push_back(b);
+    }
+    std::vector<Region> out;
+    for (auto &[key, r] : byKey) {
+      out.push_back(std::move(r));
+    }
+    return out;
+  }
+
+  // A cluster for a region's bricks; its group (self) is set by the caller.
+  Cluster regionCluster(const VoxelGrid &grid, const Region &region, int refined) {
+    Cluster c;
+    c.firstBrick = uint32_t(lod.bricks.size());
+    c.brickCount = uint32_t(region.bricks.size());
+    c.voxelEdge = grid.edge;
+    c.refinedGroup = refined;
+    Vec3 lo{FLT_MAX, FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+    for (uint32_t b : region.bricks) {
+      const VoxelBrick &brick = grid.bricks[b];
+      VoxelBrickRef ref;
+      for (int k = 0; k < 3; ++k) {
+        ref.origin[k] = brick.origin[k];
+      }
+      ref.firstVoxel = uint32_t(lod.voxels.size());
+      ref.occupied = brick.occupied;
+      lod.bricks.push_back(ref);
+      for (uint32_t i = 0; i < 64; ++i) {
+        if (!((brick.occupied >> i) & 1u)) {
+          continue;
+        }
+        lod.voxels.push_back(packVoxelPayload(brick.voxels[i]));
+        const Vec3 v0{(brick.origin[0] + float(i % 4)) * grid.edge,
+                      (brick.origin[1] + float(i / 4 % 4)) * grid.edge,
+                      (brick.origin[2] + float(i / 16)) * grid.edge};
+        const Vec3 v1 = v0 + Vec3{grid.edge, grid.edge, grid.edge};
+        lo = {std::min(lo.x, v0.x), std::min(lo.y, v0.y), std::min(lo.z, v0.z)};
+        hi = {std::max(hi.x, v1.x), std::max(hi.y, v1.y), std::max(hi.z, v1.z)};
+      }
+    }
+    c.boundsCenter = (lo + hi) * 0.5f;
+    c.boundsRadius = length(hi - lo) * 0.5f * (1.0f + 1e-4f);
+    return c;
+  }
+
+  void attach(int token, int group, clodBounds, int depth) {
+    VoxelGrid grid = std::move(pending[token]);
+    // Clusters of the current level, waiting for the group that replaces
+    // them, with their regions' keys.
+    std::vector<Cluster> level;
+    std::vector<std::array<int64_t, 3>> keys;
+    for (const Region &r : regions(grid)) {
+      level.push_back(regionCluster(grid, r, group));
+      keys.push_back(r.key);
+    }
+    while (true) {
+      ++depth;
+        size_t voxels = 0;
+      for (const Cluster &c : level) {
+        for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
+          voxels += std::popcount(lod.bricks[b].occupied);
+        }
+      }
+      // The lattice is anchored at the origin, so regions on either side of
+      // it never merge: the last group may hold up to 8 clusters.
+      if (voxels <= 64) {
+        std::vector<uint32_t> all(level.size());
+        std::iota(all.begin(), all.end(), 0u);
+        emitGroup(level, all, LodBounds{}, depth, true);
+        return;
+      }
+      // The next level: edge x2, regions twice as large; each of its
+      // clusters replaces the current clusters inside its region.
+      const VoxelGrid coarse = mergeVoxelGrid(grid);
+      std::vector<Cluster> next;
+      std::vector<std::array<int64_t, 3>> nextKeys;
+      for (const Region &r : regions(coarse)) {
+        std::vector<uint32_t> members;
+        for (uint32_t i = 0; i < level.size(); ++i) {
+          if (floorDiv(keys[i][0], 2) == r.key[0] && floorDiv(keys[i][1], 2) == r.key[1] &&
+              floorDiv(keys[i][2], 2) == r.key[2]) {
+            members.push_back(i);
+          }
+        }
+        // The group's bounds enclose its members' and their own groups', so
+        // projected errors stay monotonic along every path.
+        std::vector<Sphere> spheres;
+        for (uint32_t i : members) {
+          spheres.push_back({level[i].boundsCenter, level[i].boundsRadius});
+          const LodBounds &refined = groups[level[i].refinedGroup];
+          spheres.push_back({refined.center, refined.radius});
+        }
+        const Sphere s = enclose(spheres);
+        const int id = emitGroup(level, members, {s.center, s.radius, coarse.edge}, depth, false);
+        next.push_back(regionCluster(coarse, r, id));
+        nextKeys.push_back(r.key);
+      }
+      level = std::move(next);
+      keys = std::move(nextKeys);
+      grid = coarse;
+    }
+  }
+
+  // Emits level[members] as one group (contiguous, as GroupRange wants);
+  // terminal groups are never replaced (error FLT_MAX).
+  int emitGroup(const std::vector<Cluster> &level, const std::vector<uint32_t> &members,
+                LodBounds bounds, int depth, bool terminal) {
+    if (terminal) {
+      std::vector<Sphere> spheres;
+      for (uint32_t i : members) {
+        spheres.push_back({level[i].boundsCenter, level[i].boundsRadius});
+      }
+      const Sphere s = enclose(spheres);
+      bounds = {s.center, s.radius, FLT_MAX};
+    }
+    const int id = int(groups.size());
+    groups.push_back(bounds);
+    groupRanges.push_back({depth, uint32_t(lod.clusters.size()), uint32_t(members.size())});
+    for (uint32_t i : members) {
+      Cluster c = level[i];
+      c.self = bounds;
+      c.group = uint32_t(id);
+      lod.clusters.push_back(c);
+      refinedGroups.push_back(c.refinedGroup);
+      clusterGroups.push_back(id);
+    }
+    return id;
+  }
+};
+
 } // namespace
 
-ClusterLod buildClusterLod(const MeshData &mesh) {
+ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
   // Normals guide simplification; UVs (the floats around them in Vertex:
   // uvX, normal, uvY) only protect seams.
   const float attributeWeights[5] = {0.0f, 0.5f, 0.5f, 0.5f, 0.0f};
@@ -385,7 +629,15 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
   std::vector<int> refinedGroups, clusterGroups;
   std::vector<unsigned int> localVertices(kMaxClusterTriangles * 3);
   std::vector<unsigned char> localTriangles(kMaxClusterTriangles * 3);
-  clodBuild(clodDefaultConfig(kMaxClusterTriangles), input,
+  clodConfig config = clodDefaultConfig(kMaxClusterTriangles);
+  VoxelLevels voxelLevels{mesh,          voxels ? *voxels : VoxelSource{}, lod, groups,
+                          groupRanges,   refinedGroups, clusterGroups, {}};
+  if (voxels && mesh.voxelize) {
+    config.voxel_context = &voxelLevels;
+    config.voxel_decide = &VoxelLevels::decide;
+    config.voxel_attach = &VoxelLevels::attach;
+  }
+  clodBuild(config, input,
             [&](clodGroup group, const clodCluster *clusters, size_t count) {
               const auto groupIndex = static_cast<int>(groups.size());
               groups.push_back(toLodBounds(group.simplified));
@@ -402,6 +654,8 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
                                         c.bounds.center[2]};
                 cluster.boundsRadius = c.bounds.radius;
                 cluster.self = groups.back();
+                cluster.group = static_cast<uint32_t>(groupIndex);
+                cluster.refinedGroup = c.refined;
                 cluster.firstVertex = static_cast<uint32_t>(lod.vertices.size());
                 cluster.vertexCount = static_cast<uint32_t>(vertexCount);
                 cluster.firstTriangle =
@@ -424,7 +678,41 @@ ClusterLod buildClusterLod(const MeshData &mesh) {
         refined < 0 ? LodBounds{{}, 0.0f, -1.0f} : groups[refined];
   }
   if (mesh.leaf) {
-    keepLeafArea(mesh, lod, clusterGroups, refinedGroups, groups);
+    // Voxel clusters have no area to keep: the leaf move applies to triangle
+    // replacements only.
+    std::vector<int> triangleRefined = refinedGroups;
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      if (lod.clusters[i].brickCount > 0) {
+        triangleRefined[i] = -1;
+      }
+    }
+    keepLeafArea(mesh, lod, clusterGroups, triangleRefined, groups);
+    // The move raised groups' errors and radii; every group above follows,
+    // so no member's own error projects larger than its group's (groups
+    // come after the groups their members were made from).
+    std::vector<std::vector<size_t>> members(groups.size());
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      members[clusterGroups[i]].push_back(i);
+    }
+    for (size_t g = 0; g < groups.size(); ++g) {
+      for (size_t i : members[g]) {
+        if (refinedGroups[i] < 0) {
+          continue;
+        }
+        const LodBounds &refined = groups[refinedGroups[i]];
+        if (groups[g].error != FLT_MAX) {
+          groups[g].error = std::max(groups[g].error, refined.error);
+        }
+        groups[g].radius = std::max(groups[g].radius,
+                                    length(groups[g].center - refined.center) + refined.radius);
+      }
+    }
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      lod.clusters[i].self = groups[clusterGroups[i]];
+      if (refinedGroups[i] >= 0) {
+        lod.clusters[i].refined = groups[refinedGroups[i]];
+      }
+    }
   }
   buildBvh(lod, groupRanges);
   return lod;
@@ -450,6 +738,9 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
       writeArray(out, lod.levels);
       writeArray(out, lod.addedSources);
       writeArray(out, lod.addedPositions);
+      writeArray(out, lod.bricks);
+      writeArray(out, lod.voxels);
+      writeArray(out, lod.voxelAxis);
     }
     if (!out) {
       std::filesystem::remove(partial, error);
@@ -488,7 +779,8 @@ readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
     if (!readArray(in, size, lod.clusters) || !readArray(in, size, lod.vertices) ||
         !readArray(in, size, lod.triangles) || !readArray(in, size, lod.nodes) ||
         !readArray(in, size, lod.levels) || !readArray(in, size, lod.addedSources) ||
-        !readArray(in, size, lod.addedPositions)) {
+        !readArray(in, size, lod.addedPositions) || !readArray(in, size, lod.bricks) ||
+        !readArray(in, size, lod.voxels) || !readArray(in, size, lod.voxelAxis)) {
       return std::nullopt;
     }
   }
@@ -496,7 +788,19 @@ readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
 }
 
 bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
+  if (!lod.voxelAxis.empty() && lod.voxelAxis.size() != lod.voxels.size()) {
+    return false;
+  }
+  for (const VoxelBrickRef &brick : lod.bricks) {
+    if (uint64_t{brick.firstVoxel} + std::popcount(brick.occupied) > lod.voxels.size()) {
+      return false;
+    }
+  }
   for (const Cluster &c : lod.clusters) {
+    if (uint64_t{c.firstBrick} + c.brickCount > lod.bricks.size() ||
+        (c.brickCount > 0 && (c.triangleCount > 0 || !(c.voxelEdge > 0.0f)))) {
+      return false;
+    }
     if (c.vertexCount > kMaxClusterVertices || c.triangleCount > kMaxClusterTriangles ||
         uint64_t{c.firstVertex} + c.vertexCount > lod.vertices.size() ||
         (uint64_t{c.firstTriangle} + c.triangleCount) * 3 > lod.triangles.size()) {
@@ -543,6 +847,85 @@ bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
   return std::all_of(lod.vertices.begin(), lod.vertices.end(), [&](uint32_t v) {
     return v < meshVertexCount + lod.addedSources.size();
   });
+}
+
+void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
+  // Per edge: every voxel of the model, by lattice position, summed where
+  // meshes overlap.
+  struct Cell {
+    float depth[3] = {};
+  };
+  struct Ref {
+    size_t mesh;
+    uint32_t voxel;
+    int64_t c[3];
+  };
+  std::map<float, std::map<std::array<int64_t, 3>, Cell>> cells;
+  std::map<float, std::vector<Ref>> refs;
+  for (size_t m = 0; m < meshes.size(); ++m) {
+    ClusterLod &lod = meshes[m];
+    lod.voxelAxis.assign(lod.voxels.size(), 0);
+    for (const Cluster &c : lod.clusters) {
+      for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
+        const VoxelBrickRef &brick = lod.bricks[b];
+        uint32_t voxel = brick.firstVoxel;
+        for (uint32_t i = 0; i < 64; ++i) {
+          if (!((brick.occupied >> i) & 1u)) {
+            continue;
+          }
+          const std::array<int64_t, 3> key = {brick.origin[0] + int64_t(i % 4),
+                                              brick.origin[1] + int64_t(i / 4 % 4),
+                                              brick.origin[2] + int64_t(i / 16)};
+          const VoxelPayload v = unpackVoxelPayload(lod.voxels[voxel]);
+          Cell &cell = cells[c.voxelEdge][key];
+          for (int a = 0; a < 3; ++a) {
+            cell.depth[a] += v.depth[a];
+          }
+          refs[c.voxelEdge].push_back({m, voxel, {key[0], key[1], key[2]}});
+          ++voxel;
+        }
+      }
+    }
+  }
+  for (auto &[edge, grid] : cells) {
+    // Per axis and line of cells along it: positions and depths in order,
+    // with prefix sums, so each voxel's depth beyond it is a lookup.
+    std::array<std::map<std::array<int64_t, 2>, std::vector<std::pair<int64_t, float>>>, 3> lines;
+    for (const auto &[key, cell] : grid) {
+      for (int a = 0; a < 3; ++a) {
+        lines[a][{key[(a + 1) % 3], key[(a + 2) % 3]}].push_back({key[a], cell.depth[a]});
+      }
+    }
+    std::array<std::map<std::array<int64_t, 2>, std::vector<float>>, 3> prefix;
+    for (int a = 0; a < 3; ++a) {
+      for (auto &[line, cellsOnLine] : lines[a]) {
+        std::sort(cellsOnLine.begin(), cellsOnLine.end());
+        std::vector<float> &sum = prefix[a][line];
+        sum.assign(cellsOnLine.size() + 1, 0.0f);
+        for (size_t i = 0; i < cellsOnLine.size(); ++i) {
+          sum[i + 1] = sum[i] + cellsOnLine[i].second;
+        }
+      }
+    }
+    for (const Ref &r : refs[edge]) {
+      uint32_t word = 0;
+      for (int a = 0; a < 3; ++a) {
+        const std::array<int64_t, 2> line = {r.c[(a + 1) % 3], r.c[(a + 2) % 3]};
+        const auto &cellsOnLine = lines[a][line];
+        const std::vector<float> &sum = prefix[a][line];
+        const size_t i = size_t(std::lower_bound(cellsOnLine.begin(), cellsOnLine.end(),
+                                                 std::pair<int64_t, float>{r.c[a], -FLT_MAX}) -
+                                cellsOnLine.begin());
+        const float own = 0.5f * cellsOnLine[i].second;
+        const float toward[2] = {own + sum.back() - sum[i + 1], own + sum[i]}; // +axis, -axis
+        for (int s = 0; s < 2; ++s) {
+          const uint32_t q = std::min<uint32_t>(15, uint32_t(std::lround(toward[s] / kVoxelAxisDepthStep)));
+          word |= q << (4 * (2 * a + s));
+        }
+      }
+      meshes[r.mesh].voxelAxis[r.voxel] = word;
+    }
+  }
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
@@ -613,6 +996,50 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
     }
   }
   return cut;
+}
+
+bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> foliage) {
+  constexpr float kCrownHeight = 4.0f; // mesh.mesh's crown rule
+  for (size_t i = 0; i < meshes.size(); ++i) {
+    if (!foliage[i] || meshes[i].vertices.empty()) {
+      continue;
+    }
+    float lo = FLT_MAX, hi = -FLT_MAX;
+    for (const Vertex &v : meshes[i].vertices) {
+      lo = std::min(lo, v.position.y);
+      hi = std::max(hi, v.position.y);
+    }
+    if (hi - lo > kCrownHeight) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uint64_t clusterSourceKey(std::span<const MeshData> meshes,
+                          std::span<const std::vector<uint8_t>> voxelTextures) {
+  // FNV-1a: the cache stays valid exactly as long as what it was built from.
+  uint64_t hash = 14695981039346656037ull;
+  const auto mix = [&](const void *data, size_t bytes) {
+    const auto *p = static_cast<const unsigned char *>(data);
+    for (size_t i = 0; i < bytes; ++i) {
+      hash = (hash ^ p[i]) * 1099511628211ull;
+    }
+  };
+  for (const MeshData &mesh : meshes) {
+    const uint64_t counts[] = {mesh.vertices.size(), mesh.indices.size(), mesh.leaf,
+                               mesh.voxelize};
+    mix(counts, sizeof(counts));
+    mix(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
+    mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
+  }
+  for (const std::vector<uint8_t> &texture : voxelTextures) {
+    const uint64_t size = texture.size();
+    mix(&size, sizeof(size));
+    mix(texture.data(), texture.size());
+  }
+  mix(&kVoxelizerVersion, sizeof(kVoxelizerVersion));
+  return hash;
 }
 
 } // namespace meridian
