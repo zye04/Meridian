@@ -26,6 +26,8 @@ void toFloat3(float out[3], DVec3 v) {
 
 void Renderer::setShadowMode(ShadowMode mode) { impl_->shadowMode = mode; }
 
+void Renderer::setShadowRefresh(bool refresh) { impl_->shadowRefresh = refresh; }
+
 uint32_t Renderer::sunShadowRenderCount() const { return impl_->shadowRenderCount; }
 
 float Renderer::sunShadowMaxMs() const { return impl_->shadowMaxMs; }
@@ -109,7 +111,7 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
   }
   const bool sunMoved = sunDirection.x != shadowSun.x || sunDirection.y != shadowSun.y ||
                         sunDirection.z != shadowSun.z;
-  const bool full = shadowStale || sunMoved;
+  const bool full = shadowStale || sunMoved || shadowRefresh;
   shadowSun = sunDirection;
   shadowStale = false;
   shadowBasis = lightBasis(sunDirection);
@@ -183,6 +185,7 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
     traverseClusters(cmd, frame, 1, &cull);
     cullClusters(cmd, frame, 1, &cull);
     expandVoxelBricks(cmd, frame, 1, &cull);
+    readBackCounters(cmd, frame, shadowCounters, 1 + i);
 
     // Contents are cleared, so the old layout is discarded; earlier frames'
     // reads of the map finish first.

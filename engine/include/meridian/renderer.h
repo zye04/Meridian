@@ -214,6 +214,19 @@ struct CullDrops {
   uint32_t traversalNodes = 0;
 };
 
+// The most entries a view's cull lists held in one frame (main view or any
+// sun shadow cascade), each list's largest phase, queue or bucket: equal to
+// the need while nothing drops, a lower bound once something does.
+struct CullNeed {
+  uint32_t chunks = 0;
+  uint32_t workItems = 0;
+  uint32_t traversalNodes = 0;
+  uint32_t drawnClusters = 0;
+  uint32_t voxelClusters = 0;
+  uint32_t voxelQuads = 0;
+  uint32_t dropped = 0;
+};
+
 // A mesh placed in the world (what loadGltf returns per node primitive).
 struct DrawItem {
   MeshId mesh;
@@ -309,11 +322,15 @@ public:
   uint32_t drawnTriangleCount() const;
   // Terrain quadtree nodes drawn in a recent frame (2048 triangles each).
   uint32_t drawnTerrainNodeCount() const;
-  // Chunks, work items, clusters, terrain nodes and BVH traversal nodes the
-  // culling passes dropped in a recent frame because a list was full
-  // (nonzero means geometry is missing).
+  // Chunks, work items, clusters, terrain nodes, BVH traversal nodes and
+  // voxel list entries the culling passes dropped in a recent frame because
+  // a list was full, main view and sun shadow cascades (nonzero means
+  // geometry or shadow is missing).
   uint32_t droppedCullEntryCount() const;
   CullDrops droppedCullEntries() const;
+  // The cull lists' need over the run: the main view's, and the largest of
+  // the sun shadow cascades'.
+  CullNeed cullNeed(bool cascades) const;
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
   // Far cells drawn as voxels in a recent frame.
@@ -350,6 +367,9 @@ public:
   double referenceNoise();
   // Cascade renders so far (a frame can render several).
   uint32_t sunShadowRenderCount() const;
+  // Re-render every cascade every frame (measures the cascades' cost and
+  // list need; normally they re-render only when the camera or sun moves).
+  void setShadowRefresh(bool refresh);
   // The slowest sun shadows pass over the run, in ms.
   float sunShadowMaxMs() const;
 

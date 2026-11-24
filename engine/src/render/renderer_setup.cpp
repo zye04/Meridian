@@ -427,7 +427,7 @@ void Renderer::Impl::createFrames() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.drawCountReadback = createBuffer(
-        sizeof(DrawCounters), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        (1 + kShadowCascades) * sizeof(DrawCounters), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(

@@ -170,11 +170,16 @@ detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
-geometry), per list: chunks, work items, clusters, terrain nodes, bvh
-nodes (the voxel lists' drops are in the total only); a nonzero total also
-ends the run with a `WARNING: N entries dropped by full cull lists` line on
-stderr. A GPU-only buffer placed outside device memory prints `warning: a N
-MiB GPU buffer is outside device memory` when it is created.
+geometry or shadow; main view plus the sun shadow cascades rendered that
+frame), per list: chunks, work items, clusters, terrain nodes, bvh nodes
+(the voxel lists' drops are in the total only); a nonzero total also ends
+the run with a `WARNING: N entries dropped by full cull lists` line on
+stderr. Two `cull list need,
+main view|sun shadow cascades, most in a frame:` lines give each list's
+largest phase, queue or bucket over the run (the need while nothing drops,
+a lower bound once something does; the caps in gpu_types.h). A GPU-only
+buffer placed outside device memory prints `warning: a N MiB GPU buffer is
+outside device memory` when it is created.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
 voxels), `voxel trees N (bricks B, voxels V)` (voxel clusters drawn,
@@ -319,4 +324,6 @@ blended into the next over the outer 15%), or `rt` from one TLAS ray per
 pixel toward a point on the sun disk. Either way the terrain march,
 cloud shadow, contact shadows and the far path stay. Capture runs print
 `sun shadows: N cascade renders, max X ms` (the slowest shadow pass of
-the run: the re-render hitch).
+the run: the re-render hitch). `--shadow-refresh` re-renders all five
+cascades every frame (normally only when the camera or sun moves), to
+measure their cost and cull list need in the averaged frames.

@@ -111,6 +111,23 @@ float gradeLutDifference(const Grade &grade, const uint16_t *rgba) {
   return worst;
 }
 
+// A list's need in one frame: its largest phase, queue or bucket.
+void accumulateNeed(CullNeed &need, const DrawCounters &c) {
+  for (uint32_t phase = 0; phase < 2; ++phase) {
+    need.chunks = std::max(need.chunks, c.chunkDispatch[phase][0]);
+    need.workItems = std::max(need.workItems, c.workDispatch[phase][0]);
+    for (uint32_t depth = 0; depth < kBvhDepths; ++depth) {
+      need.traversalNodes = std::max(need.traversalNodes, c.traverseCount[phase][depth]);
+    }
+    for (const auto &tasks : c.meshTasks[phase]) {
+      need.drawnClusters = std::max(need.drawnClusters, tasks[0]);
+    }
+    need.voxelClusters = std::max(need.voxelClusters, c.voxelDispatch[phase][0]);
+    need.voxelQuads = std::max(need.voxelQuads, c.voxelQuads[phase][0]);
+  }
+  need.dropped = std::max(need.dropped, c.overflow);
+}
+
 } // namespace
 
 // Writes the CPU instance list to the GPU instance table. The table is
@@ -331,14 +348,16 @@ void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-// The main view's counters to the host, after the late voxel expansion (its
-// counts and drops are counters too). The shaders reach the counters by
-// device address, which synchronization validation does not track.
-void Renderer::Impl::readBackCounters(VkCommandBuffer cmd, const FrameData &frame) {
+// A view's counters to the host, after the last pass that writes them (the
+// late voxel expansion: its counts and drops are counters too). The shaders
+// reach the counters by device address, which synchronization validation
+// does not track.
+void Renderer::Impl::readBackCounters(VkCommandBuffer cmd, const FrameData &frame,
+                                      const Buffer &counters, uint32_t slot) {
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-  const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
-  vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
+  const VkBufferCopy copy{0, slot * sizeof(DrawCounters), sizeof(DrawCounters)};
+  vkCmdCopyBuffer(cmd, counters.buffer, frame.drawCountReadback.buffer, 1, &copy);
   // A fence wait alone doesn't make device writes visible to the host.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
@@ -496,6 +515,10 @@ uint32_t Renderer::drawnClusterCount() const { return impl_->drawnClusters; }
 uint32_t Renderer::drawnTriangleCount() const { return impl_->drawnTriangles; }
 
 uint32_t Renderer::droppedCullEntryCount() const { return impl_->droppedEntries; }
+
+CullNeed Renderer::cullNeed(bool cascades) const {
+  return cascades ? impl_->cascadeNeed : impl_->mainNeed;
+}
 
 CullDrops Renderer::droppedCullEntries() const {
   const auto &d = impl_->droppedByList;
@@ -709,7 +732,23 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
     impl_->drawnInstances = counters->instances;
     impl_->drawnTriangles = counters->triangles;
-    impl_->droppedEntries = counters->overflow;
+    // This frame's drops and the need over the run, cascades included.
+    std::array<uint32_t, 5> drops{};
+    std::copy(std::begin(counters->drops), std::end(counters->drops), drops.begin());
+    uint32_t overflow = counters->overflow;
+    accumulateNeed(impl_->mainNeed, *counters);
+    for (uint32_t i = 0; i < kShadowCascades; ++i) {
+      if (frame.cascadesRead & (1u << i)) {
+        const DrawCounters &cascade = counters[1 + i];
+        accumulateNeed(impl_->cascadeNeed, cascade);
+        overflow += cascade.overflow;
+        for (size_t list = 0; list < drops.size(); ++list) {
+          drops[list] += cascade.drops[list];
+        }
+      }
+    }
+    impl_->droppedEntries = overflow;
+    impl_->droppedByList = drops;
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
     impl_->drawnFarCells = counters->farTasks[0];
@@ -724,8 +763,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->drawnVoxelArea = counters->voxelArea / 16.0;
     impl_->drawnSubpixelVoxels = counters->voxelSubpixel;
     impl_->visitedBvhNodes = counters->bvhNodes;
-    std::copy(std::begin(counters->drops), std::end(counters->drops),
-              impl_->droppedByList.begin());
     impl_->drawnClusters = 0;
     for (const auto &lists : counters->meshTasks) {
       for (const auto &tasks : lists) {
@@ -955,6 +992,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("terrain shadow");
   // Before the main view's counters reset: the cascades' culls use the same
   // scratch buffers.
+  frame.cascadesRead = 0;
+  for (uint32_t i = 0; i < kShadowCascades; ++i) {
+    frame.cascadesRead |= impl_->shadowPlanned[i] ? 1u << i : 0u;
+  }
   impl_->recordSunShadows(cmd, frame);
   endPass("sun shadows");
   impl_->resetDrawCounters(cmd, impl_->drawCounters);
@@ -1245,7 +1286,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
   impl_->expandVoxelBricks(cmd, frame, 1);
-  impl_->readBackCounters(cmd, frame);
+  impl_->readBackCounters(cmd, frame, impl_->drawCounters, 0);
   endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,

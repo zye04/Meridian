@@ -1311,8 +1311,11 @@ struct FrameData {
   // while the other frame's commands still read its own.
   Buffer instanceStaging;
   Buffer instanceBuffer;
-  // This frame's DrawCounters, copied back for statistics.
+  // This frame's DrawCounters, copied back for statistics: the main view's,
+  // then each sun shadow cascade's; cascadesRead marks the cascades this
+  // frame rendered.
   Buffer drawCountReadback;
+  uint32_t cascadesRead = 0;
   // GpuWeather::history: kWeatherHistoryCapacity WeatherHistorySamples.
   Buffer weatherHistory;
   // The streamed slots to update this frame (StreamUpdate), CPU-written;

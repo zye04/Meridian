@@ -129,8 +129,11 @@ struct Renderer::Impl {
   uint32_t drawnInstances = 0;
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
+  // Main view and cascades: drops in a recent frame, need over the run.
   uint32_t droppedEntries = 0;
   std::array<uint32_t, 5> droppedByList{};
+  CullNeed mainNeed;
+  CullNeed cascadeNeed;
   uint32_t drawnTerrainNodes = 0;
   uint32_t drawnCells = 0;
   uint32_t drawnFarCells = 0;
@@ -161,6 +164,7 @@ struct Renderer::Impl {
   LightBasis shadowBasis;
   Vec3 shadowSun;
   bool shadowStale = true;
+  bool shadowRefresh = false;
   Buffer shadowCounters;
   Buffer shadowDrawLists;
   VkPipeline shadowPipeline = VK_NULL_HANDLE;
@@ -647,7 +651,10 @@ struct Renderer::Impl {
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
   // Writes the voxel pools' addresses into voxelPoolInfo.
   void writeVoxelPoolInfo();
-  void readBackCounters(VkCommandBuffer cmd, const FrameData &frame);
+  // Copies counters into the frame's readback slot (0: main view, 1 + i:
+  // cascade i).
+  void readBackCounters(VkCommandBuffer cmd, const FrameData &frame, const Buffer &counters,
+                        uint32_t slot);
   // VMA's allocated blocks on the device-local heaps (VRAM), and on all
   // heaps (system memory too).
   struct MemoryUse {
