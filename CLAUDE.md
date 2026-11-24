@@ -47,7 +47,7 @@ Docs, read on demand:
 ## Commands
 
 ```bash
-cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
+cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation + sync validation
 ctest --test-dir build                           # or ./build/tests/tests
 # the build uses ccache and mold automatically when installed (no setup needed)
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)

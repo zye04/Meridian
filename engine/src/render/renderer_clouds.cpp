@@ -16,7 +16,8 @@ void buildMips3d(VkCommandBuffer cmd, VkImage image, uint32_t size, uint32_t lev
   for (uint32_t level = 1; level < levels; ++level) {
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+                  VK_PIPELINE_STAGE_2_BLIT_BIT,
+                  VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
     const auto source = static_cast<int32_t>(size >> (level - 1));
     const auto destination = static_cast<int32_t>(size >> level);
     VkImageBlit blit{};

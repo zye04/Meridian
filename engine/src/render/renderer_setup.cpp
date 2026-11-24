@@ -1186,6 +1186,8 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   }
   if (kEnableValidation) {
     instanceBuilder.request_validation_layers()
+        .add_validation_feature_enable(
+            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT)
         .set_debug_callback(debugCallback)
         .set_debug_messenger_severity(
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
