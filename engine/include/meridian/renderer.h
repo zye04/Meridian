@@ -331,6 +331,8 @@ public:
   // The cull lists' need over the run: the main view's, and the largest of
   // the sun shadow cascades'.
   CullNeed cullNeed(bool cascades) const;
+  // The same for one sun shadow cascade (0 nearest).
+  CullNeed cascadeCullNeed(uint32_t cascade) const;
   // Waits for the frames still in flight and reads their counters, so the
   // statistics above cover every frame drawn (call before reporting).
   void drainStatistics();

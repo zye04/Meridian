@@ -1577,6 +1577,13 @@ int main(int argc, char **argv) {
                   need.traversalNodes, need.drawnClusters, need.voxelClusters, need.voxelQuads,
                   need.dropped);
     }
+    for (uint32_t i = 0; i < 5; ++i) {
+      const meridian::CullNeed need = renderer.cascadeCullNeed(i);
+      std::printf("cull list need, cascade %u: work items %u, bvh nodes %u, drawn clusters %u, "
+                  "voxel clusters %u, voxel quads %u; %u dropped\n",
+                  i, need.workItems, need.traversalNodes, need.drawnClusters, need.voxelClusters,
+                  need.voxelQuads, need.dropped);
+    }
     std::fflush(stdout);
     if (renderer.droppedCullEntryCount() > 0) {
       std::fprintf(stderr,

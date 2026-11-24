@@ -134,6 +134,7 @@ struct Renderer::Impl {
   std::array<uint32_t, 5> droppedByList{};
   CullNeed mainNeed;
   CullNeed cascadeNeed;
+  std::array<CullNeed, kShadowCascades> cascadeNeeds{};
   uint32_t drawnTerrainNodes = 0;
   uint32_t drawnCells = 0;
   uint32_t drawnFarCells = 0;

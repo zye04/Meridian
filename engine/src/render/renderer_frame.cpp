@@ -520,6 +520,10 @@ CullNeed Renderer::cullNeed(bool cascades) const {
   return cascades ? impl_->cascadeNeed : impl_->mainNeed;
 }
 
+CullNeed Renderer::cascadeCullNeed(uint32_t cascade) const {
+  return impl_->cascadeNeeds.at(cascade);
+}
+
 CullDrops Renderer::droppedCullEntries() const {
   const auto &d = impl_->droppedByList;
   return {d[0], d[1], d[2], d[3], d[4]};
@@ -682,6 +686,7 @@ void Renderer::Impl::readCounters(FrameData &frame) {
     if (frame.cascadesRead & (1u << i)) {
       const DrawCounters &cascade = counters[1 + i];
       accumulateNeed(cascadeNeed, cascade);
+      accumulateNeed(cascadeNeeds[i], cascade);
       overflow += cascade.overflow;
       for (size_t list = 0; list < drops.size(); ++list) {
         drops[list] += cascade.drops[list];

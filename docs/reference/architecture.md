@@ -205,7 +205,7 @@ instance change; each re-render runs the cell cull -> cull -> traverse ->
 cluster cull chain on a copy of SceneData with `shadowView` set (light
 box planes, no curvature, orthographic LOD of 1 texel, no occlusion, no
 visibility writes, no streamed layers, no far switch,
-LOD error 0.25 texel in cascades 0-1 for thin foliage, the depth range up
+LOD error 1 texel in every cascade (triangle clusters and voxel levels), the depth range up
 to the terrain's highest sample + 150 m) into its own
 counters and draw lists, and in cascades 0-3 its voxel clusters (cascade 4
 switches every cell to its far cell, so placed trees cast there as far-cell

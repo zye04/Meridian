@@ -55,9 +55,10 @@ unconditional", "VRAM budget").
    lows, R5-1 forest walk, explain aa 2.45 vs 1.36 ms, re-measure the
    scene-early split on current trees), the two capture guards (render
    size not 2560x1440, any list overflow), the VRAM print and gate, the
-   cascade changes (drop the sun-axis re-render trigger, relax the 0.25 px
-   caster LOD for foliage, static ground cover out of the cascades, voxel
-   casters).
+   cascade changes (drop the sun-axis re-render trigger, static ground
+   cover out of the cascades). Done on g1: voxel casters (8738167) and the
+   caster LOD relaxed to 1 texel in every cascade (cascade overflow, see
+   decisions.md "Caster LOD of one texel in every cascade").
 4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed");
    the TLAS/BLAS memory check (build them only for `--shadows rt`,
    `--far-shadows tlas`, `--reference` if g1 removes the last ray query

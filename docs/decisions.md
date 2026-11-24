@@ -4892,3 +4892,28 @@ gate protects).
   gaps from above, the shadowing matches. Brightness is a lighting and grade
   matter, not a g1 change.
 
+## Caster LOD of one texel in every cascade (G1, 2026-11-24)
+
+- **Why**: with the voxel casters and the cascade counters read back, the
+  sun cascades dropped entries at five of the seven evidence views (forest
+  edge 12.85M). Per cascade at the edge (`--shadow-refresh`), cascade 1
+  saturated both lists: drawn clusters at kMaxDrawnClusters (2^21, also
+  near the GPU's 2^22 mesh dispatch limit) and voxel quads at 24.66M, while
+  cascades 2-3 at one texel needed 7-18k triangle clusters. Cascades 0-1
+  kept a 0.25-texel caster error "for thin foliage": several casters per
+  texel of a 2048^2 map that filters over +-1.5 texels.
+- **Chosen**: `lodErrorPixels` 1 in every cascade, for triangle clusters
+  and voxel levels alike (they share the threshold). Pulled forward from
+  resume.md step 3 ("relax the 0.25 px caster LOD").
+- **Measured, 1440p** (`--shadow-refresh`, every cascade every frame):
+  drops 0 at edge, interior looking up, fly-toward, overview within the
+  committed caps (max cascade drawn clusters 939289, quads 15.5M); GPU
+  109.6 -> 78.6, 85.6 -> 60.3, 92.8 -> 64.8, 49.2 -> 47.3 ms; edge without
+  the flag 24.7 ms; peak unchanged (14261 MiB device-local).
+- **No thinner shadows against the ray-traced truth** (main `--shadows
+  rt`): overview ground mask mean 96.66 (0.25: 96.67; truth 101.21), classes
+  unchanged; OKLCh edge canopy/understory L -0.005/-0.007 (0.25:
+  -0.004/-0.007), fly-toward canopy L +0.005 (0.25: +0.011). Near dappled
+  shade, canopy from 40 m above: mean 84.78 -> 85.42, look side-by-side
+  `.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg` (a look question).
+

@@ -143,9 +143,11 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.shadowView = 1;
       copy.shadowFarCells = i + 1 == kShadowCascades ? 1 : 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
-      // Foliage is thin: at one texel its leaves simplify away and the crowns
-      // shade too bright, so the near cascades keep four times the detail.
-      copy.lodErrorPixels = i < 2 ? 0.25f : 1.0f;
+      // One texel of caster error in every cascade: at 0.25 in cascades 0-1
+      // their casters outnumbered the texels several times over and overflowed
+      // the cull lists, and the shadows matched the ray-traced truth no better
+      // (decisions.md "Caster LOD of one texel in every cascade").
+      copy.lodErrorPixels = 1.0f;
       copy.shadowDrawMargin =
           static_cast<float>(0.5 * (cascadeHalfSize(i) - cascadeRadius(i)) * std::sqrt(3.0));
       Buffer &buffer = shadowScenes[frameSlot][i];
