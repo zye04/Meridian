@@ -255,17 +255,19 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
 }
 
 // The voxel clusters cluster_cull.comp listed in this phase become bricks
-// and voxels to draw (voxel_bricks.comp, one workgroup per cluster).
+// and voxels to draw (voxel_bricks.comp, one workgroup per cluster); for a
+// cascade, seen from the sun.
 void Renderer::Impl::expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame,
-                                       uint32_t phase) {
+                                       uint32_t phase, const ShadowCull *shadow) {
   if (voxelInstanceList.buffer == VK_NULL_HANDLE) {
     return;
   }
-  const CullConstants constants = cullConstants(frame, phase, nullptr);
+  const CullConstants constants = cullConstants(frame, phase, shadow);
+  const Buffer &counters = shadow ? *shadow->counters : drawCounters;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, voxelBricksPipeline);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
                      &constants);
-  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+  vkCmdDispatchIndirect(cmd, counters.buffer,
                         offsetof(DrawCounters, voxelDispatch) +
                             phase * sizeof(DrawCounters::voxelDispatch[0]));
   // voxel_instance.mesh reads the quad list and count.

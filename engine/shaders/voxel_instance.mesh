@@ -45,11 +45,19 @@ void main() {
     uint voxel = voxelSlot(brick, i);
     vec3 local = (vec3(voxelCoords(brick, i)) + 0.5) * v;
     vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
-    vec3 view = normalize(transpose(mat3(instance.transform)) * relative);
+    // A cascade looks along the sun, orthographically: the quad faces the
+    // sun and its size is the projection's scale per metre, not over depth.
+    bool cascade = scene.shadowView != 0u;
+    vec3 view = normalize(transpose(mat3(instance.transform)) *
+                          (cascade ? -scene.sunDirection : relative));
     float spread = abs(view.x) + abs(view.y) + abs(view.z);
 
     vec4 center = scene.viewProjection * displayedPosition(scene, relative);
-    vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * abs(scene.projectionScale);
+    mat4 vp = scene.viewProjection;
+    vec2 perMetre = cascade ? vec2(length(vec3(vp[0][0], vp[1][0], vp[2][0])),
+                                   length(vec3(vp[0][1], vp[1][1], vp[2][1])))
+                            : abs(scene.projectionScale);
+    vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * perMetre;
     uvec4 packed = pools.voxels.voxels[voxel];
     uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {

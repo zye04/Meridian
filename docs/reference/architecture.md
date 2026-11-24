@@ -204,11 +204,16 @@ passes half its margin, or on the first frame, a sun change or an
 instance change; each re-render runs the cell cull -> cull -> traverse ->
 cluster cull chain on a copy of SceneData with `shadowView` set (light
 box planes, no curvature, orthographic LOD of 1 texel, no occlusion, no
-visibility writes, no streamed layers, no far switch, no voxel clusters (G11),
+visibility writes, no streamed layers, no far switch,
 LOD error 0.25 texel in cascades 0-1 for thin foliage, the depth range up
 to the terrain's highest sample + 150 m) into its own
-counters and draw lists, then shadow.mesh (+ shadow_masked.frag for
-alpha-masked) draws all four buckets, cull none, slope-scaled bias; the
+counters and draw lists, and its voxel clusters through voxel_bricks.comp
+seen along the sun (coverage by the voxel's opacity along the sun, no
+terrain march; the voxel lists are scratch shared with the next cascade and
+the main view, a mesh-read -> compute-write barrier between them); then
+shadow.mesh (+ shadow_masked.frag for alpha-masked) draws all four buckets
+and voxel_instance.mesh the voxel quads (orthographic, facing the sun, depth
+only), cull none, slope-scaled bias; the
 coarsest cascade (`shadowFarCells`) skips every cell's trees and casts its
 far cell instead: voxel.mesh's box, voxel_shadow.frag marching the bricks
 along the sunlight to opacity 0.5) ->

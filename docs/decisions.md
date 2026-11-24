@@ -4835,3 +4835,25 @@ gate protects).
   the all-heaps total in brackets), and the peak now covers model load
   (sampled when a pool grows: 13114 MiB, below the far-field peak).
 
+## Voxel clusters cast into the cascades (G1 Task 8, G11, 2026-11-24)
+
+- **The same voxels, seen from the sun**: in a cascade, cluster_cull.comp
+  lists voxel clusters as in the main view, voxel_bricks.comp keeps a voxel
+  where the stable coverage hash falls under its opacity along the sun (and
+  drops those hidden deeper than kVoxelHiddenDepth toward it), and
+  voxel_instance.mesh draws each as an orthographic quad facing the sun,
+  depth only. No cascade path disables LOD pruning: the cascades keep
+  their orthographic LOD (1 texel, 0.25 in cascades 0-1).
+- **Self-shadow counted once**: voxel_instance.frag already attenuates by
+  the voxel's optical depth out of its model toward the sun and traces from
+  where the sun ray leaves the mesh's box, so the cascades add only other
+  trees. A caster moved half a voxel away from the sun changed nothing
+  (edge 21.11 -> 21.27), so the voxels' own leaves were not the darkening.
+- **Coverage against the ray-traced truth** (`--shadows rt`, full BLAS),
+  1440p, region mean: forest edge (rows 200-1000) g1 21.11, main ray traced
+  21.41, main raster 28.95; overview crop g1 97.97, ray traced 99.19, main
+  raster 106.75. Main's coarse cascades under-shadow (thin leaves simplify
+  away at one texel); g1 lands within 1.5% of the truth.
+- **Cost** (all five cascades in one frame, `sun shadows:` max): edge 84.7
+  ms against main's 80.6, overview 27.0 against 40.7.
+

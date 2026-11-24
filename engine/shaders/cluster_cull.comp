@@ -76,10 +76,9 @@ void drawVoxels(uint instanceIndex, uint clusterIndex) {
 void draw(uint instanceIndex, uint clusterIndex, ClusterInfo cluster, vec3 world,
           float radius) {
     if (cluster.voxelEdge > 0.0) {
-        // Until voxel clusters cast into the cascades (G11), they cast nothing.
-        if (cull.scene.shadowView == 0u) {
-            drawVoxels(instanceIndex, clusterIndex);
-        }
+        // In a cascade too: voxel_bricks.comp lists its voxels as seen from
+        // the sun and voxel_instance.mesh casts them.
+        drawVoxels(instanceIndex, clusterIndex);
         return;
     }
     MeshInfo mesh = cull.scene.meshes.meshes[cluster.mesh];

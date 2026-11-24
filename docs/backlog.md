@@ -32,7 +32,6 @@ per gap so none is lost; remove a row when its gap is resolved.
 | G18 Fireflies and leaf sparkle in motion | Glossy leaf speculars as sub-pixel hot pixels, amplified by TAA and bloom | User screenshots in motion 2026-11-21 | Leaf material (G15), specular AA, firefly clamp; Neon #6: geometric specular AA + Toksvig roughness mips (leaf-geometry) (research/2026-11-22-neon-triage.md) |
 | G19 Smear / jitter / shimmer on everything in motion (top priority) | Clouds' long history (weight 0.05) smears small detail when moving; native TAA smears/jitters trees and textures | User 2026-11-21 evening | Measure in motion, then rule-1 fixes (research E); A/B CE's alpha-grass mip bias and motion smear mask (baseline F16; his AA method is unknown); step 2 re-planned: preset K/L, outline, history, half-res, composite after DLAA; the transparency mask is unused by DLSS SR (research/2026-11-22-neon-triage.md) |
 | Cloud shadow outline resolution | The cloud shadow map's ~29 m texels (bilinear over a 5x5 blur) show as staircase outlines on sharp cloud shadows; the motion is smooth since G20 | G20 (2026-11-22) | Look decision: finer near cascade or bicubic lookup |
-| G11 No tree shadows at distance with raster shadows | Forest overview without ground shadows | Farm lane | Branch `far-m-shadow2` |
 
 ## Lighting and shading
 

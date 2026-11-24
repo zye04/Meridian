@@ -74,10 +74,14 @@ void Renderer::Impl::createSunShadows() {
   desc.meshShader = "voxel.mesh";
   desc.fragmentShader = "voxel_shadow.frag";
   farShadowCasterPipeline = createGraphicsPipeline(dev, desc);
+  desc.meshShader = "voxel_instance.mesh";
+  desc.fragmentShader = nullptr;
+  voxelShadowCasterPipeline = createGraphicsPipeline(dev, desc);
 }
 
 void Renderer::Impl::destroySunShadows() {
   VkDevice dev = device.device;
+  vkDestroyPipeline(dev, voxelShadowCasterPipeline, nullptr);
   vkDestroyPipeline(dev, farShadowCasterPipeline, nullptr);
   vkDestroyPipeline(dev, shadowMaskedPipeline, nullptr);
   vkDestroyPipeline(dev, shadowPipeline, nullptr);
@@ -132,6 +136,8 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       }
       copy.viewProjection = cascadeProjection(window, shadowBasis);
       copy.drawLists = shadowDrawLists.address;
+      // voxel_instance.mesh reads its quad count from the cascade's counters.
+      copy.drawCounters = shadowCounters.address;
       copy.shadowView = 1;
       copy.shadowFarCells = i + 1 == kShadowCascades ? 1 : 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
@@ -176,6 +182,7 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
     cullInstances(cmd, frame, 1, &cull);
     traverseClusters(cmd, frame, 1, &cull);
     cullClusters(cmd, frame, 1, &cull);
+    expandVoxelBricks(cmd, frame, 1, &cull);
 
     // Contents are cleared, so the old layout is discarded; earlier frames'
     // reads of the map finish first.
@@ -216,6 +223,18 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
           offsetof(DrawCounters, meshTasks) + bucket * sizeof(DrawCounters::meshTasks[0][0]), 1,
           sizeof(DrawCounters::meshTasks[0][0]));
     }
+    if (voxelInstanceList.buffer != VK_NULL_HANDLE) {
+      // The voxel clusters' quads, facing the sun (list 2: phase 1's).
+      PushConstants push;
+      push.sceneBuffer = sceneBuffer.address;
+      push.drawList = 2;
+      vkCmdPushConstants(cmd, sceneLayout, kScenePushStages, 0, sizeof(push), &push);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelShadowCasterPipeline);
+      dispatch.cmdDrawMeshTasksIndirectEXT(
+          cmd, shadowCounters.buffer,
+          offsetof(DrawCounters, voxelTasks) + 2 * sizeof(DrawCounters::voxelTasks[0][0]), 1,
+          sizeof(DrawCounters::voxelTasks[0][0]));
+    }
     if (i + 1 == kShadowCascades && farFieldInfo.buffer != VK_NULL_HANDLE) {
       // The coarsest cascade's trees cast as their far cells' voxels.
       PushConstants push;
@@ -234,6 +253,10 @@ void Renderer::Impl::recordSunShadows(VkCommandBuffer cmd, const FrameData &fram
                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+    // The voxel quad list is scratch shared with the next cascade and the
+    // main view, whose culls rewrite it.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   }
 }
 

@@ -80,7 +80,8 @@ void main() {
     uint i = gl_LocalInvocationIndex;
     if (i == 0u) {
         vec3 world = (instance.transform * vec4(cluster.boundsCenter, 1.0)).xyz;
-        keptFirst = terrainSun(world, entry.y, entry.x);
+        // A cascade needs no lighting, only where the voxels block the sun.
+        keptFirst = scene.shadowView != 0u ? 1u : terrainSun(world, entry.y, entry.x);
         areaSum = 0u;
         subpixelSum = 0u;
     }
@@ -120,8 +121,11 @@ void main() {
             }
             uint slot = voxelSlot(brick, i);
             vec3 local = (vec3(voxelCoords(brick, i)) + 0.5) * v;
-            vec3 view = normalize(toLocal * ((instance.transform * vec4(local, 1.0)).xyz -
-                                             scene.cameraPosition));
+            // A cascade looks along the sun (orthographic).
+            vec3 view = normalize(toLocal * (scene.shadowView != 0u
+                                                 ? -scene.sunDirection
+                                                 : (instance.transform * vec4(local, 1.0)).xyz -
+                                                       scene.cameraPosition));
             float opacity = voxelViewOpacity(voxelDepths(pools.voxels.voxels[slot]), view);
             // Keyed on where the brick is (lattice origin, edge, mesh), not its
             // pool index, so a cache rebuild or a new load order keeps the pattern.

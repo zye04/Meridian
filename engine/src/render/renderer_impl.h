@@ -383,6 +383,8 @@ struct Renderer::Impl {
   VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
   VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
+  // Voxel clusters' quads into a cascade (voxel_instance.mesh, depth only).
+  VkPipeline voxelShadowCasterPipeline = VK_NULL_HANDLE;
   bool voxelLod = true;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
@@ -656,7 +658,6 @@ struct Renderer::Impl {
   // The largest memoryUse while models load (a growing pool's old and new
   // buffers coexist), printed with the TLAS line.
   MemoryUse loadPeak;
-  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {
     VkDeviceAddress scene;
@@ -672,6 +673,8 @@ struct Renderer::Impl {
                         const ShadowCull *shadow = nullptr);
   void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
                     const ShadowCull *shadow = nullptr);
+  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                         const ShadowCull *shadow = nullptr);
   // Raster sun shadows (renderer_shadows.cpp). plan runs on the CPU before
   // the scene upload and fills scene.sunShadows; record renders what plan chose.
   void createSunShadows();
