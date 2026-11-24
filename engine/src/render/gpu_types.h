@@ -603,6 +603,11 @@ static_assert(offsetof(SceneData, shadowView) == 2320);
 static_assert(offsetof(SceneData, sunShadows) == 2336);
 static_assert(offsetof(SceneData, voxelPools) == 2624);
 static_assert(offsetof(SceneData, terrainShadowTexels) == 2656);
+// vec2 in GLSL (8-aligned), float[2] here: these hold only while the
+// 8-byte address before them keeps them on 8-byte boundaries.
+static_assert(offsetof(SceneData, terrainShadowOrigin) == 2664);
+static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
+static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
 static_assert(sizeof(SceneData) == 2704);
 
 // Must match MeshInfo in common.glsl.

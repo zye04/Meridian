@@ -3,6 +3,57 @@
 Newest last. Each entry: what was chosen, why, what was rejected, and the
 sources. Check here before re-researching a topic.
 
+## Current choices (index)
+
+One line per area: the choice in force and the entry that holds it. Entries
+marked superseded carry a "Superseded by" line under their title. Entries
+listed under "Tuned under older conditions" were tuned before the current
+defaults and are candidates to re-check when their area is next touched,
+not verdicts.
+
+- Resolution and anti-aliasing: native 1440p, DLSS Super Resolution DLAA
+  default, own TAA the fallback, Ray Reconstruction an A/B: "DLSS DLAA is
+  the default anti-aliasing (2026-11-22)" (resolution: "Native 1440p with
+  our own TAA is the default").
+- Sun shadows: raster cached cascades, `--shadows rt` an A/B: "Raster sun
+  shadows are the default (2026-11-21)".
+- Global illumination: terrain-following probes, ground cache, on by
+  default, foliage lit where the ray meets it: "GI probes on by default",
+  "GI probes: foliage lit where the ray meets it", "GI reads material
+  albedo". The screen-space bitmask half was never built.
+- Crown occlusion: "GI: crown visibility only without GI (#30)".
+- Trees: Megascans Trees from Unreal, leaves as opaque geometry traced from
+  the atlas: "Tree leaves as opaque geometry, traced from the atlas",
+  "Leaf transmission per KHR_materials_diffuse_transmission".
+- Far vegetation: voxel tiers ("Far-field forests: voxel tiers", "Mid tier:
+  rasterized prototype voxels"); the DAG voxel design (branch `g1`)
+  replaces them once it merges.
+- Placement: "Geo channels and causal placement".
+- Clouds: volumetric, outline off: "Cloud outline off by default" (look and
+  march entries under "M4 clouds").
+- Haze: "Haze as a boundary layer over the valley floor".
+- Camera: "Camera field of view: 70 degrees horizontal, configurable".
+- Judging: "Benchmark route and ledger", "Reference path tracer".
+- Performance gate: "Performance gate restated (2026-11-24)".
+- Geometry shading: "Visibility buffer is unconditional (2026-11-24)".
+- Memory: "VRAM budget (2026-11-24)".
+
+Tuned under older conditions (re-check when the area is next touched):
+
+- The five TAA entries ("TAA: sharpen in proportion to motion", "TAA: a
+  longer history when still", "TAA: sharper history resampling, shorter
+  blend in motion", "TAA stability over sharpness", the TAA parts of
+  "Motion clarity: DLSS 4.5, Ray Reconstruction, TAA v2, grading") and
+  "Cloud temporal stability under TAA": tuned for the own TAA, now the
+  fallback.
+- "Micro and contact shadows", "Plant micro occlusion", "Visible quality
+  pass", "Starting grade: neutral saturation, stronger greens": tuned
+  before GI probes and raster shadows were defaults.
+- "Frame cost measured, perf lane": the scene-early split predates opaque
+  leaves, the Megascans beech and the causal forest.
+- "Global illumination: terrain-following probes + screen-space bitmask":
+  the bitmask half was never built.
+
 ## Foundations (2026-11-18/19)
 
 - **Vulkan 1.3 from day one** (dynamic rendering, synchronization2, buffer
@@ -51,6 +102,8 @@ sources. Check here before re-researching a topic.
   - https://www.unrealengine.com/en-US/tech-blog/how-epic-games-is-handling-auto-exposure-in-4-25
 
 ## Shadows
+
+*Superseded in part: the ray-traced sun shadows chosen below gave way to "Raster sun shadows: cached cascades", then "Raster sun shadows are the default" (`--shadows rt` stays an A/B). Terrain march, cloud shadow and contact shadows stand.*
 
 - **Hardware ray-traced sun shadows** (ray queries in the fragment shader),
   not cascaded shadow maps: no cascade seams or shimmer, per-pixel accuracy,
@@ -699,6 +752,8 @@ foliage that survives simplification).
 
 ## Tree import: Megascans Megaplants USD (M2a, 2026-11-19)
 
+*Superseded by "Megascans Trees (card leaves) from Unreal replace the Megaplants", then "Tree leaves as opaque geometry, traced from the atlas" (2026-11-22), which holds.*
+
 - **Two stages.** `tools/usd2gltf/usd2gltf.py` reads the USD with Pixar's
   `usd-core` (pinned 26.11 in `requirements.txt`, installed into a
   git-ignored venv by `setup.sh`) and writes an *unflattened* glTF: one
@@ -941,6 +996,8 @@ foliage that survives simplification).
 
 ## Far-field forests: voxel tiers (M2a, 2026-11-20)
 
+*To be superseded by the DAG voxel foliage plan (branch `g1`, ray-query bake removed) once it merges; until then this entry holds.*
+
 - **Chosen (user, 2026-11-20): voxels, no impostors, in three tiers**,
   as Chlorophyll Engine describes its own: near trees are clusters of
   their LOD DAG; from where a tree's triangles go sub-pixel it is drawn as
@@ -951,7 +1008,7 @@ foliage that survives simplification).
   bricks (L0 4 m, L1 8 m, L2 16 m). The world bricks are also the far ray
   field: a sun shadow map built from them for far receivers now, sky
   visibility in M2b (replacing M2b's 2D canopy field). Spec:
-  `docs/superpowers/specs/2026-11-20-far-field-design.md`.
+  `docs/superpowers/archive/specs/2026-11-20-far-field-design.md`.
 - **Why three tiers:** the Task 8 prototype (per-cell bricks beyond 4 km,
   clusters nearer) measured the early scene pass at ~13 ms at the overview,
   mostly cluster raster of trees inside 4 km, whose coarse DAG foliage
@@ -1221,7 +1278,7 @@ slice 5's compression and streaming stay deferred.
 
 ## Motion clarity: DLSS 4.5, Ray Reconstruction, TAA v2, grading (2026-11-20)
 
-Spec: `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`.
+Spec: `docs/superpowers/archive/specs/2026-11-20-motion-clarity-design.md`.
 
 **The smear is in the TAA history, not in the motion vectors.**
 - Measured at 1080p, eye-height ground view, motion/still Laplacian:
@@ -1744,6 +1801,8 @@ restores the previous behaviour exactly (2645325 instances, hash
 
 ## DLSS DLAA with Ray Reconstruction is the default (2026-11-20)
 
+*Superseded by "Super Resolution DLAA is the default, RR an A/B", then "Native 1440p with our own TAA is the default", then "DLSS DLAA is the default anti-aliasing" (2026-11-22), which holds.*
+
 Superseded by "Super Resolution DLAA is the default, RR an A/B" (below):
 the fallbacks and gate definitions here still hold.
 
@@ -2041,7 +2100,7 @@ rock's 2-3 m tiles drew a grid from ~50 m out, which the 4x far sample
   3 hex taps x 4 maps per rock variant, both variants on ~40% of the rock.
 ## Weather state and wind (M4 clouds, 2026-11-19)
 
-Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
+Spec: `docs/superpowers/archive/specs/2026-11-19-clouds-weather-design.md`.
 
 - **Weather state** (`weather.h`): coverage, type (0 stratus/overcast ..
   1 cumulus, above 1 reserved for cumulonimbus), precipitation (carried,
@@ -2767,7 +2826,7 @@ and draw path. Debug builds check every regenerated cell against
 `evaluatePoint`. Streamed instances are not in the TLAS. They receive
 sun shadows, but cast only screen-space contact shadows. Whether they
 should be in the TLAS is open (plan task 4). Plan:
-`docs/superpowers/plans/2026-11-20-streamed-placement.md`.
+`docs/superpowers/archive/plans/2026-11-20-streamed-placement.md`.
 
 - **Seamless thinning (2026-11-20):** the mat must leave no edge, ring
   or pop. The keep fraction is full density, then (fullDensity/d)^2,
@@ -2990,12 +3049,14 @@ thin cloud does.
 
 ## Super Resolution DLAA is the default, RR an A/B (2026-11-20)
 
+*Superseded by "Native 1440p with our own TAA is the default", then "DLSS DLAA is the default anti-aliasing" (2026-11-22), which holds.*
+
 Supersedes the default in "DLSS DLAA with Ray Reconstruction is the
 default". User decision: raster rendering in the style of Chlorophyll
 Engine (no ray tracing, art-directed), for image clarity, motion clarity
 and performance. RR's reason to be the default was the ray-traced sun
 shadow's per-pixel noise; the raster sun shadows that replace the ray
-(spec `2026-11-20-raster-sun-shadows-design.md`) have none to denoise.
+(spec `superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md`) have none to denoise.
 
 - **Choice:** `--rr` defaults to off: DLSS Super Resolution DLAA, preset
   M (the SR default). `--rr on` stays as an A/B. Under SR the upscaler
@@ -3067,10 +3128,12 @@ off|probes|hybrid` (default off until the look is accepted).
 
 ## Raster sun shadows: cached cascades (2026-11-20)
 
+*Superseded by "Raster sun shadows are the default" (2026-11-21), which holds.*
+
 User direction: raster rendering, no ray tracing. Replaces the per-pixel
 TLAS shadow ray for objects (see "Shadows" at the top, which chose RT);
 the terrain march, cloud shadow, contact shadows and the far path stay.
-Spec `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`.
+Spec `docs/superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md`.
 
 - **Choice:** cached, camera-centred cascaded shadow maps (a coarse
   clipmap), not virtual shadow maps. VSMs cache per page and match screen
@@ -3202,6 +3265,8 @@ Editor plugin, "Nanite Foliage (Experimental)") and exports them with
 
 ## Native 1440p with our own TAA is the default (2026-11-21)
 
+*The native 1440p resolution stands; the own-TAA default is superseded by "DLSS DLAA is the default anti-aliasing" (2026-11-22). The own TAA is the fallback.*
+
 User direction: native 2560x1440, no upscaler, as the Chlorophyll Engine
 renders (native 1440p, no upscaler, on an RTX 3080). `--aa taa` at render
 scale 1 is the default; DLSS (Super Resolution DLAA, Ray Reconstruction)
@@ -3234,6 +3299,8 @@ stays behind `--aa dlss` as an A/B, so its backlog rows are A/B-only.
   his engine changed.
 
 ## Crown sky visibility (2026-11-21)
+
+*Superseded by "GI: crown visibility only without GI (#30, 2026-11-23)", which holds.*
 
 Foliage took the full sky and ground ambient at every leaf, so crowns read
 flat and pale: forest edge foliage OKLCh L median 0.51 (p10 0.44) against
@@ -3335,6 +3402,8 @@ Interactive runs load the user's grade file, which overrides this.
 
 ## Textured beech from Megascans scans, no Unreal step (assets, 2026-11-21)
 
+*Superseded by "Tree leaves as opaque geometry, traced from the atlas" (2026-11-22), which holds.*
+
 The Megaplants' own leaf and bark textures exist only in Unreal; Megascans
 scans already downloaded hold a leaf atlas and beech bark.
 `tools/usd2gltf/texture_tree.py` maps them onto the usd2gltf glTF:
@@ -3413,6 +3482,8 @@ Bar: the 2.5D path's p99 0.55.
 
 ## Crown sky visibility for bark (2026-11-21)
 
+*Superseded by "GI: crown visibility only without GI (#30, 2026-11-23)", which holds.*
+
 Under the darker crowns the trunks and branches stood out pale pink-white
 (forest edge), where the references' trunks are dark. A placed tree's
 non-leaf meshes now take the crown of the prototype's leaf mesh (mesh.mesh
@@ -3462,6 +3533,8 @@ CAS's weakest lobe raised still shimmer from 1.7/1.5 to 2.3/2.4).
   al. 2020, "A Survey of Temporal Antialiasing Techniques" (EG STAR).
 
 ## Mid tier: rasterized prototype voxels (M2a Task 11, 2026-11-21)
+
+*To be superseded by the DAG voxel foliage plan (branch `g1`) once it merges; until then this entry holds.*
 
 - **Chosen (user, 2026-11-20): rasterize the prototype voxels the Nanite
   Foliage way**, replacing the per-instance box + fragment DDA (measured
@@ -3702,6 +3775,8 @@ the far-field bake and `--far-shadows tlas` use them).
 
 ## Cloud outline and motion-adaptive resolve (2026-11-21)
 
+*Superseded by "Cloud outline off by default" (2026-11-23), which holds.*
+
 User request: crisper volumetric clouds, "almost a pseudo outline", on the
 outer silhouette and on the lobes inside it, from the resolved clouds,
 subtle by default, an Effects strength with 0 = off; still flicker free.
@@ -3925,6 +4000,8 @@ Follow-up to "Global illumination" above (`--gi probes`, still default off).
 
 ## Megascans Trees (card leaves) from Unreal replace the Megaplants (2026-11-21)
 
+*The import path stands; the card leaves are superseded by "Tree leaves as opaque geometry, traced from the atlas" (2026-11-22).*
+
 The Megascans Trees packs (Black Alder, European Beech; Fab, Unreal only)
 are what the Chlorophyll frames look like up close: card leaves on an 8K
 atlas, scanned bark, several variants per kind (Forest, Field, Sapling).
@@ -4097,7 +4174,7 @@ and DLAA is how DLSS is commonly shipped as pure anti-aliasing.
 
 Status: implemented 2026-11-23 (spec
 `2026-11-21-materials-fidelity-design.md` section 2, D1 and D2; plan
-`plans/2026-11-22-leaf-geometry.md`).
+`superpowers/archive/plans/2026-11-22-leaf-geometry.md`).
 
 - **Problem:** the Megascans Trees' leaves and decoration are
   alpha-tested cards. Their cut-out edge depends on a texture fetch whose
@@ -4413,8 +4490,8 @@ honour the standard the engine imports; asset semantics belong to the cook.
 
 ## Reference path tracer (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-reference-path-tracer-design.md`, plan
-`superpowers/plans/2026-11-23-reference-path-tracer.md`. Every lighting
+Spec `superpowers/archive/specs/2026-11-23-reference-path-tracer-design.md`, plan
+`superpowers/archive/plans/2026-11-23-reference-path-tracer.md`. Every lighting
 question had been judged against photos and measured ranges, which can
 reject an outlier but cannot say whether an approximation is right (#32's
 trunk tint). Unreal and Unity HDRP ship a path tracer for this; we had the
@@ -4464,8 +4541,8 @@ bindless materials, the heightfield march).
 
 ## GI probes: foliage lit where the ray meets it (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-gi-canopy-radiance-design.md`, plan
-`superpowers/plans/2026-11-23-gi-canopy-radiance.md`. The reference path
+Spec `superpowers/archive/specs/2026-11-23-gi-canopy-radiance-design.md`, plan
+`superpowers/archive/plans/2026-11-23-gi-canopy-radiance.md`. The reference path
 tracer measured the forest edge's shaded trunk at 2.1x its luminance and too
 green (B/G 0.61 vs 0.84) under the probes. An ablation against the
 reference (one term neutralized per variant, Release, 2560x1440, `--trees
@@ -4541,7 +4618,7 @@ area.
 
 ## Backlit canopy: leaf sun side and crowns without tuft occlusion (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-backlit-direct-design.md`. The reference
+Spec `superpowers/archive/specs/2026-11-23-backlit-direct-design.md`. The reference
 put the backlit forest edge (`--sun -0.9 0.4 0.15`) at 1.4-2.5x the raster
 on the sunward side, the same with `--gi off`. Ablation (Release,
 2560x1440, `--trees --effects pom=0 --bloom 0 0 --streamed off`, references
@@ -4633,3 +4710,97 @@ terrain with noise masks; real ground puts things where they grow or fall.
   early 12.6 -> 20.3 ms, every segment slower (meadow most: its ground is
   now partly forest). Release startup 26.4 -> 26.8 s. The user kept the
   extent; the performance lane takes the cost (backlog).
+
+## Performance gate restated (2026-11-24)
+
+Phase 2 architecture assessment, delegated by the user to Fable (the
+assessment file is `.superpowers/fable-review/architecture-assessment.md`
+in the main checkout, git-ignored; no GPU run was possible that session,
+so every ms estimate there is a projection from recorded measurements).
+
+The programme's gate was 180 fps average (5.5 ms) and ~105 fps (9.5 ms)
+in the heaviest views, scaled from the Chlorophyll Engine's reported
+numbers. Chosen instead, as GPU ms on the benchmark route, native 2560x1440
+DLAA, GI on:
+
+- route average <= 8.3 ms (120 fps);
+- heaviest segment <= 11.1 ms (90 fps);
+- 1% low >= 60 fps in every segment, hop frames excluded (new: the line
+  the user's "stable" priority needs).
+
+180 fps stays a stretch figure. It is still proof of technique, not a
+merge gate (parity programme call 1). Why the old figure goes: the fixed
+per-frame costs (aa ~1.4-2.5, GI ~1.9, weather 0.44, clouds 0.3-1.5, post
+~0.2 ms: 4.2-5.4 ms) are settled choices, so 5.5 ms is out of reach by
+arithmetic before any terrain, tree or shadow is drawn; and the figure
+does not transfer: his 130 fps has no stated internal resolution or AA
+cost (baseline F16), his figure with GI on is ~120 average and never
+below ~90 (F12), and his clouds are 2.5D (F6) where Meridian keeps
+volumetric by the user's call.
+
+Also decided: match the result, not the architecture. Programme rule 3
+("Chlorophyll's approach by default") becomes: adopt his technique where it
+is his stated answer to a problem Meridian measurably has (visibility
+buffer, ground cover out of the shadow maps, semi-static shadows). The
+deliberate divergences (volumetric clouds, native 1440p DLAA, probe GI)
+stay, and the gate pays for them.
+
+Projection after the ordered work (judgment, wide error bars): forest
+segments 11-13 ms, meadow and aerial 7-9 ms, route average 9-10 ms. The
+first GPU session therefore starts with the measurement repair (split
+"cull early", hop frames out of the 1% lows, the R5-1 forest walk, aa 2.45
+vs 1.36 ms, the scene-early split re-measured on current trees).
+
+## Visibility buffer is unconditional (2026-11-24)
+
+Parity programme call 3 made the visibility buffer conditional: start it if
+the forest edge still exceeds 9.5 ms and sub-pixel shading is over ~1.5 ms
+of it after the voxel switch lands. That trigger is met today by a wide
+margin (scene early 20.3 ms on the route average; the only breakdown on
+record, "Frame cost measured, perf lane", puts about a third each on
+geometry, per-fragment cascade PCF and sub-pixel triangle shading, and
+predates opaque traced leaves) and will very likely still be met after g1.
+
+Decision: no longer conditional. Its spec is written right after g1
+merges, before any new forward per-fragment lighting pass (GTAO first of
+all); cluster geometry and voxel quads go through it, terrain stays
+forward and is drawn after on the resolved depth. Estimated saving 8-12 ms
+on forest segments (PCF, GI reads and material once per pixel; the voxel
+overshading goes with it). Risk is high (every material path, motion
+vectors, DLSS guides, texture LOD from barycentrics, previous-frame wind
+for motion vectors), effort 1-2 weeks at the project's pace.
+
+Consequences: the GTAO spec's forward ambient-radiance attachment (its
+decision 2) is dropped, the spec is superseded and rewritten after the
+visibility buffer spec, which also chooses GTAO against the visibility
+bitmask. The shading math stays in shared functions so the resolve reuses
+it (call 3's existing rule). The cascade changes (drop the sun-axis
+re-render trigger, relax the 0.25 px foliage caster LOD, static ground
+cover out of the cascades, voxel casters) come before it and must not close
+the door on static far cascades plus a small dynamic near map (wind).
+
+## VRAM budget (2026-11-24)
+
+New standing gate beside frame time; no spec or gate covered memory before.
+Evidence (g1 lane report of 2026-11-24, three tree species, 2-4K placeholder
+textures): main holds 12.6 GB before the far field loads and peaks at 14.4
+GB on the 16 GB card; g1 holds 14.4 GB and peaks at 16.1-16.7 GB, which
+pages to system memory (far-field splat 0.36 s -> ~56 s). The per-pool
+breakdown is being measured by the g1 lane.
+
+Chosen (medium confidence on the numbers):
+
+- Resident <= 12 GB and transient peak <= 14 GB at the showcase views,
+  printed by every capture run. Every spec states its VRAM delta. g1 may
+  not merge above main's peak.
+- Geometry compression (backlog "Cluster vertices are 48 B uncompressed",
+  about 4x on tree memory) moves ahead of any new content pack. The
+  broadleaf forest floor cook waits for it or for measured headroom.
+- To check: how much the TLAS and the full-detail BLAS hold on the default
+  raster path. If g1 removes the last ray query from it, building them only
+  for `--shadows rt`, `--far-shadows tlas` and `--reference` may be the
+  largest single saving.
+
+Rejected: no budget (the g1 overshoot would have merged unnoticed), and a
+lower resolution or texture cap as the first lever (it trades the look the
+gate protects).

@@ -10,7 +10,7 @@
 
 **Tech Stack:** C++20, Vulkan 1.3 (dynamic rendering), GLSL, doctest, NVIDIA DLSS SDK 310.x (NGX, Linux x86_64), FidelityFX shadow denoiser (MIT, ported to GLSL), ImageMagick 7 + Python 3/numpy for gates.
 
-**Spec:** `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-20-motion-clarity-design.md`
 
 ## Global Constraints
 

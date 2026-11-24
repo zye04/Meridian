@@ -16,7 +16,8 @@ void buildMips3d(VkCommandBuffer cmd, VkImage image, uint32_t size, uint32_t lev
   for (uint32_t level = 1; level < levels; ++level) {
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT,
                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+                  VK_PIPELINE_STAGE_2_BLIT_BIT,
+                  VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
     const auto source = static_cast<int32_t>(size >> (level - 1));
     const auto destination = static_cast<int32_t>(size >> level);
     VkImageBlit blit{};
@@ -500,6 +501,8 @@ void Renderer::dumpWeatherMap(const std::filesystem::path &path) {
     region.imageExtent = {kSize, kSize, 1};
     vkCmdCopyImageToBuffer(cmd, impl_->weatherMap.image, VK_IMAGE_LAYOUT_GENERAL,
                            readback.buffer, 1, &region);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(impl_->allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");
@@ -528,6 +531,8 @@ void Renderer::printAmbient() {
     vkCmdCopyBuffer(cmd, impl_->skyIrradianceBuffer.buffer, readback.buffer, 1, &irradiance);
     const VkBufferCopy exposure{0, sizeof(SkyIrradiance), sizeof(ExposureState)};
     vkCmdCopyBuffer(cmd, impl_->exposureBuffer.buffer, readback.buffer, 1, &exposure);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(impl_->allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");

@@ -174,6 +174,20 @@ TEST_CASE("a negative mask edge is the exact complement of the mask") {
   CHECK(partial > 0);
 }
 
+TEST_CASE("noise periods are off or at least 1 m, so no octave divides by zero") {
+  const Heightfield field = planeField(64, 2.0f, 10.0f);
+  for (const float frequency : {1e30f, INFINITY, 1.0f, 1e-30f, 0.0f, -1.0f, NAN}) {
+    DensityRule rule = openRule();
+    rule.maskFrequency = frequency;
+    rule.clusterFrequency = frequency;
+    rule.clusterAmount = 0.5f;
+    const PlacementRule out = placementRule(field, rule);
+    const bool on = frequency > 0.0f;
+    CHECK(out.maskPeriod == (on ? std::max(out.maskPeriod, 65536u) : 0u));
+    CHECK(out.clusterPeriod == (on ? std::max(out.clusterPeriod, 65536u) : 0u));
+  }
+}
+
 TEST_CASE("densityAt values are pinned (anchors for the GPU comparison)") {
   const Heightfield field = planeField(129, 2.0f, 10.0f);
   DensityRule rule = openRule();

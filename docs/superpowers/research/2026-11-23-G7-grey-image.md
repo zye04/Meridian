@@ -1,6 +1,6 @@
 # G7: grey, washed-out image in forests (diagnosis, 2026-11-23)
 
-Issue #7, plan `plans/2026-11-21-phase0-trustworthy-judgment.md` Task 4.
+Issue #7, plan `../archive/plans/2026-11-21-phase0-trustworthy-judgment.md` Task 4.
 Release, DLSS DLAA, 2560x1440 fullscreen (headless 1440p output), `--trees`
 with the Megascans Trees (27 forest, 10 lone, 18 sapling prototypes),
 `--frames 120`, 0 validation errors in every run. Captures are git-ignored,

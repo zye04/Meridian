@@ -1,8 +1,13 @@
 # Broadleaf forest floor: Megascans pack, grounded placement, contact
 
-Status: design, awaiting user approval (2026-11-24).
+Status: decided in direction (2026-11-24 assessment), sequenced: the cook
+(group 1) is independent of the renderer and runs as a cheap lane once
+memory headroom exists (vertex compression lands first, backlog "Cluster
+vertices are 48 B uncompressed", decisions.md "VRAM budget"); placement
+and the contact look (group 2) land after ambient occlusion, because
+rock-to-ground contact is judged through it.
 
-Builds on: `2026-11-23-geo-channels-causal-placement-design.md` (the
+Builds on: `../archive/specs/2026-11-23-geo-channels-causal-placement-design.md` (the
 terrain lane, merged to main on 2026-11-24). Related drafts: `2026-11-21-gtao-design.md` (G2),
 `2026-11-21-materials-fidelity-design.md` (G12). Research:
 `research/2026-11-23-terrain-pcg-deep-research.md` (RVT, channels).

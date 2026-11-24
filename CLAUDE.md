@@ -17,6 +17,8 @@ Docs, read on demand:
 - `docs/superpowers/{specs,plans}/`: designs and implementation plans
   (Status line at the top); milestones in
   `specs/2026-11-19-showcase-roadmap.md`.
+- `docs/superpowers/archive/{specs,plans}/`: finished specs and plans,
+  moved out of the way; read one only when a decisions.md entry points to it.
 - `docs/assets.md`: Megascans and Fab asset import.
 - `docs/reference/cli.md`: every game flag, controls, overlays (G grade
   panel, F3/F4 perf), benchmark and route, reference path tracer, weather,
@@ -43,11 +45,24 @@ Docs, read on demand:
 - Keep this file, `docs/reference/*.md` and `docs/decisions.md` current in
   the same commit as the change they describe (a new flag gets a line in
   `docs/reference/cli.md`, a new pass one in its frame order).
+- The user opens no documents; docs are agent memory. Approval happens in
+  chat: an agent that needs a decision asks at most three questions, each
+  with options, a recommendation and, for a look question, a side-by-side
+  image path, then writes the answer into the spec. Spec status values:
+  draft, decided, in progress, done. Structural changes (visibility
+  buffer, far tile tier, wind) get a spec and a plan; everything else gets
+  a backlog row, the change and a decisions.md entry.
+- Every lane report ends with the same five parts, numbers at 2560x1440:
+  done, measured, look (image paths), needs from the user, next. It also
+  carries: the commit hashes; for each number, the exact command and its
+  raw output line; the `Render WxH` line of the run; image paths for every
+  look claim; and a "not checked" list (everything the report does not
+  prove).
 
 ## Commands
 
 ```bash
-cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation
+cmake -S . -B build && cmake --build build      # Debug: ASan+UBSan, validation + sync validation
 ctest --test-dir build                           # or ./build/tests/tests
 # the build uses ccache and mold automatically when installed (no setup needed)
 flock /tmp/meridian-gpu.lock ./build/game/game   # interactive (WASD, mouse, Esc; F walk/fly)
@@ -108,6 +123,12 @@ the trees back (hidden by default). Capture runs print validation errors,
   exact pixels.
 - Prefer unit tests for math (e.g. frustum planes in tests/mat4_test.cpp)
   over visual checks.
+- Gates (decisions.md "Performance gate restated", "VRAM budget"): route
+  average <= 8.3 ms, heaviest segment <= 11.1 ms, 1% low >= 60 fps per
+  segment (hop frames excluded) at 2560x1440 DLAA with GI on; VRAM
+  resident <= 12 GB and transient peak <= 14 GB at the showcase views.
+  Every spec states its VRAM delta; a branch may not merge above main's
+  peak. Proof of technique, not a merge gate for frame time.
 
 ## Conventions
 

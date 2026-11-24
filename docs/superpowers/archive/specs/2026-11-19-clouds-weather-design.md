@@ -2,7 +2,7 @@
 
 **Status:** done, merged to main 2026-11-20 (plan `../plans/2026-11-19-clouds-weather.md`).
 
-Milestone M4 of the showcase roadmap (`2026-11-19-showcase-roadmap.md`),
+Milestone M4 of the showcase roadmap (`../../specs/2026-11-19-showcase-roadmap.md`),
 widened with the user on 2026-11-19 from "a cumulus layer" to the
 engine's **weather framework plus its cloud renderer**. Built by Lane B
 on the `clouds` branch in its own worktree, in parallel with M1 (Lane A),

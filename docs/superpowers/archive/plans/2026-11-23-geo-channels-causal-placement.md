@@ -10,7 +10,7 @@ Status: done (2026-11-24).
 
 **Tech Stack:** C++20, Vulkan 1.3 compute (GLSL), doctest, bash + magick + python3/numpy (tools).
 
-**Spec:** `docs/superpowers/specs/2026-11-23-geo-channels-causal-placement-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-23-geo-channels-causal-placement-design.md`
 
 ## Global Constraints
 

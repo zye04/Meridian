@@ -1,9 +1,109 @@
 # Resume here (entry point; updated 2026-11-24)
 
-Read this file first. It holds current truth only: state of main, open
-branches, what waits on the user, and the next steps per area. Session
-history lives in git (`git log -- docs/superpowers/resume.md`) and in
-`docs/decisions.md`.
+Read this file first, ask the open questions below, and update the file
+before ending the session. It holds current truth only: open questions,
+running lanes, the ordered next steps, the gates, and the state of main.
+Session history lives in git (`git log -- docs/superpowers/resume.md`) and
+in `docs/decisions.md`.
+
+## Open questions for the user
+
+At most three, each answered in chat (the user opens no documents); the
+agent writes the answer into the spec or here.
+
+None open.
+
+Decided by the user 2026-11-24, not yet applied: reset the saved grade file
+to the starting grade (the file `~/.config/meridian/grade.json` overrides
+the starting grade in every interactive run). To apply, either delete the
+file (`rm ~/.config/meridian/grade.json`; a missing file means the
+defaults, and the sun, haze and fov it holds reset too), or open the game,
+press `G`, click Reset, then Save. Whoever next runs the game
+interactively does it; it was not done in the docs lane. Board issues #9
+and #17 were already closed on 2026-11-24 with a reason comment each.
+
+No spec waits for approval: the broadleaf forest floor spec is decided
+and sequenced, the GTAO spec is superseded (rewrite after the visibility
+buffer), the DAG voxel design is approved.
+
+## Lanes running
+
+| Branch | Window / worktree | State |
+|---|---|---|
+| `g1` | main checkout (`~/Projects/dev/meridian`) | paused, see "Paused: G1" below; exit criteria in its plan |
+| `main` | `../meridian-main` | docs housekeeping lane (this file); no code |
+| `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
+| `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
+
+Lane report shape (every lane ends its report with these five, numbers
+at 2560x1440): done, measured, look (image paths), needs from the user,
+next. The user relays between windows by pasting them.
+
+## Ordered next steps (Fable assessment, 2026-11-24)
+
+The assessment is `.superpowers/fable-review/architecture-assessment.md`
+in the main checkout (git-ignored); decisions.md holds the three entries
+that came out of it ("Performance gate restated", "Visibility buffer is
+unconditional", "VRAM budget").
+
+1. g1: Debug far-field check, main baseline at 1440p, Task 7 look loop,
+   Task 8, Task 9 with the exit criteria in its plan (no list overflow at
+   any evidence view; drawn voxel quads at the overview about the pixel
+   count; peak VRAM <= main's; all evidence re-measured at 1440p); merge.
+2. Versioned `.clusters` file name (landed on g1, 028d3c6).
+3. Measurement repair (split "cull early", exclude hop frames from 1%
+   lows, R5-1 forest walk, explain aa 2.45 vs 1.36 ms, re-measure the
+   scene-early split on current trees), the two capture guards (render
+   size not 2560x1440, any list overflow), the VRAM print and gate, the
+   cascade changes (drop the sun-axis re-render trigger, relax the 0.25 px
+   caster LOD for foliage, static ground cover out of the cascades, voxel
+   casters).
+4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed");
+   the TLAS/BLAS memory check (build them only for `--shadows rt`,
+   `--far-shadows tlas`, `--reference` if g1 removes the last ray query
+   from the default path).
+5. Visibility buffer: spec, then build (structural: spec and plan).
+6. Ambient occlusion respecified on the resolve: GTAO or the visibility
+   bitmask, chosen in that spec.
+7. Forest floor: cook (independent of the renderer, once memory headroom
+   exists), then placement and the contact look (after AO).
+8. Far tile tier spec (instance-less aggregates past ~1 km; aerial gate).
+9. Wind on trees and grass with the static-plus-dynamic shadow split.
+10. Frame pacing, HDR output (before the final grade is tuned, on a real
+    HDR monitor), then the final grade.
+11. Water (river; planar reflections plus screen-space).
+12. Ambient sound.
+
+Ceremony by size: structural changes (visibility buffer, far tile tier,
+wind) get a spec and a plan; everything else gets a backlog row, the
+change and a decisions.md entry. Spec status values: draft, decided,
+in progress, done.
+
+## Gates
+
+Measured on the benchmark route, 2560x1440 native DLAA, GI on:
+
+- Frame time: route average <= 8.3 ms (120 fps); heaviest segment <= 11.1
+  ms (90 fps); 1% low >= 60 fps in every segment, hop frames excluded. 180
+  fps is a stretch figure, not a gate. Proof of technique, not a merge
+  gate.
+- VRAM: resident <= 12 GB, transient peak <= 14 GB at the showcase views,
+  printed by every capture run; every spec states its VRAM delta; g1 may
+  not merge above main's peak (main today: 12.6 GB before the far field
+  loads, 14.4 GB peak, on the 16 GB card).
+- "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
+  (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
+  with 2 m terrain and the far tile tier as backdrop.
+
+## Paused: G1 voxel foliage (branch `g1`)
+
+When the user says to resume G1 / the G1 branch: `git fetch && git checkout
+g1` (unmerged, on origin), then read the "Resume" section at the top of
+`docs/superpowers/plans/2026-11-24-dag-voxel-foliage.md` and the ledger
+beside it (`2026-11-24-dag-voxel-foliage-ledger.md`), and continue with
+superpowers:executing-plans (inline; Opus for the final review, never
+Fable). If `assets/` is missing, run `./tools/fetch-sample-assets.sh`
+first; the `.clusters` caches rebuild on first load (~4-7 min).
 
 ## Paused: G1 voxel foliage (branch `g1`)
 
@@ -31,19 +131,23 @@ placement").
 
 ## Workspace
 
-- Worktrees: the main checkout and `../meridian-canopy` (branch
-  `canopy-backlit`, merged; kept for its 1024 spp references and scripts
-  in `.superpowers/spike-backlit/`, inputs to the canopy steps below).
+- Worktrees: the main checkout (branch `g1`), `../meridian-main` (branch
+  `main`), `../meridian-lane-b`, `../meridian-canopy`.
 - Parked branches (unmerged, on origin; finish or drop when the area comes up):
-  - `far-c`: far-cell raster with two-phase Hi-Z (#10), slower than main.
-  - `far-m-shadow2`: voxel trees cast into cascades 0-3 (#11).
-  - `meadow-y`: far-field grass match WIP.
   - `clouds-25d`, `clouds-25d-mip`: paused 2.5D clouds (volumetric kept).
-  - `farm-cpuvox`: CPU voxelizer prototype (tools/cpuvox), the starting
-    point of the DAG voxel design (`specs/2026-11-24-dag-voxel-foliage-design.md`).
-  - origin only: `clouds` (pre-rebase clouds lane, superseded), `ground2`
-    (natural terrain transitions WIP), `ground2-cliffs` (non-repeating
-    cliffs WIP).
+  - origin only: `ground2` (natural terrain transitions WIP),
+    `ground2-cliffs` (non-repeating cliffs WIP); both wait for the forest
+    floor work to decide them.
+- Archive tags for the five branches deleted on 2026-11-24 (locally and on
+  origin); `git checkout archive/<name>` to read one:
+  - `archive/far-c`: far-cell raster with two-phase Hi-Z, slower than main
+    (the visibility buffer replaces its purpose).
+  - `archive/far-m-shadow2`: voxel trees cast into cascades 0-3 (G1 Task 8
+    does it).
+  - `archive/farm-cpuvox`: CPU voxelizer prototype (tools/cpuvox), absorbed
+    by g1.
+  - `archive/clouds`: pre-rebase clouds lane, superseded.
+  - `archive/meadow-y`: far-field grass match WIP (redone after G1).
 - Old lane notes and tools (next.md, RESUME.md, progress ledgers, capture
   scripts) from the 55 removed worktrees: `.superpowers/archive/<worktree>/`
   in the main checkout (git-ignored). The G7 lane helpers (cap.sh, rgb.py,
@@ -51,23 +155,8 @@ placement").
   `.superpowers/archive/g7/g7/tools/`; the paused `cloudpop` investigation
   in `.superpowers/archive/cloudpop/cloudpop/RESUME.md`.
 - Board: https://github.com/users/zye04/projects/1 (issues #1-#13, #16-#32).
-  Close candidates (user's call): #9 G9 (native TAA vs DLSS, moot since
-  DLAA is the default and the `native` branch is dropped), #17 G14 (giant
-  leaf cards; the card cooks were replaced by traced leaves).
 
-## Waiting for the user
-
-0. DAG voxel foliage design (G1, `specs/2026-11-24-dag-voxel-foliage-design.md`):
-   approve, then writing-plans. User chose the Chlorophyll / Nanite Foliage
-   way (voxels inside the cluster LOD hierarchy) on 2026-11-24.
-1. Broadleaf forest floor spec (`specs/2026-11-24-broadleaf-forest-floor-design.md`):
-   approve, then writing-plans (group 1: cook, audit, photos; group 2 on the
-   geo channels, now on main). The Megascans pack is in ~/Downloads (66 zips).
-2. GTAO spec's 3 decisions (`specs/2026-11-21-gtao-design.md`); proposed
-   first: re-check its double-darkening section against the GI probes.
-3. The saved grade file overrides the starting grade (G panel Reset + Save).
-
-## Next steps per area (agreed order within each)
+## Area notes (detail behind the ordered steps; agreed order within each)
 
 - Canopy lighting (user 2026-11-23): interior sun-path ablation on the new
   terrain (backlog "Forest interior floor"), then front-lit residuals
@@ -92,7 +181,8 @@ placement").
   binary motion switch) is archived, see Workspace.
 - Performance: parity route (`--benchmark 60 out.csv --route
   tools/routes/parity.route --trees`, `python3 -I tools/bench-route.py`)
-  at 27.9 fps against 180; G10 (#10) forest edge cost.
+  at 27.9 fps against the restated gate (see Gates); G10 (#10) forest
+  edge cost.
 
 ## Unreal
 

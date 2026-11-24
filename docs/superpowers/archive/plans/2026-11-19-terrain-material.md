@@ -10,7 +10,7 @@
 
 **Tech Stack:** C++20, Vulkan 1.3, GLSL (bindless textures, buffer device address), Basis Universal, doctest, ImageMagick (`magick`) for image metrics.
 
-**Spec:** `docs/superpowers/specs/2026-11-19-terrain-material-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-19-terrain-material-design.md`
 
 ## Global Constraints
 
