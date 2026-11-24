@@ -51,6 +51,8 @@ tools/motion-clarity.sh build-release out-dir    # in-motion jitter (frame 120 v
 ./build/tools/cook/meridian-cook --texture in.jpg out.ktx2 color|data|normal
 ./build/tools/cook/meridian-cook --stats a.ktx2 a.png   # mean linear colour (alpha-weighted) as the renderer transcodes it vs the source
 ./build/tools/cook/meridian-cook --heightfield in.f32 W H SPACING out.height   # float32 m -> 16-bit .height
+./build/tools/cook/meridian-cook --geo in.height out.geo RATIO [LATITUDE]   # geo channels (tools/cook/geo_channels.h) beside the .height; the game loads x.geo with x.height
+./build/game/game --terrain assets/terrain/relief-0.5.height --score-forest assets/terrain/relief-forest-truth.bin   # forest rule vs swissSURFACE3D canopy: kappa, F1
 cmake -S . -B build-brute -DMERIDIAN_TERRAIN_MARCH_BRUTE_FORCE=ON   # A/B: terrain shadows by a 1 m linear march
 cmake -S . -B build-off -DMERIDIAN_DLSS=OFF      # licence-clean build: no NVIDIA SDK, TAA only
 python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance per pixel rect (top-left origin, end exclusive) + ratio to the first
@@ -951,9 +953,14 @@ barriers account for that.
   code, not ours).
 - Megascans trees, ground surfaces, the Fab cliff and their import tools:
   `docs/assets.md`. The rock placement layer and the terrain material's
-  rock blend share `kRockNormalY` (renderer.h); the forest layers and the
-  material's forest floor share the forest mask (`kMaskFrequency`...,
-  main.cpp; `forestMask` in surface.glsl runs placement.glsl's mask).
+  rock blend share `kRockNormalY` (renderer.h). Placement layers are
+  causal (spec `2026-11-23-geo-channels-causal-placement-design.md`):
+  rules read the `.geo` channels (`DensityRule::channels`) and an earlier
+  layer's density (`PlacementLayer::parent`); without a `.geo` the game
+  skips channel layers. The forest floor follows the forest layer
+  (`TerrainMaterial::forestLayerId`): setPlacement bakes its density per
+  geo texel (placement.comp `PLACEMENT_FOREST`), surface.glsl
+  `forestDensity` reads it.
 - Dither patterns are cached in `assets/placement-cache/dither-<layer
   id>-<points>.bin` (`cachedDitherPattern`, placement.h; the game passes
   the directory to `setPlacement`): header = magic, format version, seed,

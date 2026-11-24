@@ -148,6 +148,10 @@ if [[ ! -f "$root/assets/terrain/napf.height" ]]; then
   "$cook" --heightfield "$napf_tiles/napf.f32" 7500 7500 2 "$root/assets/terrain/napf.height"
   rm -f "${rows[@]}"
 fi
+# Its geo channels (4 m texels), which the causal placement layers read.
+if [[ ! -f "$root/assets/terrain/napf.geo" ]]; then
+  "$cook" --geo "$root/assets/terrain/napf.height" "$root/assets/terrain/napf.geo" 2
+fi
 
 # Megaplants: each zip is extracted into its own empty directory (untrusted
 # data, kept apart from the scripts that read it), converted to an

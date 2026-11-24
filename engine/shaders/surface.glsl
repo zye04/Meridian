@@ -650,7 +650,7 @@ vec3 parallaxHit(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy, float de
     return hit;
 }
 
-// Each role's weight from the ground's shape, the forest mask and noise,
+// Each role's weight from the ground's shape, the forest layer and noise,
 // stacked bottom to top in TerrainRole order (grass at the bottom, rock on
 // top) with height blends; ~5 m edge noise makes the borders irregular. A
 // role is only sampled where it shows: weight above 0 and nothing above it
