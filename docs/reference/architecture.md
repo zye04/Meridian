@@ -207,8 +207,9 @@ box planes, no curvature, orthographic LOD of 1 texel, no occlusion, no
 visibility writes, no streamed layers, no far switch,
 LOD error 0.25 texel in cascades 0-1 for thin foliage, the depth range up
 to the terrain's highest sample + 150 m) into its own
-counters and draw lists, and its voxel clusters through voxel_bricks.comp
-seen along the sun (coverage by the voxel's opacity along the sun, no
+counters and draw lists, and in cascades 0-3 its voxel clusters (cascade 4
+switches every cell to its far cell, so placed trees cast there as far-cell
+voxels) through voxel_bricks.comp seen along the sun (coverage by the voxel's opacity along the sun, no
 terrain march; the voxel lists are scratch shared with the next cascade and
 the main view, a mesh-read -> compute-write barrier between them); then
 shadow.mesh (+ shadow_masked.frag for alpha-masked) draws all four buckets
@@ -247,8 +248,10 @@ single/double-sided, and lists voxel clusters (instance, cluster) for
 voxel_bricks.comp, one workgroup per voxel cluster after each phase's
 cluster cull, which lists its bricks in the frustum (with the terrain's
 sun visibility marched once per brick) and, compacted, the voxels that
-draw: coverage by a stable hash of instance, brick and voxel against the
-voxel's opacity along the view, skipping voxels whose optical depth out
+draw: coverage by a stable hash of instance, the brick's lattice place and
+edge, the cluster's seed (a voxel cluster's ClusterInfo.firstVertex: the
+mesh's seed from its cluster cache key XOR the cluster's index in its
+ClusterLod) and voxel, against the voxel's opacity along the view, skipping voxels whose optical depth out
 of the model toward the camera exceeds 3.5; a masked cluster of radius <= 1 m also marches the
 terrain toward the sun once and packs the result into its entry's top 8
 bits, which mesh.frag uses instead of its per-fragment march) -> atmosphere LUTs

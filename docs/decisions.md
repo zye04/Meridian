@@ -4795,7 +4795,9 @@ breakdown is being measured by the g1 lane.
 
 Chosen (medium confidence on the numbers):
 
-- Resident <= 12 GB and transient peak <= 14 GB at the showcase views,
+- Resident <= 12 GiB (12288 MiB) and transient peak <= 14 GiB (14336 MiB),
+  device-local (VMA's blocks on the DEVICE_LOCAL heaps, the figure the
+  capture runs print first), at the showcase views,
   printed by every capture run. Every spec states its VRAM delta. g1 may
   not merge above main's peak.
 - Geometry compression (backlog "Cluster vertices are 48 B uncompressed",
@@ -4837,8 +4839,12 @@ gate protects).
 
 ## Voxel clusters cast into the cascades (G1 Task 8, G11, 2026-11-24)
 
-- **The same voxels, seen from the sun**: in a cascade, cluster_cull.comp
-  lists voxel clusters as in the main view, voxel_bricks.comp keeps a voxel
+- **The same voxels, seen from the sun, in cascades 0-3**: cascade 4
+  (`shadowFarCells`) switches every cell with trees to its far cell
+  (cell_cull.comp skips the pixel test in a shadow view), so placed trees
+  cast there as far-cell voxels and only hand-placed instances reach the
+  cluster cull. In cascades 0-3, cluster_cull.comp lists voxel clusters as
+  in the main view, voxel_bricks.comp keeps a voxel
   where the stable coverage hash falls under its opacity along the sun (and
   drops those hidden deeper than kVoxelHiddenDepth toward it), and
   voxel_instance.mesh draws each as an orthographic quad facing the sun,
