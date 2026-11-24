@@ -26,10 +26,16 @@ his showcase and wants that fidelity everywhere.
 - Lighting quality and correctness (occlusion, translucency, shadows,
   exposure).
 - Materials that hold up like a photo up close and far away.
-- Performance as the proof of right technique: >= 180 fps average
-  (5.5 ms) at native 2560x1440 on the RTX 4080, >= ~105 fps (9.5 ms) in
-  the heaviest views (his ~130 fps average / ~80 fps dense forest on an
-  RTX 3080, scaled by the 4080's ~30% lead).
+- Performance as the proof of right technique, restated 2026-11-24
+  (decisions.md "Performance gate restated"), on the benchmark route at
+  native 2560x1440 DLAA with GI on: route average <= 8.3 ms (120 fps),
+  heaviest segment <= 11.1 ms (90 fps), 1% low >= 60 fps in every
+  segment with hop frames excluded. 180 fps stays a stretch figure. The
+  original bar (>= 180 fps average, >= ~105 fps heaviest, scaled from his
+  ~130 / ~80 fps on an RTX 3080) did not survive the settled choices: the
+  fixed per-frame costs take 4.2-5.4 ms.
+- Memory beside frame time (decisions.md "VRAM budget"): resident <= 12
+  GB, transient peak <= 14 GB at the showcase views.
 
 ## Non-goals (this programme)
 
@@ -57,8 +63,12 @@ his showcase and wants that fidelity everywhere.
    count, instance count or overdraw, the technique is wrong; fix the
    technique, never cut the content. Heavy, detailed assets are allowed
    and are themselves a test.
-3. **Chlorophyll's approach by default**, unless something is known to be
-   better (then logged in decisions.md with the reason).
+3. **Match the result, not the architecture** (restated 2026-11-24).
+   Adopt Chlorophyll's technique where it is his stated answer to a
+   problem Meridian measurably has (visibility buffer, ground cover out
+   of the shadow maps, semi-static shadows); log the choice in
+   decisions.md. The user's deliberate divergences stay (volumetric
+   clouds, native 1440p DLAA, probe GI) and the gate pays for them.
 4. **Evidence for every claim:** matched-view side-by-sides with his
    frames, motion gates, the benchmark route; research cited and verified.
 
@@ -201,7 +211,12 @@ Marked as the orchestrator's calls unless stated as the user's.
    voxel trees 0.9, clouds 0.75), forest interior 6.8 ms, forest
    overview ~13 ms. Phase 0's benchmark route replaces these with route
    averages and 1% lows.
-3. **The visibility buffer is conditional, with a trigger** (CE is a
+3. **Superseded 2026-11-24: the visibility buffer is unconditional**
+   (decisions.md "Visibility buffer is unconditional": the trigger below
+   is met by a wide margin; its spec follows g1's merge and it lands
+   before any new forward per-fragment lighting pass). Original call,
+   kept for the record: the visibility buffer is conditional, with a
+   trigger (CE is a
    visibility-buffer deferred renderer with all shading in compute and
    names it his foliage-overdraw answer, F17; rule 3 would make it the
    default, this call keeps it gated until the user revisits it): after

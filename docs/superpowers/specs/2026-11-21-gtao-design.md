@@ -1,6 +1,11 @@
 # GTAO (issue #2, gap G2)
 
-Status: draft for user review. Pillar 2 of
+Status: superseded (2026-11-24), rewrite after the visibility buffer spec
+(decisions.md "Visibility buffer is unconditional"). Decision 2 below adds a
+forward ambient-radiance attachment written by every shading shader, which
+the visibility buffer removes (the resolve has ambient and occlusion in one
+place); the three open decisions are superseded with it, and GTAO against
+the visibility bitmask is chosen in the rewrite. Pillar 2 of
 `2026-11-21-chlorophyll-parity-programme-design.md`; sources and their
 verification status in `../research/2026-11-21-B-ambient-occlusion.md`.
 All ms figures below are estimates until measured on this GPU.
