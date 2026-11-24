@@ -80,3 +80,101 @@ Task 9 (terminal merge, kVoxelizerVersion 10, in the cache file name): high view
 Task 9: final-caps edge: GPU 23.81 ms, 0 dropped, peak 14261 MiB (all heaps 14357), no spill. Coverage hash keyed on the brick lattice origin, edge and mesh instead of the pool index: edge mean 27.16 -> 27.23, drawn instances 4127 -> 4958, voxels 7536392 -> 8057263, GPU 24.38 ms (new pattern, occlusion follows it).
 Task 8: voxel clusters cast into all five cascades (cluster_cull lists them in shadowView; voxel_bricks along the sun; voxel_instance.mesh orthographic, depth-only pipeline; scene copy's drawCounters = shadowCounters; mesh-read -> compute-write barrier per cascade). Ruling: all cascades, not 0-3 as planned (main's triangle clusters cast in every cascade, the far cells cover only what instances don't). Region means vs ray traced truth (main --shadows rt): edge g1 21.11 / rt 21.41 / main raster 28.95; overview crop 97.97 / 99.19 / 106.75. Caster moved half a voxel from the sun: no change (21.27), dropped. Sun shadows max: edge 84.74 (main 80.61), overview 26.96 (main 40.70). Validation build: 0 errors.
 Item 7 (8738167, 1440p): six views GPU ms edge 24.51, summit 20.44, overview 22.39, high 48.84, interior 18.10, fly 24.44; all 0 dropped, 0 validation errors, no spill, peak 14261 MiB (all heaps 14357). Warm Release startup to the first frame (edge, --trees, --frames 1): g1 81.12/81.32 s, main 85.52/85.56 s. motion-clarity g1 vs main: forest still jitter 0.49 vs 2.66, side5 4.18/3.43 vs 6.70/6.01 (jitter/error), side30 4.97/4.04 vs 7.53/6.48, turn1 2.12/2.25 vs 4.29/4.92; ground and sky equal. Far horizon (-359 1408.7 -465 1.57 0 --clouds off): g1 25.97 ms, main 31.68. Look: g1's mid-distance forest reads darker and bluer than main (fly frames, overview); shadow coverage matches ray-traced truth at edge and overview, the hue gap is unexplained.
+
+## Evidence index (reports 2026-11-24 evening): command, then raw output lines; paths under .superpowers/g1/ (git-ignored, main checkout)
+Views (6 evidence views): .superpowers/g1/t9d/views.sh BUILD OUT PREFIX = flock /tmp/meridian-gpu.lock BUILD/game/game --trees --camera <view> --capture OUT/<view>.png (fly: --camera 700 1300 -400 -1.55 -0.1 --camera-velocity -40 -3 0 --capture-sequence 10 --frames 300).
+Item 7 batch: .superpowers/g1/t9d/item7.sh (views on build-release at 8738167; startup = wall time of --trees --camera 600 1205.6 -400 -1.55 0.02 --frames 1, g1 and main twice; tools/motion-clarity.sh BUILD OUT for g1 and main).
+item7 edge: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 edge: Rendered 120 frames, GPU 24.51 ms, 4958 drawn instances, 305530 clusters, 16494072 triangles, 320 terrain nodes, cells 1080, far cells 102, voxel trees 138272 (bricks 7552040, voxels 8057263), bvh nodes 583098, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 edge: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 summit: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 summit: Rendered 120 frames, GPU 20.44 ms, 53783 drawn instances, 204319 clusters, 11886633 triangles, 323 terrain nodes, cells 4404, far cells 158, voxel trees 117967 (bricks 6011590, voxels 6222247), bvh nodes 556961, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 summit: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 overview: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 overview: Rendered 120 frames, GPU 22.39 ms, 22294 drawn instances, 6564 clusters, 416961 triangles, 112 terrain nodes, cells 876, far cells 0, voxel trees 300409 (bricks 8835310, voxels 9369325), bvh nodes 833271, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 overview: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 high: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 high: Rendered 120 frames, GPU 48.84 ms, 680464 drawn instances, 0 clusters, 0 triangles, 167 terrain nodes, cells 12110, far cells 285, voxel trees 3853120 (bricks 15054728, voxels 3360112), bvh nodes 6811001, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 high: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 under: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 under: Rendered 120 frames, GPU 18.10 ms, 1669 drawn instances, 322048 clusters, 17066725 triangles, 51 terrain nodes, cells 78, far cells 0, voxel trees 53101 (bricks 2354010, voxels 2135315), bvh nodes 219934, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 under: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 fly: Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS
+item7 fly: Rendered 300 frames, GPU 24.44 ms, 19800 drawn instances, 222653 clusters, 12091632 triangles, 292 terrain nodes, cells 4140, far cells 108, voxel trees 224163 (bricks 8890991, voxels 9462579), bvh nodes 952187, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+item7 fly: device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+item7 startup (s, from startup.txt): g1 81.124245035;main 85.515691692;g1 81.316923872;main 85.555937761;
+item7 motion g1:
+  case           region     sharp   ratio   jitter    error
+  forest_still   all       0.5005  1.0000   0.4896        -
+  forest_side5   all       0.4410  0.8813   4.1802   3.4345
+  forest_side30  all       0.4308  0.8609   4.9743   4.0362
+  forest_turn1   all       0.4510  0.9011   2.1161   2.2515
+  ground_still   all       0.5624  1.0000   1.1547        -
+  ground_side5   all       0.4889  0.8694   7.8955  10.1175
+  ground_fwd30   all       0.4867  0.8654   9.3609  16.9889
+  ground_turn1   all       0.5074  0.9023   4.4085   7.2669
+  sky_still      clouds    0.0600  1.0000   0.1242        -
+  sky_drift      clouds    0.0600  0.9998   0.1257        -
+  sky_turn1      clouds    0.0606  1.0094   0.6499   1.9354
+  sky_still      detail    0.0211  1.0000   0.1557        -
+  sky_drift      detail    0.0213  1.0127   0.1539   0.5787
+  sky_turn1      detail    0.0181  0.8570   0.8739   1.9287
+  resolution: 2560x1440
+item7 motion main:
+  case           region     sharp   ratio   jitter    error
+  forest_still   all       0.5790  1.0000   2.6570        -
+  forest_side5   all       0.5067  0.8751   6.7033   6.0099
+  forest_side30  all       0.4971  0.8587   7.5335   6.4789
+  forest_turn1   all       0.5161  0.8914   4.2914   4.9248
+  ground_still   all       0.5627  1.0000   1.1552        -
+  ground_side5   all       0.4892  0.8693   7.8979  10.1157
+  ground_fwd30   all       0.4875  0.8664   9.3702  17.0387
+  ground_turn1   all       0.5078  0.9025   4.4138   7.2650
+  sky_still      clouds    0.0600  1.0000   0.1242        -
+  sky_drift      clouds    0.0600  0.9998   0.1257        -
+  sky_turn1      clouds    0.0606  1.0094   0.6498   1.9366
+  sky_still      detail    0.0211  1.0000   0.1557        -
+  sky_drift      detail    0.0213  1.0127   0.1539   0.5787
+  sky_turn1      detail    0.0181  0.8570   0.8737   1.9324
+  resolution: 2560x1440
+horizon g1 (flock … --trees --camera -359 1408.7 -465 1.57 0 --clouds off --capture look/horizon_g1.png): Rendered 120 frames, GPU 25.97 ms, 84131 drawn instances, 347142 clusters, 18892237 triangles, 320 terrain nodes, cells 7499, far cells 470, voxel trees 364274 (bricks 7159012, voxels 7170767), bvh nodes 1445459, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+horizon main (flock … --trees --camera -359 1408.7 -465 1.57 0 --clouds off --capture look/horizon_main.png): Rendered 120 frames, GPU 31.68 ms, 84744 drawn instances, 915753 clusters, 58522904 triangles, 320 terrain nodes, cells 7399, far cells 512, voxel trees 45222 (bricks 3066612, voxels 5709777), bvh nodes 387828, 0 dropped by full cull lists (chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0), placed 3364956, 0 validation errors
+Task 8 sun shadows (flock build-release/game/game --trees --camera <view> --capture t8/<view>.png; main from main1440/): edge g1 sun shadows: 5 cascade renders, max 85.27 ms, main sun shadows: 5 cascade renders, max 80.61 ms; overview g1 sun shadows: 5 cascade renders, max 27.01 ms, main sun shadows: 5 cascade renders, max 40.70 ms
+Ray traced truth (flock ../meridian-main/build-release/game/game --trees --shadows rt --camera <view> --capture t8/<view>_rt_main.png): Rendered 120 frames, GPU 49.08 ms, 4613 drawn instances, 131 / Rendered 120 frames, GPU 49.35 ms, 23522 drawn instances, 41
+Region means (python3 -I .superpowers/g1/q2/region_means.py, run in .superpowers/g1): edge rows 200-1000 28.95 21.41 21.11;overview crop 106.75 99.19 97.97;
+Ground-only (python3 -I .superpowers/g1/q2/ground_mask.py): ground mask px 156478 4.24 %;main raster  ground mean 144.84;main rt      ground mean 101.21;g1 T8        ground mean  96.67;g1 pre-T8    ground mean 126.78;
+Fly ray traced (flock ../meridian-main/build-release/game/game --trees --shadows rt --camera 700 1300 -400 -1.55 -0.1 --camera-velocity -40 -3 0 --capture-sequence 10 --frames 300 --capture q2/fly_rt_main.png): Rendered 300 frames, GPU 40.52 ms, 20340 drawn instances, 911862 clusters, 55413
+OKLCh fly frame 010 (magick <frame> -flip q2/fly010_<b>.png; python3 -I tools/resemblance.py q2/fly010_g1.png q2/fly010_<ref>.png --regions q2/regions.json --view fly010; regions: foliage-lit = far canopy 0.05,0.08-0.95,0.35, foliage-shadow = near canopy 0.05,0.41-0.95,0.65, grass = understory/ground 0.30,0.82-0.70,0.903):
+  g1 vs main rt (metric ours ref delta):
+    foliage-lit L                 0.306    0.305    0.001
+    foliage-lit C                 0.059    0.059   -0.001
+    foliage-lit h               250.734  250.989   -0.255
+    foliage-lit L p5              0.221    0.220    0.000
+    foliage-lit L p95             0.417    0.406    0.011
+    foliage-shadow L              0.254    0.264   -0.010
+    foliage-shadow C              0.043    0.043    0.000
+    foliage-shadow h            246.606  245.589    1.018
+    foliage-shadow L p5           0.173    0.174   -0.001
+    foliage-shadow L p95          0.465    0.479   -0.014
+    grass L                       0.395    0.375    0.021
+    grass C                       0.032    0.033   -0.000
+    grass h                     225.978  224.489    1.488
+    grass L p5                    0.164    0.164    0.000
+    grass L p95                   0.897    0.841    0.056
+  g1 vs main raster:
+    foliage-lit L                 0.306    0.326   -0.020
+    foliage-lit C                 0.059    0.055    0.004
+    foliage-lit h               250.734  249.263    1.471
+    foliage-lit L p5              0.221    0.223   -0.003
+    foliage-lit L p95             0.417    0.565   -0.148
+    foliage-shadow L              0.254    0.330   -0.076
+    foliage-shadow C              0.043    0.038    0.005
+    foliage-shadow h            246.606  226.615   19.991
+    foliage-shadow L p5           0.173    0.180   -0.007
+    foliage-shadow L p95          0.465    0.680   -0.215
+    grass L                       0.395    0.510   -0.115
+    grass C                       0.032    0.039   -0.007
+    grass h                     225.978  131.621   94.356
+    grass L p5                    0.164    0.174   -0.011
+    grass L p95                   0.897    0.902   -0.005
+Fly steps (python3 -I .superpowers/g1/q2/fly_steps.py): mean 27.39 33.83 peak 48.98 53.43
