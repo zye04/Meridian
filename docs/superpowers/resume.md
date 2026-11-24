@@ -2,6 +2,14 @@
 
 Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
 
+## Session 2026-11-24 (broadleaf forest floor, brainstorm)
+
+User downloaded the Megascans European Broadleaf Forest pack (66 zips in
+~/Downloads). Design written: `specs/2026-11-24-broadleaf-forest-floor-design.md`
+(approach A, builder check folded in). Next: user reviews and approves the
+spec, then writing-plans (group 1 now: cook, audit, photos; group 2 after
+the geo lane merges).
+
 ## Session 2026-11-23 night (canopy lighting lane, worktree `../meridian-canopy`)
 
 Spike captures, 1024 spp references (edge `reffix-*` with the new leaf rule,
