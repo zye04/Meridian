@@ -5,6 +5,16 @@ branches, what waits on the user, and the next steps per area. Session
 history lives in git (`git log -- docs/superpowers/resume.md`) and in
 `docs/decisions.md`.
 
+## Paused: G1 voxel foliage (branch `g1`)
+
+When the user says to resume G1 / the G1 branch: `git fetch && git checkout
+g1` (unmerged, on origin), then read the "Resume" section at the top of
+`docs/superpowers/plans/2026-11-24-dag-voxel-foliage.md` and the ledger
+beside it (`2026-11-24-dag-voxel-foliage-ledger.md`), and continue with
+superpowers:executing-plans (inline; Opus for the final review, never
+Fable). If `assets/` is missing, run `./tools/fetch-sample-assets.sh`
+first; the `.clusters` caches rebuild on first load (~4-7 min).
+
 ## State of main (2026-11-24)
 
 Native 1440p; DLSS Super Resolution DLAA default (own stable TAA = fallback,
