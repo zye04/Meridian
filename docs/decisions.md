@@ -1265,9 +1265,14 @@ slice 5's compression and streaming stay deferred.
   slack reached 1.79 GB at `--trees` (6279 MiB allocated, 4491 MiB used),
   and the far-field splat's 1.5 GB transient then went past the 16 GB
   RTX 4080, so the driver paged and the splat took 55 s. `setPlacement`
-  first copies every pool into an exact-size buffer (`trimPools`; one
-  submit, models are loaded by then; a later upload grows again):
-  device memory 14481 -> 12932 MiB, splat 55 s -> 0.33 s.
+  first copies every pool into an exact-size buffer (`trimPools`; models
+  are loaded by then; a later upload grows again): device memory 14481 ->
+  12932 MiB, splat 55 s -> 0.33 s. One pool at a time, each old one freed
+  before the next is allocated: trimming all ten in one submit exceeded
+  device memory and VMA (`VMA_MEMORY_USAGE_AUTO`) silently placed 2.2 GB
+  of voxel and cluster pools in system memory (forest edge 1440p 24.6 ->
+  42.3 ms, found by bisection). `createBuffer` now warns when a GPU-only
+  buffer lands outside device memory.
 - **Limits that remain** are structural and checked in `uploadMesh`, each
   with its own error: work items pack a first cluster index into 26 bits
   (`kMaxClusterIndex`, cull.glsl); vertex offsets are int32 and other

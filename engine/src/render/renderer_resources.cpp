@@ -28,6 +28,16 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
         "vmaCreateBufferWithAlignment");
   buffer.mapped = info.pMappedData;
   buffer.size = size;
+  if (flags == 0) {
+    // Past the device-local budget VMA silently falls back to system memory,
+    // which every later GPU read then pays for over PCIe.
+    VkMemoryPropertyFlags properties = 0;
+    vmaGetMemoryTypeProperties(allocator, info.memoryType, &properties);
+    if (!(properties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+      std::fprintf(stderr, "warning: a %.0f MiB GPU buffer is outside device memory\n",
+                   static_cast<double>(size) / (1 << 20));
+    }
+  }
 
   if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
     VkBufferDeviceAddressInfo addressInfo{};
@@ -57,7 +67,6 @@ void Renderer::Impl::trimPools() {
     Buffer &pool;
     VkDeviceSize used;
     VkBufferUsageFlags usage;
-    Buffer trimmed{};
   };
   Trim trims[] = {
       {vertexPool, VkDeviceSize{vertexCount} * sizeof(Vertex), kVertexPoolUsage},
@@ -71,43 +80,36 @@ void Renderer::Impl::trimPools() {
       {voxelPool, VkDeviceSize{voxelCount} * sizeof(PackedVoxel), kPoolUsage},
       {voxelAxisPool, VkDeviceSize{voxelCount} * sizeof(uint32_t), kPoolUsage},
   };
-  bool any = false;
-  for (Trim &t : trims) {
-    const VkDeviceSize bytes = std::max(t.used, kMinPoolBytes);
-    if (bytes < t.pool.size) {
-      t.trimmed = createBuffer(bytes, t.usage, 0);
-      any = true;
-    }
-  }
-  if (!any) {
-    return;
-  }
   // Frames in flight may still read the pools, and the copies read them.
   check(vkDeviceWaitIdle(device.device), "vkDeviceWaitIdle");
-  submitNow([&](VkCommandBuffer cmd) {
-    for (const Trim &t : trims) {
-      if (t.trimmed.buffer != VK_NULL_HANDLE && t.used > 0) {
-        const VkBufferCopy copy{0, 0, t.used};
-        vkCmdCopyBuffer(cmd, t.pool.buffer, t.trimmed.buffer, 1, &copy);
-      }
-    }
-    VkMemoryBarrier2 copied{};
-    copied.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-    copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    copied.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    copied.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
-    VkDependencyInfo dependency{};
-    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency.memoryBarrierCount = 1;
-    dependency.pMemoryBarriers = &copied;
-    vkCmdPipelineBarrier2(cmd, &dependency);
-  });
+  // One pool at a time, the old one freed before the next is allocated: all
+  // the copies at once exceeded device memory and VMA placed them in system
+  // memory (2.2 GB of voxel and cluster pools, forest edge 25 -> 42 ms).
   for (Trim &t : trims) {
-    if (t.trimmed.buffer != VK_NULL_HANDLE) {
-      destroyBuffer(t.pool);
-      t.pool = t.trimmed;
+    const VkDeviceSize bytes = std::max(t.used, kMinPoolBytes);
+    if (bytes >= t.pool.size) {
+      continue;
     }
+    Buffer trimmed = createBuffer(bytes, t.usage, 0);
+    submitNow([&](VkCommandBuffer cmd) {
+      if (t.used > 0) {
+        const VkBufferCopy copy{0, 0, t.used};
+        vkCmdCopyBuffer(cmd, t.pool.buffer, trimmed.buffer, 1, &copy);
+      }
+      VkMemoryBarrier2 copied{};
+      copied.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+      copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+      copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+      copied.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+      copied.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+      VkDependencyInfo dependency{};
+      dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+      dependency.memoryBarrierCount = 1;
+      dependency.pMemoryBarriers = &copied;
+      vkCmdPipelineBarrier2(cmd, &dependency);
+    });
+    destroyBuffer(t.pool);
+    t.pool = trimmed;
   }
   writeVoxelPoolInfo();
 }
