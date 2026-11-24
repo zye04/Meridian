@@ -22,7 +22,7 @@ const uint kCounterVoxelDrops = 176u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 1u << 20;
-const uint kMaxVoxelQuads = 1u << 23;
+const uint kMaxVoxelQuads = 1u << 24;
 // Where the voxel lists start in SceneData.voxelInstances (uvec2 entries:
 // cluster entry | terrain sun << 31, pool brick << 6 | voxel), per phase
 // after the cluster lists.

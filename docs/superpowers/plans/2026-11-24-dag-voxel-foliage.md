@@ -10,9 +10,11 @@ Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
 Findings from the last runs (ledger has details):
 - All G1 evidence before 2026-11-24 15:00 ran at 1920x1080 (monitor off,
   Hyprland fallback), not 1440p. Re-measure main and g1 at 1440p.
-- At 1440p the forest overview (`--camera 700 1450 -400 -1.55 -0.5
-  --trees`) overflows `kMaxVoxelQuads` (8388608, ~0.95M dropped): fix
-  before judging the look (Task 7) or GPU time.
+- Done 2026-11-24: the 1440p forest overview (`--camera 700 1450 -400
+  -1.55 -0.5 --trees`) overflowed `kMaxVoxelQuads` (2^23, ~0.95M
+  dropped); cap now 2^24: 9.29M quads, 0 dropped, GPU 21.7 ms (main at
+  1440p not yet measured). Cutting the quad count (~2.5 per pixel) is
+  Task 7/9 work.
 - Done 2026-11-24: g1 peaked at 16.1-16.7 GB on the 16 GB RTX 4080 (pool
   growth slack 1.79 GB), so the far-field splat paged (~56 s); `trimPools`
   before placement: peak 14.6 GB, splat 0.33 s.

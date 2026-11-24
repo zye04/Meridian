@@ -997,7 +997,7 @@ static_assert(sizeof(FarCheckConstants) == 32);
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
 constexpr uint32_t kMaxVoxelInstances = 1u << 20;
-constexpr uint32_t kMaxVoxelQuads = 1u << 23;
+constexpr uint32_t kMaxVoxelQuads = 1u << 24;
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at
 // firstVoxel + the present voxels below it.
