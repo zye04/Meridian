@@ -5,6 +5,17 @@ Status: in progress, paused 2026-11-24 on branch `g1` (pushed). Done: Tasks
 Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
 (copy of the git-ignored `.superpowers/sdd/` ledger).
 
+## Exit criteria (user's direction review, 2026-11-24)
+
+Finish as designed, plus, all at 2560x1440:
+1. No list overflow at any evidence view.
+2. Drawn voxel quads at the forest overview no more than about the pixel
+   count (~3.7M); the 2^24 cap is a stopgap. Cull hidden voxels first
+   (not a look change), voxel size only after.
+3. Peak VRAM no higher than main's measured peak (and within the phase 2
+   gate: resident <= 12 GB, peak <= 14 GB).
+4. Every number re-measured at 1440p (main and g1).
+
 ## Resume (paused 2026-11-24)
 
 Findings from the last runs (ledger has details):
