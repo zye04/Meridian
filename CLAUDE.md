@@ -43,6 +43,15 @@ Docs, read on demand:
 - Keep this file, `docs/reference/*.md` and `docs/decisions.md` current in
   the same commit as the change they describe (a new flag gets a line in
   `docs/reference/cli.md`, a new pass one in its frame order).
+- The user opens no documents; docs are agent memory. Approval happens in
+  chat: an agent that needs a decision asks at most three questions, each
+  with options, a recommendation and, for a look question, a side-by-side
+  image path, then writes the answer into the spec. Spec status values:
+  draft, decided, in progress, done. Structural changes (visibility
+  buffer, far tile tier, wind) get a spec and a plan; everything else gets
+  a backlog row, the change and a decisions.md entry.
+- Every lane report ends with the same five parts, numbers at 2560x1440:
+  done, measured, look (image paths), needs from the user, next.
 
 ## Commands
 
@@ -108,6 +117,12 @@ the trees back (hidden by default). Capture runs print validation errors,
   exact pixels.
 - Prefer unit tests for math (e.g. frustum planes in tests/mat4_test.cpp)
   over visual checks.
+- Gates (decisions.md "Performance gate restated", "VRAM budget"): route
+  average <= 8.3 ms, heaviest segment <= 11.1 ms, 1% low >= 60 fps per
+  segment (hop frames excluded) at 2560x1440 DLAA with GI on; VRAM
+  resident <= 12 GB and transient peak <= 14 GB at the showcase views.
+  Every spec states its VRAM delta; a branch may not merge above main's
+  peak. Proof of technique, not a merge gate for frame time.
 
 ## Conventions
 
