@@ -1,6 +1,6 @@
 # Geo channels and causal placement (terrain lane steps 2-3)
 
-Status: design, awaiting user approval (2026-11-23).
+Status: implemented (2026-11-24); results in decisions.md "Geo channels and causal placement".
 
 Context: `research/2026-11-23-terrain-triage.md` (direction, decisions 2-3,
 plan steps 2-3; step 1 result: real relief matters, the patch at

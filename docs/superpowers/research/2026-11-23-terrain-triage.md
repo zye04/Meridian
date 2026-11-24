@@ -159,3 +159,13 @@ amplitude. Today's isotropic noise is worse than none on open pasture. The
 gain also reaches mid-distance hillsides, where the detail noise never
 acts. Caveat: the shadow-height map's 4 m texels cast no shadows of the
 0.5 m relief; what shows is normals, silhouettes and contact shadows.
+
+## Steps 2-3 result (2026-11-24)
+
+Done: geo channels in the cook and causal placement on them (decisions.md
+"Geo channels and causal placement"). The forest follows the Napf's land
+use (steep and shaded ground wooded, gentle sunny ground pasture), scored
+against swissSURFACE3D canopy at kappa 0.461. Next for the lane: step 4
+(fine relief synthesis, judged against the 0.5 m patch) or the 0.5 m
+height clipmap when the showcase needs the full area; instance-level
+dependence and wet/scree materials are in the backlog.

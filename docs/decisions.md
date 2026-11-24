@@ -4585,3 +4585,41 @@ on, as the march already does after each step. A Python twin of the march over
 napf.height: 42 of 300 random downward rays from the interior camera and 124 of
 300 from the default start disagreed with a 0.25 m brute march, 0 after. Edge
 view against the reference: backlit 0.128 -> 0.121 (GI), front 0.069 either way.
+
+## Geo channels and causal placement (2026-11-24)
+
+Terrain lane steps 2-3 (research/2026-11-23-terrain-triage.md; spec and
+plan `2026-11-23-geo-channels-causal-placement*`). Placement decorated the
+terrain with noise masks; real ground puts things where they grow or fall.
+
+- Channels: `meridian-cook --geo` writes 8-bit channels beside the
+  heightfield (`.geo`, meridian/geo.h, generic to the engine; meaning and
+  encodings in tools/cook/geo_channels.h): topographic wetness index (Beven
+  and Kirkby 1979) and specific catchment area from FD8 multiple flow
+  direction (Freeman 1991, exponent 1.1; D8 stripes) over a
+  Priority-Flood+epsilon filled DEM (Barnes et al. 2014) smoothed to ~4 m
+  (Lidberg et al. 2021); topographic position at 6 m and 40 m; annual
+  direct sun relative to flat open ground with a 16-azimuth terrain horizon
+  at 47 N; rockfall reach below ground steeper than 45 degrees within a 32
+  degree energy line (Heim's Fahrboschung), from the source's foot. Own C++
+  (tested on analytic surfaces) rather than WhiteboxTools: no external
+  binary, runs on any heightfield. Patch 5 s, Napf 15 s.
+- Rules: up to four integer channel ramps per `DensityRule` and an
+  optional ramp over an earlier layer's raw density
+  (`PlacementLayer::parent`, one level), bit-exact on CPU and GPU.
+- Forest truth: swissSURFACE3D Raster minus swissALTI3D (canopy over 3 m
+  covering 20% of an 8 m cell), `--score-forest` reports Cohen's kappa and
+  F1 (the patch is 69% forest: everything-forest scores F1 0.82, kappa 0).
+  The truth is an evaluation, never an input (user).
+- Result: the best rule is the Napf's land use: forest on slopes from ~14
+  degrees, closed by ~34, minus the sunniest slopes (pasture). Kappa -0.225
+  -> 0.461, F1 0.403 -> 0.829; wetness, cluster noise and slope variants
+  scored lower. Other layers: field trees in the forest's open ground,
+  saplings in its gaps, ferns in moist shade, meadow plants by sun and
+  wetness, scree rocks along the runout.
+- Forest floor: baked per geo texel at setPlacement (placement.comp
+  `PLACEMENT_FOREST`) and read with one bilinear fetch; per-fragment
+  evaluation cost +6.5 ms.
+- Cost: the realistic forest (67% of the patch vs 41%) raises scene early
+  where it stands (ravine view 9.8 -> 21 ms); the user kept the extent, the
+  performance lane takes the cost (backlog).
