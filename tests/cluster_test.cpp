@@ -700,6 +700,7 @@ TEST_CASE("a mesh that does not opt in gets no voxels") {
   const VoxelSource source{{&material, 1}};
   const ClusterLod lod = buildClusterLod(crown, &source);
   CHECK(lod.bricks.empty());
+  CHECK(lod.farBricks.empty());
   for (const Cluster &c : lod.clusters) {
     CHECK(!isVoxel(c));
   }
@@ -764,6 +765,12 @@ TEST_CASE("voxel bricks and axis depths round-trip the cluster cache") {
   CHECK(std::memcmp((*read)[0].voxels.data(), lods[0].voxels.data(),
                     lods[0].voxels.size() * sizeof(PackedVoxel)) == 0);
   CHECK((*read)[0].voxelAxis == lods[0].voxelAxis);
+  REQUIRE(!lods[0].farBricks.empty());
+  REQUIRE((*read)[0].farVoxels.size() == lods[0].farVoxels.size());
+  CHECK(std::memcmp((*read)[0].farBricks.data(), lods[0].farBricks.data(),
+                    lods[0].farBricks.size() * sizeof(VoxelBrickRef)) == 0);
+  CHECK(std::memcmp((*read)[0].farVoxels.data(), lods[0].farVoxels.data(),
+                    lods[0].farVoxels.size() * sizeof(PackedVoxel)) == 0);
   std::filesystem::remove(file);
 }
 

@@ -3,8 +3,8 @@
 C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
 world, grand scale. Sun shadows are raster (cached cascaded shadow maps);
-hardware ray tracing is still required (`--shadows rt` A/B, the far-field
-bake, `--far-shadows tlas`). The setting is open,
+hardware ray tracing is still required (`--shadows rt` A/B,
+`--far-shadows tlas`). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:
@@ -229,8 +229,8 @@ the trees back (hidden by default). Capture runs print validation errors,
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry (and, for a
   voxelizing model, its voxel materials and their texture bytes) and versioned
-  with meshoptimizer (`kCacheVersion`, cluster.cpp, 7 since meshoptimizer
-  v1.3; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
+  with meshoptimizer (`kCacheVersion`, cluster.cpp, 8 since the far-field
+  voxels; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
   the first load after a change prints "Building clusters" and rewrites it
   (an unwritable cache only warns). The cache also stores each mesh's
   per-DAG-level group BVH (`nodes`, `levels`), uploaded to a shared node

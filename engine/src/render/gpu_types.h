@@ -994,48 +994,6 @@ struct FarCheckConstants {
 };
 static_assert(sizeof(FarCheckConstants) == 32);
 
-// The prototype bake: rays per axis and voxel face, and mesh slots per
-// prototype (its meshes; more share the last slot's hit counts).
-constexpr uint32_t kFarBakeRays = 8;
-constexpr uint32_t kFarBakeSlots = 8;
-static_assert(3 * kFarBakeRays * kFarBakeRays < 256, "slot hits are 8-bit");
-
-// Must match the push constants in farfield_bake.comp.
-struct FarBakeConstants {
-  VkDeviceAddress tlas = 0;
-  VkDeviceAddress vertices = 0;
-  VkDeviceAddress indices = 0;
-  VkDeviceAddress meshes = 0;
-  VkDeviceAddress materials = 0;
-  VkDeviceAddress prototypeMeshes = 0;
-  VkDeviceAddress bake = 0;
-  uint32_t firstMesh = 0;
-  uint32_t meshCount = 0;
-  float origin[3] = {};
-  uint32_t raysPerAxis = 0;
-  uint32_t size[3] = {};
-  // The first voxel of the dispatch (the prototype bake runs in chunks) and
-  // the voxel edge (1 for the template).
-  uint32_t firstVoxel = 0;
-  float voxelSize = 1.0f;
-  uint32_t pad[3] = {};
-};
-static_assert(sizeof(FarBakeConstants) == 112);
-static_assert(offsetof(FarBakeConstants, origin) == 64);
-static_assert(offsetof(FarBakeConstants, size) == 80);
-static_assert(offsetof(FarBakeConstants, voxelSize) == 96);
-
-// Must match BakeVoxel in farfield_bake.comp.
-struct FarBakeVoxel {
-  uint32_t passes;
-  uint32_t hits;
-  uint32_t slotHits[2];
-  float normal[4];
-  float slotColor[kFarBakeSlots][4];
-  float slotTransmissionColor[kFarBakeSlots][4];
-};
-static_assert(sizeof(FarBakeVoxel) == 288);
-
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
 constexpr uint32_t kMaxVoxelInstances = 1u << 20;

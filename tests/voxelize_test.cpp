@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
 #include <meridian/voxelize.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <random>
 
 using namespace meridian;
@@ -257,6 +259,36 @@ TEST_CASE("a packed voxel round-trips within its quantization") {
   const NormalLobe lobe = normalLobe(u);
   CHECK(std::abs(dot(lobe.axis, axis)) > 0.999f);
   CHECK(lobe.alignment == doctest::Approx(0.7f).epsilon(0.01));
+}
+
+TEST_CASE("a grid's packed bricks unpack to its voxels") {
+  std::vector<VoxelTriangle> a;
+  quad(a, {0.0f, 0.0f, 0.2f}, 3.0f, 2);
+  const VoxelMaterial material{};
+  const VoxelGrid grid = voxelize(a, {&material, 1}, 0.5f);
+  REQUIRE(grid.bricks.size() > 1);
+  std::vector<VoxelBrickRef> bricks{VoxelBrickRef{}}; // appends after what's there
+  std::vector<PackedVoxel> voxels(3);
+  packVoxelBricks(grid, bricks, voxels);
+  const VoxelGrid back =
+      unpackVoxelBricks(std::span(bricks).subspan(1), voxels, grid.edge);
+  CHECK(back.edge == grid.edge);
+  REQUIRE(back.bricks.size() == grid.bricks.size());
+  for (size_t b = 0; b < grid.bricks.size(); ++b) {
+    CHECK(back.bricks[b].occupied == grid.bricks[b].occupied);
+    CHECK(std::equal(std::begin(back.bricks[b].origin), std::end(back.bricks[b].origin),
+                     std::begin(grid.bricks[b].origin)));
+    uint32_t next = bricks[b + 1].firstVoxel;
+    for (uint32_t i = 0; i < 64; ++i) {
+      if ((grid.bricks[b].occupied >> i) & 1u) {
+        const PackedVoxel p = packVoxelPayload(grid.bricks[b].voxels[i]);
+        CHECK(std::memcmp(&p, &voxels[next], sizeof(p)) == 0);
+        const VoxelPayload u = unpackVoxelPayload(voxels[next++]);
+        CHECK(back.bricks[b].voxels[i].depth[2] == u.depth[2]);
+        CHECK(back.bricks[b].voxels[i].albedo.y == u.albedo.y);
+      }
+    }
+  }
 }
 
 TEST_CASE("combined grids add coincident voxels' optical depths, as independent media") {

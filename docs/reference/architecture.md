@@ -58,8 +58,8 @@ engine/src/render/         renderer internals:
                            submits), Debug check against evaluatePoint;
                            buildPlacedTlas: prototype BLAS + PrototypeInfo,
                            cell margin, TLAS fill (tlas_fill.comp) + build
-  renderer_farfield.cpp    far field at setPlacement: prototype bake
-                           (farfield_bake.comp, ray queries on the BLAS),
+  renderer_farfield.cpp    far field at setPlacement: prototype templates
+                           from the meshes' 1 m voxels (cluster cache),
                            splat of the placed table into world bricks
                            (farfield_splat.comp), column map, Debug checks
                            against the CPU replica (farfield.h/.cpp)

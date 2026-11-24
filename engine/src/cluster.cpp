@@ -1,4 +1,5 @@
 #include <meridian/cluster.h>
+#include <meridian/farfield.h>
 #include <meridian/mesh.h>
 
 #include <meshoptimizer.h>
@@ -25,7 +26,7 @@ constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
-constexpr uint32_t kCacheVersion = (7u << 16) | MESHOPTIMIZER_VERSION;
+constexpr uint32_t kCacheVersion = (8u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
@@ -418,10 +419,10 @@ struct VoxelLevels {
   // A group that went to voxels (clodBuild pools a pass's groups by cell):
   // its triangles voxelized, split by region, wait for the shared hierarchy
   // (finish).
-  void emit(const unsigned int *indices, size_t indexCount, float edge, int group, int depth) {
-    std::vector<VoxelTriangle> triangles(indexCount / 3);
-    for (size_t t = 0; t < triangles.size(); ++t) {
-      VoxelTriangle &v = triangles[t];
+  std::vector<VoxelTriangle> triangles(const unsigned int *indices, size_t indexCount) const {
+    std::vector<VoxelTriangle> out(indexCount / 3);
+    for (size_t t = 0; t < out.size(); ++t) {
+      VoxelTriangle &v = out[t];
       for (int k = 0; k < 3; ++k) {
         const Vertex &vertex = mesh.vertices[indices[t * 3 + k]];
         v.p[k] = vertex.position;
@@ -431,7 +432,11 @@ struct VoxelLevels {
       }
       v.material = source.material;
     }
-    const VoxelGrid grid = voxelize(triangles, source.materials, edge);
+    return out;
+  }
+
+  void emit(const unsigned int *indices, size_t indexCount, float edge, int group, int depth) {
+    const VoxelGrid grid = voxelize(triangles(indices, indexCount), source.materials, edge);
     for (const Region &r : regions(grid)) {
       VoxelGrid part;
       part.edge = edge;
@@ -667,6 +672,11 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
               return groupIndex;
             });
   voxelLevels.finish();
+  if (voxels && mesh.voxelize) {
+    packVoxelBricks(voxelize(voxelLevels.triangles(mesh.indices.data(), mesh.indices.size()),
+                             voxels->materials, kFarTemplateVoxel),
+                    lod.farBricks, lod.farVoxels);
+  }
 
   for (size_t i = 0; i < lod.clusters.size(); ++i) {
     const int refined = refinedGroups[i];
@@ -740,6 +750,8 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
       writeArray(out, lod.bricks);
       writeArray(out, lod.voxels);
       writeArray(out, lod.voxelAxis);
+      writeArray(out, lod.farBricks);
+      writeArray(out, lod.farVoxels);
     }
     if (!out) {
       std::filesystem::remove(partial, error);
@@ -779,7 +791,8 @@ readClusterCache(const std::filesystem::path &file, uint64_t sourceKey) {
         !readArray(in, size, lod.triangles) || !readArray(in, size, lod.nodes) ||
         !readArray(in, size, lod.levels) || !readArray(in, size, lod.addedSources) ||
         !readArray(in, size, lod.addedPositions) || !readArray(in, size, lod.bricks) ||
-        !readArray(in, size, lod.voxels) || !readArray(in, size, lod.voxelAxis)) {
+        !readArray(in, size, lod.voxels) || !readArray(in, size, lod.voxelAxis) ||
+        !readArray(in, size, lod.farBricks) || !readArray(in, size, lod.farVoxels)) {
       return std::nullopt;
     }
   }
@@ -792,6 +805,11 @@ bool validClusterLod(const ClusterLod &lod, size_t meshVertexCount) {
   }
   for (const VoxelBrickRef &brick : lod.bricks) {
     if (uint64_t{brick.firstVoxel} + std::popcount(brick.occupied) > lod.voxels.size()) {
+      return false;
+    }
+  }
+  for (const VoxelBrickRef &brick : lod.farBricks) {
+    if (uint64_t{brick.firstVoxel} + std::popcount(brick.occupied) > lod.farVoxels.size()) {
       return false;
     }
   }

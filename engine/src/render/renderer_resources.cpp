@@ -769,6 +769,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   }
 
   impl_->meshes.push_back(mesh);
+  impl_->meshFarVoxels.push_back({lod.farBricks, lod.farVoxels});
   return {meshIndex};
 }
 

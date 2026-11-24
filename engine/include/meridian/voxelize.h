@@ -133,4 +133,11 @@ struct VoxelBrickRef {
 };
 static_assert(sizeof(VoxelBrickRef) == 24);
 
+// A grid's bricks appended to bricks/voxels in packed form, and back (the
+// moment rebuilt from the lobe, as unpackVoxelPayload).
+void packVoxelBricks(const VoxelGrid &grid, std::vector<VoxelBrickRef> &bricks,
+                     std::vector<PackedVoxel> &voxels);
+VoxelGrid unpackVoxelBricks(std::span<const VoxelBrickRef> bricks,
+                            std::span<const PackedVoxel> voxels, float edge);
+
 } // namespace meridian

@@ -536,4 +536,34 @@ VoxelPayload unpackVoxelPayload(const PackedVoxel &p) {
   return v;
 }
 
+void packVoxelBricks(const VoxelGrid &grid, std::vector<VoxelBrickRef> &bricks,
+                     std::vector<PackedVoxel> &voxels) {
+  for (const VoxelBrick &brick : grid.bricks) {
+    VoxelBrickRef ref;
+    std::copy(std::begin(brick.origin), std::end(brick.origin), ref.origin);
+    ref.firstVoxel = uint32_t(voxels.size());
+    ref.occupied = brick.occupied;
+    bricks.push_back(ref);
+    for (uint64_t bits = brick.occupied; bits != 0; bits &= bits - 1) {
+      voxels.push_back(packVoxelPayload(brick.voxels[std::countr_zero(bits)]));
+    }
+  }
+}
+
+VoxelGrid unpackVoxelBricks(std::span<const VoxelBrickRef> bricks,
+                            std::span<const PackedVoxel> voxels, float edge) {
+  VoxelGrid grid;
+  grid.edge = edge;
+  for (const VoxelBrickRef &ref : bricks) {
+    VoxelBrick &brick = grid.bricks.emplace_back();
+    std::copy(std::begin(ref.origin), std::end(ref.origin), brick.origin);
+    brick.occupied = ref.occupied;
+    uint32_t next = ref.firstVoxel;
+    for (uint64_t bits = ref.occupied; bits != 0; bits &= bits - 1) {
+      brick.voxels[std::countr_zero(bits)] = unpackVoxelPayload(voxels[next++]);
+    }
+  }
+  return grid;
+}
+
 } // namespace meridian

@@ -2,6 +2,8 @@
 #include <meridian/farfield.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -216,10 +218,87 @@ TEST_CASE("The splat conserves extinction under rotation and scale") {
   }
 }
 
-TEST_CASE("Bake pass fractions convert to extinction") {
-  CHECK(farExtinctionFromPasses(192, 192) == 0.0f);
-  CHECK(farExtinctionFromPasses(96, 192) == doctest::Approx(std::log(2.0f)));
-  CHECK(farExtinctionFromPasses(0, 192) == doctest::Approx(std::log(384.0f)));
+namespace {
+
+// A 1 m grid with one voxel at each lattice index given.
+VoxelGrid voxelGrid(std::initializer_list<std::pair<std::array<int32_t, 3>, VoxelPayload>> voxels) {
+  VoxelGrid grid;
+  grid.edge = kFarTemplateVoxel;
+  for (const auto &[at, payload] : voxels) {
+    VoxelBrick brick;
+    for (int k = 0; k < 3; ++k) {
+      brick.origin[k] = at[k] - ((at[k] % 4) + 4) % 4;
+    }
+    const uint32_t i = uint32_t(at[0] - brick.origin[0]) +
+                       4 * (uint32_t(at[1] - brick.origin[1]) + 4 * uint32_t(at[2] - brick.origin[2]));
+    brick.occupied = uint64_t{1} << i;
+    brick.voxels[i] = payload;
+    grid.bricks.push_back(brick);
+  }
+  return grid;
+}
+
+VoxelPayload payload(float dx, float dy, float dz, Vec3 albedo, Vec3 transmission, Vec3 axis) {
+  VoxelPayload v;
+  v.depth[0] = dx;
+  v.depth[1] = dy;
+  v.depth[2] = dz;
+  v.albedo = albedo;
+  v.transmission = transmission;
+  v.moment[0] = axis.x * axis.x;
+  v.moment[1] = axis.y * axis.y;
+  v.moment[2] = axis.z * axis.z;
+  v.moment[3] = axis.x * axis.y;
+  v.moment[4] = axis.x * axis.z;
+  v.moment[5] = axis.y * axis.z;
+  v.coverage = 1.0f - (std::exp(-dx) + std::exp(-dy) + std::exp(-dz)) / 3.0f;
+  return v;
+}
+
+} // namespace
+
+TEST_CASE("a far template grid from mesh voxels keeps their optical depth and strongest slot") {
+  // Slot 0: a dense voxel at (0, 0, 0) and one at (5, 2, -1); slot 1: a
+  // sparse voxel coinciding with the first.
+  const Vec3 green{0.1f, 0.3f, 0.05f}, bark{0.2f, 0.15f, 0.1f};
+  const std::vector<VoxelGrid> slots{
+      voxelGrid({{{0, 0, 0}, payload(1.0f, 2.0f, 3.0f, green, {0.05f, 0.1f, 0.0f}, {1, 0, 0})},
+                 {{5, 2, -1}, payload(0.5f, 0.5f, 0.5f, green, {}, {0, 0, 1})}}),
+      voxelGrid({{{0, 0, 0}, payload(0.5f, 0.5f, 0.5f, bark, {}, {1, 0, 0})}})};
+  std::vector<FarSlotColor> colors(2);
+  const FarBakeGrid grid = farBakeGridFromVoxels(slots, 10, colors);
+  CHECK(grid.origin.x == 0.0f);
+  CHECK(grid.origin.y == 0.0f);
+  CHECK(grid.origin.z == -1.0f);
+  CHECK(grid.size[0] == 6);
+  CHECK(grid.size[1] == 3);
+  CHECK(grid.size[2] == 2);
+  const auto at = [&](uint32_t x, uint32_t y, uint32_t z) {
+    return x + grid.size[0] * (y + size_t{grid.size[1]} * z);
+  };
+  // Coincident voxels add their optical depths (up to the opaque limit);
+  // extinction per metre is their mean over the three axes.
+  const float opaque = -std::log(kVoxelMinTransmittance);
+  const size_t first = at(0, 0, 1);
+  CHECK(grid.extinction[first] ==
+        doctest::Approx((1.5f + 2.5f + std::min(3.5f, opaque)) / 3.0f).epsilon(1e-4));
+  CHECK(grid.albedo[first] == 10); // slot 0 covers more of it
+  CHECK(std::abs(grid.normal[first].x) == doctest::Approx(1.0f).epsilon(1e-3));
+  const size_t second = at(5, 2, 0);
+  CHECK(grid.extinction[second] == doctest::Approx(0.5f).epsilon(1e-4));
+  CHECK(std::abs(grid.normal[second].z) == doctest::Approx(1.0f).epsilon(1e-3));
+  size_t occupied = 0;
+  for (float e : grid.extinction) {
+    occupied += e > 0.0f;
+  }
+  CHECK(occupied == 2);
+  // The palette's sums: coverage-weighted colours per slot.
+  const float c0 = slots[0].bricks[0].voxels[0].coverage;
+  const float c1 = slots[0].bricks[1].voxels[std::countr_zero(slots[0].bricks[1].occupied)].coverage;
+  CHECK(colors[0].coverage == doctest::Approx(c0 + c1));
+  CHECK(colors[0].albedo.y == doctest::Approx((c0 + c1) * green.y));
+  CHECK(colors[0].transmission.y == doctest::Approx(c0 * 0.1f));
+  CHECK(colors[1].albedo.x == doctest::Approx(slots[1].bricks[0].voxels[0].coverage * bark.x));
 }
 
 // The production scale: farFixedScale for the game's tree layers (scale

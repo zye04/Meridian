@@ -95,6 +95,10 @@ struct ClusterLod {
   std::vector<VoxelBrickRef> bricks;
   std::vector<PackedVoxel> voxels;
   std::vector<uint32_t> voxelAxis;
+  // A voxelizing mesh's whole surface voxelized at kFarTemplateVoxel: the
+  // far field's template (farBakeGridFromVoxels, farfield.h).
+  std::vector<VoxelBrickRef> farBricks;
+  std::vector<PackedVoxel> farVoxels;
 };
 
 constexpr float kVoxelAxisDepthStep = 0.5f;

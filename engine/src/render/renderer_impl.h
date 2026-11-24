@@ -521,6 +521,13 @@ struct Renderer::Impl {
   bool cloudShadowFullRefresh = true;
 
   std::vector<GpuMesh> meshes;
+  // Per mesh, its far-field template voxels (ClusterLod::farBricks and
+  // farVoxels; empty unless it voxelizes), for buildFarField.
+  struct MeshFarVoxels {
+    std::vector<VoxelBrickRef> bricks;
+    std::vector<PackedVoxel> voxels;
+  };
+  std::vector<MeshFarVoxels> meshFarVoxels;
 
   std::optional<std::filesystem::path> capturePath;
   std::optional<std::filesystem::path> albedoCapturePath;
@@ -601,7 +608,7 @@ struct Renderer::Impl {
   void buildPlacedTlas(std::span<const Prototype> prototypes,
                        std::span<const PlacementLayer> layers,
                        const std::vector<std::array<float, 4>> &bounds);
-  // The far field of the current placement: prototype bake, then the
+  // The far field of the current placement: prototype templates, then the
   // splat over the placed table (offsets: setPlacement's per (cell, layer)).
   void buildFarField(std::span<const Prototype> prototypes,
                      std::span<const PlacementLayer> layers,
