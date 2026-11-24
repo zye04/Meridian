@@ -294,14 +294,15 @@ triangles, makes Debug startup ~2.5 min); over the scatter:
 so without the Megaplants trees the same seed places different content
 and these views differ.
 The game places rocks over the whole Napf at load (`placeScenery` in
-main.cpp; 21281 instances), poppies, goldenrod and ferns (~500k
-together), streamed meadow layers around the camera (a short grass mat,
+main.cpp; 21281 on steep ground, 124776 scree along rockfall runouts),
+poppies, goldenrod and ferns (~200k together; ferns ~46k under the forest
+with `--trees`), streamed meadow layers around the camera (a short grass mat,
 seed-head tufts in patches, hawkbit drifts (grasses and hawkbit graded
 by `Prototype::tint`), clover: ring ~6.8M slots,
 ~2.2M live; building their dense dither patterns adds ~10 s to Release
 and ~59 s to Debug startup on the first run only: the patterns are cached,
-see Gotchas), plus forests and lone trees with `--trees`
-(~2.65M instances), which loads the rocks (and with `--trees` the
+see Gotchas), plus forests, lone trees and saplings with `--trees`
+(~3.1M instances; all of these are causal layers on the `.geo` channels), which loads the rocks (and with `--trees` the
 trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--terrain FILE` loads another heightfield instead of `assets/terrain/napf.height` (e.g. the relief patch). `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
@@ -311,8 +312,8 @@ don't need placement. `--streamed off` drops only the streamed meadow layers
 shows what `--reference` traces; the static table and its hash are unchanged. Debug runs print `placement check:` (GPU table vs
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
-`placement hash 0x...` of the static table (0x341d51799d224d3c for seed 1 without
-trees, 0x1e6e4d7edf517787 with `--trees` and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+`placement hash 0x...` of the static table (0x07e033157372f778 for seed 1 without
+trees, 0x5353fab653ec154d with `--trees`, both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws

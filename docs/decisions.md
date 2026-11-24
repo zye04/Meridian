@@ -4621,5 +4621,8 @@ terrain with noise masks; real ground puts things where they grow or fall.
   `PLACEMENT_FOREST`) and read with one bilinear fetch; per-fragment
   evaluation cost +6.5 ms.
 - Cost: the realistic forest (67% of the patch vs 41%) raises scene early
-  where it stands (ravine view 9.8 -> 21 ms); the user kept the extent, the
-  performance lane takes the cost (backlog).
+  where it stands (ravine view 9.8 -> 21 ms). Parity route with `--trees`
+  (new baseline): 41.1 -> 27.9 fps average, 1% low 13.6 -> 10.4, scene
+  early 12.6 -> 20.3 ms, every segment slower (meadow most: its ground is
+  now partly forest). Release startup 26.4 -> 26.8 s. The user kept the
+  extent; the performance lane takes the cost (backlog).
