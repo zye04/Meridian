@@ -58,12 +58,18 @@ void main() {
     // The aligned share of the lobe: (3 alignment - 1) / 2 of the leaves
     // face along its axis, the rest every way.
     float aligned = clamp((3.0 * voxelAlignment(voxel) - 1.0) * 0.5, 0.0, 1.0);
-    // Sky visibility out of the model: up, and the four sides.
-    float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
-    float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, vec3(1.0, 0.0, 0.0))) +
-                          exp(-voxelBoxDepth(axisWord, vec3(-1.0, 0.0, 0.0))) +
-                          exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, 1.0))) +
-                          exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, -1.0))));
+    // Sky visibility out of the model (up, and the four sides), as the
+    // clusters' crownOcclusion (surface.glsl): only without GI, whose probes
+    // already trace the canopy.
+    float occlusion = 1.0;
+    if (scene.giMode == 0u) {
+        float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
+        float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, vec3(1.0, 0.0, 0.0))) +
+                              exp(-voxelBoxDepth(axisWord, vec3(-1.0, 0.0, 0.0))) +
+                              exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, 1.0))) +
+                              exp(-voxelBoxDepth(axisWord, vec3(0.0, 0.0, -1.0))));
+        occlusion = mix(1.0, 0.5 * (up + sides), scene.microShadowStrength);
+    }
 
     Surface s;
     s.baseColor = albedo;
@@ -74,7 +80,7 @@ void main() {
     float alpha = voxelRoughness(voxel) * voxelRoughness(voxel);
     float spread = 2.0 * (1.0 - voxelAlignment(voxel));
     s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + spread, 1.0)));
-    s.occlusion = 0.5 * (up + sides);
+    s.occlusion = occlusion;
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;
     s.emissive = vec3(0.0);
