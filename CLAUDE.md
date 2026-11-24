@@ -237,6 +237,8 @@ the trees back (hidden by default). Capture runs print validation errors,
   pool (`ClusterNodeInfo`, children rebased into the node or cluster
   pool) and level table. `selectClustersBvh` is the CPU reference for the
   GPU traversal (cull.comp's level band, cluster_traverse.comp's node
-  test): it must select exactly the clusters `lodVisible` accepts.
+  test): it must select exactly the clusters `lodVisible` accepts, each at
+  its `clusterThresholds` (voxel clusters switch at `kVoxelPixels` x the
+  threshold, cluster_cull.comp).
 - Known issues and deferred work live in `docs/backlog.md`, not here: add
   a row for anything deferred, remove it in the commit that resolves it.

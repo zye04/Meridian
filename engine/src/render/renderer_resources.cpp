@@ -410,19 +410,17 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   if (clustered) {
     // Triangle clusters whose group voxel clusters replace (the voxel LOD
     // A/B keeps drawing them instead).
-    std::vector<uint8_t> voxelGroup, triangleGroup;
+    std::vector<uint8_t> voxelGroup;
     for (const Cluster &c : lod.clusters) {
       if (c.brickCount > 0 && c.refinedGroup >= 0) {
         voxelGroup.resize(std::max<size_t>(voxelGroup.size(), size_t(c.refinedGroup) + 1), 0);
         voxelGroup[size_t(c.refinedGroup)] = 1;
       }
-      if (c.brickCount == 0) {
-        triangleGroup.resize(std::max<size_t>(triangleGroup.size(), size_t(c.group) + 1), 0);
-        triangleGroup[c.group] = 1;
-      }
     }
+    const std::vector<LodThresholds> thresholds = clusterThresholds(lod, 1.0f);
     clusterInfos.reserve(lod.clusters.size());
-    for (const Cluster &c : lod.clusters) {
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      const Cluster &c = lod.clusters[i];
       ClusterInfo info;
       info.boundsCenter = c.boundsCenter;
       info.boundsRadius = c.boundsRadius;
@@ -436,13 +434,9 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
         info.firstTriangle = impl_->voxelBrickCount + c.firstBrick;
         info.triangleCount = c.brickCount;
         info.voxelEdge = c.voxelEdge;
-        // Made from triangles: its refined side switches at the threshold
-        // itself (kVoxelPixels).
-        info.vertexCount = c.refinedGroup >= 0 && !voxelGroup.empty() &&
-                                   size_t(c.refinedGroup) < triangleGroup.size() &&
-                                   triangleGroup[size_t(c.refinedGroup)]
-                               ? 1u
-                               : 0u;
+        // 1: the refined side switches at the threshold itself (made from
+        // triangles), else at kVoxelPixels times it.
+        info.vertexCount = thresholds[i].refined < thresholds[i].self ? 1u : 0u;
       } else {
         info.firstVertex = impl_->clusterVertexCount + c.firstVertex;
         info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;

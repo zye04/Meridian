@@ -511,17 +511,24 @@ struct VoxelLevels {
         std::vector<Cluster> clusters;
         std::vector<Sphere> spheres;
         std::vector<const VoxelGrid *> grids;
+        // At least twice the error of every group the members replace: a
+        // voxel cluster made from triangles gives way at kVoxelPixels times
+        // the threshold, its triangles at the threshold, so the cut covers
+        // once only if this projects at least twice theirs (the bounds
+        // enclose theirs, so twice the error suffices).
+        float error = edge * 2.0f;
         for (uint32_t i : members) {
           clusters.push_back(regionCluster(nodes[i].grid, nodes[i].refined));
           spheres.push_back({clusters.back().boundsCenter, clusters.back().boundsRadius});
           const LodBounds &refined = groups[nodes[i].refined];
           spheres.push_back({refined.center, refined.radius});
+          error = std::max(error, refined.error * kVoxelPixels);
           grids.push_back(&nodes[i].grid);
         }
         // The group's bounds enclose its members' and their own groups', so
         // projected errors stay monotonic along every path.
         const Sphere s = enclose(spheres);
-        const int id = emitGroup(clusters, {s.center, s.radius, edge * 2.0f}, depth);
+        const int id = emitGroup(clusters, {s.center, s.radius, error}, depth);
         levels[edge * 2.0f].push_back({mergeVoxelGrid(combineVoxelGrids(grids)), id, key});
       }
       ++depth;
@@ -994,15 +1001,39 @@ float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
   return bounds.error * scale / distance * projY * 0.5f * screenHeight;
 }
 
+std::vector<LodThresholds> clusterThresholds(const ClusterLod &lod, float threshold) {
+  std::vector<uint8_t> triangleGroup;
+  for (const Cluster &c : lod.clusters) {
+    if (c.brickCount == 0) {
+      triangleGroup.resize(std::max<size_t>(triangleGroup.size(), size_t(c.group) + 1), 0);
+      triangleGroup[c.group] = 1;
+    }
+  }
+  std::vector<LodThresholds> thresholds;
+  thresholds.reserve(lod.clusters.size());
+  for (const Cluster &c : lod.clusters) {
+    if (c.brickCount == 0) {
+      thresholds.push_back({threshold, threshold});
+      continue;
+    }
+    const bool fromTriangles = c.refinedGroup >= 0 &&
+                               size_t(c.refinedGroup) < triangleGroup.size() &&
+                               triangleGroup[size_t(c.refinedGroup)];
+    thresholds.push_back(
+        {threshold * kVoxelPixels, fromTriangles ? threshold : threshold * kVoxelPixels});
+  }
+  return thresholds;
+}
+
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
-                float nearPlane, float screenHeight, float thresholdPixels,
+                float nearPlane, float screenHeight, LodThresholds thresholds,
                 float orthoPixelsPerMeter) {
   const auto project = [&](const LodBounds &b) {
     return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight,
                                 orthoPixelsPerMeter);
   };
-  return project(cluster.self) > thresholdPixels &&
-         (cluster.refined.error < 0.0f || project(cluster.refined) <= thresholdPixels);
+  return project(cluster.self) > thresholds.self &&
+         (cluster.refined.error < 0.0f || project(cluster.refined) <= thresholds.refined);
 }
 
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
@@ -1027,11 +1058,13 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
             ? level.minError * scale * orthoPixelsPerMeter
             : level.minError * scale / std::max(farthest, nearPlane) * projY * 0.5f *
                   screenHeight;
-    if (finest <= thresholdPixels &&
+    // Voxel levels switch at up to kVoxelPixels times the threshold.
+    if (finest <= thresholdPixels * kVoxelPixels &&
         project({root.lod.center, root.lod.radius, level.maxError}) > thresholdPixels) {
       queue.push_back(level.rootNode);
     }
   }
+  const std::vector<LodThresholds> thresholds = clusterThresholds(lod, thresholdPixels);
   std::vector<uint32_t> cut;
   for (size_t q = 0; q < queue.size(); ++q) {
     const ClusterBvhNode &node = lod.nodes[queue[q]];
@@ -1042,7 +1075,7 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
       if (!node.leaf) {
         queue.push_back(i);
       } else if (lodVisible(lod.clusters[i], camera, scale, projY, nearPlane, screenHeight,
-                            thresholdPixels, orthoPixelsPerMeter)) {
+                            thresholds[i], orthoPixelsPerMeter)) {
         cut.push_back(i);
       }
     }

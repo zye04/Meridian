@@ -137,17 +137,37 @@ float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
                            float projY, float nearPlane, float screenHeight,
                            float orthoPixelsPerMeter = 0.0f);
 
+// Voxel clusters give way to coarser voxels at this multiple of the LOD
+// threshold (pixels per voxel edge at the switch): coverage-built foliage
+// fills its crown's volume, so finer voxels cost the cube. Must match
+// common.glsl.
+inline constexpr float kVoxelPixels = 2.0f;
+
+// The pixel thresholds of a cluster's two LOD tests: its self (coarser
+// replacement) and its refined (finer) bounds.
+struct LodThresholds {
+  float self = 0.0f;
+  float refined = 0.0f;
+};
+
+// Per cluster, the thresholds the GPU tests it with (cluster_cull.comp):
+// a triangle cluster {T, T}; a voxel cluster self kVoxelPixels T, refined
+// T where it replaces triangles and kVoxelPixels T where it replaces voxels.
+// The upload derives the GPU's flag for the refined side from this.
+std::vector<LodThresholds> clusterThresholds(const ClusterLod &lod, float threshold);
+
 // Nanite's cut: draw a cluster when its coarser replacement is too coarse
 // and it is itself fine enough. Errors grow monotonically up the DAG, so the
 // drawn clusters cover the surface once, without cracks.
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
-                float nearPlane, float screenHeight, float thresholdPixels,
+                float nearPlane, float screenHeight, LodThresholds thresholds,
                 float orthoPixelsPerMeter = 0.0f);
 
 // CPU replica of the GPU traversal: the levels whose band can hold the cut,
 // then their BVHs breadth-first, skipping nodes whose bounds rule every
-// cluster below out, then lodVisible per cluster of the reached leaves.
-// Returns exactly the clusters lodVisible accepts, in traversal order.
+// cluster below out, then lodVisible per cluster of the reached leaves
+// (clusterThresholds). Returns exactly the clusters lodVisible accepts, in
+// traversal order.
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,

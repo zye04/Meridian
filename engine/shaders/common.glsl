@@ -88,8 +88,10 @@ layout(buffer_reference, std430) readonly buffer MeshBuffer {
 // Voxel clusters replace each other at this multiple of the LOD threshold
 // (pixels per voxel edge at the switch to a coarser level): coverage-built
 // foliage fills its crown's volume, so finer voxels cost the cube. The group
-// where triangles give way to voxels keeps the threshold itself, so the cut
-// stays exact. Must match gpu_types.h.
+// where triangles give way to voxels keeps the threshold itself; the cut
+// stays exact because the first voxel group's error is at least
+// kVoxelPixels x its triangles' (cluster.cpp). Must match cluster.h (CPU
+// reference: clusterThresholds).
 const float kVoxelPixels = 2.0;
 
 struct ClusterInfo {

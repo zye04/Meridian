@@ -145,7 +145,8 @@ void main() {
     }
     // A group whose members and replacement are both voxels switches at
     // kVoxelPixels times the threshold; the one where triangles give way to
-    // voxels at the threshold, on both of its sides.
+    // voxels at the threshold, on both of its sides (CPU reference:
+    // meridian::clusterThresholds).
     bool voxel = cluster.voxelEdge > 0.0;
     float selfThreshold = voxel ? threshold * kVoxelPixels : threshold;
     float refinedThreshold = voxel && cluster.vertexCount == 0u ? threshold * kVoxelPixels : threshold;

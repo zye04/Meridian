@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 
 using namespace meridian;
 
@@ -57,7 +58,7 @@ Cut selectCut(const MeshData &mesh, const ClusterLod &lod, Vec3 camera,
               float threshold) {
   Cut cut;
   for (const Cluster &c : lod.clusters) {
-    if (!lodVisible(c, camera, 1.0f, 1.0f, 0.1f, 1080.0f, threshold)) {
+    if (!lodVisible(c, camera, 1.0f, 1.0f, 0.1f, 1080.0f, {threshold, threshold})) {
       continue;
     }
     cut.triangles += c.triangleCount;
@@ -82,7 +83,7 @@ TEST_CASE("a mesh smaller than a cluster is one original cluster") {
   CHECK(c.refined.error < 0.0f);
   CHECK(c.self.error == FLT_MAX);
   for (float threshold : {0.0f, 1.0f, 1000.0f}) {
-    CHECK(lodVisible(c, {0, 1, 100}, 1.0f, 1.0f, 0.1f, 1080.0f, threshold));
+    CHECK(lodVisible(c, {0, 1, 100}, 1.0f, 1.0f, 0.1f, 1080.0f, {threshold, threshold}));
   }
 }
 
@@ -356,9 +357,10 @@ void checkBvh(const ClusterLod &lod) {
 
 std::vector<uint32_t> flatCut(const ClusterLod &lod, Vec3 camera, float scale,
                               float projY, float threshold) {
+  const std::vector<LodThresholds> thresholds = clusterThresholds(lod, threshold);
   std::vector<uint32_t> cut;
   for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
-    if (lodVisible(lod.clusters[i], camera, scale, projY, 0.1f, 1440.0f, threshold)) {
+    if (lodVisible(lod.clusters[i], camera, scale, projY, 0.1f, 1440.0f, thresholds[i])) {
       cut.push_back(i);
     }
   }
@@ -414,9 +416,10 @@ TEST_CASE("selectClustersBvh orthographic equals lodVisible") {
           std::vector<uint32_t> bvh = selectClustersBvh(lod, camera, scale, 1.0f, 0.1f, 1.0f,
                                                         threshold, pixelsPerMeter);
           std::sort(bvh.begin(), bvh.end());
+          const std::vector<LodThresholds> thresholds = clusterThresholds(lod, threshold);
           std::vector<uint32_t> flat;
           for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
-            if (lodVisible(lod.clusters[i], camera, scale, 1.0f, 0.1f, 1.0f, threshold,
+            if (lodVisible(lod.clusters[i], camera, scale, 1.0f, 0.1f, 1.0f, thresholds[i],
                            pixelsPerMeter)) {
               flat.push_back(i);
             }
@@ -646,6 +649,34 @@ TEST_CASE("the mixed DAG is consistent and monotonic, so the cut covers the surf
       }
     }
   }
+}
+
+TEST_CASE("every voxel root switches no later than its triangles") {
+  // A voxel root draws while its self projects over kVoxelPixels x the
+  // threshold, its triangles while their group projects over the threshold:
+  // both draw unless the first condition implies the second.
+  const ClusterLod &lod = cachedCrown();
+  std::set<uint32_t> triangleGroups;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c)) {
+      triangleGroups.insert(c.group);
+    }
+  }
+  size_t roots = 0;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c) || c.refinedGroup < 0 || !triangleGroups.count(uint32_t(c.refinedGroup))) {
+      continue;
+    }
+    ++roots;
+    for (float distance : {20.0f, 60.0f, 200.0f, 700.0f, 3000.0f}) {
+      for (const Vec3 dir : {Vec3{0, 0, 1}, normalize(Vec3{1, 1, 0})}) {
+        const Vec3 camera = Vec3{0.0f, 5.0f, 0.0f} + dir * distance;
+        CHECK(projectedErrorPixels(c.self, camera, 1.0f, 1.2f, 0.1f, 1440.0f) >=
+              kVoxelPixels * projectedErrorPixels(c.refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f));
+      }
+    }
+  }
+  CHECK(roots > 0);
 }
 
 TEST_CASE("selectClustersBvh equals lodVisible over mixed levels") {

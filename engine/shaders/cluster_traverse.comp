@@ -8,7 +8,8 @@
 // seeded (cull.comp), one dispatch per BVH depth and one thread per
 // (instance, node) of that depth's queue. A node is skipped when no cluster
 // below can be in the LOD cut (its largest self error projects at or under
-// the threshold), or when it is outside the view frustum or occluded.
+// the threshold, which no voxel threshold is below; CPU reference:
+// meridian::selectClustersBvh), or when it is outside the view frustum or occluded.
 // Survivors push their children to the next depth's queue; leaves emit
 // their clusters as work items for cluster_cull.comp. Occlusion is
 // two-phase like the cluster cull's: phase 0 tests against last frame's
