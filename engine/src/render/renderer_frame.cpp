@@ -268,9 +268,11 @@ void Renderer::Impl::expandVoxelBricks(VkCommandBuffer cmd, const FrameData &fra
   vkCmdDispatchIndirect(cmd, drawCounters.buffer,
                         offsetof(DrawCounters, voxelDispatch) +
                             phase * sizeof(DrawCounters::voxelDispatch[0]));
+  // voxel_instance.mesh reads the quad list and count.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
