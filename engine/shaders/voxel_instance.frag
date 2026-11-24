@@ -113,11 +113,12 @@ void main() {
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);
     vec3 exposure = scene.sunIlluminance * scene.exposure.exposure;
-    outColor = vec4(luminance * exposure, 1.0);
+    outColor = vec4(min(luminance * exposure, vec3(kMaxExposedLuminance)), 1.0);
     outDiffuseAlbedo = vec4(sh.diffuseColor, 1.0);
     outSpecularAlbedo = vec4(mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0), 1.0);
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
-    outSunLight = vec4(sunRadiance * hazeTransmittance * exposure, 1.0);
+    outSunLight =
+        vec4(min(sunRadiance * hazeTransmittance * exposure, vec3(kMaxExposedLuminance)), 1.0);
 
     // Motion of the flat point, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).

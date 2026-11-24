@@ -3,6 +3,10 @@
 #extension GL_EXT_buffer_reference : require
 #include "exposure.glsl"
 
+// Cap on pre-exposed colour written to the FP16 HDR targets (max ~65504),
+// per channel so hue is kept.
+const float kMaxExposedLuminance = 60000.0;
+
 struct Vertex {
     vec3 position;
     float uvX;
