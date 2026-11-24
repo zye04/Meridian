@@ -584,6 +584,9 @@ struct Renderer::Impl {
   // A buffer at least 1.5x larger than `pool` that holds `bytes`, or none
   // if `pool` already does.
   Buffer grownPool(const Buffer &pool, VkDeviceSize bytes, VkBufferUsageFlags usage);
+  // Shrinks every mesh pool to the bytes in use (growth leaves up to a
+  // third unused), before placement and the far field allocate.
+  void trimPools();
   Buffer uploadStorage(const void *data, VkDeviceSize bytes);
   void writeTexture(uint32_t index, VkImageView view, VkSampler sampler,
                     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

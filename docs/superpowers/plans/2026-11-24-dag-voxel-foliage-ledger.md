@@ -60,3 +60,4 @@ Finding (all G1 evidence before 2026-11-24 15:00): every capture since Task 0 ra
 Finding: g1 peaks at 16.1-16.7 GB device memory on the 16 GB RTX 4080 (main 14.4 GB); the far-field splat then takes ~56 s (main 0.36 s) since Task 5. Task 9: voxel pool VRAM.
 Finding: the shared assets/ caches are rebuilt by other lanes' main builds (kCacheVersion 7 vs 8): 16 non-tree models rebuild on each g1 run while lanes run main.
 Task 6c: complete (commit 2bd0ea4, shader only; tests unaffected)
+Task 9 (VRAM): Ruling: the pools are trimmed to exact size at setPlacement (trimPools), not pre-sized from totals — growth slack was the whole g1-vs-main gap (1.79 GB: vertices 0.7, voxel pools 0.82); pre-sizing needs a new API and a pass over every model (decisions "Geometry pools grow with the content") — cost: one extra copy of every pool at load (~0.1 s). Overview 1440p: device memory 14481 -> 12932 MiB, far-field peak 16157 -> 14607 MiB, splat 55.2 s -> 0.33 s, 0 validation errors.

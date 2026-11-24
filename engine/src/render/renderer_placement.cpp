@@ -240,6 +240,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     throw std::runtime_error("setPlacement needs a layer");
   }
   r.shadowStale = true;
+  r.trimPools();
   const auto start = std::chrono::steady_clock::now();
   // Static layers are placed over the whole crop now, streamed ones around
   // the camera every frame.

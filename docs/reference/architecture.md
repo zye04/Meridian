@@ -406,8 +406,9 @@ the layouts behind them.
   occludes the sharp sky reflection by the probes' rough irradiance over
   the open sky's (under a canopy the sky is not reflected at full strength).
 - GPU-driven scene: all meshes live in shared vertex/index pools (bump
-  allocated; they and the cluster pools grow by >= 1.5x when an upload
-  needs more, `grownPool`); `MeshInfo` and `InstanceData` tables are on
+  allocated; they and the cluster and voxel pools grow by >= 1.5x when an
+  upload needs more, `grownPool`, and `setPlacement` trims them to the
+  bytes in use, `trimPools`); `MeshInfo` and `InstanceData` tables are on
   the GPU. One 24-bit instance id space (`kMaxInstanceId`) serves
   culling, draw lists, visibility and the TLAS custom index: ids below
   `kPlacedBase` index `InstanceData`, the rest index the placed table

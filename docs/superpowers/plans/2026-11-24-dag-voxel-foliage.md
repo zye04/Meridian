@@ -13,9 +13,9 @@ Findings from the last runs (ledger has details):
 - At 1440p the forest overview (`--camera 700 1450 -400 -1.55 -0.5
   --trees`) overflows `kMaxVoxelQuads` (8388608, ~0.95M dropped): fix
   before judging the look (Task 7) or GPU time.
-- g1 peaks at 16.1-16.7 GB device memory on the 16 GB RTX 4080 (main 14.4
-  GB); the far-field splat then takes ~56 s at startup (main 0.36 s). The
-  voxel pools' VRAM is the first Task 9 item.
+- Done 2026-11-24: g1 peaked at 16.1-16.7 GB on the 16 GB RTX 4080 (pool
+  growth slack 1.79 GB), so the far-field splat paged (~56 s); `trimPools`
+  before placement: peak 14.6 GB, splat 0.33 s.
 - Repeat-run noise with `--trees`: 0.3/255 at the forest edge, 4.3/255 at
   the overflowing overview. Judge A/Bs against a repeat run, not zero.
 - Other lanes' main builds share `assets/` and rewrite the `.clusters`
