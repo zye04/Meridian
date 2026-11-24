@@ -30,8 +30,8 @@ buffer), the DAG voxel design is approved.
 
 | Branch | Window / worktree | State |
 |---|---|---|
-| `g1` | main checkout (`~/Projects/dev/meridian`) | paused, see "Paused: G1" below; exit criteria in its plan |
-| `main` | `../meridian-main` | docs housekeeping lane (this file); no code |
+| `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` until the next lane |
+| `main` | `../meridian-main` | main's worktree; the g1 merge was built and verified here |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
 
@@ -46,19 +46,23 @@ in the main checkout (git-ignored); decisions.md holds the three entries
 that came out of it ("Performance gate restated", "Visibility buffer is
 unconditional", "VRAM budget").
 
-1. g1: Debug far-field check, main baseline at 1440p, Task 7 look loop,
-   Task 8, Task 9 with the exit criteria in its plan (no list overflow at
-   any evidence view; drawn voxel quads at the overview about the pixel
-   count; peak VRAM <= main's; all evidence re-measured at 1440p); merge.
-2. Versioned `.clusters` file name (landed on g1, 028d3c6).
+1. Done 2026-11-24: g1 merged (fd3df78), every exit criterion in its plan
+   met (the high overview's GPU criterion waived; main's image drops
+   there).
+2. Done: versioned `.clusters` file names (cache and voxelizer version).
 3. Measurement repair (split "cull early", exclude hop frames from 1%
    lows, R5-1 forest walk, explain aa 2.45 vs 1.36 ms, re-measure the
-   scene-early split on current trees), the two capture guards (render
-   size not 2560x1440, any list overflow), the VRAM print and gate, the
-   cascade changes (drop the sun-axis re-render trigger, static ground
-   cover out of the cascades). Done on g1: voxel casters (8738167) and the
-   caster LOD relaxed to 1 texel in every cascade (cascade overflow, see
-   decisions.md "Caster LOD of one texel in every cascade").
+   scene-early split on current trees); several views in one process for
+   evidence passes (no such flag exists; `--benchmark --route` is the
+   nearest); a startup time breakdown with `--trees` (81 s warm against
+   ~11 s with `--placement off`); capture runs exiting non-zero on any
+   list drop, a render size other than 2560x1440, or a GPU buffer outside
+   device memory (today they only print a warning); timestamps for the
+   frames still in flight (backlog); the cascade changes (drop the
+   sun-axis re-render trigger, static ground cover out of the cascades).
+   Done with g1: the VRAM print (device-local and all heaps, peak at load
+   and at the far field), the drop warning over the whole run, voxel
+   casters, the caster LOD of one texel in every cascade.
 4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed");
    the TLAS/BLAS memory check (build them only for `--shadows rt`,
    `--far-shadows tlas`, `--reference` if g1 removes the last ray query
@@ -88,33 +92,32 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   ms (90 fps); 1% low >= 60 fps in every segment, hop frames excluded. 180
   fps is a stretch figure, not a gate. Proof of technique, not a merge
   gate.
-- VRAM: resident <= 12 GB, transient peak <= 14 GB at the showcase views,
-  printed by every capture run; every spec states its VRAM delta; g1 may
-  not merge above main's peak (main today: 12.6 GB before the far field
-  loads, 14.4 GB peak, on the 16 GB card).
+- VRAM: resident <= 12 GiB (12288 MiB), transient peak <= 14 GiB (14336
+  MiB), device-local, at the showcase views, printed by every capture run;
+  every spec states its VRAM delta. Main after the g1 merge (forest edge,
+  `--trees`): resident 13383 MiB (over the gate; the cull list caps sized
+  for the voxel views), peak 14261 MiB (all heaps 14357), on the 16 GB
+  card. Vertex compression (step 4) is the planned saving.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.
 
-## Paused: G1 voxel foliage (branch `g1`)
+## Voxel foliage (G1, merged 2026-11-24)
 
-When the user says to resume G1 / the G1 branch: `git fetch && git checkout
-g1` (unmerged, on origin), then read the "Resume" section at the top of
-`docs/superpowers/plans/2026-11-24-dag-voxel-foliage.md` and the ledger
-beside it (`2026-11-24-dag-voxel-foliage-ledger.md`), and continue with
-superpowers:executing-plans (inline; Opus for the final review, never
-Fable). If `assets/` is missing, run `./tools/fetch-sample-assets.sh`
-first; the `.clusters` caches rebuild on first load (~4-7 min).
+Plan, ledger (every ruling, command and raw number) and decisions:
+`plans/2026-11-24-dag-voxel-foliage.md`, its ledger, decisions.md "Voxels
+inside the cluster DAG", "Cull list caps from measured need", "Voxel
+clusters cast into the cascades", "Caster LOD of one texel in every
+cascade".
 
-## Paused: G1 voxel foliage (branch `g1`)
-
-When the user says to resume G1 / the G1 branch: `git fetch && git checkout
-g1` (unmerged, on origin), then read the "Resume" section at the top of
-`docs/superpowers/plans/2026-11-24-dag-voxel-foliage.md` and the ledger
-beside it (`2026-11-24-dag-voxel-foliage-ledger.md`), and continue with
-superpowers:executing-plans (inline; Opus for the final review, never
-Fable). If `assets/` is missing, run `./tools/fetch-sample-assets.sh`
-first; the `.clusters` caches rebuild on first load (~4-7 min).
+- The user's bar (2026-11-24): voxels are not noticeable in gameplay; the
+  user cannot point at the switch on foot or in flight.
+- Known gap: at the overview the voxel crowns cover more of the clearings
+  than triangle crowns (crown 25.5% of the clearing mask against 11.5% in
+  main ray traced; backlog row).
+- Next: the user's fly-through on merged main; then a diagnosis lane that
+  checks how solid a sparse voxel is drawn and the voxel size in pixels
+  across the range, before any tuning.
 
 ## State of main (2026-11-24)
 
@@ -123,7 +126,9 @@ Ray Reconstruction an A/B); raster cascaded sun shadows default; `--fov` 70
 deg horizontal; GI probes default (ground cache, material albedo, foliage
 lit where the ray meets it); reference path tracer (`--reference SPP`);
 Megascans Trees (alder, beech, hornbeam, 30 variants, traced opaque leaves,
-leaf transmission per KHR) under `--trees`; voxel trees and far field;
+leaf transmission per KHR) under `--trees`; voxel levels inside the trees'
+cluster DAGs (G1), casting into sun cascades 0-3, and the far field from
+the same voxelizer;
 volumetric clouds (outline off by default); valley-anchored haze; geo
 channels and causal placement (forest follows land use, scree layer).
 Parity route baseline 27.9 fps with the causal forest (accepted; the
