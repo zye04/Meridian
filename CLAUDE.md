@@ -228,10 +228,11 @@ the trees back (hidden by default). Capture runs print validation errors,
   spends ~0.1 s there (Release ~10 s and Debug ~59 s cold).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
   next to the glTF, keyed by a hash of the loaded geometry and versioned
-  with meshoptimizer; the first load after a change prints "Building
-  clusters" and rewrites it (an unwritable cache only warns). The cache
-  also stores each mesh's per-DAG-level group BVH (`nodes`, `levels`;
-  version 3, so older caches rebuild once), uploaded to a shared node
+  with meshoptimizer (`kCacheVersion`, cluster.cpp, 7 since meshoptimizer
+  v1.3; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
+  the first load after a change prints "Building clusters" and rewrites it
+  (an unwritable cache only warns). The cache also stores each mesh's
+  per-DAG-level group BVH (`nodes`, `levels`), uploaded to a shared node
   pool (`ClusterNodeInfo`, children rebased into the node or cluster
   pool) and level table. `selectClustersBvh` is the CPU reference for the
   GPU traversal (cull.comp's level band, cluster_traverse.comp's node

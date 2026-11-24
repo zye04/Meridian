@@ -25,10 +25,11 @@ FetchContent_Declare(fastgltf
 FetchContent_Declare(mikktspace
     GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
     GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409)
-# meshoptimizer: cluster LOD hierarchies (demo/clusterlod.h, Nanite-style).
+# meshoptimizer: simplification and clustering; its demo/clusterlod.h (cluster
+# LOD hierarchies, Nanite-style) is vendored in third_party/clusterlod.
 FetchContent_Declare(meshoptimizer
     GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
-    GIT_TAG v1.0
+    GIT_TAG v1.3
     SYSTEM)
 # Dear ImGui: the in-game overlay. It has no CMake; the library is built here.
 FetchContent_Declare(imgui
@@ -188,6 +189,6 @@ target_link_libraries(meridian PRIVATE
     fastgltf
     mikktspace
     meshoptimizer)
-target_include_directories(meridian SYSTEM PRIVATE ${meshoptimizer_SOURCE_DIR}/demo)
+target_include_directories(meridian SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/clusterlod)
 set_source_files_properties(src/clusterlod.cpp PROPERTIES
     COMPILE_OPTIONS "-w;-O2;-fno-sanitize=all")

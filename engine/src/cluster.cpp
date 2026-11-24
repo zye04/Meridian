@@ -20,7 +20,7 @@ constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
-constexpr uint32_t kCacheVersion = (6u << 16) | MESHOPTIMIZER_VERSION;
+constexpr uint32_t kCacheVersion = (7u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
