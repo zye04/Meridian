@@ -1,5 +1,7 @@
 # M4 Clouds and weather — design
 
+**Status:** done, merged to main 2026-11-20 (plan `../plans/2026-11-19-clouds-weather.md`).
+
 Milestone M4 of the showcase roadmap (`2026-11-19-showcase-roadmap.md`),
 widened with the user on 2026-11-19 from "a cumulus layer" to the
 engine's **weather framework plus its cloud renderer**. Built by Lane B

@@ -1,6 +1,6 @@
 # M2a Forests — design
 
-**Status:** in progress; the plan (`docs/superpowers/plans/2026-11-19-forests.md`) tracks which tasks are done.
+**Status:** done (2026-11-24 review): placed forests, the cluster BVH and the voxel far field are on main; see the plan's Status line.
 
 Milestone M2 of the showcase roadmap (`2026-11-19-showcase-roadmap.md`) is
 split in two, each visible on screen with its own GPU budget:

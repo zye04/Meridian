@@ -1,5 +1,7 @@
 # 15 km showcase scene — roadmap
 
+**Status:** reference (2026-11-24 review): milestone states live in their own specs and plans; current next steps in `../resume.md`.
+
 Agreed with the user on 2026-11-19. Goal: as fast as possible, a proper
 15 x 15 km natural scene (hills and a peak, forests, meadows, grass,
 flowers, rocks, clouds), walkable and flyable, resembling

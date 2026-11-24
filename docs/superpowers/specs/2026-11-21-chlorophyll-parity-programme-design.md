@@ -1,11 +1,11 @@
 # Chlorophyll parity programme: design
 
-Status: draft for user approval (2026-11-21). Inputs:
+Status: active programme (2026-11-24 review): its pillars and gaps are tracked on the GitHub board and in `2026-11-21-look-gap-audit.md`. Inputs:
 `2026-11-21-look-gap-audit.md` (gaps G1-G11 with evidence),
 `2026-11-21-chlorophyll-baseline.md` (graded facts, frame inferences,
 Meridian capabilities, cross-check), research reports
 `docs/superpowers/research/2026-11-21-{A..E}-*.md`, matched views
-`docs/superpowers/research/matched-views/` (in progress).
+`docs/superpowers/research/matched-views/`.
 
 ## Intent
 

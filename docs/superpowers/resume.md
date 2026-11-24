@@ -1,273 +1,83 @@
 # Resume here (entry point; updated 2026-11-24)
 
-Read this file first. Weekly usage resets **Tuesday 2026-11-24 05:00**.
+Read this file first. It holds current truth only: state of main, open
+branches, what waits on the user, and the next steps per area. Session
+history lives in git (`git log -- docs/superpowers/resume.md`) and in
+`docs/decisions.md`.
 
-## FIRST, before anything else: housekeeping lane (user, 2026-11-24)
+## State of main (2026-11-24)
 
-Absolute top priority after the usage reset. Make it evident what is done,
-where things stand and what is planned; find stale docs (specs/plans whose
-Status lines lie, resume.md sections, backlog rows already resolved,
-CLAUDE.md claims), leftover temp files, and worktrees/branches/folders no
-longer needed (~58 worktrees in ../meridian-*). Show the user the cleanup
-list before deleting anything. Other work (broadleaf spec, GTAO decisions,
-geo lane) waits until this is done.
+Native 1440p; DLSS Super Resolution DLAA default (own stable TAA = fallback,
+Ray Reconstruction an A/B); raster cascaded sun shadows default; `--fov` 70
+deg horizontal; GI probes default (ground cache, material albedo, foliage
+lit where the ray meets it); reference path tracer (`--reference SPP`);
+Megascans Trees (alder, beech, hornbeam, 30 variants, traced opaque leaves,
+leaf transmission per KHR) under `--trees`; voxel trees and far field;
+volumetric clouds (outline off by default); valley-anchored haze; geo
+channels and causal placement (forest follows land use, scree layer).
+Parity route baseline 27.9 fps with the causal forest (accepted; the
+performance lane takes it, backlog "Forest render cost after causal
+placement").
 
-## Session 2026-11-24 (terrain lane: geo channels, merged)
+## Workspace
 
-Terrain lane steps 1-3 landed on main (plan
-`plans/2026-11-23-geo-channels-causal-placement.md`, done; decisions.md
-"Terrain relief test" and "Geo channels and causal placement"):
-- Relief test: real 0.5 m relief beats 2 m under grazing light; the 0.3 m
-  detail noise is off by default (`--effects terrain-detail=1` A/B).
-- `meridian-cook --geo` channels beside every `.height` (napf.geo,
-  relief-*.geo); placement rules read them and an earlier layer's density.
-- Forest follows the Napf's land use (slopes 14-34 degrees, sunny slopes
-  cleared), scored against swissSURFACE3D canopy (`--score-forest`: kappa
-  -0.225 -> 0.461). New scree layer; meadow plants by sun and wetness.
-- Cost accepted by the user: parity route 41.1 -> 27.9 fps is the new
-  baseline (more forest); the performance lane takes it (backlog). The
-  default start view now looks into forest on the ridge.
-- Worktree `../meridian-geo` (branch `geo`) is merged and can go in the
-  housekeeping cleanup. Deferred minors from the final review: no
-  maxPushConstantsSize check (placement push constants are 144 B); the
-  forest-floor bake sits half a sample off its texel centre.
-- Next for the lane: step 4 (fine relief synthesis against the 0.5 m
-  patch) or the 0.5 m height clipmap; the broadleaf floor's group 2 and
-  the canopy lane's interior ablation were waiting on this merge.
+- Worktrees: the main checkout and `../meridian-canopy` (branch
+  `canopy-backlit`, merged; kept for its 1024 spp references and scripts
+  in `.superpowers/spike-backlit/`, inputs to the canopy steps below).
+- Parked branches (unmerged, on origin; finish or drop when the area comes up):
+  - `far-c`: far-cell raster with two-phase Hi-Z (#10), slower than main.
+  - `far-m-shadow2`: voxel trees cast into cascades 0-3 (#11).
+  - `meadow-y`: far-field grass match WIP.
+  - `clouds-25d`, `clouds-25d-mip`: paused 2.5D clouds (volumetric kept).
+  - origin only: `clouds` (pre-rebase clouds lane, superseded), `ground2`
+    (natural terrain transitions WIP), `ground2-cliffs` (non-repeating
+    cliffs WIP).
+- Old lane notes and tools (next.md, RESUME.md, progress ledgers, capture
+  scripts) from the 55 removed worktrees: `.superpowers/archive/<worktree>/`
+  in the main checkout (git-ignored). The G7 lane helpers (cap.sh, rgb.py,
+  oklab-stats.py, forest-clarity.sh, albedo-cap.sh) are in
+  `.superpowers/archive/g7/g7/tools/`; the paused `cloudpop` investigation
+  in `.superpowers/archive/cloudpop/cloudpop/RESUME.md`.
+- Board: https://github.com/users/zye04/projects/1 (issues #1-#13, #16-#32).
+  Close candidates (user's call): #9 G9 (native TAA vs DLSS, moot since
+  DLAA is the default and the `native` branch is dropped), #17 G14 (giant
+  leaf cards; the card cooks were replaced by traced leaves).
 
-## Session 2026-11-24 (broadleaf forest floor, brainstorm)
+## Waiting for the user
 
-User downloaded the Megascans European Broadleaf Forest pack (66 zips in
-~/Downloads). Design written: `specs/2026-11-24-broadleaf-forest-floor-design.md`
-(approach A, builder check folded in). Open: GTAO spec's 3 decisions
-(waiting since 2026-11-21): user asked what they are; Claude proposed
-re-checking its double-darkening section against the GI probes (default
-since 2026-11-23) first. Next: user reviews and approves the
-spec, then writing-plans (group 1 now: cook, audit, photos; group 2 after
-the geo lane merges).
+1. Broadleaf forest floor spec (`specs/2026-11-24-broadleaf-forest-floor-design.md`):
+   approve, then writing-plans (group 1: cook, audit, photos; group 2 on the
+   geo channels, now on main). The Megascans pack is in ~/Downloads (66 zips).
+2. GTAO spec's 3 decisions (`specs/2026-11-21-gtao-design.md`); proposed
+   first: re-check its double-darkening section against the GI probes.
+3. The saved grade file overrides the starting grade (G panel Reset + Save).
 
-## Session 2026-11-23 night (canopy lighting lane, worktree `../meridian-canopy`)
+## Next steps per area (agreed order within each)
 
-Spike captures, 1024 spp references (edge `reffix-*` with the new leaf rule,
-interior `refint-front`) and cap.sh / cmp.sh / variant.sh in
-`../meridian-canopy/.superpowers/spike-backlit/` (own build: a parallel
-session rebuilt the main checkout under a capture once).
-- Backlit direct path done (be08624): leaf sun side by the geometric
-  normal (raster + reference), no tuft occlusion on crowns. Backlit 0.368 ->
-  0.121 mean |ln ratio|, front 0.069 (decisions.md).
-- Reference terrain hole fixed (d8b3354): the march mishandled rays starting
-  on a sample line (also every finest-level GI probe).
-- Interior gate now runs: floor 1.1-2.6x dark, square sunflecks (backlog).
-
-Next (user, 2026-11-23): wait for the terrain lane to land, then the interior
-sun-path ablation (backlog row) on its terrain, then front-lit residuals
-(canopy-edge GI sky term, silvery leaves), then the bitmask pass.
-
-## Session 2026-11-23 evening (Pro account, inline)
-
-Landed on main:
-- #32 closed: leaf transmission per KHR_materials_diffuse_transmission
-  (e1c3803, look-neutral re-encode in the cook), Megascans Trees calibrated
-  to measured mature beech t = 1.1 (59e21a0).
-- Reference path tracer (`--reference SPP`, `--reference-mode`), spec and
-  plan `2026-11-23-reference-path-tracer*`, decisions.md entry: shared
-  `surface.glsl`, `ray_hit.glsl`, `reference.comp`,
-  `tools/reference-compare.py`, `--streamed off`. Furnace checks pass; it
-  found the fragment-only DFG binding (fixed).
-- First comparison: GI probes make shaded trunks 2.1x too bright and too
-  green (the #32 tint is theirs); backlit canopy 1.8x too dark (backlog).
-- Neon terrain research stored, not triaged:
-  `research/2026-11-23-terrain-pcg-deep-research.md` (recommends cook-time
-  geomorphology maps + surface clipmap + runtime weather layer).
-
-- GI canopy radiance (spec/plan `2026-11-23-gi-canopy-radiance*`): probe
-  rays light foliage at the hit (sun + sky marches, leaf phase,
-  recollision). Edge trunk 2.1x -> 0.97x of the reference, B/G 0.89 (ref
-  0.84), front error 14.5% -> 6.6%, +0.17 ms. Found by ablation; the
-  backlit error is the direct path's (same with `--gi off`). The reference
-  misses the terrain around the forest interior (backlog).
-
-Next, proposed (ask the user):
-1. Backlit direct path (mesh.frag transmission, shadow cascades over
-   leaves): own design, checked against the reference (backlog row).
-2. Reference terrain hole at the interior view (backlog), so interior views
-   can be judged; then the bitmask pass.
-3. Terrain lane: triaged in `research/2026-11-23-terrain-triage.md`
-   (direction agreed, nothing built); start at its plan step 1, the 0.5 m
-   relief test.
-
-## Session 2026-11-22 (Pro account, inline work, no lanes)
-
-Pro-plan rules while on that account: work inline in the main thread, no
-lane sub-orchestrators or fan-out, lighter workflow (draft, self-review,
-direct write; full SDD only for structural changes, after asking),
-subagents only when clearly worth it at the lowest tier, fewest GPU runs.
-The user may run parallel Claude Code terminals themselves.
-
-Landed on main: `tools/motion-clarity.sh` (4b2f454: jitter = frame 120 vs
-121 at the same pose while moving, error = motion vs still), stable TAA
-(5789387, `Effects::stableTaa`, absorbs the `native` branch's 3x3
-reconstruction: drop that branch), DLSS DLAA as the default AA (a5c8f43).
-User preference: stability over sharpness (memory).
-
-G19 (#22) plan, this lane ("image-stability"):
-- Step 0 done (baseline under TAA: `.superpowers/motion/baseline-main/`).
-- Step 1 done (stable TAA, then DLAA chosen; decisions.md 2026-11-22).
-- DLAA baseline done: `.superpowers/motion-baseline-dlaa.txt`.
-- Step c done (a28c484): `Effects::cutoutMipBias`, default +1 on the masked
-  depth pass (ground jitter -8..-11%, forest +1.1 ms; decisions.md). -1 and
-  +1 runs in `.superpowers/motion/cutout-{m1,p1}/`.
-- Neon's deep-research report triaged (`research/2026-11-22-neon-triage.md`,
-  report `research/2026-11-22-neon-deep-research.md`): its top bug (cloud
-  transparency mask) is wrong, DLSS SR ignores the mask; preset K vs M is
-  a valid re-test; leaf dead zone (G13), voxel transmission (G1), jittered
-  contact shadows (G5) confirmed in code. Backlog rows carry the rest.
-- Next, step 2: cloud small-detail smear, re-planned in the triage doc
-  (A/B list 0-5). Step 0 done (crop rows in motion-clarity.sh). Step 1
-  (preset M vs K, L dropped for usage) stopped by the user at the usage
-  limit after 5 of 56 captures: re-run both tables from scratch
+- Canopy lighting (user 2026-11-23): interior sun-path ablation on the new
+  terrain (backlog "Forest interior floor"), then front-lit residuals
+  (canopy-edge GI sky term, silvery leaves), then the screen-space
+  visibility-bitmask pass (GI plan Tasks 6-8; structural: short plan, ask
+  first; radius <= 1.5 m, sector-masked probe fill, ~1 ms).
+- Lighting after that: G5 (#5) contact/micro shadows tuned on the GI image;
+  #30 remainder (intra-crown sun from the prototype voxels, recollision).
+- Voxels and leaves (user priority 2026-11-23): seamless voxel switch (G1):
+  a seam gate first, then the band with opaque leaves, then the voxels'
+  grey speckle; leaf shading: still-camera jitter 1.02 -> 1.35 with traced
+  leaves, G18 specular AA, G13 back faces, G15 roughness.
+- Terrain: step 4 (fine relief synthesis against the 0.5 m patch) or the
+  0.5 m height clipmap (`research/2026-11-23-terrain-triage.md`).
+  Deferred minors: no maxPushConstantsSize check (placement push constants
+  144 B); the forest-floor bake sits half a sample off its texel centre.
+- Image stability, G19 (#22): re-run preset M vs K from scratch
   (`tools/motion-clarity.sh build-release .superpowers/motion/preset-M
-  --dlss-preset M`, same for K). Crop
-  baseline (DLAA M): sky_turn1 Laplacian ratio 0.70, jitter 1.19, error
-  2.48 on the `detail` crop.
-- `cloudpop` (worktree `../meridian-cloudpop`, paused WIP, no commits;
-  note `.superpowers/cloudpop/RESUME.md`): still-camera sky pops/frame
-  under DLAA at `1119 1356 -431 -1.55 0.35`: base 21.3, outline=0 9.7,
-  variance clip off 22.5 (not the cause); frozen clouds 12.9 / 8.3 with
-  outline=0. Suspects: the outline's contrast term (shade / opacity at
-  thin rims), then the composite's binary motion switch (opacity > 0.5).
-  Step 2's outline A/B (2) is the in-motion half of this.
-- Even under DLAA a moving frame differs ~6x more than a still one:
-  foliage input is the larger remaining source.
-
-Parallel terminals the user opened (check with them / `git worktree list`):
-- G20 (#23) cloud shadows stepping: worktree `../meridian-g20`, branch `g20`.
-- Leaf geometry design (cards -> opaque triangles at cook time), folded
-  into `specs/2026-11-21-materials-fidelity-design.md`: docs only.
-
-## G7 lane (2026-11-23, worktree `../meridian-g7`, branch `g7`)
-
-User steer 2026-11-23: leaves, voxels and lighting come before cloud
-smear. Principle (user): the engine stands without the game: no
-asset-pack knowledge in the engine, generic (glTF-standard first)
-material features, asset translation in the cook; suspect the engine's
-handling of an asset first (materials spec "Principle").
-
-Done and on main (2026-11-23):
-- G7 (#7) exposure shade floor 3 EV.
-- Materials spec D3-D6 decided (98c48ee).
-- Albedo capture `--capture-albedo` + `tools/albedo-audit.py` (dc477d2),
-  `meridian-cook --stats` (1c020d8): texture path exact (KTX2 vs source
-  within 0.3%); leaves match the atlas within ~6%; trunks consistent with
-  the tiling bark. Per-pixel material-ID view deferred (backlog).
-- #31 GI reads the far-field material albedo, reflected + transmitted
-  (f63f597, 89bc219); #30 crown visibility only with GI off (3b6b900).
-  Forest edge with GI: mean L 0.241 -> 0.310, p5 0 -> 0.073, trunk
-  neutral; interior floor 1.5-2.7% of sunflecks (target 1.5-5%). #30
-  stays open for the leaf lighting heuristic.
-- Neon GI foliage research + triage (3b5234d,
-  `research/2026-11-23-gi-foliage-{deep-research,triage}.md`); #32 filed
-  (leaf transmission vs KHR_materials_diffuse_transmission).
-
-- GI probes on by default (user approved; motion gates pass except the
-  pre-existing SSIM fwd5 failure, decisions.md "GI probes on by default").
-
-Next, in order (agreed with the user):
-1. #32: leaf transmission per KHR (front (1 - f) base colour, back f);
-   cook calibration of the factor (measured beech tau/rho ~2) is
-   materials-lane work. Before the bitmask pass: it changes leaf
-   brightness everywhere.
-2. Screen-space visibility-bitmask pass (completes the hybrid GI, covers
-   AO #2): write a short plan first and ask the user (structural).
-   Parameters from the triage: radius <= 1.5 m, sector-masked probe fill,
-   material-aware thickness, spatial-first filtering, ~1 ms budget.
-3. G5 (#5) contact/micro shadows, tuned on the GI image (Bend-style
-   deterministic march lead; "raster leaf shadow blobby" out of scope,
-   note on #5).
-4. #30 remainder: intra-crown sun from the prototype voxels (replaces
-   `leafSun`), then recollision multi-scatter.
-- GI colour check from the triage: closed forest shade ~(0.83, 1, 0.62),
-  woodland shade ~(0.64, 1, 1.65) linear RGB normalized to G (Chiao 2000).
-- Captures need the headless 1440p output when the monitor sleeps
-  (memory native-1440-rule; `MERIDIAN-1440`). Lane helpers in
-  `.superpowers/g7/tools/` (cap.sh, rgb.py, oklab-stats.py,
-  forest-clarity.sh, albedo-cap.sh; bash). Capture run-to-run noise is
-  0.46/255 on the ground view (backlog row), not ~1e-6.
-- Worktree `../meridian-gi-albedo` (branch `gi-albedo`) is merged; it can
-  be removed.
-
-## Leaf-geometry lane (2026-11-23, worktree `../meridian-leafgeo`, branch `leaf-geometry`)
-
-Merged to main (38cb67a): the Megascans Trees' leaves are traced opaque
-geometry (plan `plans/2026-11-22-leaf-geometry.md` done; decisions.md
-"Tree leaves as opaque geometry" has the fixes and the numbers). Main's
-shared `assets/source/megascans/{blackalder,europeanbeech,europeanhornbeam}`
-now hold the 30 traced variants; the 25 dropped card cooks are parked in
-`assets/source/megascans/_cards-dropped/` (delete once nobody needs the
-card A/B). Cluster cache version 6.
-
-Other worktrees: rebase on main before running `--trees`. An older binary
-loads the traced hornbeam through MikkTSpace's O(n^2) degenerate path
-(minutes per tree, 30+ min startup; fixed in 280f6c2).
-
-Next for this area (user priorities 2026-11-23: leaves, voxels, lighting):
-1. Seamless voxel switch (G1): a seam gate first (cluster vs voxel look at
-   the switch distance, still and moving), then the band with opaque
-   leaves (backlog row: clusters draw whole under dithered voxels) and the
-   voxels' look (grey speckle).
-2. Leaf shading: still-camera jitter 1.02 -> 1.35 with traced leaves
-   (backlog), G18 specular AA, G13 back faces, G15 roughness.
-
-## The work list
-
-- **Programme:** `docs/superpowers/specs/2026-11-21-chlorophyll-parity-programme-design.md`
-  (why, goals, anti-goals, two rules: each frame correct on its own; cost
-  follows visible pixels; 180 fps native 1440p on the 4080 as proof;
-  phase 0 + five pillars; GitHub tracking).
-- **Board:** https://github.com/users/zye04/projects/1 (Acknowledged ->
-  Investigating -> Planned -> Implementing -> Verified). Issues #1-#12 =
-  audit gaps G1-G12, #13 matched views, #14 route (closed), #15 metric
-  (closed), #16-#21 = G13-G18, #22 = G19, #23 = G20.
-- **Evidence:** `docs/superpowers/specs/2026-11-21-look-gap-audit.md`
-  (G1-G20 with screenshots in `docs/images/look-gap-2026-11-21/`),
-  `2026-11-21-chlorophyll-baseline.md` (graded facts about his engine,
-  frame inferences, our capabilities), research
-  `docs/superpowers/research/2026-11-21-{A..E}-*.md`, matched views +
-  resemblance numbers `docs/superpowers/research/matched-views/`.
-
-## Next, in this order
-
-1. **G19 (#22) motion smear/jitter** on clouds, trees, textures (the
-   user's top complaint) and **G20 (#23) blocky cloud shadows**: measure
-   with a moving camera at user-like speeds first (the flicker metric so
-   far was static), then fix per rule 1. CE's alpha-grass mip bias and
-   motion smear mask (baseline F16) are A/B candidates; his AA is unknown.
-2. **Regression checks (cheap A/Bs):** G16 (#19) blocky distant clouds vs
-   `--effects cloud-outline=0`; G17 (#20) terrain banding vs the
-   brute-force march / pre-aaab45b.
-3. **Leaf material** (Pillar 1, #18 G15) first: it feeds G13 (#16 black
-   back faces), G14 (#17 giant cards), G18 (#21 fireflies). Spec
-   `2026-11-21-materials-fidelity-design.md` (draft: user confirms 3
-   decisions) -> plan.
-4. **Reconcile WIP branches** against their issues: `native` (absorbed by
-   stable TAA 5789387: drop it), `far-m-shadow2` (distant tree shadows, #11),
-   `far-c` (far-cell occlusion, #10). Finish or drop each.
-5. Re-run the parity route (`--benchmark 60 out.csv --route
-   tools/routes/parity.route --trees`, `python3 -I tools/bench-route.py`)
-   on the Megascans Trees + 70 deg FOV; find the 20-26 fps 1% low hitches.
-6. Phase 0 Task 4, G7 grey image (#7): plan
-   `docs/superpowers/plans/2026-11-21-phase0-trustworthy-judgment.md`.
-7. GTAO (#2): spec `2026-11-21-gtao-design.md` (draft: user confirms 3
-   decisions) -> plan -> implement.
-8. Matched views refined at 70 deg (#13); motion gates re-anchored at 70.
-
-## State of main (2026-11-21)
-
-Native 1440p, DLSS DLAA default since 2026-11-22 (own stable TAA = fallback); raster sun shadows default;
-`--fov` default 70 deg horizontal; Megascans Trees (alder, beech,
-hornbeam, 30 variants, traced opaque leaves) under `--trees`;
-voxel trees; clouds with outline (default 1); valley-anchored haze; GI
-probes on by default (2026-11-23); benchmark route + resemblance metric tools.
+  --dlss-preset M`, same for K); then the cloud small-detail smear A/B list
+  in `research/2026-11-22-neon-triage.md`. Paused `cloudpop` (sky pops on a
+  still camera; suspects: the outline's contrast term, the composite's
+  binary motion switch) is archived, see Workspace.
+- Performance: parity route (`--benchmark 60 out.csv --route
+  tools/routes/parity.route --trees`, `python3 -I tools/bench-route.py`)
+  at 27.9 fps against 180; G10 (#10) forest edge cost.
 
 ## Unreal
 
@@ -277,77 +87,42 @@ EditorScriptingUtilities, GLTFExporter enabled); packs Black Alder,
 European Beech, European Hornbeam. Steps: docs/assets.md "Megascans Trees
 from Unreal".
 
-## Decisions waiting for the user
+## How work runs
 
-1. GTAO spec's 3 decisions; materials spec's 3 decisions.
-2. GI default (off until forest cost and motion gates pass).
-3. The saved grade file overrides the starting grade (G panel Reset +
-   Save).
-
-## Housekeeping
-
-~48 old worktrees sit beside the repo (`git worktree list`). Branches
-with unmerged commits: `native`, `far-m-shadow2`, `far-c`, `clouds-25d`
-(paused 2.5D clouds), `meadow-y`. Everything else is merged or obsolete:
-remove those worktrees only after the user OKs a list.
-
-## How work runs (still valid)
-
-One orchestrator session is the user's only interface. It does no
-implementing, reviewing or research itself: it dispatches one
-sub-orchestrator per lane (background agent, self-contained brief) and
-relays reports and user decisions. Each sub-orchestrator runs SDD
-(Sonnet implementers, Sonnet reviewers, Opus only for look judgment and
-risky reviews; never Fable) in its own worktree beside the repo (never
-under `/tmp`), and merges to main by rebase + fast-forward after review.
+Pro account (user, 2026-11-23): work inline in the main thread, no lane
+sub-orchestrators or fan-out, lighter workflow (draft, self-review, direct
+write; full SDD only for structural changes, after asking), subagents only
+when clearly worth it at the lowest tier, fewest GPU runs. The user may run
+parallel Claude Code terminals themselves. Ask which account if unclear;
+on a larger plan, lanes come back (brief template:
+`.superpowers/orch/common-brief.md`, git-ignored; update its dates first).
 
 The user's rules:
 
-- Time: work fast and right. The user may set deadlines and ask for more agents: lanes then cut scope to a
-  first visible version behind a flag, run several Sonnet implementers on
-  non-colliding files at once, and say within 15 minutes what can land.
-  Every milestone message carries an absolute local-time ETA; no padding.
-- Parallelism: run queued work in parallel when files don't collide. The
-  GPU flock is the real bottleneck with 4+ lanes. Watch the 5-hour usage
-  window (the user reports %); near the limit, pause lanes with a WIP
-  commit + push + a `next.md`.
-- Don't launch lanes the user didn't ask for; when the user asks for help
-  choosing, answer directly. When the user reports a visual problem,
-  dispatch a fix, not a lane that proves it, and verify it in the user's
-  conditions (clouds drifting at `--time-scale 1`, mouse-like turns,
-  interactive settings), not only static deterministic captures.
-- Prove a look claim with a side-by-side capture before relaying it.
-- Look target: the Chlorophyll Engine frames in
-  `assets/reference/chlorophyll/` plus `assets/reference/target-meadow.png`
-  (clouds stay volumetric by the user's choice). Native 1440p, own TAA, no
-  upscaler is our direction, not a stated CE fact (F16); raster on the default
-  path.
-- Ask the user before deciding look questions; give a recommendation.
+- Work fast and right; every milestone message carries an absolute
+  local-time ETA. Kill dead ends after one try plus one variant.
+- Don't start work the user didn't ask for; when asked to help choose,
+  answer directly. Ask before deciding look questions; give a
+  recommendation. Prove a look claim with a side-by-side capture.
+- When the user reports a visual problem, fix it and verify it in the
+  user's conditions (clouds drifting at `--time-scale 1`, mouse-like
+  turns, interactive settings), not only static captures.
+- Look target: `assets/reference/chlorophyll/` plus
+  `assets/reference/target-meadow.png`; clouds stay volumetric.
+- Stability over sharpness; judge clarity in motion at user speeds.
+- Reports: "status" = running and waiting work only; "overview" = done.
+- Usage: the user reports the 5-hour and weekly %; Sonnet for mechanical
+  work, Opus for look judgment and risky reviews; never Fable.
 
-Every lane brief carries: no AI attribution in commits; latest SDK
-versions (verify at fetch time); tidiness (no debug leftovers, new CLI
-flags in CLAUDE.md, plan Status lines, docs state current truth only);
-commit messages and temp files inside the lane's worktree (never the
-shared session scratchpad); every game run through `flock
-/tmp/meridian-gpu.lock`; never `pkill`/`killall` or any name-pattern kill:
-record the PID of every background process at launch and stop only those
-(a lane's `pkill -f 'sleep 900'` on 2026-11-20 may have hit another
-lane's timer); look at assets before trusting their names; captures at
-2560x1440 and GPU ms compared only with identical `Render WxH` lines;
-DLSS SDK reuse via `-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=
-/home/zye/Projects/dev/meridian-motion-dlss/build/_deps/dlss_sdk-src`;
-every worktree's `assets/` is a symlink to
-`/home/zye/Projects/dev/meridian/assets` (check the link and the placement hash
-in CLAUDE.md before measuring); new `.glsl` includes need
-a cmake re-configure before shaders rebuild; ccache + mold are automatic.
-
-Reports: "status" = running and waiting work only; "overview" = done.
-
-- Usage: the user reports the 5-hour and weekly %; Sonnet for implementers,
-  reviewers and research, Opus only for look judgment and risky reviews;
-  one or two lanes at a time near the weekly limit.
-- Be judgmental: no ceremony for small changes, kill dead ends after one
-  try plus one variant, Debug once before merge (lane brief template:
-  `.superpowers/orch/common-brief.md` in the main checkout, git-ignored;
-  update its dates before reuse).
-
+Every worktree or parallel run: no AI attribution in commits; commit
+messages and temp files inside the worktree (`.superpowers/`), never a
+shared scratchpad; every game run through `flock /tmp/meridian-gpu.lock`;
+never `pkill`/`killall` or any name-pattern kill (stop only PIDs you
+started); `assets/` is a symlink to `/home/zye/Projects/dev/meridian/assets`
+(check the placement hash in CLAUDE.md before measuring); captures at
+2560x1440 and GPU ms compared only with identical `Render WxH` lines (the
+headless 1440p output when the monitor sleeps, memory native-1440-rule);
+DLSS SDK reuse via
+`-DFETCHCONTENT_SOURCE_DIR_DLSS_SDK=/home/zye/Projects/dev/meridian/build/_deps/dlss_sdk-src`;
+new `.glsl` includes need a cmake re-configure; worktrees beside the repo,
+never under `/tmp`; remove a worktree once its branch is merged.

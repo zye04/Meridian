@@ -3,8 +3,7 @@
 Status: design, awaiting user approval (2026-11-24).
 
 Builds on: `2026-11-23-geo-channels-causal-placement-design.md` (the
-terrain lane, `../meridian-geo`, branch `geo`, at its Task 8 "Causal
-layers" on 2026-11-24). Related drafts: `2026-11-21-gtao-design.md` (G2),
+terrain lane, merged to main on 2026-11-24). Related drafts: `2026-11-21-gtao-design.md` (G2),
 `2026-11-21-materials-fidelity-design.md` (G12). Research:
 `research/2026-11-23-terrain-pcg-deep-research.md` (RVT, channels).
 

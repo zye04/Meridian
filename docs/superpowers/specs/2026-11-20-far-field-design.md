@@ -1,8 +1,6 @@
 # Far-field forests: voxel tiers (M2a)
 
-**Status:** revised 2026-11-20 (lane M2a-far): three tiers, no impostors.
-The far tier's prototype is built (Task 8, gates failed as measured); Tasks
-9-13 of the forests plan build the revision.
+**Status:** implemented (2026-11-24 review): three voxel tiers, no impostors; far and mid tiers on main (forests plan Tasks 9-11). Far-cell raster (`far-c`) and voxel trees in the shadow cascades (`far-m-shadow2`) are parked branches (backlog).
 
 Decided with the user on 2026-11-20: option C of the far-field draft
 (voxels), and no impostors anywhere. The model is Chlorophyll Engine, whose

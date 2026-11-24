@@ -1,6 +1,6 @@
 # Raster Sun Shadows Implementation Plan
 
-**Status:** Tasks 1-4 merged (raster shadows opt-in); Task 5 (tuning, flip the default) open.
+**Status:** done; Task 5 flipped the default on 2026-11-21 (decisions.md "Raster sun shadows are the default").
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

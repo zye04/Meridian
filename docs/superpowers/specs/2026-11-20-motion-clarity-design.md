@@ -1,7 +1,6 @@
 # Motion clarity: DLSS 4.5, Ray Reconstruction, TAA v2 fallback, grading
 
-**Status:** decided with the user 2026-11-20; plan
-`docs/superpowers/plans/2026-11-20-motion-clarity.md` (not started).
+**Status:** done (2026-11-24 review); see the plan's Status line.
 
 This is quality pass step 2 (TAA sharpness and the shadow denoiser), plus a
 scene-referred grading system. Measurements, crops and the experiment diff

@@ -1,6 +1,6 @@
 # Streamed Placement Implementation Plan
 
-**Status:** in progress (lane M3, branch `meadow-stream`). Tasks 1-3 and 5 (dense look, plant micro occlusion, far-field colour match) merged; next: seamless transition (prefetch margin, wider fade band, normal blend, terrain blade detail), then task 4.
+**Status:** closed (2026-11-24 review). Tasks 1-3 and 5 on main (streamed meadow layers); the seamless-transition follow-ups (prefetch margin, wider fade band, normal blend, terrain blade detail) and task 4 were not built; reopen if the streaming edge shows.
 
 **Goal:** any placement layer can be *streamed*: instead of being placed
 once over the whole crop at load, it is placed by the GPU in a window of

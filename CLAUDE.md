@@ -693,7 +693,7 @@ motion, 0.04-0.25 in the layer; rescaled on exposure change)
 reprojected by cloud depth + wind; clouds_composite.comp upsamples it
 bilaterally on scene depth, sharpens it where every tap agrees (the
 outline: an unsharp mask of opacity and shading against a radius-2-texel
-tent, `Effects::cloudOutline`, push constant) and composites it over HDR (as storage, GENERAL), writes
+tent, `Effects::cloudOutline`, push constant, off by default) and composites it over HDR (as storage, GENERAL), writes
 cloud motion where opacity > 0.5 and raises the transparency mask to the
 cloud coverage) -> contact shadows (contact_shadows.comp: with the
 complete depth, a 16-step march toward the sun over 0.25-1.5 m; where it

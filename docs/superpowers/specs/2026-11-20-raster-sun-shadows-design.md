@@ -1,6 +1,6 @@
 # Raster sun shadows: cached cascaded shadow maps
 
-**Status:** implemented as an opt-in (`--shadows raster`, default rt until it passes the shimmer gates; see decisions.md "Raster sun shadows"). Changed in implementation: every cascade that needs re-centring renders the same frame (no one-per-frame limit).
+**Status:** done; raster is the default since 2026-11-21 (decisions.md "Raster sun shadows are the default"), `--shadows rt` the A/B. Changed in implementation: every cascade that needs re-centring renders the same frame (no one-per-frame limit).
 
 ## Goal
 

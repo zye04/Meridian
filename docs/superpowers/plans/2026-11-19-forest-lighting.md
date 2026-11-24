@@ -1,6 +1,6 @@
 # M2b Forest Lighting Implementation Plan
 
-**Status:** not started; begins after M2a (`docs/superpowers/plans/2026-11-19-forests.md`) is complete.
+**Status:** superseded (2026-11-24), never started; see the spec's Status line.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

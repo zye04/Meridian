@@ -143,7 +143,7 @@ import), `lane-*` are lane captures from the same day.
 
 ### G9. Motion shimmer still above DLSS
 - Native TAA, current main: walk 15.9, turn 10.4 /255 vs DLSS 10.1, 6.1
-  (`meridian-native/.superpowers/native/next.md`). The 3x3 reconstruction
+  (archived: `.superpowers/archive/native/native/next.md` in the main checkout). The 3x3 reconstruction
   WIP (branch `native`, 36c37a8) cuts 25% but softens 20%.
 - CE (F16): follows DLSS/FSR guidance, adds a lower mip bias on
   alpha-tested grass and a motion-based "smear mask" that sharpens

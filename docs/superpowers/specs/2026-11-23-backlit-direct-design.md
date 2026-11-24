@@ -1,6 +1,6 @@
 # Backlit canopy: direct sun on leaves (short design)
 
-Status: approved 2026-11-23 (user: "go with your recommendations").
+Status: implemented (2026-11-23, be08624), decisions.md "Backlit canopy: leaf sun side and crowns without tuft occlusion".
 
 ## Why
 

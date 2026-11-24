@@ -1,6 +1,6 @@
 # M2b Forest lighting — design
 
-**Status:** not started; begins after M2a (`docs/superpowers/plans/2026-11-19-forests.md`) is complete.
+**Status:** superseded (2026-11-24). Never built as designed: raster cascaded sun shadows (decisions.md "Raster sun shadows are the default"), the far shadow map and the GI probes ("GI probes on by default") took over its jobs. Kept for its research only.
 
 Second half of milestone M2 (see `2026-11-19-forests-design.md` for M2a
 and `2026-11-19-showcase-roadmap.md`). M2a puts millions of placed trees

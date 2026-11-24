@@ -1,10 +1,6 @@
 # Motion Clarity Implementation Plan
 
-**Status:** in progress: tasks done 0, 2.1, 2.2, 1.1a, 1.1b, 1.2, 1.3, 1.4, 1.5, 3.1. Next steps:
-- Track 1: done. DLSS DLAA + Ray Reconstruction (preset F) is the default since 2026-11-20 (user decision; fallbacks RR -> SR DLAA preset M -> TAA v2), and the Laplacian gates are absolute motion sharpness, not the motion/still ratio (see Global Constraints). 1.3 DLSS module, 1.4 guide buffers + `whiteNoise`, 1.5 RR on main. Tasks 3.2a-3.2b (shadow denoiser) are fallback-only work (`--aa taa`, `--rr off`).
-- Track 2: done.
-- Track 3: 3.1 done; next 3.2a -> 3.2b.
-- After all: Task 4 (sweep), Task 5 (final review). Ledger: `../meridian-motion/.superpowers/sdd/2026-11-20-motion-clarity/progress.md`.
+**Status:** closed (2026-11-24 review). Tracks 1-2 and 3.1 done; the defaults have since moved on: DLSS Super Resolution DLAA (no Ray Reconstruction, decisions.md "DLSS DLAA is the default anti-aliasing") with stable TAA as the fallback. Tasks 3.2a-3.2b (shadow denoiser) are moot under raster sun shadows. Remaining smear/jitter work lives in issue #22 (G19) and the backlog; the gate tools are `tools/motion-gates.sh` and `tools/motion-clarity.sh`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

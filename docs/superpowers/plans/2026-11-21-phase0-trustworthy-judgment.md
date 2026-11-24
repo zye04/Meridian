@@ -2,9 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Status: ready (2026-11-21). Issues: #14 (benchmark route + ledger), #15
-(resemblance metric), #7 (G7 diagnosis). #6 (G6) and #13 (matched views)
-run in their own lanes.
+Status: done (2026-11-24 review): #14 benchmark route and #15 resemblance metric closed, #7 (G7 grey image) landed 2026-11-23 (decisions.md "Exposure: shade lift floor").
 
 **Goal:** Make every later look and performance judgment trustworthy: a fixed camera route benchmarked with averages, 1% lows and per-pass ms per segment; a resemblance metric per matched view; the grey-image (G7) cause found.
 
