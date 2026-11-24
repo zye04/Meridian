@@ -732,7 +732,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
     impl_->drawnInstances = counters->instances;
     impl_->drawnTriangles = counters->triangles;
-    // This frame's drops and the need over the run, cascades included.
+    // Drops and need: the most in any frame of the run, cascades included.
     std::array<uint32_t, 5> drops{};
     std::copy(std::begin(counters->drops), std::end(counters->drops), drops.begin());
     uint32_t overflow = counters->overflow;
@@ -747,8 +747,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         }
       }
     }
-    impl_->droppedEntries = overflow;
-    impl_->droppedByList = drops;
+    impl_->droppedEntries = std::max(impl_->droppedEntries, overflow);
+    for (size_t list = 0; list < drops.size(); ++list) {
+      impl_->droppedByList[list] = std::max(impl_->droppedByList[list], drops[list]);
+    }
     impl_->drawnTerrainNodes = counters->terrainNodes;
     impl_->drawnCells = counters->cells;
     impl_->drawnFarCells = counters->farTasks[0];

@@ -1531,7 +1531,7 @@ int main(int argc, char **argv) {
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "
                 "%u dropped by full "
-                "cull lists (cascades included: chunks %u, work items %u, "
+                "cull lists (most in a frame, cascades included: chunks %u, work items %u, "
                 "clusters %u, terrain nodes %u, bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
@@ -1579,8 +1579,8 @@ int main(int argc, char **argv) {
     std::fflush(stdout);
     if (renderer.droppedCullEntryCount() > 0) {
       std::fprintf(stderr,
-                   "WARNING: %u entries dropped by full cull lists in the last frame (main "
-                   "view and sun shadow cascades): the image is incomplete\n",
+                   "WARNING: up to %u entries dropped by full cull lists in a frame (main view "
+                   "and sun shadow cascades): the image is incomplete\n",
                    renderer.droppedCullEntryCount());
     }
   }

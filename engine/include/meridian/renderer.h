@@ -323,9 +323,9 @@ public:
   // Terrain quadtree nodes drawn in a recent frame (2048 triangles each).
   uint32_t drawnTerrainNodeCount() const;
   // Chunks, work items, clusters, terrain nodes, BVH traversal nodes and
-  // voxel list entries the culling passes dropped in a recent frame because
-  // a list was full, main view and sun shadow cascades (nonzero means
-  // geometry or shadow is missing).
+  // voxel list entries the culling passes dropped because a list was full,
+  // the most in any frame of the run, main view and sun shadow cascades
+  // (nonzero means geometry or shadow is missing).
   uint32_t droppedCullEntryCount() const;
   CullDrops droppedCullEntries() const;
   // The cull lists' need over the run: the main view's, and the largest of

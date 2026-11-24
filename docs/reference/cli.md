@@ -170,11 +170,11 @@ detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
-geometry or shadow; main view plus the sun shadow cascades rendered that
-frame), per list: chunks, work items, clusters, terrain nodes, bvh nodes
-(the voxel lists' drops are in the total only); a nonzero total also ends
-the run with a `WARNING: N entries dropped by full cull lists` line on
-stderr. Two `cull list need,
+geometry or shadow; the most in any frame of the run, main view plus the
+sun shadow cascades rendered that frame), per list: chunks, work items,
+clusters, terrain nodes, bvh nodes (the voxel lists' drops are in the total
+only); a nonzero total also ends the run with a `WARNING: up to N entries
+dropped by full cull lists in a frame` line on stderr. Two `cull list need,
 main view|sun shadow cascades, most in a frame:` lines give each list's
 largest phase, queue or bucket over the run (the need while nothing drops,
 a lower bound once something does; the caps in gpu_types.h). A GPU-only
