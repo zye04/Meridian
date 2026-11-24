@@ -1,6 +1,67 @@
 # DAG Voxel Foliage Implementation Plan
 
-Status: ready (2026-11-24), awaiting the user's review.
+Status: in progress on branch `g1` (pushed). Done: Tasks 0-8, 6a-6c, and
+Task 9's measurements (ledger). Open: the independent delta review of
+ebfc444..7a46bf4 and the Task 9 closeout (docs, merge, issue #1 and #11).
+
+## User decisions (2026-11-24)
+
+- **Far-field palette, accepted deviation**: the far field keeps one
+  palette entry per mesh slot (`kFarSlots` = 8, reflected and transmitted
+  colour each), not Task 6's per-voxel albedo and transmission; revisit with
+  the far tile tier. Evidence: far horizon side-by-side
+  `.superpowers/g1/look/q1_far_forest_g1_top_main_bottom.jpg`.
+- **Darker forest, accepted for merge** as the correct shadowing; brightness
+  is a lighting and grade matter later, not a g1 change. Evidence: fly frame
+  010 against main ray traced (`--shadows rt`), OKLCh, g1 - ray traced vs
+  ray traced - main raster: far canopy L +0.001 / -0.021, h -0.3 / +1.7 deg;
+  near canopy L -0.010 / -0.066, h +1.0 / +19.0 deg; understory L +0.021 /
+  -0.135, h +1.5 / +92.9 deg. Overview ground mask (main raster's lit gaps,
+  4.24% of the frame): ground mean g1 96.67, ray traced 101.21, main raster
+  144.84; on g1 the mask is lit 6.9%, crown 25.5%, shadowed ground 67.6%
+  (ray traced 17.3 / 11.5 / 71.2: the voxel crowns cover more of the gaps
+  from above, the shadowing matches).
+- Task 7 is closed with these two answers; no voxel shading tuning.
+- **Caster LOD of one texel in every sun cascade, kept** (the cascade
+  overflow fix, decisions.md "Caster LOD of one texel in every cascade"):
+  the user saw the 0.25 against 1 texel side by side
+  (`.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg`) and found them nearly
+  identical.
+Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
+(copy of the git-ignored `.superpowers/sdd/` ledger).
+
+## Exit criteria (user's direction review, 2026-11-24)
+
+Finish as designed, plus, all at 2560x1440:
+1. No list overflow at any evidence view.
+2. Restated 2026-11-24 (the quad diagnostics showed 0.2% of overview
+   quads under 1 px; the excess is stacked layers, not voxel size): no
+   evidence view slower than main in GPU ms at 1440p, and no list
+   overflows. (Was: overview quads no more than about the pixel count.)
+3. Peak VRAM no higher than main's measured peak (and within the phase 2
+   gate: resident <= 12 GB, peak <= 14 GB).
+4. Every number re-measured at 1440p (main and g1).
+
+## Resume (paused 2026-11-24)
+
+Findings from the last runs (ledger has details):
+- All G1 evidence before 2026-11-24 15:00 ran at 1920x1080 (monitor off,
+  Hyprland fallback), not 1440p. Re-measure main and g1 at 1440p.
+- Done 2026-11-24: the 1440p forest overview (`--camera 700 1450 -400
+  -1.55 -0.5 --trees`) overflowed `kMaxVoxelQuads` (2^23, ~0.95M
+  dropped); cap now 2^24: 9.29M quads, 0 dropped, GPU 21.7 ms (main at
+  1440p not yet measured). Cutting the quad count (~2.5 per pixel) is
+  Task 7/9 work.
+- Done 2026-11-24: g1 peaked at 16.1-16.7 GB on the 16 GB RTX 4080 (pool
+  growth slack 1.79 GB), so the far-field splat paged (~56 s); `trimPools`
+  before placement: peak 14.6 GB, splat 0.33 s.
+- Repeat-run noise with `--trees`: 0.3/255 at the forest edge, 4.3/255 at
+  the overflowing overview. Judge A/Bs against a repeat run, not zero.
+- Other lanes' main builds share `assets/` and rewrite the `.clusters`
+  caches (main kCacheVersion 7, g1 8): models rebuild when lanes alternate.
+- Task 6's Debug far-field check (`build/game/game` at the overview with
+  `--trees`, the far-field Debug checks) was started but not finished.
+- Task 6c's look verdict (voxel canopy brightness under GI) moves to Task 7.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -186,6 +247,84 @@ Status: ready (2026-11-24), awaiting the user's review.
 - [ ] **Step 2:** Run -> FAIL; implement; pass; the existing far-field tests (splat vs CPU replica, `farFieldTransmittance` vs CPU) updated and passing.
 - [ ] **Step 3:** Debug capture at the forest overview with `--trees`: `far shadow map check` and the far-field Debug checks pass; Release startup time into `.superpowers/g1/t6-startup.txt` (P3: expected faster, no bake).
 - [ ] **Step 4:** Commit (`Far field from the DAG voxels; ray-query bake removed`); backlog row "Far-field bake needs ray queries" removed.
+
+### Review addendum (2026-11-24): Tasks 6a-6c, before Task 7
+
+From the Fable review (`.superpowers/fable-review/findings.md`: R6-3, R6-2,
+R3-1/R6-5, R6-A1). They come before Task 7 so its quality loop doesn't judge
+a double-drawn band at the triangle-to-voxel switch, or a voxel canopy that
+GI darkens twice.
+
+How the cut behaves today (it bears on every option below). Take a group G
+whose triangles go to voxels at lattice edge e. G's error is
+gE = max(e, childrenError), which lies in [e, 2e). The voxel roots (lattice e)
+have self group P1 with error 2e, tested at 2T, and refined G, tested at T
+(`vertexCount = 1`). Lattice 2e has self P2 = 4e and refined P1, both
+tested at 2T. T is `lodErrorPixels` and K is the pixels per metre at
+distance 1.
+- G's triangles draw while gE·K/d > T. Lattice 2e draws from e·K/d <= T.
+  Both draw while e·K/d <= T < gE·K/d (R6-2), a band whenever gE > e.
+- The lattice-e roots draw only where proj(P1) > 2T and proj(G) <= T. With
+  P1 at 2e and gE >= e, those two conditions meet only through sphere slack.
+  The finest voxel level is therefore close to never drawn: the triangles
+  hand over directly to 2 px lattice-2e voxels. That is the design's 2 px
+  intent, but lattice e is cache and VRAM that almost never draws. This is
+  a Task 9 question, not a defect.
+- The cut covers the surface once exactly when, for every root cluster,
+  proj(P1) >= 2·proj(G). That is the R6-2 test. Spheres only help, because
+  P1 encloses G.
+
+### Task 6a: CPU reference carries the GPU's voxel thresholds (R6-3)
+
+**Files:**
+- Modify: `engine/shaders/common.glsl` (comment: mirrors it), `engine/include/meridian/cluster.h`, `engine/src/cluster.cpp` (`lodVisible`, `selectClustersBvh`), `engine/src/render/renderer_resources.cpp` (upload uses the shared rule)
+- Test: `tests/cluster_test.cpp`
+
+**Interfaces:**
+- Produces:
+  - `inline constexpr float kVoxelPixels = 2.0f;` in `cluster.h`, because the CPU reference needs it outside the renderer (`gpu_types.h` is renderer-private). common.glsl's "must match" then points at cluster.h.
+  - `struct LodThresholds { float self, refined; };` and `LodThresholds clusterThresholds(const ClusterLod &lod, uint32_t cluster, float threshold)`. A triangle cluster gets {T, T}. A voxel cluster gets self 2T, and refined T if its refined group is triangles, else 2T. Upload's `vertexCount` flag derives from this same function, replacing the inline `triangleGroup` code at renderer_resources.cpp:441, so the CPU rule and the GPU's input can't drift.
+  - `lodVisible(cluster, ..., LodThresholds)`. `selectClustersBvh` seeds levels at `finest <= T·kVoxelPixels` (as cull.comp:44) and prunes nodes at T (as cluster_traverse.comp; conservative), so it still returns exactly what `lodVisible` accepts.
+
+- [ ] **Step 1: Write the failing test.** "every voxel root switches no later than its triangles" (findings R6-2): for every voxel cluster whose refined group is triangles in `cachedCrown()`, and cameras at 20..3000 m along two directions, assert `projectedErrorPixels(c.self) >= kVoxelPixels * projectedErrorPixels(c.refined)`. Check that it fails on `cachedCrown()`. If the synthetic crown never produces gE > e (QEM simplifies it almost exactly), add a case whose children error is not a power of two, for example a crown with `minEdge` chosen to force it. A test that cannot fail does not count.
+- [ ] **Step 2:** Implement `kVoxelPixels`, `clusterThresholds`, the new `lodVisible`/`selectClustersBvh` and the upload change. The existing "cut covers once" and "selectClustersBvh equals lodVisible over mixed levels" tests now run on the GPU rule; Step 1's test stays red until Task 6b.
+- [ ] **Step 3:** Commit (`CPU LOD reference carries the voxel thresholds`), with the CLAUDE.md `selectClustersBvh` line updated (it now names the voxel thresholds).
+
+### Task 6b: Exact triangle-to-voxel junction (R6-2)
+
+**Options** (acceptance for all: Task 6a's test passes; existing tests pass):
+
+| | Change | Switch distance | Cost | Cut covers once |
+|---|---|---|---|---|
+| A | `edgeFor` picks a power of two in [childrenError, maxError]. With none in that interval, the group stays triangles one more pass, and G's error = e | Unchanged where gE = e already. Groups with childrenError > e switch one or more passes later, at a coarser edge | More triangle levels for those groups: the thinning the voxels exist to stop. maxError is often < 2·childrenError, so many groups get no power of two for several passes | Yes |
+| B | P1's error = max(2e, 2·max gE over its roots' refined groups) instead of `edge * 2` (cluster.cpp:524, roots' first level only). Higher levels keep 2^k·e, which is still >= P1 because gE < 2e | Triangles unchanged (gE). Lattice-2e voxels start at gE_max·K/T instead of e·K/T, at 2e·T/gE_max ∈ (1, 2]·T px | Removes the overlap band's voxels, so it is cheaper than today. Where a pooled cell mixes groups with different gE, lattice-e voxels (<= 1 px) fill [gE, gE_max]·K/T for the smaller-gE groups: a thin band of fine voxels | Yes (P1 >= 2·gE, P1 encloses G) |
+| C | Drop the 2x on P1's self test (and so on lattice 2e's refined test) | Triangles unchanged | Lattice 2e is then never drawn: lattice e draws at 0.5-1 px over a 2x distance band, then lattice 4e. That is the sub-pixel voxel cost the 2 px rule was introduced to avoid (brick count grows with the cube) | Yes |
+
+**Recommendation: B.** It is one build-side change. It leaves the triangle switch distances and the Task 3 error rulings as they are, and costs less than today. A risks reintroducing leaf thinning. C brings back the sub-pixel voxel cost.
+
+**Files:**
+- Modify: `engine/src/cluster.cpp` (`finish`: the first voxel group's error over root members), `engine/shaders/common.glsl` (rewrite the "cut stays exact" comment to state the rule: P1 >= 2·G), `docs/superpowers/specs/2026-11-24-dag-voxel-foliage-design.md` (the cut-exactness lines 331/364 now name the rule)
+- Test: `tests/cluster_test.cpp` (Task 6a's test)
+
+- [ ] **Step 1:** Task 6a's test is red. Implement B and run the tests: green.
+- [ ] **Step 2:** The `.clusters` cache rebuilds through `kVoxelizerVersion` + 1, because the payload is unchanged but the group errors are not. Release `--trees` forest edge `600 1205.6 -400 -1.55 0.02` and overview `700 1450 -400 -1.55 -0.5`. Expected: voxel quad count down at the edge, "tree passes" ms no higher, and no visible change outside the former band (mean difference small, concentrated at the switch distance).
+- [ ] **Step 3:** Commit (`Exact triangle-to-voxel junction: first voxel level's error covers its triangles' error`), with decisions.md "Voxels inside the cluster DAG" amended.
+
+### Task 6c: Voxel self-canopy occlusion as the triangles get it (R3-1 / R6-5)
+
+**Files:**
+- Modify: `engine/shaders/voxel_instance.frag` (`s.occlusion`)
+
+**Interfaces:**
+- `s.occlusion = giMode != 0 ? 1.0 : mix(1.0, 0.5 * (up + sides), microShadowStrength)`, the same treatment as the clusters' `crownOcclusion()` in surface.glsl. Under GI the probes already trace the canopy. Without GI the axis-depth term stands in for `crownVisibility`, scaled the same way. The sun self-shadow (`selfDepth`) is unchanged.
+
+- [ ] **Step 1:** Implement.
+- [ ] **Step 2:** A/B in Release, 3 captures in one batch: overview `--camera 700 1450 -400 -1.55 -0.5 --trees` before and after; `--gi off` after as the control. Expected: brighter voxel canopy under GI (region luminance on the far forest up, toward the triangle trees near the switch); `--gi off` unchanged except where `microShadowStrength` < 1. Any other visible change: stop.
+- [ ] **Step 3:** Commit (`Voxel canopy occlusion only without GI, scaled like the clusters'`), with the progress.md note "darker" in the overview measurements re-checked against the after capture.
+
+### On the Task 4+5 ruling "the Debug voxel check is not built" (R6-A1)
+
+Task 6a removes the ruling's broken premise. The CPU reference then runs the GPU's thresholds, and the upload's `vertexCount` flag comes from the same function. What stays unmirrored is GLSL only: the two threshold lines in cluster_cull.comp, the seed bound in cull.comp, and the prune in cluster_traverse.comp. Recommendation: keep not building the Debug check, and add a line to those three shaders naming `clusterThresholds` as the reference. Cost if wrong: a GLSL-only slip in those lines shows only in captures, which is the current state for every other cull rule.
 
 ### Task 7: Quality loop to the acceptance criteria
 

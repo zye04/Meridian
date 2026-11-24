@@ -170,12 +170,25 @@ detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
 sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
-geometry), per list: chunks, work items, clusters, terrain nodes, bvh
-nodes.
+geometry or shadow; the most in any frame of the run, main view plus the
+sun shadow cascades rendered that frame, every frame drawn included: the
+run waits for the frames still in flight before it reports), per list: chunks, work items,
+clusters, terrain nodes, bvh nodes (the voxel lists' drops are in the total
+only); a nonzero total also ends the run with a `WARNING: up to N entries
+dropped by full cull lists in a frame` line on stderr. Two `cull list need,
+main view|sun shadow cascades, most in a frame:` lines give each list's
+largest phase, queue or bucket over the run (the main view's also terrain
+nodes and retest clusters) (the need while nothing drops,
+a lower bound once something does; the caps in gpu_types.h), then one
+`cull list need, cascade N:` line per sun shadow cascade. A GPU-only
+buffer placed outside device memory prints `warning: a N MiB GPU buffer is
+outside device memory` when it is created.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
-voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
-voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
+voxels), `voxel trees N (bricks B, voxels V)` (voxel clusters drawn,
+their bricks and voxel quads, both phases; when any draw, a `voxel quads N:
+area A px = D x the render's pixels, S% under 1 px` line follows: the quads'
+screen area, depth complexity and sub-pixel share), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
 with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
@@ -271,12 +284,16 @@ regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 trees, 0x5353fab653ec154d with `--trees`, both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
-before and after compaction, cell margin). `--far-field off` draws
+before and after compaction, cell margin, then VMA's blocks on the
+device-local heaps and, in brackets, on all heaps including system
+memory, now and at the peak while models loaded); the far field's line gives the same pair at its peak. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
-`--voxel-trees on|off` (default on; needs the far field): a tree whose
-prototype's finest voxel (height / 128) projects under 2 px draws as that
-prototype's voxels, rasterized (architecture.md, Frame); off keeps its clusters up to the
-far switch (A/B).
+`--voxel-lod on|off` (default on): the voxel levels of tree models' cluster
+DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
+mesh over 4 m tall) replace their triangles where the LOD cut picks them,
+rasterized as ~1 px quads (architecture.md, Frame); off keeps the triangles
+at every distance, the voxels' target (A/B; slower: the traversal visits
+every level).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
@@ -310,4 +327,6 @@ blended into the next over the outer 15%), or `rt` from one TLAS ray per
 pixel toward a point on the sun disk. Either way the terrain march,
 cloud shadow, contact shadows and the far path stay. Capture runs print
 `sun shadows: N cascade renders, max X ms` (the slowest shadow pass of
-the run: the re-render hitch).
+the run: the re-render hitch). `--shadow-refresh` re-renders all five
+cascades every frame (normally only when the camera or sun moves), to
+measure their cost and cull list need in the averaged frames.

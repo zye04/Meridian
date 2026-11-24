@@ -12,9 +12,6 @@ layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
-// Keeps the sun disk inside FP16 range after pre-exposure.
-const float kMaxExposedLuminance = 60000.0;
-
 void main() {
     vec3 direction = normalize(inViewRay);
     vec3 camera = atmospherePosition(pc.scene.cameraPosition);

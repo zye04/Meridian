@@ -1,10 +1,13 @@
 #pragma once
 
 #include <meridian/math/vec3.h>
+#include <meridian/voxelize.h>
 
 #include <cstdint>
+#include <span>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace meridian {
@@ -35,6 +38,15 @@ struct Cluster {
   uint32_t vertexCount = 0;
   uint32_t firstTriangle = 0;
   uint32_t triangleCount = 0;
+  // A voxel cluster (brickCount > 0, no triangles): bricks firstBrick.. of
+  // ClusterLod::bricks on the lattice of edge voxelEdge (voxelize.h).
+  uint32_t firstBrick = 0;
+  uint32_t brickCount = 0;
+  float voxelEdge = 0.0f;
+  // The group this cluster is a member of (replaced together by `self`) and
+  // the group it was made from (-1 for original geometry).
+  uint32_t group = 0;
+  int32_t refinedGroup = -1;
 };
 
 // A node of a BVH over one DAG level's cluster groups. Leaves are groups:
@@ -78,9 +90,46 @@ struct ClusterLod {
   // appendClusterVertices adds them to the mesh.
   std::vector<uint32_t> addedSources;
   std::vector<Vec3> addedPositions;
+  // The voxel clusters' bricks and voxels, and per voxel the optical depth
+  // from its centre out of the model along +x, -x, +y, -y, +z, -z (4 bits
+  // each, steps of kVoxelAxisDepthStep; bakeModelAxisDepths).
+  std::vector<VoxelBrickRef> bricks;
+  std::vector<PackedVoxel> voxels;
+  std::vector<uint32_t> voxelAxis;
+  // A voxelizing mesh's whole surface voxelized at kFarTemplateVoxel: the
+  // far field's template (farBakeGridFromVoxels, farfield.h).
+  std::vector<VoxelBrickRef> farBricks;
+  std::vector<PackedVoxel> farVoxels;
 };
 
-ClusterLod buildClusterLod(const MeshData &mesh);
+constexpr float kVoxelAxisDepthStep = 0.5f;
+// A voxel this deep in its model from the camera shows through less than 3%
+// of the time (voxel_lod.glsl's kVoxelHiddenDepth): voxel_bricks.comp skips
+// it, and bakeModelAxisDepths drops voxels this deep from every direction.
+constexpr float kVoxelHiddenDepth = 3.5f;
+
+// What a mesh's voxel levels are made of: its material, by index into
+// materials (images decoded on the CPU).
+struct VoxelSource {
+  std::span<const VoxelMaterial> materials;
+  uint32_t material = 0;
+};
+
+// With voxels (and mesh.voxelize), a group becomes voxel clusters once its
+// voxels are no worse than its simplified triangles: the lattice edge is the
+// largest power of two at or under the triangles' error, not under the
+// mesh's height / 512, and their error at least the children's. Above, one voxel hierarchy
+// per mesh: each level groups the clusters of a twice-as-large region,
+// whichever group they came from, and doubles the edge (combineVoxelGrids,
+// mergeVoxelGrid).
+ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels = nullptr);
+
+// Fills every ClusterLod::voxelAxis of one model's meshes: the optical depth
+// through all of the model's voxels at the same edge, from each voxel's
+// centre out along the six axis directions. Then drops the voxels deeper
+// than kVoxelHiddenDepth along all six (no view sees them, the sun's
+// included), and the bricks that leave empty.
+void bakeModelAxisDepths(std::vector<ClusterLod> &meshes);
 
 // Simplification error in pixels on a screen `screenHeight` pixels tall,
 // for bounds already placed in world space and uniformly scaled by `scale`
@@ -93,17 +142,37 @@ float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,
                            float projY, float nearPlane, float screenHeight,
                            float orthoPixelsPerMeter = 0.0f);
 
+// Voxel clusters give way to coarser voxels at this multiple of the LOD
+// threshold (pixels per voxel edge at the switch): coverage-built foliage
+// fills its crown's volume, so finer voxels cost the cube. Must match
+// common.glsl.
+inline constexpr float kVoxelPixels = 2.0f;
+
+// The pixel thresholds of a cluster's two LOD tests: its self (coarser
+// replacement) and its refined (finer) bounds.
+struct LodThresholds {
+  float self = 0.0f;
+  float refined = 0.0f;
+};
+
+// Per cluster, the thresholds the GPU tests it with (cluster_cull.comp):
+// a triangle cluster {T, T}; a voxel cluster self kVoxelPixels T, refined
+// T where it replaces triangles and kVoxelPixels T where it replaces voxels.
+// The upload derives the GPU's flag for the refined side from this.
+std::vector<LodThresholds> clusterThresholds(const ClusterLod &lod, float threshold);
+
 // Nanite's cut: draw a cluster when its coarser replacement is too coarse
 // and it is itself fine enough. Errors grow monotonically up the DAG, so the
 // drawn clusters cover the surface once, without cracks.
 bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
-                float nearPlane, float screenHeight, float thresholdPixels,
+                float nearPlane, float screenHeight, LodThresholds thresholds,
                 float orthoPixelsPerMeter = 0.0f);
 
 // CPU replica of the GPU traversal: the levels whose band can hold the cut,
 // then their BVHs breadth-first, skipping nodes whose bounds rule every
-// cluster below out, then lodVisible per cluster of the reached leaves.
-// Returns exactly the clusters lodVisible accepts, in traversal order.
+// cluster below out, then lodVisible per cluster of the reached leaves
+// (clusterThresholds). Returns exactly the clusters lodVisible accepts, in
+// traversal order.
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,
@@ -113,6 +182,12 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
 // Derived-data cache of every primitive's hierarchy in one file. sourceKey
 // identifies the source it was built from; any other key, version or a
 // short file reads as nullopt.
+// The cache file's extension, carrying the cache and voxelizer versions, so
+// builds with different versions sharing one assets/ keep separate files
+// instead of rebuilding each other's (e.g. ".v00080406.10.clusters").
+std::string clusterCacheExtension();
+uint32_t clusterCacheVersion();
+uint32_t voxelizerVersion();
 void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
                        const std::vector<ClusterLod> &lods);
 std::optional<std::vector<ClusterLod>>

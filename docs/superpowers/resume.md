@@ -55,9 +55,10 @@ unconditional", "VRAM budget").
    lows, R5-1 forest walk, explain aa 2.45 vs 1.36 ms, re-measure the
    scene-early split on current trees), the two capture guards (render
    size not 2560x1440, any list overflow), the VRAM print and gate, the
-   cascade changes (drop the sun-axis re-render trigger, relax the 0.25 px
-   caster LOD for foliage, static ground cover out of the cascades, voxel
-   casters).
+   cascade changes (drop the sun-axis re-render trigger, static ground
+   cover out of the cascades). Done on g1: voxel casters (8738167) and the
+   caster LOD relaxed to 1 texel in every cascade (cascade overflow, see
+   decisions.md "Caster LOD of one texel in every cascade").
 4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed");
    the TLAS/BLAS memory check (build them only for `--shadows rt`,
    `--far-shadows tlas`, `--reference` if g1 removes the last ray query
@@ -94,6 +95,16 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.
+
+## Paused: G1 voxel foliage (branch `g1`)
+
+When the user says to resume G1 / the G1 branch: `git fetch && git checkout
+g1` (unmerged, on origin), then read the "Resume" section at the top of
+`docs/superpowers/plans/2026-11-24-dag-voxel-foliage.md` and the ledger
+beside it (`2026-11-24-dag-voxel-foliage-ledger.md`), and continue with
+superpowers:executing-plans (inline; Opus for the final review, never
+Fable). If `assets/` is missing, run `./tools/fetch-sample-assets.sh`
+first; the `.clusters` caches rebuild on first load (~4-7 min).
 
 ## Paused: G1 voxel foliage (branch `g1`)
 

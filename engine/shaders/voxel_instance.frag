@@ -6,19 +6,22 @@
 #include "material.glsl"
 #include "terrain.glsl"
 #include "lighting.glsl"
-#include "protovoxel.glsl"
+#include "voxel_lod.glsl"
 
-// A voxel of a tree's prototype voxels (voxel_instance.mesh draws it as a
-// camera-facing quad), shaded flat at its center: its normal, albedo and
-// baked sky occlusion. The crown shades itself through the voxel's baked
-// optical depth toward the sun (sunlit tops, dark undersides); the sun ray
-// traces the scene's objects from where it leaves the prototype's box; the
-// terrain's sun visibility comes per brick from voxel_bricks.comp. Over the switch band the voxels draw
-// where the dither is below their weight, the clusters where it is above.
+// A voxel of a voxel cluster (voxel_instance.mesh draws it as a
+// camera-facing quad), shaded flat at its centre as the leaves it stands in
+// for: their mean reflected and transmitted colour (with the placed
+// instance's tint, as mesh.frag), roughness and normal lobe. The aligned
+// part of the lobe shades as one two-sided leaf through the same lighting
+// as the triangles; the rest as leaves facing every way (the spherical-leaf
+// phase, gi.glsl). The model shades itself through the voxel's optical
+// depth out of it toward the sun (sunlit tops, dark undersides) and the sky;
+// the sun ray then traces the scene from where it leaves the mesh's box;
+// the terrain's sun visibility comes per brick from voxel_bricks.comp.
 
 layout(location = 0) flat in vec3 inRelative;
-layout(location = 1) flat in uvec2 inVoxel;
-layout(location = 2) flat in uvec2 inBrick;
+layout(location = 1) flat in uvec4 inVoxel;
+layout(location = 2) flat in uvec4 inInfo;
 layout(location = 3) flat in vec3 inLocal;
 
 layout(location = 0) out vec4 outColor;
@@ -30,42 +33,61 @@ layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
-const float kVoxelPerceptualRoughness = 0.8;
 // Where the sun ray leaves the box, so it doesn't start inside the crown.
 const float kExitBias = 0.1;
 
 void main() {
     SceneBuffer scene = pc.scene;
-    LoadedInstance instance = loadInstance(scene, inBrick.x);
-    PrototypeInfo prototype = scene.prototypes.prototypes[instance.meshOrPrototype];
-#ifdef VOXEL_BAND
-    if (voxelDither(gl_FragCoord.xy, scene.frameIndex) >=
-        instanceVoxelBlend(scene, instance, prototype)) {
-        discard;
-    }
-#endif
+    LoadedInstance instance = loadInstance(scene, inInfo.x);
+    ClusterInfo cluster = scene.clusters.clusters[inInfo.w];
+    MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
 
     mat3 linear = mat3(instance.transform);
     float scale = instance.scale;
     mat3 toLocal = transpose(linear) / (scale * scale);
     vec3 relative = inRelative;
     vec3 world = scene.cameraPosition + relative;
-    uvec2 voxel = inVoxel;
+    uvec4 voxel = inVoxel;
+    uint axisWord = inInfo.z;
+
+    vec3 tint = instance.placed
+        ? unpackPrototypeTint(scene.prototypes.prototypes[instance.meshOrPrototype].tint)
+        : vec3(1.0);
+    vec3 albedo = voxelSqrtRgb(voxel.y) * tint;
+    vec3 transmitted = voxelSqrtRgb(voxel.z) * tint;
+    // The aligned share of the lobe: (3 alignment - 1) / 2 of the leaves
+    // face along its axis, the rest every way.
+    float aligned = clamp((3.0 * voxelAlignment(voxel) - 1.0) * 0.5, 0.0, 1.0);
+    // Sky visibility out of the model (up, and the four sides), as the
+    // clusters' crownOcclusion (surface.glsl): only without GI, whose probes
+    // already trace the canopy.
+    float occlusion = 1.0;
+    if (scene.giMode == 0u) {
+        float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
+        vec3 east = normalize(toLocal * vec3(1.0, 0.0, 0.0));
+        vec3 south = normalize(toLocal * vec3(0.0, 0.0, 1.0));
+        float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, east)) +
+                              exp(-voxelBoxDepth(axisWord, -east)) +
+                              exp(-voxelBoxDepth(axisWord, south)) +
+                              exp(-voxelBoxDepth(axisWord, -south)));
+        occlusion = mix(1.0, 0.5 * (up + sides), scene.microShadowStrength);
+    }
 
     Surface s;
-    s.baseColor = scene.farField.field.palette.albedo[voxelAlbedo(voxel.x)].rgb;
-    vec3 transmitted =
-        scene.farField.field.palette
-            .albedo[scene.farField.field.paletteSize + voxelAlbedo(voxel.x)].rgb;
+    s.baseColor = albedo;
     s.alpha = 1.0;
     s.metallic = 0.0;
-    s.perceptualRoughness = kVoxelPerceptualRoughness;
-    s.occlusion = float(voxel.y & 0xFFu) * (1.0 / 255.0);
+    // The leaves' normals spread around the lobe axis: their highlights
+    // spread as much (Toksvig), or the flat axis glints where no leaf would.
+    float alpha = voxelRoughness(voxel) * voxelRoughness(voxel);
+    float spread = 2.0 * (1.0 - voxelAlignment(voxel));
+    s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + spread, 1.0)));
+    s.occlusion = occlusion;
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;
     s.emissive = vec3(0.0);
-    // Foliage is two-sided, like the leaf cards the voxels average.
-    s.normal = normalize(linear * voxelNormal(voxel.x));
+    // Two-sided, like the leaves the voxel averages.
+    s.normal = normalize(linear * voxelLobeAxis(voxel));
     if (dot(s.normal, relative) > 0.0) {
         s.normal = -s.normal;
     }
@@ -73,23 +95,25 @@ void main() {
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
-    bool backLit = backNoL > 0.0 && any(greaterThan(transmitted, vec3(0.0)));
-    if (sh.NoL > 0.0 || backLit) {
-        vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
+    vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
+    if (rayDirection.y > -sin(scene.sunAngularRadius)) {
         vec3 sunLocal = normalize(toLocal * rayDirection);
-        PrototypeVoxels box = scene.protoVoxels.prototypes.prototypes[instance.meshOrPrototype];
-        float selfDepth = protoVoxelDepth(voxel.y, sunLocal);
+        vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
+        vec3 lo = mesh.boundsCenter - halfExtent, hi = mesh.boundsCenter + halfExtent;
+        float selfDepth = voxelBoxDepth(axisWord, sunLocal);
         vec3 exitPoint =
-            world + rayDirection * (protoBoxExit(box, inLocal, sunLocal) * scale + kExitBias);
-        float visibility = float(inBrick.y >> 31) * exp(-selfDepth) *
+            world + rayDirection * (voxelBoxExit(lo, hi, inLocal, sunLocal) * scale + kExitBias);
+        float visibility = float(inInfo.y) * exp(-selfDepth) *
                            traceSunVisibility(exitPoint, exitPoint, rayDirection, 0.0, false,
-                                              exitPoint - scene.cameraPosition,
-                                              backLit ? -s.normal : s.normal);
+                                              exitPoint - scene.cameraPosition, s.normal);
         if (sh.NoL > 0.0) {
-            addSunLight(sh, visibility, 1.0);
-            sunRadiance = sh.diffuseLight + sh.specularLight;
+            addSunLight(sh, visibility * aligned, 1.0);
         }
-        addTransmittedSun(sh, transmitted, backNoL, visibility);
+        addTransmittedSun(sh, transmitted, backNoL, visibility * aligned);
+        // Light travels -L, scattered toward the camera travels -V.
+        sh.diffuseLight += sh.sunAtSurface * (visibility * (1.0 - aligned)) *
+                           leafPhase(-dot(sh.L, sh.V), albedo, transmitted);
+        sunRadiance = sh.diffuseLight + sh.specularLight;
     }
     addAmbientLight(sh, s.occlusion);
     addTransmittedAmbient(sh, transmitted, s.occlusion);
@@ -97,13 +121,14 @@ void main() {
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);
     vec3 exposure = scene.sunIlluminance * scene.exposure.exposure;
-    outColor = vec4(luminance * exposure, 1.0);
+    outColor = vec4(min(luminance * exposure, vec3(kMaxExposedLuminance)), 1.0);
     outDiffuseAlbedo = vec4(sh.diffuseColor, 1.0);
     outSpecularAlbedo = vec4(mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0), 1.0);
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
-    outSunLight = vec4(sunRadiance * hazeTransmittance * exposure, 1.0);
+    outSunLight =
+        vec4(min(sunRadiance * hazeTransmittance * exposure, vec3(kMaxExposedLuminance)), 1.0);
 
-    // Motion of the flat hit, each frame displayed with its own camera and
+    // Motion of the flat point, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).
     vec4 current = scene.currentViewProjection * displayedPosition(scene, relative);
     vec4 previous = scene.previousViewProjection *

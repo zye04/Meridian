@@ -25,10 +25,11 @@ FetchContent_Declare(fastgltf
 FetchContent_Declare(mikktspace
     GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
     GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409)
-# meshoptimizer: cluster LOD hierarchies (demo/clusterlod.h, Nanite-style).
+# meshoptimizer: simplification and clustering; its demo/clusterlod.h (cluster
+# LOD hierarchies, Nanite-style) is vendored in third_party/clusterlod.
 FetchContent_Declare(meshoptimizer
     GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
-    GIT_TAG v1.0
+    GIT_TAG v1.3
     SYSTEM)
 # Dear ImGui: the in-game overlay. It has no CMake; the library is built here.
 FetchContent_Declare(imgui
@@ -121,7 +122,6 @@ add_shader(gi_albedo.comp gi_albedo_scatter.comp SCATTER ${MARCH_DEFINES})
 add_shader(gi_albedo.comp gi_albedo_resolve.comp ${MARCH_DEFINES})
 add_shader(cluster_cull.comp cluster_cull.comp ${MARCH_DEFINES})
 add_shader(voxel_instance.frag voxel_instance.frag ${MARCH_DEFINES})
-add_shader(voxel_instance.frag voxel_band.frag VOXEL_BAND ${MARCH_DEFINES})
 add_shader(voxel_bricks.comp voxel_bricks.comp ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
@@ -130,7 +130,6 @@ add_shader(placement.comp placement_forest.comp PLACEMENT_FOREST)
 add_shader(bloom.comp bloom_down.comp)
 add_shader(bloom.comp bloom_up.comp BLOOM_UPSAMPLE)
 add_shader(bloom.comp bloom_composite.comp BLOOM_COMPOSITE)
-add_shader(farfield_bake.comp farfield_bake.comp)
 add_shader(farfield_splat.comp farfield_occupancy.comp FARFIELD_OCCUPANCY)
 add_shader(farfield_splat.comp farfield_accumulate.comp FARFIELD_ACCUMULATE)
 add_shader(farfield_splat.comp farfield_mask.comp FARFIELD_MASK)
@@ -147,7 +146,7 @@ add_library(meridian STATIC
     src/clusterlod.cpp
     src/frame_stats.cpp
     src/farfield.cpp
-    src/protovoxel.cpp
+    src/voxelize.cpp
     src/grade.cpp
     src/model.cpp
     src/placement.cpp
@@ -188,6 +187,6 @@ target_link_libraries(meridian PRIVATE
     fastgltf
     mikktspace
     meshoptimizer)
-target_include_directories(meridian SYSTEM PRIVATE ${meshoptimizer_SOURCE_DIR}/demo)
+target_include_directories(meridian SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/clusterlod)
 set_source_files_properties(src/clusterlod.cpp PROPERTIES
     COMPILE_OPTIONS "-w;-O2;-fno-sanitize=all")

@@ -3,7 +3,6 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "farfield.glsl"
-#include "protovoxel.glsl"
 
 // One workgroup per culled cluster (see cluster_cull.comp): its vertices
 // and triangles, with the same outputs as mesh.vert.
@@ -73,11 +72,6 @@ float crownVisibility(MeshInfo mesh, vec3 position, vec3 normal) {
             exp(-kCrownDensity * low)) / 3.0;
 }
 
-// The voxel representation's weight for this instance (protovoxel.glsl): the
-// masked fragments of a tree in the switch band discard where the dither is
-// below it, the voxels draw where it is above.
-layout(location = 13) flat out float outVoxelBlend[];
-
 void main() {
     // Entries past the list's capacity were dropped by the cull.
     if (gl_WorkGroupID.x >= kMaxDrawnClusters) {
@@ -92,9 +86,6 @@ void main() {
     float terrainSun = terrainSunCode == kTerrainSunPerFragment ? -1.0 : float(terrainSunCode);
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
     MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
-    float voxelBlend = instance.placed
-        ? instanceVoxelBlend(scene, instance, scene.prototypes.prototypes[instance.meshOrPrototype])
-        : 0.0;
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
 
     // The crown: a leaf mesh's own bounds; the rest of a placed tree (bark)
@@ -137,7 +128,6 @@ void main() {
         outTint[i] = tint;
         outStreamFade[i] = instance.fade;
         outTerrainSun[i] = terrainSun;
-        outVoxelBlend[i] = voxelBlend;
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = tuft ? clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0) : 1.0;
         outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;

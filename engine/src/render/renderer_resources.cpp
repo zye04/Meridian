@@ -28,6 +28,16 @@ Buffer Renderer::Impl::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
         "vmaCreateBufferWithAlignment");
   buffer.mapped = info.pMappedData;
   buffer.size = size;
+  if (flags == 0) {
+    // Past the device-local budget VMA silently falls back to system memory,
+    // which every later GPU read then pays for over PCIe.
+    VkMemoryPropertyFlags properties = 0;
+    vmaGetMemoryTypeProperties(allocator, info.memoryType, &properties);
+    if (!(properties & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+      std::fprintf(stderr, "warning: a %.0f MiB GPU buffer is outside device memory\n",
+                   static_cast<double>(size) / (1 << 20));
+    }
+  }
 
   if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
     VkBufferDeviceAddressInfo addressInfo{};
@@ -50,6 +60,73 @@ Buffer Renderer::Impl::grownPool(const Buffer &pool, VkDeviceSize bytes,
   }
   return createBuffer(std::min(std::max(bytes, pool.size + pool.size / 2), maxBufferSize),
                       usage, 0);
+}
+
+Renderer::Impl::MemoryUse Renderer::Impl::memoryUse() const {
+  VmaTotalStatistics stats;
+  vmaCalculateStatistics(allocator, &stats);
+  const VkPhysicalDeviceMemoryProperties *properties = nullptr;
+  vmaGetMemoryProperties(allocator, &properties);
+  MemoryUse use;
+  use.all = stats.total.statistics.blockBytes;
+  for (uint32_t h = 0; h < properties->memoryHeapCount; ++h) {
+    if (properties->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+      use.deviceLocal += stats.memoryHeap[h].statistics.blockBytes;
+    }
+  }
+  return use;
+}
+
+void Renderer::Impl::trimPools() {
+  struct Trim {
+    Buffer &pool;
+    VkDeviceSize used;
+    VkBufferUsageFlags usage;
+  };
+  Trim trims[] = {
+      {vertexPool, VkDeviceSize{vertexCount} * sizeof(Vertex), kVertexPoolUsage},
+      {indexPool, VkDeviceSize{indexCount} * sizeof(uint32_t), kIndexPoolUsage},
+      {clusterPool, VkDeviceSize{clusterCount} * sizeof(ClusterInfo), kPoolUsage},
+      {clusterVertexPool, VkDeviceSize{clusterVertexCount} * sizeof(uint32_t), kPoolUsage},
+      {clusterTrianglePool, VkDeviceSize{clusterTriangleCount} * sizeof(uint32_t), kPoolUsage},
+      {clusterNodePool, VkDeviceSize{clusterNodeCount} * sizeof(ClusterNodeInfo), kPoolUsage},
+      {clusterLevelPool, VkDeviceSize{clusterLevelCount} * sizeof(ClusterLevelGpu), kPoolUsage},
+      {voxelBrickPool, VkDeviceSize{voxelBrickCount} * sizeof(GpuVoxelBrick), kPoolUsage},
+      {voxelPool, VkDeviceSize{voxelCount} * sizeof(PackedVoxel), kPoolUsage},
+      {voxelAxisPool, VkDeviceSize{voxelCount} * sizeof(uint32_t), kPoolUsage},
+  };
+  // Frames in flight may still read the pools, and the copies read them.
+  check(vkDeviceWaitIdle(device.device), "vkDeviceWaitIdle");
+  // One pool at a time, the old one freed before the next is allocated: all
+  // the copies at once exceeded device memory and VMA placed them in system
+  // memory (2.2 GB of voxel and cluster pools, forest edge 25 -> 42 ms).
+  for (Trim &t : trims) {
+    const VkDeviceSize bytes = std::max(t.used, kMinPoolBytes);
+    if (bytes >= t.pool.size) {
+      continue;
+    }
+    Buffer trimmed = createBuffer(bytes, t.usage, 0);
+    submitNow([&](VkCommandBuffer cmd) {
+      if (t.used > 0) {
+        const VkBufferCopy copy{0, 0, t.used};
+        vkCmdCopyBuffer(cmd, t.pool.buffer, trimmed.buffer, 1, &copy);
+      }
+      VkMemoryBarrier2 copied{};
+      copied.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+      copied.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+      copied.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+      copied.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+      copied.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+      VkDependencyInfo dependency{};
+      dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+      dependency.memoryBarrierCount = 1;
+      dependency.pMemoryBarriers = &copied;
+      vkCmdPipelineBarrier2(cmd, &dependency);
+    });
+    destroyBuffer(t.pool);
+    t.pool = trimmed;
+  }
+  writeVoxelPoolInfo();
 }
 
 AccelerationStructure
@@ -406,9 +483,21 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   std::vector<ClusterLevelGpu> levelInfos;
   uint32_t traversalDepths = clustered ? 1 : 0;
   std::vector<uint32_t> clusterTriangles;
+  std::vector<GpuVoxelBrick> voxelBricks;
   if (clustered) {
-    clusterInfos.reserve(lod.clusters.size());
+    // Triangle clusters whose group voxel clusters replace (the voxel LOD
+    // A/B keeps drawing them instead).
+    std::vector<uint8_t> voxelGroup;
     for (const Cluster &c : lod.clusters) {
+      if (c.brickCount > 0 && c.refinedGroup >= 0) {
+        voxelGroup.resize(std::max<size_t>(voxelGroup.size(), size_t(c.refinedGroup) + 1), 0);
+        voxelGroup[size_t(c.refinedGroup)] = 1;
+      }
+    }
+    const std::vector<LodThresholds> thresholds = clusterThresholds(lod, 1.0f);
+    clusterInfos.reserve(lod.clusters.size());
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      const Cluster &c = lod.clusters[i];
       ClusterInfo info;
       info.boundsCenter = c.boundsCenter;
       info.boundsRadius = c.boundsRadius;
@@ -418,12 +507,31 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       info.refinedCenter = c.refined.center;
       info.refinedRadius = c.refined.radius;
       info.refinedError = c.refined.error;
-      info.firstVertex = impl_->clusterVertexCount + c.firstVertex;
-      info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;
-      info.vertexCount = c.vertexCount;
-      info.triangleCount = c.triangleCount;
+      if (c.brickCount > 0) {
+        info.firstTriangle = impl_->voxelBrickCount + c.firstBrick;
+        info.triangleCount = c.brickCount;
+        info.voxelEdge = c.voxelEdge;
+        info.firstVertex = data.voxelSeed ^ uint32_t(i);
+        // 1: the refined side switches at the threshold itself (made from
+        // triangles), else at kVoxelPixels times it.
+        info.vertexCount = thresholds[i].refined < thresholds[i].self ? 1u : 0u;
+      } else {
+        info.firstVertex = impl_->clusterVertexCount + c.firstVertex;
+        info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;
+        info.vertexCount = c.vertexCount;
+        info.triangleCount = c.triangleCount;
+        if (c.group < voxelGroup.size() && voxelGroup[c.group]) {
+          info.voxelEdge = -1.0f;
+        }
+      }
       info.mesh = meshIndex;
       clusterInfos.push_back(info);
+    }
+    voxelBricks.reserve(lod.bricks.size());
+    for (const VoxelBrickRef &b : lod.bricks) {
+      voxelBricks.push_back({{b.origin[0], b.origin[1], b.origin[2]},
+                             impl_->voxelCount + b.firstVoxel,
+                             {uint32_t(b.occupied), uint32_t(b.occupied >> 32)}});
     }
     // Children and roots index the shared pools.
     for (const ClusterBvhNode &n : lod.nodes) {
@@ -464,6 +572,11 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const auto clusterTriangleCount = static_cast<uint32_t>(clusterTriangles.size());
   const auto nodeCount = static_cast<uint32_t>(nodeInfos.size());
   const auto levelCount = static_cast<uint32_t>(levelInfos.size());
+  const auto brickCount = static_cast<uint32_t>(voxelBricks.size());
+  const auto voxelCount = clustered ? static_cast<uint32_t>(lod.voxels.size()) : 0u;
+  if (clustered && lod.voxelAxis.size() != lod.voxels.size()) {
+    throw std::runtime_error("voxel axis depths missing (bakeModelAxisDepths)");
+  }
 
   const auto total = [](uint32_t used, uint32_t added) { return uint64_t{used} + added; };
   if (total(impl_->vertexCount, vertexCount) > INT32_MAX ||
@@ -471,8 +584,14 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       total(impl_->clusterVertexCount, clusterVertexCount) > UINT32_MAX ||
       total(impl_->clusterTriangleCount, clusterTriangleCount) > UINT32_MAX ||
       total(impl_->clusterNodeCount, nodeCount) > UINT32_MAX ||
-      total(impl_->clusterLevelCount, levelCount) > UINT32_MAX) {
+      total(impl_->clusterLevelCount, levelCount) > UINT32_MAX ||
+      total(impl_->voxelBrickCount, brickCount) > UINT32_MAX ||
+      total(impl_->voxelCount, voxelCount) > UINT32_MAX) {
     throw std::runtime_error("geometry pool offsets exceed 32 bits");
+  }
+  // A voxel quad entry packs its pool brick above the 6-bit voxel index.
+  if (total(impl_->voxelBrickCount, brickCount) > (uint64_t{1} << 26)) {
+    throw std::runtime_error("more voxel bricks than a quad entry can index (2^26)");
   }
   if (total(impl_->clusterCount, clusterCount) > kMaxClusterIndex) {
     throw std::runtime_error("more clusters than work items can index (kMaxClusterIndex)");
@@ -489,7 +608,9 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
                 total(impl_->clusterVertexCount, clusterVertexCount) * sizeof(uint32_t),
                 total(impl_->clusterTriangleCount, clusterTriangleCount) * sizeof(uint32_t),
                 total(impl_->clusterNodeCount, nodeCount) * sizeof(ClusterNodeInfo),
-                total(impl_->clusterLevelCount, levelCount) * sizeof(ClusterLevelGpu)}) >
+                total(impl_->clusterLevelCount, levelCount) * sizeof(ClusterLevelGpu),
+                total(impl_->voxelBrickCount, brickCount) * sizeof(GpuVoxelBrick),
+                total(impl_->voxelCount, voxelCount) * sizeof(PackedVoxel)}) >
       impl_->maxBufferSize) {
     throw std::runtime_error("a geometry pool would exceed the device's maxBufferSize");
   }
@@ -525,6 +646,10 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const uint32_t firstLevel = impl_->clusterLevelCount;
   impl_->clusterNodeCount += nodeCount;
   impl_->clusterLevelCount += levelCount;
+  const uint32_t firstBrick = impl_->voxelBrickCount;
+  const uint32_t firstVoxel = impl_->voxelCount;
+  impl_->voxelBrickCount += brickCount;
+  impl_->voxelCount += voxelCount;
   impl_->traversalDepths = std::max(impl_->traversalDepths, traversalDepths);
 
   // Bounding sphere around the bounding box: cheap and good enough for
@@ -572,8 +697,11 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       VkDeviceSize{clusterTriangleCount} * sizeof(uint32_t);
   const VkDeviceSize nodeBytes = VkDeviceSize{nodeCount} * sizeof(ClusterNodeInfo);
   const VkDeviceSize levelBytes = VkDeviceSize{levelCount} * sizeof(ClusterLevelGpu);
+  const VkDeviceSize brickBytes = VkDeviceSize{brickCount} * sizeof(GpuVoxelBrick);
+  const VkDeviceSize voxelBytes = VkDeviceSize{voxelCount} * sizeof(PackedVoxel);
+  const VkDeviceSize axisBytes = VkDeviceSize{voxelCount} * sizeof(uint32_t);
   // Staging layout: vertices, indices, clusters, cluster vertices, cluster
-  // triangles, BVH nodes, levels.
+  // triangles, BVH nodes, levels, voxel bricks, voxels, axis depths.
   const VkDeviceSize stagingOffsets[] = {
       0,
       vertexBytes,
@@ -582,9 +710,15 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       vertexBytes + indexBytes + clusterBytes + clusterVertexBytes,
       vertexBytes + indexBytes + clusterBytes + clusterVertexBytes + clusterTriangleBytes,
       vertexBytes + indexBytes + clusterBytes + clusterVertexBytes + clusterTriangleBytes +
-          nodeBytes};
+          nodeBytes,
+      vertexBytes + indexBytes + clusterBytes + clusterVertexBytes + clusterTriangleBytes +
+          nodeBytes + levelBytes,
+      vertexBytes + indexBytes + clusterBytes + clusterVertexBytes + clusterTriangleBytes +
+          nodeBytes + levelBytes + brickBytes,
+      vertexBytes + indexBytes + clusterBytes + clusterVertexBytes + clusterTriangleBytes +
+          nodeBytes + levelBytes + brickBytes + voxelBytes};
   Buffer staging = impl_->createBuffer(
-      stagingOffsets[6] + levelBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      stagingOffsets[9] + axisBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
           VMA_ALLOCATION_CREATE_MAPPED_BIT);
   auto *stagingBytes = static_cast<char *>(staging.mapped);
@@ -598,6 +732,11 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
                 clusterTriangleBytes);
     std::memcpy(stagingBytes + stagingOffsets[5], nodeInfos.data(), nodeBytes);
     std::memcpy(stagingBytes + stagingOffsets[6], levelInfos.data(), levelBytes);
+    if (brickCount > 0) {
+      std::memcpy(stagingBytes + stagingOffsets[7], voxelBricks.data(), brickBytes);
+      std::memcpy(stagingBytes + stagingOffsets[8], lod.voxels.data(), voxelBytes);
+      std::memcpy(stagingBytes + stagingOffsets[9], lod.voxelAxis.data(), axisBytes);
+    }
   }
   check(vmaFlushAllocation(impl_->allocator, staging.allocation, 0,
                            VK_WHOLE_SIZE),
@@ -626,11 +765,22 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
        kPoolUsage},
       {impl_->clusterLevelPool, firstLevel * sizeof(ClusterLevelGpu), stagingOffsets[6],
        levelBytes, kPoolUsage},
+      {impl_->voxelBrickPool, firstBrick * sizeof(GpuVoxelBrick), stagingOffsets[7], brickBytes,
+       kPoolUsage},
+      {impl_->voxelPool, firstVoxel * sizeof(PackedVoxel), stagingOffsets[8], voxelBytes,
+       kPoolUsage},
+      {impl_->voxelAxisPool, firstVoxel * sizeof(uint32_t), stagingOffsets[9], axisBytes,
+       kPoolUsage},
   };
   bool grows = false;
   for (PoolUpload &upload : uploads) {
     upload.grown = impl_->grownPool(upload.pool, upload.offset + upload.bytes, upload.usage);
     grows |= upload.grown.buffer != VK_NULL_HANDLE;
+  }
+  if (grows) {
+    const Impl::MemoryUse use = impl_->memoryUse();
+    impl_->loadPeak.deviceLocal = std::max(impl_->loadPeak.deviceLocal, use.deviceLocal);
+    impl_->loadPeak.all = std::max(impl_->loadPeak.all, use.all);
   }
 
   impl_->submitNow([&](VkCommandBuffer cmd) {
@@ -695,9 +845,18 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
         upload.pool = upload.grown;
       }
     }
+    impl_->writeVoxelPoolInfo();
+  }
+  if (brickCount > 0 && impl_->voxelInstanceList.buffer == VK_NULL_HANDLE) {
+    impl_->voxelInstanceList =
+        impl_->createBuffer(2 * (VkDeviceSize{kMaxVoxelInstances} + kMaxVoxelQuads) * 8,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                            0);
   }
 
   impl_->meshes.push_back(mesh);
+  impl_->meshFarVoxels.push_back({lod.farBricks, lod.farVoxels});
   return {meshIndex};
 }
 
@@ -720,6 +879,16 @@ InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
   impl_->instancesDirty = true;
   impl_->shadowStale = true;
   return {static_cast<uint32_t>(impl_->instances.size() - 1)};
+}
+
+void Renderer::Impl::writeVoxelPoolInfo() {
+  GpuVoxelPools pools;
+  pools.bricks = voxelBrickPool.address;
+  pools.voxels = voxelPool.address;
+  pools.axis = voxelAxisPool.address;
+  std::memcpy(voxelPoolInfo.mapped, &pools, sizeof(pools));
+  check(vmaFlushAllocation(allocator, voxelPoolInfo.allocation, 0, VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
 }
 
 } // namespace meridian

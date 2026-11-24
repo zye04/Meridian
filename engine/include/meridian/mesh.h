@@ -3,7 +3,9 @@
 #include <meridian/cluster.h>
 #include <meridian/math/vec3.h>
 
+#include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace meridian {
@@ -28,7 +30,31 @@ struct MeshData {
   // Opaque double-sided leaves with transmission: disjoint pieces whose
   // coarser cluster levels are scaled to keep their area (buildClusterLod).
   bool leaf = false;
+  // Part of a model that gets voxel levels in its cluster DAG
+  // (voxelizesModel).
+  bool voxelize = false;
+  // Seeds its voxel clusters' coverage hash (voxel_bricks.comp): from the
+  // cluster cache key and the primitive's index, so a rebuild or another
+  // load order keeps the pattern. Not cached.
+  uint32_t voxelSeed = 0;
 };
+
+// A model gets voxel levels when it holds a tree crown: a foliage mesh
+// (material with diffuse transmission or alpha MASK, foliage[i] != 0) over
+// 4 m tall. Then all its meshes do, bark included; smaller plants keep their
+// triangles.
+bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> foliage);
+
+// The cluster cache's key: the geometry, which meshes voxelize, the bytes of
+// the textures their voxels sample, the voxel materials' factors, which
+// material each mesh uses and which textures (indices into voxelTextures,
+// -1: none) each material samples for base colour, transmission colour and
+// metallic-roughness, and the voxelizer's version.
+uint64_t clusterSourceKey(std::span<const MeshData> meshes,
+                          std::span<const std::vector<uint8_t>> voxelTextures,
+                          std::span<const VoxelMaterial> voxelMaterials,
+                          std::span<const uint32_t> primitiveMaterial,
+                          std::span<const std::array<int, 3>> materialTextures);
 
 // The MeshData::leaf rule, from the glTF material.
 inline bool keepsLeafArea(bool opaque, bool doubleSided, float diffuseTransmission) {

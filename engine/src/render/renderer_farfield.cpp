@@ -1,14 +1,13 @@
-// The far field at load (setPlacement, after the TLAS): each far-field
-// prototype's BLAS is voxelized by farfield_bake.comp into a 1 m template
-// (ray pass fractions, normals, mesh slots, base colors), filtered on the
-// CPU to the three levels (filterFarTemplate). farfield_splat.comp then
+// The far field at load (setPlacement): each far-field prototype's 1 m
+// template comes from its meshes' far voxels (the cluster build voxelized
+// them, ClusterLod::farBricks; farBakeGridFromVoxels), filtered on the CPU
+// to the three levels (filterFarTemplate). farfield_splat.comp then
 // splats the placed table level by level: occupancy (read back; the CPU
 // allocates the brick columns), fixed-point accumulation into transient
 // buffers, pack. Debug builds compare sample cells with the CPU replica
 // (splatFarField) and print a hash of the result.
 #include "renderer_impl.h"
 
-#include <meridian/protovoxel.h>
 #include <meridian/farfield.h>
 #include <meridian/placement.h>
 
@@ -34,7 +33,10 @@ constexpr double kMiB = 1.0 / (1 << 20);
 // L2) plus its sink depth.
 constexpr float kFarBaseMargin = 32.0f;
 // A splat slice's accumulators stay within this many bytes.
-constexpr VkDeviceSize kFarSliceBytes = VkDeviceSize{1} << 30;
+// 256 MiB, not 1 GiB: the splat's transient buffers set the startup memory
+// peak, and more slices cost little (decisions.md "Cull list caps from measured
+// need").
+constexpr VkDeviceSize kFarSliceBytes = VkDeviceSize{1} << 28;
 constexpr uint64_t kFarSliceBricks =
     kFarSliceBytes / (kBrickVoxels * kFarChannels * sizeof(uint32_t));
 
@@ -186,13 +188,10 @@ void Renderer::Impl::destroyFarField() {
     destroyBuffer(farColumns[level]);
     destroyBuffer(farVoxels[level]);
   }
-  for (Buffer *buffer : {&farCells, &farPyramid, &farPalette, &farFieldInfo, &farCellList,
-                         &protoVoxelPrototypes, &protoVoxelLevels,
-                         &protoVoxelData, &protoVoxelOcclusion, &protoVoxelCoords, &protoVoxelInfo, &voxelInstanceList}) {
+  for (Buffer *buffer : {&farCells, &farPyramid, &farPalette, &farFieldInfo, &farCellList}) {
     destroyBuffer(*buffer);
   }
   destroyFarShadow();
-  protoFinestVoxel.clear();
 }
 
 // After the early clusters, so the terrain and near geometry reject hidden
@@ -230,106 +229,57 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   VkDevice dev = device.device;
   const auto loadStart = Clock::now();
 
-  // ---------------------------------------------------------------- Bake
+  // ------------------------------------------------------------ Templates
 
-  // Each far prototype at its own x offset in one bake TLAS.
-  struct Bake {
-    uint32_t prototype;
-    uint32_t firstMesh;
-    uint32_t paletteBase;
-    Vec3 origin;
-    uint32_t size[3];
-    float offset;
-  };
-  std::vector<Bake> bakes;
-  uint32_t firstMesh = 0, paletteSize = 0;
-  float cursor = 0.0f;
+  // Each far prototype's 1 m template from its meshes' far voxels (the
+  // cluster build voxelized them; slot = mesh, up to kFarSlots, the rest
+  // share the last slot), one palette entry per slot.
+  constexpr uint32_t kFarSlots = 8;
+  std::vector<FarTemplates> templates(prototypes.size());
+  std::vector<FarSlotColor> colors;
+  std::vector<float> transmissionFactors;
+  const auto bakeStart = Clock::now();
   for (uint32_t p = 0; p < prototypes.size(); ++p) {
-    const uint32_t meshCount = static_cast<uint32_t>(prototypes[p].meshes.size());
-    if (far[p]) {
-      Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-      for (MeshId id : prototypes[p].meshes) {
-        const GpuMesh &mesh = meshes[id.index];
-        const Vec3 r{mesh.boundsRadius, mesh.boundsRadius, mesh.boundsRadius};
-        const Vec3 a = mesh.boundsCenter - r, b = mesh.boundsCenter + r;
-        lo = {std::min(lo.x, a.x), std::min(lo.y, a.y), std::min(lo.z, a.z)};
-        hi = {std::max(hi.x, b.x), std::max(hi.y, b.y), std::max(hi.z, b.z)};
-      }
-      const Vec3 origin{std::floor(lo.x), std::floor(lo.y), std::floor(lo.z)};
-      // The boxes (which hold the meshes' spheres) 16 m apart along x.
-      Bake bake{p, firstMesh, paletteSize, origin, {}, cursor - origin.x};
-      bake.size[0] = static_cast<uint32_t>(std::ceil(hi.x - origin.x));
-      bake.size[1] = static_cast<uint32_t>(std::ceil(hi.y - origin.y));
-      bake.size[2] = static_cast<uint32_t>(std::ceil(hi.z - origin.z));
-      bakes.push_back(bake);
-      paletteSize += std::min(meshCount, kFarBakeSlots);
-      cursor += static_cast<float>(bake.size[0]) + 16.0f;
+    if (!far[p]) {
+      continue;
     }
-    firstMesh += meshCount;
-  }
-  if (paletteSize > 256) {
-    throw std::runtime_error("far field palette exceeds 256 entries");
-  }
-
-  std::vector<VkAccelerationStructureInstanceKHR> records;
-  for (const Bake &bake : bakes) {
-    VkAccelerationStructureInstanceKHR record{};
-    record.transform.matrix[0][0] = record.transform.matrix[1][1] = record.transform.matrix[2][2] =
-        1.0f;
-    record.transform.matrix[0][3] = bake.offset;
-    record.mask = 0xFF;
-    record.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    record.accelerationStructureReference = prototypeBlas[bake.prototype].address;
-    records.push_back(record);
-  }
-  Buffer recordBuffer = createBuffer(
-      records.size() * sizeof(records[0]),
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-  std::memcpy(recordBuffer.mapped, records.data(), records.size() * sizeof(records[0]));
-  check(vmaFlushAllocation(allocator, recordBuffer.allocation, 0, VK_WHOLE_SIZE),
-        "vmaFlushAllocation");
-  VkAccelerationStructureGeometryKHR geometry{};
-  geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-  geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-  geometry.geometry.instances.sType =
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-  geometry.geometry.instances.data.deviceAddress = recordBuffer.address;
-  VkAccelerationStructureBuildGeometryInfoKHR build{};
-  build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-  build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-  build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-  build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-  build.geometryCount = 1;
-  build.pGeometries = &geometry;
-  const auto recordCount = static_cast<uint32_t>(records.size());
-  VkAccelerationStructureBuildSizesInfoKHR sizes{};
-  sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-  dispatch.getAccelerationStructureBuildSizesKHR(VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                 &build, &recordCount, &sizes);
-  AccelerationStructure bakeTlas = createAccelerationStructure(
-      VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, sizes.accelerationStructureSize);
-  Buffer scratch =
-      createBuffer(sizes.buildScratchSize,
-                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                   0, scratchAlignment);
-  build.dstAccelerationStructure = bakeTlas.handle;
-  build.scratchData.deviceAddress = scratch.address;
-  submitNow([&](VkCommandBuffer cmd) {
-    const VkAccelerationStructureBuildRangeInfoKHR range{recordCount, 0, 0, 0};
-    const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
-    {
-      DriverLeakScope driverLeak;
-      dispatch.cmdBuildAccelerationStructuresKHR(cmd, 1, &build, &ranges);
+    const auto meshCount = static_cast<uint32_t>(prototypes[p].meshes.size());
+    const uint32_t slots = std::min(meshCount, kFarSlots);
+    std::vector<VoxelGrid> grids(slots);
+    std::vector<float> slotTransmission(slots, 0.0f);
+    for (uint32_t m = 0; m < meshCount; ++m) {
+      const uint32_t index = prototypes[p].meshes[m].index;
+      const MeshFarVoxels &source = meshFarVoxels[index];
+      VoxelGrid grid = unpackVoxelBricks(source.bricks, source.voxels, kFarTemplateVoxel);
+      const uint32_t slot = std::min(m, slots - 1);
+      grids[slot].edge = kFarTemplateVoxel;
+      grids[slot].bricks.insert(grids[slot].bricks.end(), grid.bricks.begin(), grid.bricks.end());
+      slotTransmission[slot] =
+          std::max(slotTransmission[slot], materials[meshes[index].materialIndex].diffuseTransmission);
     }
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                  VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
-  });
-  destroyBuffer(scratch);
-  const VkDeviceSize bakeTlasBytes = bakeTlas.size + recordBuffer.size + sizes.buildScratchSize;
+    const auto paletteBase = static_cast<uint32_t>(colors.size());
+    if (paletteBase + slots > 256) {
+      throw std::runtime_error("far field palette exceeds 256 entries");
+    }
+    colors.resize(paletteBase + slots);
+    transmissionFactors.insert(transmissionFactors.end(), slotTransmission.begin(),
+                               slotTransmission.end());
+    const FarBakeGrid grid =
+        farBakeGridFromVoxels(grids, static_cast<uint8_t>(paletteBase),
+                              std::span(colors).subspan(paletteBase));
+    if (grid.extinction.empty()) {
+      std::fprintf(stderr, "Far field: prototype %u has no far voxels (not voxelized)\n", p);
+      continue;
+    }
+    FarTemplates &t = templates[p];
+    t = filterFarTemplate(grid);
+    std::printf("Far field template: prototype %u, %ux%ux%u m; %zu/%zu/%zu template voxels "
+                "L0/L1/L2\n",
+                p, grid.size[0], grid.size[1], grid.size[2], t[0].voxels.size(),
+                t[1].voxels.size(), t[2].voxels.size());
+  }
+  const double bakeMs = msSince(bakeStart);
+  const auto paletteSize = static_cast<uint32_t>(colors.size());
 
   const auto makeLayout = [&](uint32_t bytes, bool materials) {
     const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes};
@@ -344,313 +294,20 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     check(vkCreatePipelineLayout(dev, &info, nullptr, &layout), "vkCreatePipelineLayout");
     return layout;
   };
-  VkPipelineLayout bakeLayout = makeLayout(sizeof(FarBakeConstants), true);
-  VkPipeline bakePipeline = createComputePipeline(dev, "farfield_bake.comp", bakeLayout);
-
-  std::vector<FarTemplates> templates(prototypes.size());
-  std::vector<std::array<double, 3>> colorSums(paletteSize, {0.0, 0.0, 0.0});
-  std::vector<double> hitSums(paletteSize, 0.0);
-  std::vector<double> transmissionSums(paletteSize, 0.0);
-  std::vector<std::array<double, 3>> transmissionColorSums(paletteSize, {0.0, 0.0, 0.0});
-  constexpr uint32_t kRays = 3 * kFarBakeRays * kFarBakeRays;
-  double bakeMs = 0.0;
-  // The mid tier: every prototype's voxels, concatenated (gpu_types.h).
-  std::vector<GpuPrototypeVoxels> protoInfos(prototypes.size());
-  std::vector<GpuProtoVoxelLevel> protoLevels;
-  std::vector<uint32_t> protoData, protoOcclusion, protoCoords;
-  uint32_t protoBricks = 0;
-  double protoBakeMs = 0.0, protoBuildMs = 0.0;
-  protoFinestVoxel.assign(prototypes.size(), 0.0f);
-  for (const Bake &bake : bakes) {
-    const uint32_t voxelCount = bake.size[0] * bake.size[1] * bake.size[2];
-    Buffer output = createBuffer(
-        VkDeviceSize{voxelCount} * sizeof(FarBakeVoxel),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-    const uint32_t meshCount = static_cast<uint32_t>(prototypes[bake.prototype].meshes.size());
-    FarBakeConstants constants;
-    constants.tlas = bakeTlas.address;
-    constants.vertices = vertexPool.address;
-    constants.indices = indexPool.address;
-    constants.meshes = meshTable.address;
-    constants.materials = materialBuffer.address;
-    constants.prototypeMeshes = prototypeMeshTable.address;
-    constants.bake = output.address;
-    constants.firstMesh = bake.firstMesh;
-    constants.meshCount = meshCount;
-    constants.origin[0] = bake.origin.x + bake.offset;
-    constants.origin[1] = bake.origin.y;
-    constants.origin[2] = bake.origin.z;
-    constants.raysPerAxis = kFarBakeRays;
-    std::copy(std::begin(bake.size), std::end(bake.size), constants.size);
-    const auto start = Clock::now();
-    submitNow([&](VkCommandBuffer cmd) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bakePipeline);
-      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bakeLayout, 1, 1, &materialSet,
-                              0, nullptr);
-      vkCmdPushConstants(cmd, bakeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
-                         &constants);
-      vkCmdDispatch(cmd, (voxelCount + 63) / 64, 1, 1);
-      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
-                    VK_ACCESS_2_HOST_READ_BIT);
-    });
-    const double ms = msSince(start);
-    bakeMs += ms;
-    check(vmaInvalidateAllocation(allocator, output.allocation, 0, VK_WHOLE_SIZE),
-          "vmaInvalidateAllocation");
-    const auto *voxels = static_cast<const FarBakeVoxel *>(output.mapped);
-
-    // Extinction from the mean pass fraction over the voxel's 1 m; a
-    // fully blocked voxel counts as half a ray passing.
-    FarBakeGrid grid;
-    grid.origin = bake.origin;
-    std::copy(std::begin(bake.size), std::end(bake.size), grid.size);
-    grid.extinction.resize(voxelCount);
-    grid.normal.resize(voxelCount);
-    grid.albedo.resize(voxelCount);
-    const uint32_t slots = std::min(meshCount, kFarBakeSlots);
-    uint32_t occupied = 0;
-    for (uint32_t i = 0; i < voxelCount; ++i) {
-      const FarBakeVoxel &v = voxels[i];
-      grid.extinction[i] = farExtinctionFromPasses(v.passes, kRays);
-      const Vec3 normal{v.normal[0], v.normal[1], v.normal[2]};
-      grid.normal[i] = length(normal) > 0.0f ? normalize(normal) : Vec3{};
-      uint32_t best = 0, bestHits = 0;
-      for (uint32_t slot = 0; slot < slots; ++slot) {
-        const uint32_t hits = (v.slotHits[slot / 4] >> (8 * (slot % 4))) & 0xFF;
-        if (hits > bestHits) {
-          best = slot;
-          bestHits = hits;
-        }
-        hitSums[bake.paletteBase + slot] += hits;
-        transmissionSums[bake.paletteBase + slot] +=
-            hits *
-            materials[meshes[prototypes[bake.prototype].meshes[slot].index].materialIndex]
-                .diffuseTransmission;
-        for (int c = 0; c < 3; ++c) {
-          colorSums[bake.paletteBase + slot][c] += v.slotColor[slot][c];
-          transmissionColorSums[bake.paletteBase + slot][c] += v.slotTransmissionColor[slot][c];
-        }
-      }
-      grid.albedo[i] = static_cast<uint8_t>(bake.paletteBase + best);
-      occupied += grid.extinction[i] > 0.0f ? 1 : 0;
-    }
-    destroyBuffer(output);
-    FarTemplates &t = templates[bake.prototype];
-    t = filterFarTemplate(grid);
-    std::printf("Far field bake: prototype %u, %ux%ux%u m in %.1f ms, %.1f%% "
-                "of 1 m voxels "
-                "occupied; %zu/%zu/%zu template voxels L0/L1/L2\n",
-                bake.prototype, bake.size[0], bake.size[1], bake.size[2], ms,
-                100.0 * occupied / voxelCount, t[0].voxels.size(), t[1].voxels.size(),
-                t[2].voxels.size());
-
-    // The prototype's own voxels: the occupied box of the 1 m template,
-    // baked again at its height / kProtoVoxelsPerHeight in chunks.
-    uint32_t lo[3] = {UINT32_MAX, UINT32_MAX, UINT32_MAX}, hi[3] = {0, 0, 0};
-    for (uint32_t i = 0; i < voxelCount; ++i) {
-      if (grid.extinction[i] > 0.0f) {
-        const uint32_t c[3] = {i % bake.size[0], (i / bake.size[0]) % bake.size[1],
-                               i / (bake.size[0] * bake.size[1])};
-        for (int a = 0; a < 3; ++a) {
-          lo[a] = std::min(lo[a], c[a]);
-          hi[a] = std::max(hi[a], c[a] + 1);
-        }
-      }
-    }
-    if (lo[0] == UINT32_MAX) {
-      continue;
-    }
-    const Vec3 boxLo = grid.origin + Vec3{static_cast<float>(lo[0]), static_cast<float>(lo[1]),
-                                          static_cast<float>(lo[2])};
-    const float finest = static_cast<float>(hi[1] - lo[1]) / kProtoVoxelsPerHeight;
-    const uint32_t multiple = 1u << (protoLevelCount(finest) - 1);
-    ProtoBakeGrid fine;
-    fine.origin = boxLo;
-    fine.voxelSize = finest;
-    for (int a = 0; a < 3; ++a) {
-      const auto n = static_cast<uint32_t>(std::ceil(static_cast<float>(hi[a] - lo[a]) / finest));
-      fine.size[a] = (n + multiple - 1) / multiple * multiple;
-    }
-    const size_t fineCount = size_t{fine.size[0]} * fine.size[1] * fine.size[2];
-    fine.extinction.assign(fineCount, 0.0f);
-    fine.normal.assign(fineCount, Vec3{});
-    fine.albedo.assign(fineCount, 0);
-    constexpr uint32_t kChunk = 1u << 18;
-    constexpr uint32_t kFineRays = 3 * kProtoBakeRays * kProtoBakeRays;
-    Buffer chunkOutput = createBuffer(
-        VkDeviceSize{std::min<size_t>(kChunk, fineCount)} * sizeof(FarBakeVoxel),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-    FarBakeConstants fineConstants = constants;
-    fineConstants.bake = chunkOutput.address;
-    fineConstants.origin[0] = boxLo.x + bake.offset;
-    fineConstants.origin[1] = boxLo.y;
-    fineConstants.origin[2] = boxLo.z;
-    fineConstants.raysPerAxis = kProtoBakeRays;
-    std::copy(std::begin(fine.size), std::end(fine.size), fineConstants.size);
-    fineConstants.voxelSize = finest;
-    const auto fineStart = Clock::now();
-    for (size_t first = 0; first < fineCount; first += kChunk) {
-      fineConstants.firstVoxel = static_cast<uint32_t>(first);
-      const auto groups = static_cast<uint32_t>(std::min<size_t>(kChunk, fineCount - first) + 63) / 64;
-      submitNow([&](VkCommandBuffer cmd) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bakePipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bakeLayout, 1, 1,
-                                &materialSet, 0, nullptr);
-        vkCmdPushConstants(cmd, bakeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                           sizeof(fineConstants), &fineConstants);
-        vkCmdDispatch(cmd, groups, 1, 1);
-        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
-                      VK_ACCESS_2_HOST_READ_BIT);
-      });
-      check(vmaInvalidateAllocation(allocator, chunkOutput.allocation, 0, VK_WHOLE_SIZE),
-            "vmaInvalidateAllocation");
-      const auto *out = static_cast<const FarBakeVoxel *>(chunkOutput.mapped);
-      const size_t count = std::min<size_t>(kChunk, fineCount - first);
-      for (size_t i = 0; i < count; ++i) {
-        const FarBakeVoxel &v = out[i];
-        if (v.passes >= kFineRays) {
-          continue;
-        }
-        const double pass = std::max(static_cast<double>(v.passes), 0.5) / kFineRays;
-        fine.extinction[first + i] = static_cast<float>(-std::log(pass) / finest);
-        const Vec3 normal{v.normal[0], v.normal[1], v.normal[2]};
-        fine.normal[first + i] = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
-        uint32_t best = 0, bestHits = 0;
-        for (uint32_t slot = 0; slot < slots; ++slot) {
-          const uint32_t hits = (v.slotHits[slot / 4] >> (8 * (slot % 4))) & 0xFF;
-          if (hits > bestHits) {
-            best = slot;
-            bestHits = hits;
-          }
-        }
-        fine.albedo[first + i] = static_cast<uint8_t>(bake.paletteBase + best);
-      }
-    }
-    destroyBuffer(chunkOutput);
-    const double fineMs = msSince(fineStart);
-    const auto buildStart = Clock::now();
-    const PrototypeVoxels built = buildPrototypeVoxels(fine);
-    const double buildMs = msSince(buildStart);
-    protoBakeMs += fineMs;
-    protoBuildMs += buildMs;
-
-    GpuPrototypeVoxels &info = protoInfos[bake.prototype];
-    for (int a = 0; a < 3; ++a) {
-      info.lo[a] = (&built.boundsLo.x)[a];
-      info.hi[a] = (&built.boundsHi.x)[a];
-    }
-    info.levelCount = static_cast<uint32_t>(built.levels.size());
-    info.firstLevel = static_cast<uint32_t>(protoLevels.size());
-    protoCoords.resize(protoBricks + built.brickCount);
-    for (size_t l = 0; l < built.levels.size(); ++l) {
-      const ProtoVoxelLevel &level = built.levels[l];
-      GpuProtoVoxelLevel gpu{};
-      gpu.voxelSize = level.voxelSize;
-      gpu.brickOffset = level.brickOffset + protoBricks;
-      gpu.brickCount = (l + 1 < built.levels.size() ? built.levels[l + 1].brickOffset
-                                                    : built.brickCount) -
-                       level.brickOffset;
-      for (uint32_t z = 0; z < level.bricks[2]; ++z) {
-        for (uint32_t y = 0; y < level.bricks[1]; ++y) {
-          for (uint32_t x = 0; x < level.bricks[0]; ++x) {
-            const uint32_t index =
-                built.brickGrid[level.gridOffset + x + level.bricks[0] * (y + level.bricks[1] * z)];
-            if (index != kEmptyBrick) {
-              protoCoords[gpu.brickOffset + index] = x | y << 10 | z << 20;
-            }
-          }
-        }
-      }
-      protoLevels.push_back(gpu);
-    }
-    for (size_t i = 0; i < built.voxels.size(); i += 2) {
-      protoData.push_back(built.voxels[i]);
-      protoOcclusion.push_back(built.voxels[i + 1]);
-    }
-    protoBricks += built.brickCount;
-    protoFinestVoxel[bake.prototype] = finest;
-    std::printf("Prototype voxels: prototype %u, %ux%ux%u voxels of %.3f m, %zu levels, %u "
-                "bricks (%.1f MiB), bake %.0f ms, build %.0f ms\n",
-                bake.prototype, fine.size[0], fine.size[1], fine.size[2], finest,
-                built.levels.size(), built.brickCount,
-                static_cast<double>(built.voxels.size() * 4 + built.brickGrid.size() * 4) * kMiB,
-                fineMs, buildMs);
-    // Projected coverage per level (mean of the 3 axes): the mips should
-    // keep it (protovoxel.cpp downsample).
-    std::printf("  coverage per level:");
-    for (uint32_t l = 0; l < built.levels.size(); ++l) {
-      const Vec3 c = protoCoverage(built, l);
-      std::printf(" %.3f", (c.x + c.y + c.z) / 3.0f);
-    }
-    std::printf("\n");
-  }
-  vkDestroyPipeline(dev, bakePipeline, nullptr);
-  vkDestroyPipelineLayout(dev, bakeLayout, nullptr);
-  destroyAccelerationStructure(bakeTlas);
-  destroyBuffer(recordBuffer);
-
-  if (protoBricks > 0) {
-    protoVoxelPrototypes = uploadStorage(protoInfos.data(), protoInfos.size() * sizeof(protoInfos[0]));
-    protoVoxelLevels = uploadStorage(protoLevels.data(), protoLevels.size() * sizeof(protoLevels[0]));
-    protoVoxelData = uploadStorage(protoData.data(), protoData.size() * sizeof(uint32_t));
-    protoVoxelOcclusion = uploadStorage(protoOcclusion.data(), protoOcclusion.size() * sizeof(uint32_t));
-    protoVoxelCoords = uploadStorage(protoCoords.data(), protoCoords.size() * sizeof(uint32_t));
-    GpuProtoVoxels pools;
-    pools.prototypes = protoVoxelPrototypes.address;
-    pools.levels = protoVoxelLevels.address;
-    pools.voxels = protoVoxelData.address;
-    pools.occlusion = protoVoxelOcclusion.address;
-    pools.brickCoords = protoVoxelCoords.address;
-    protoVoxelInfo = uploadStorage(&pools, sizeof(pools));
-    // PrototypeInfo.voxelSize (the table was uploaded with the BLAS, before
-    // the bake).
-    submitNow([&](VkCommandBuffer cmd) {
-      for (uint32_t p = 0; p < prototypes.size(); ++p) {
-        if (protoFinestVoxel[p] > 0.0f) {
-          vkCmdUpdateBuffer(cmd, prototypeTable.buffer,
-                            p * sizeof(PrototypeInfo) + offsetof(PrototypeInfo, voxelSize),
-                            sizeof(float), &protoFinestVoxel[p]);
-        }
-      }
-      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
-    });
-    voxelInstanceList = createBuffer(2 * (VkDeviceSize{kMaxVoxelInstances} + kMaxVoxelBricks) * 8 +
-                                         2 * VkDeviceSize{kMaxVoxelQuads + kMaxVoxelBandQuads} * 4,
-                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                     0);
-    std::printf("Prototype voxels: %.1f MiB resident, bake %.0f ms, build %.0f ms\n",
-                static_cast<double>(protoVoxelPrototypes.size + protoVoxelLevels.size +
-                                    protoVoxelData.size + protoVoxelOcclusion.size +
-                                    protoVoxelCoords.size) * kMiB,
-                protoBakeMs, protoBuildMs);
-  }
-
   // Entries 0..paletteSize-1: (reflected diffuse rgb, diffuse transmission
   // factor); entries paletteSize..: (transmitted rgb, 0), the factor times
   // the transmission colour (farfield.glsl).
   std::vector<Vec3> palette(paletteSize, Vec3{0.5f, 0.5f, 0.5f});
   std::vector<float> paletteData, transmittedData;
   for (uint32_t e = 0; e < paletteSize; ++e) {
-    const float transmission =
-        hitSums[e] > 0.0 ? static_cast<float>(transmissionSums[e] / hitSums[e]) : 0.0f;
     Vec3 transmitted{};
-    if (hitSums[e] > 0.0) {
-      const double reflected = (1.0 - transmission) / hitSums[e];
-      const double through = transmission / hitSums[e];
-      palette[e] = {static_cast<float>(colorSums[e][0] * reflected),
-                    static_cast<float>(colorSums[e][1] * reflected),
-                    static_cast<float>(colorSums[e][2] * reflected)};
-      transmitted = {static_cast<float>(transmissionColorSums[e][0] * through),
-                     static_cast<float>(transmissionColorSums[e][1] * through),
-                     static_cast<float>(transmissionColorSums[e][2] * through)};
+    if (colors[e].coverage > 0.0) {
+      const auto inverse = static_cast<float>(1.0 / colors[e].coverage);
+      palette[e] = colors[e].albedo * inverse;
+      transmitted = colors[e].transmission * inverse;
     }
-    paletteData.insert(paletteData.end(), {palette[e].x, palette[e].y, palette[e].z, transmission});
+    paletteData.insert(paletteData.end(),
+                       {palette[e].x, palette[e].y, palette[e].z, transmissionFactors[e]});
     transmittedData.insert(transmittedData.end(),
                            {transmitted.x, transmitted.y, transmitted.z, 0.0f});
   }
@@ -749,12 +406,12 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   std::array<double, kFarLevels> splatMs{};
   std::vector<float> cellBottom(cellCount, std::numeric_limits<float>::max());
   std::vector<float> cellTop(cellCount, -std::numeric_limits<float>::max());
-  VkDeviceSize peakTransient = 0, peakAllocated = 0;
+  VkDeviceSize peakTransient = 0, peakAllocated = 0, peakAll = 0;
   const auto samplePeak = [&](VkDeviceSize transient) {
     peakTransient = std::max(peakTransient, transient);
-    VmaTotalStatistics stats;
-    vmaCalculateStatistics(allocator, &stats);
-    peakAllocated = std::max(peakAllocated, stats.total.statistics.blockBytes);
+    const MemoryUse use = memoryUse();
+    peakAllocated = std::max(peakAllocated, use.deviceLocal);
+    peakAll = std::max(peakAll, use.all);
   };
   const VkDeviceSize fixedTransient =
       templateBuffer.size + templateVoxelBuffer.size + cellData.size + readback.size;
@@ -1057,7 +714,6 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     resident += farColumns[level].size + farVoxels[level].size;
   }
-  peakTransient = std::max(peakTransient, bakeTlasBytes);
   const double splatTotal = splatMs[0] + splatMs[1] + splatMs[2];
   const auto voxelsIn = [&](uint32_t level) {
     return static_cast<unsigned long long>(poolWords[level] -
@@ -1068,14 +724,14 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
               "%.0f MiB "
               "(bricks %.0f/%.0f/%.0f, columns %.0f/%.0f/%.0f); peak transient %.0f "
               "MiB, "
-              "device memory allocated at peak %.0f MiB; bake %.0f ms, splat %.0f ms "
+              "device memory allocated at peak %.0f MiB (all heaps %.0f MiB); templates %.0f ms, splat %.0f ms "
               "(L0/L1/L2 %.0f/%.0f/%.0f), total %.0f ms; %u lost deposits\n",
               brickCounts[0], brickCounts[1], brickCounts[2], voxelsIn(0), voxelsIn(1), voxelsIn(2),
               occupiedColumns[0], occupiedColumns[1], occupiedColumns[2], treeCells, sliceCounts[0],
               sliceCounts[1], sliceCounts[2], resident * kMiB, farVoxels[0].size * kMiB,
               farVoxels[1].size * kMiB, farVoxels[2].size * kMiB, farColumns[0].size * kMiB,
               farColumns[1].size * kMiB, farColumns[2].size * kMiB, peakTransient * kMiB,
-              peakAllocated * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
+              peakAllocated * kMiB, peakAll * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
               msSince(loadStart), lostDeposits);
 
   destroyBuffer(templateBuffer);

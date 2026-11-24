@@ -214,6 +214,22 @@ struct CullDrops {
   uint32_t traversalNodes = 0;
 };
 
+// The most entries a view's cull lists held in one frame (main view or any
+// sun shadow cascade), each list's largest phase, queue or bucket: equal to
+// the need while nothing drops, a lower bound once something does.
+struct CullNeed {
+  uint32_t chunks = 0;
+  uint32_t workItems = 0;
+  uint32_t traversalNodes = 0;
+  uint32_t drawnClusters = 0;
+  uint32_t voxelClusters = 0;
+  uint32_t voxelQuads = 0;
+  // Main view only (terrain_select.comp; the late pass's retest list).
+  uint32_t terrainNodes = 0;
+  uint32_t retestClusters = 0;
+  uint32_t dropped = 0;
+};
+
 // A mesh placed in the world (what loadGltf returns per node primitive).
 struct DrawItem {
   MeshId mesh;
@@ -309,11 +325,20 @@ public:
   uint32_t drawnTriangleCount() const;
   // Terrain quadtree nodes drawn in a recent frame (2048 triangles each).
   uint32_t drawnTerrainNodeCount() const;
-  // Chunks, work items, clusters, terrain nodes and BVH traversal nodes the
-  // culling passes dropped in a recent frame because a list was full
-  // (nonzero means geometry is missing).
+  // Chunks, work items, clusters, terrain nodes, BVH traversal nodes and
+  // voxel list entries the culling passes dropped because a list was full,
+  // the most in any frame of the run, main view and sun shadow cascades
+  // (nonzero means geometry or shadow is missing).
   uint32_t droppedCullEntryCount() const;
   CullDrops droppedCullEntries() const;
+  // The cull lists' need over the run: the main view's, and the largest of
+  // the sun shadow cascades'.
+  CullNeed cullNeed(bool cascades) const;
+  // The same for one sun shadow cascade (0 nearest).
+  CullNeed cascadeCullNeed(uint32_t cascade) const;
+  // Waits for the frames still in flight and reads their counters, so the
+  // statistics above cover every frame drawn (call before reporting).
+  void drainStatistics();
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
   // Far cells drawn as voxels in a recent frame.
@@ -323,6 +348,11 @@ public:
   // Their bricks and voxels drawn (both phases).
   uint32_t drawnVoxelBrickCount() const;
   uint32_t drawnVoxelQuadCount() const;
+  // Their screen area in pixels, that over the render's pixels (depth
+  // complexity), and how many cover under one pixel.
+  double drawnVoxelQuadArea() const;
+  double drawnVoxelQuadComplexity() const;
+  uint32_t drawnSubpixelVoxelQuads() const;
   // Cluster group BVH nodes the traversal visited in a recent frame.
   uint32_t visitedBvhNodeCount() const;
 
@@ -345,6 +375,9 @@ public:
   double referenceNoise();
   // Cascade renders so far (a frame can render several).
   uint32_t sunShadowRenderCount() const;
+  // Re-render every cascade every frame (measures the cascades' cost and
+  // list need; normally they re-render only when the camera or sun moves).
+  void setShadowRefresh(bool refresh);
   // The slowest sun shadows pass over the run, in ms.
   float sunShadowMaxMs() const;
 
@@ -361,10 +394,10 @@ public:
   // Off by default; Probes lights ambient from the terrain-following probe
   // clipmap traced against the heightfield and the far field.
   void setGiMode(GiMode mode);
-  // On by default: trees whose triangles go sub-pixel draw as their
-  // prototype's voxels; off keeps their clusters up to the far switch (for
-  // A/B comparisons). Needs a far field (setPlacement).
-  void setVoxelTrees(bool enabled);
+  // On by default: the voxel levels of the meshes' cluster DAGs replace their
+  // triangles where the LOD cut picks them; off keeps the triangles at every
+  // distance (an A/B: what the voxels stand in for).
+  void setVoxelLod(bool enabled);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

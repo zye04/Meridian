@@ -57,3 +57,17 @@ TEST_CASE("loading garbage as KTX2 throws") {
   std::vector<uint8_t> garbage(100, 0xAB);
   CHECK_THROWS(meridian::loadKtx2(garbage, meridian::ColorSpace::Linear));
 }
+
+TEST_CASE("KTX2 decodes to RGBA8 at the largest mip within a size") {
+  std::vector<uint8_t> file = encodeTestKtx2(64);
+  const meridian::CpuImage image = meridian::loadKtx2Rgba8(file, 32);
+  CHECK(image.width == 32);
+  CHECK(image.height == 32);
+  REQUIRE(image.rgba.size() == 32 * 32 * 4);
+  // The gradient: red grows with x, green with y, blue 128, alpha 255.
+  const auto px = [&](uint32_t x, uint32_t y, int c) { return int(image.rgba[(y * 32 + x) * 4 + c]); };
+  CHECK(px(24, 8, 0) > px(8, 8, 0) + 100); // interior: the mip filter wraps at the edges
+  CHECK(px(8, 24, 1) > px(8, 8, 1) + 100);
+  CHECK(std::abs(px(10, 10, 2) - 128) <= 8);
+  CHECK(px(10, 10, 3) == 255);
+}

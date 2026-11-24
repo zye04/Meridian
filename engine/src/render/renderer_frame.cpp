@@ -111,6 +111,25 @@ float gradeLutDifference(const Grade &grade, const uint16_t *rgba) {
   return worst;
 }
 
+// A list's need in one frame: its largest phase, queue or bucket.
+void accumulateNeed(CullNeed &need, const DrawCounters &c) {
+  for (uint32_t phase = 0; phase < 2; ++phase) {
+    need.chunks = std::max(need.chunks, c.chunkDispatch[phase][0]);
+    need.workItems = std::max(need.workItems, c.workDispatch[phase][0]);
+    for (uint32_t depth = 0; depth < kBvhDepths; ++depth) {
+      need.traversalNodes = std::max(need.traversalNodes, c.traverseCount[phase][depth]);
+    }
+    for (const auto &tasks : c.meshTasks[phase]) {
+      need.drawnClusters = std::max(need.drawnClusters, tasks[0]);
+    }
+    need.voxelClusters = std::max(need.voxelClusters, c.voxelDispatch[phase][0]);
+    need.voxelQuads = std::max(need.voxelQuads, c.voxelQuads[phase][0]);
+  }
+  need.terrainNodes = std::max(need.terrainNodes, c.terrainNodes);
+  need.retestClusters = std::max(need.retestClusters, c.retestCount);
+  need.dropped = std::max(need.dropped, c.overflow);
+}
+
 } // namespace
 
 // Writes the CPU instance list to the GPU instance table. The table is
@@ -254,23 +273,27 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-// The voxel trees cull.comp listed in this phase become bricks to draw
-// (voxel_bricks.comp, one workgroup per tree).
+// The voxel clusters cluster_cull.comp listed in this phase become bricks
+// and voxels to draw (voxel_bricks.comp, one workgroup per cluster); for a
+// cascade, seen from the sun.
 void Renderer::Impl::expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame,
-                                       uint32_t phase) {
-  if (protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+                                       uint32_t phase, const ShadowCull *shadow) {
+  if (voxelInstanceList.buffer == VK_NULL_HANDLE) {
     return;
   }
-  const CullConstants constants = cullConstants(frame, phase, nullptr);
+  const CullConstants constants = cullConstants(frame, phase, shadow);
+  const Buffer &counters = shadow ? *shadow->counters : drawCounters;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, voxelBricksPipeline);
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
                      &constants);
-  vkCmdDispatchIndirect(cmd, drawCounters.buffer,
+  vkCmdDispatchIndirect(cmd, counters.buffer,
                         offsetof(DrawCounters, voxelDispatch) +
                             phase * sizeof(DrawCounters::voxelDispatch[0]));
+  // voxel_instance.mesh reads the quad list and count.
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
@@ -325,13 +348,21 @@ void Renderer::Impl::cullClusters(VkCommandBuffer cmd, const FrameData &frame,
                 VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  if (phase == 1 && !shadow) {
-    const VkBufferCopy copy{0, 0, sizeof(DrawCounters)};
-    vkCmdCopyBuffer(cmd, drawCounters.buffer, frame.drawCountReadback.buffer, 1, &copy);
-    // A fence wait alone doesn't make device writes visible to the host.
-    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
-  }
+}
+
+// A view's counters to the host, after the last pass that writes them (the
+// late voxel expansion: its counts and drops are counters too). The shaders
+// reach the counters by device address, which synchronization validation
+// does not track.
+void Renderer::Impl::readBackCounters(VkCommandBuffer cmd, const FrameData &frame,
+                                      const Buffer &counters, uint32_t slot) {
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+  const VkBufferCopy copy{0, slot * sizeof(DrawCounters), sizeof(DrawCounters)};
+  vkCmdCopyBuffer(cmd, counters.buffer, frame.drawCountReadback.buffer, 1, &copy);
+  // A fence wait alone doesn't make device writes visible to the host.
+  memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
 }
 
 // Reduces the scene depth into the pyramid, one level per dispatch.
@@ -487,6 +518,14 @@ uint32_t Renderer::drawnTriangleCount() const { return impl_->drawnTriangles; }
 
 uint32_t Renderer::droppedCullEntryCount() const { return impl_->droppedEntries; }
 
+CullNeed Renderer::cullNeed(bool cascades) const {
+  return cascades ? impl_->cascadeNeed : impl_->mainNeed;
+}
+
+CullNeed Renderer::cascadeCullNeed(uint32_t cascade) const {
+  return impl_->cascadeNeeds.at(cascade);
+}
+
 CullDrops Renderer::droppedCullEntries() const {
   const auto &d = impl_->droppedByList;
   return {d[0], d[1], d[2], d[3], d[4]};
@@ -500,6 +539,12 @@ uint32_t Renderer::drawnVoxelTreeCount() const { return impl_->drawnVoxelTrees; 
 uint32_t Renderer::drawnVoxelBrickCount() const { return impl_->drawnVoxelBricks; }
 
 uint32_t Renderer::drawnVoxelQuadCount() const { return impl_->drawnVoxelQuads; }
+double Renderer::drawnVoxelQuadArea() const { return impl_->drawnVoxelArea; }
+double Renderer::drawnVoxelQuadComplexity() const {
+  return impl_->drawnVoxelArea /
+         (double(impl_->renderExtent.width) * impl_->renderExtent.height);
+}
+uint32_t Renderer::drawnSubpixelVoxelQuads() const { return impl_->drawnSubpixelVoxels; }
 
 uint32_t Renderer::visitedBvhNodeCount() const { return impl_->visitedBvhNodes; }
 
@@ -529,7 +574,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 }
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
-void Renderer::setVoxelTrees(bool enabled) { impl_->voxelTrees = enabled; }
+void Renderer::setVoxelLod(bool enabled) { impl_->voxelLod = enabled; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
@@ -624,6 +669,70 @@ void Renderer::requestCapture(const std::filesystem::path &path, CaptureSource s
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
 
+// A submitted frame's counters, once its fence has signalled: the last
+// frame's statistics, and the run's most drops and need.
+void Renderer::Impl::readCounters(FrameData &frame) {
+  check(vmaInvalidateAllocation(allocator, frame.drawCountReadback.allocation,
+                                0, VK_WHOLE_SIZE),
+        "vmaInvalidateAllocation");
+  const auto *counters =
+      static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
+  drawnInstances = counters->instances;
+  drawnTriangles = counters->triangles;
+  // Drops and need: the most in any frame of the run, cascades included.
+  std::array<uint32_t, 5> drops{};
+  std::copy(std::begin(counters->drops), std::end(counters->drops), drops.begin());
+  uint32_t overflow = counters->overflow;
+  accumulateNeed(mainNeed, *counters);
+  for (uint32_t i = 0; i < kShadowCascades; ++i) {
+    if (frame.cascadesRead & (1u << i)) {
+      const DrawCounters &cascade = counters[1 + i];
+      accumulateNeed(cascadeNeed, cascade);
+      accumulateNeed(cascadeNeeds[i], cascade);
+      overflow += cascade.overflow;
+      for (size_t list = 0; list < drops.size(); ++list) {
+        drops[list] += cascade.drops[list];
+      }
+    }
+  }
+  droppedEntries = std::max(droppedEntries, overflow);
+  for (size_t list = 0; list < drops.size(); ++list) {
+    droppedByList[list] = std::max(droppedByList[list], drops[list]);
+  }
+  drawnTerrainNodes = counters->terrainNodes;
+  drawnCells = counters->cells;
+  drawnFarCells = counters->farTasks[0];
+  drawnVoxelTrees = 0;
+  drawnVoxelBricks = 0;
+  drawnVoxelQuads = 0;
+  for (uint32_t phase = 0; phase < 2; ++phase) {
+    drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
+    drawnVoxelBricks += counters->voxelBricks[phase];
+    drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
+  }
+  drawnVoxelArea = counters->voxelArea / 16.0;
+  drawnSubpixelVoxels = counters->voxelSubpixel;
+  visitedBvhNodes = counters->bvhNodes;
+  drawnClusters = 0;
+  for (const auto &lists : counters->meshTasks) {
+    for (const auto &tasks : lists) {
+      drawnClusters += tasks[0];
+    }
+  }
+  frame.countersPending = false;
+}
+
+void Renderer::drainStatistics() {
+  for (uint32_t k = 0; k < kFramesInFlight; ++k) {
+    FrameData &frame = impl_->frames[(impl_->frameNumber + k) % kFramesInFlight];
+    if (frame.countersPending) {
+      check(vkWaitForFences(impl_->device.device, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences");
+      impl_->readCounters(frame);
+    }
+  }
+}
+
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     float deltaSeconds) {
   VkDevice dev = impl_->device.device;
@@ -685,36 +794,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
         static_cast<float>(timestamps[slotPasses] - timestamps[0]) *
         msPerTick;
   }
-  if (impl_->frameNumber >= kFramesInFlight) {
-    check(vmaInvalidateAllocation(impl_->allocator, frame.drawCountReadback.allocation,
-                                  0, VK_WHOLE_SIZE),
-          "vmaInvalidateAllocation");
-    const auto *counters =
-        static_cast<const DrawCounters *>(frame.drawCountReadback.mapped);
-    impl_->drawnInstances = counters->instances;
-    impl_->drawnTriangles = counters->triangles;
-    impl_->droppedEntries = counters->overflow;
-    impl_->drawnTerrainNodes = counters->terrainNodes;
-    impl_->drawnCells = counters->cells;
-    impl_->drawnFarCells = counters->farTasks[0];
-    impl_->drawnVoxelTrees = 0;
-    impl_->drawnVoxelBricks = 0;
-    impl_->drawnVoxelQuads = 0;
-    for (uint32_t phase = 0; phase < 2; ++phase) {
-      impl_->drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
-      impl_->drawnVoxelBricks += std::min(counters->voxelBricks[phase], kMaxVoxelBricks);
-      impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads) +
-                                std::min(counters->voxelQuads[phase][1], kMaxVoxelBandQuads);
-    }
-    impl_->visitedBvhNodes = counters->bvhNodes;
-    std::copy(std::begin(counters->drops), std::end(counters->drops),
-              impl_->droppedByList.begin());
-    impl_->drawnClusters = 0;
-    for (const auto &lists : counters->meshTasks) {
-      for (const auto &tasks : lists) {
-        impl_->drawnClusters += tasks[0];
-      }
-    }
+  if (frame.countersPending) {
+    impl_->readCounters(frame);
   }
 
   uint32_t imageIndex = 0;
@@ -865,10 +946,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->updateFarShadow(lighting.sunDirection, scene);
   impl_->updateTerrainShadow(lighting.sunDirection, camera.position, frame.sceneBuffer.address,
                              scene);
-  scene.protoVoxels = impl_->protoVoxelInfo.address;
+  scene.voxelPools = impl_->voxelPoolInfo.address;
   scene.voxelInstances = impl_->voxelInstanceList.address;
   scene.drawCounters = impl_->drawCounters.address;
-  scene.voxelTrees = impl_->protoVoxelInfo.buffer != VK_NULL_HANDLE && impl_->voxelTrees ? 1 : 0;
+  scene.voxelLod = impl_->voxelInstanceList.buffer != VK_NULL_HANDLE && impl_->voxelLod ? 1 : 0;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -938,6 +1019,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("terrain shadow");
   // Before the main view's counters reset: the cascades' culls use the same
   // scratch buffers.
+  frame.cascadesRead = 0;
+  for (uint32_t i = 0; i < kShadowCascades; ++i) {
+    frame.cascadesRead |= impl_->shadowPlanned[i] ? 1u << i : 0u;
+  }
   impl_->recordSunShadows(cmd, frame);
   endPass("sun shadows");
   impl_->resetDrawCounters(cmd, impl_->drawCounters);
@@ -952,11 +1037,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->cullCells(cmd, frame, 0);
   endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);
-  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull early");
   impl_->traverseClusters(cmd, frame, 0);
   endPass("traverse");
   impl_->cullClusters(cmd, frame, 0);
+  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull clusters");
   impl_->recordFarShadow(cmd);
   endPass("far shadow");
@@ -1186,25 +1271,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        sizeof(scenePush), &scenePush);
   };
 
-  // The voxel trees' voxels (voxel_instance.mesh), one workgroup per 64; the
-  // phase rides in drawList.
+  // The voxel clusters' voxels (voxel_instance.mesh), one workgroup per 64;
+  // the phase rides in drawList (list phase * 2; the odd lists are unused).
   auto drawVoxelTrees = [&](uint32_t phase) {
-    if (impl_->protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+    if (impl_->voxelInstanceList.buffer == VK_NULL_HANDLE) {
       return;
     }
     vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
-    for (uint32_t band = 0; band < 2; ++band) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        band ? impl_->voxelBandPipeline : impl_->voxelInstancePipeline);
-      PushConstants listPush = scenePush;
-      listPush.drawList = phase * 2 + band;
-      vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(listPush),
-                         &listPush);
-      impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
-          cmd, impl_->drawCounters.buffer,
-          offsetof(DrawCounters, voxelTasks) + listPush.drawList * sizeof(DrawCounters::voxelTasks[0][0]),
-          1, sizeof(DrawCounters::voxelTasks[0][0]));
-    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->voxelInstancePipeline);
+    PushConstants listPush = scenePush;
+    listPush.drawList = phase * 2;
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(listPush),
+                       &listPush);
+    impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
+        cmd, impl_->drawCounters.buffer,
+        offsetof(DrawCounters, voxelTasks) + listPush.drawList * sizeof(DrawCounters::voxelTasks[0][0]),
+        1, sizeof(DrawCounters::voxelTasks[0][0]));
     vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(scenePush),
                        &scenePush);
   };
@@ -1228,9 +1310,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("pyramid");
   impl_->cullCells(cmd, frame, 1);
   impl_->cullInstances(cmd, frame, 1);
-  impl_->expandVoxelBricks(cmd, frame, 1);
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
+  impl_->expandVoxelBricks(cmd, frame, 1);
+  impl_->readBackCounters(cmd, frame, impl_->drawCounters, 0);
   endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -1711,6 +1794,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   submit.pSignalSemaphoreInfos = &signalInfo;
   check(vkQueueSubmit2(impl_->graphicsQueue, 1, &submit, frame.renderFence),
         "vkQueueSubmit2");
+  frame.countersPending = true;
 
   if (gradeReadback.buffer != VK_NULL_HANDLE) {
     check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),

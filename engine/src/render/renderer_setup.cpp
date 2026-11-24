@@ -427,7 +427,7 @@ void Renderer::Impl::createFrames() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.drawCountReadback = createBuffer(
-        sizeof(DrawCounters), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        (1 + kShadowCascades) * sizeof(DrawCounters), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     frame.instanceBuffer = createBuffer(
@@ -943,6 +943,15 @@ void Renderer::Impl::createScene() {
   clusterTrianglePool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
   clusterNodePool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
   clusterLevelPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  voxelBrickPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  voxelPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  voxelAxisPool = createBuffer(kMinPoolBytes, kPoolUsage, 0);
+  voxelPoolInfo = createBuffer(sizeof(GpuVoxelPools),
+                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                               VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                   VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  writeVoxelPoolInfo();
 
   constexpr VkBufferUsageFlags kTableUsage =
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
@@ -1042,14 +1051,10 @@ void Renderer::Impl::createPipelines() {
   meshDesc.meshShader = "voxel.mesh";
   meshDesc.fragmentShader = "voxel.frag";
   voxelPipeline = createGraphicsPipeline(dev, meshDesc);
-  // The trees' prototype voxels: one camera-facing quad per voxel.
+  // Voxel clusters: one camera-facing quad per voxel.
   meshDesc.meshShader = "voxel_instance.mesh";
   meshDesc.fragmentShader = "voxel_instance.frag";
   voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
-  // Trees in the switch band dither against their clusters: the discard
-  // costs early depth, so only they take this pipeline.
-  meshDesc.fragmentShader = "voxel_band.frag";
-  voxelBandPipeline = createGraphicsPipeline(dev, meshDesc);
 
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
@@ -1312,6 +1317,11 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &accelerationProperties;
   vkGetPhysicalDeviceProperties2(physical.value().physical_device, &properties);
+  // The voxel passes' dispatches stay within the limits checked here: one
+  // voxel_bricks.comp workgroup per voxel cluster, one voxel_instance.mesh
+  // workgroup per 64 voxel quads.
+  static_assert(kMaxVoxelInstances <= kMaxWorkItems);
+  static_assert((kMaxVoxelQuads + 63) / 64 <= kMaxDrawnClusters);
   if (meshProperties.maxMeshWorkGroupCount[0] < kMaxDrawnClusters ||
       meshProperties.maxMeshWorkGroupTotalCount < kMaxDrawnClusters ||
       properties.properties.limits.maxComputeWorkGroupCount[0] < kMaxWorkItems) {
@@ -1408,6 +1418,8 @@ Renderer::~Renderer() {
         &impl_->retestClusters,
         &impl_->clusterPool, &impl_->clusterVertexPool, &impl_->clusterTrianglePool,
         &impl_->clusterNodePool, &impl_->clusterLevelPool, &impl_->nodeQueues,
+        &impl_->voxelBrickPool, &impl_->voxelPool, &impl_->voxelAxisPool, &impl_->voxelPoolInfo,
+        &impl_->voxelInstanceList,
         &impl_->visibility, &impl_->terrainCounters, &impl_->terrainLists,
         &impl_->terrainPyramid, &impl_->geoBuffer, &impl_->placedInstances, &impl_->cells, &impl_->chunks,
         &impl_->prototypeTable, &impl_->prototypeMeshTable, &impl_->tlasRecords}) {
@@ -1452,7 +1464,6 @@ Renderer::~Renderer() {
   vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->voxelPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->voxelInstancePipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->voxelBandPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->terrainSelectPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->terrainSelectLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);

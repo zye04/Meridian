@@ -1,6 +1,6 @@
 #pragma once
 
-// Far-field forests (docs/superpowers/specs/2026-11-20-far-field-design.md):
+// Far-field forests (docs/superpowers/archive/specs/2026-11-20-far-field-design.md):
 // per 64 m placement cell, sparse columns of 4^3-voxel bricks at three
 // levels, splatted at load from the placed table and per-prototype
 // templates. This is the CPU side: voxel and column packing, the template
@@ -9,6 +9,7 @@
 
 #include <meridian/math/vec3.h>
 #include <meridian/placement.h>
+#include <meridian/voxelize.h>
 
 #include <array>
 #include <cstddef>
@@ -34,7 +35,8 @@ constexpr size_t farColumnIndex(uint32_t cellsX, uint32_t level, uint32_t x, uin
 constexpr float kFarHeightUnit = 0.25f;
 // Rays march L0 for their first 256 m, L1 to 1 km, L2 beyond.
 constexpr float kFarRayLevelEnd[kFarLevels - 1] = {256.0f, 1000.0f};
-// The prototype bake's template voxel (m).
+// The prototypes' template voxel (m): their meshes voxelized at this edge
+// by the cluster build (ClusterLod::farBricks).
 constexpr float kFarTemplateVoxel = 1.0f;
 
 // A voxel, 4 bytes: extinction code (0 empty; c in 1..255 is
@@ -113,11 +115,7 @@ struct FarTemplate {
 };
 using FarTemplates = std::array<FarTemplate, kFarLevels>;
 
-// A template voxel's extinction (1/m) from how many of its bake rays (each
-// kFarTemplateVoxel long) passed; a fully blocked voxel counts half a ray.
-float farExtinctionFromPasses(uint32_t passes, uint32_t rays);
-
-// The bake's 1 m template of one prototype, index x + size[0] (y + size[1] z).
+// The 1 m template of one prototype, index x + size[0] (y + size[1] z).
 struct FarBakeGrid {
   Vec3 origin; // min corner of voxel (0, 0, 0)
   uint32_t size[3] = {};
@@ -129,6 +127,24 @@ struct FarBakeGrid {
 // the optical mass), extinction-weighted normal, the albedo entry with the
 // most extinction.
 FarTemplates filterFarTemplate(const FarBakeGrid &grid);
+
+// Per palette slot: coverage-weighted sums of its voxels' reflected and
+// transmitted colours (VoxelPayload::albedo, ::transmission) and the
+// coverage, which the palette entry divides by.
+struct FarSlotColor {
+  double coverage = 0.0;
+  Vec3 albedo, transmission;
+};
+// A prototype's 1 m template from its meshes' voxels (slots[i]: mesh i's
+// triangles voxelized at kFarTemplateVoxel on the shared lattice, so the
+// grid's origin is a lattice corner). Coincident voxels combine as
+// independent media (combineVoxelGrids); extinction is the mean optical
+// depth over the three axes per metre, the normal the combined lobe's axis
+// (sign free: the far shading faces it to the viewer), the albedo
+// paletteBase + the slot with the most coverage there. Adds each slot's
+// colour sums to colors[slot].
+FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t paletteBase,
+                                  std::span<FarSlotColor> colors);
 
 struct FarFieldGrid {
   float originX = 0.0f, originZ = 0.0f, heightBase = 0.0f;

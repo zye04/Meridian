@@ -252,6 +252,12 @@ cluster record.
   1 px at the cut (Nanite's "near pixel-sized"); today's 2 px choice is
   re-measured: the gate decides between 1 and 2 px, not the old argument
   about list overflow (clusters bound the count now).
+- Cut exactness at the junction (review R6-2): voxel clusters made from
+  triangles give way at kVoxelPixels x the threshold, their triangles at
+  the threshold, so the first voxel group's error is at least kVoxelPixels
+  x the error of every triangle group its members replace (its sphere
+  encloses theirs); the CPU reference (`clusterThresholds`) carries the
+  same per-cluster thresholds as the GPU.
 
 ### 5. Drawing and shading voxels
 

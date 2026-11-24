@@ -3,8 +3,8 @@
 C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
 world, grand scale. Sun shadows are raster (cached cascaded shadow maps);
-hardware ray tracing is still required (`--shadows rt` A/B, the far-field
-bake, `--far-shadows tlas`). The setting is open,
+hardware ray tracing is still required (`--shadows rt` A/B,
+`--far-shadows tlas`). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:
@@ -232,7 +232,7 @@ the trees back (hidden by default). Capture runs print validation errors,
 - Megascans trees, ground surfaces, the Fab cliff and their import tools:
   `docs/assets.md`. The rock placement layer and the terrain material's
   rock blend share `kRockNormalY` (renderer.h). Placement layers are
-  causal (spec `2026-11-23-geo-channels-causal-placement-design.md`):
+  causal (spec `docs/superpowers/archive/specs/2026-11-23-geo-channels-causal-placement-design.md`):
   rules read the `.geo` channels (`DensityRule::channels`) and an earlier
   layer's density (`PlacementLayer::parent`); without a `.geo` the game
   skips channel layers. The forest floor follows the forest layer
@@ -247,15 +247,21 @@ the trees back (hidden by default). Capture runs print validation errors,
   `kPatternCacheVersion` (placement.cpp) when `makeDitherPattern`'s output
   changes for the same constants (e.g. `placementHash`). Warm startup
   spends ~0.1 s there (Release ~10 s and Debug ~59 s cold).
-- `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
-  next to the glTF, keyed by a hash of the loaded geometry and versioned
-  with meshoptimizer; the first load after a change prints "Building
-  clusters" and rewrites it (an unwritable cache only warns). The cache
-  also stores each mesh's per-DAG-level group BVH (`nodes`, `levels`;
-  version 3, so older caches rebuild once), uploaded to a shared node
+- `loadGltf` caches each model's cluster LOD hierarchy as
+  `<name>.v<version>.<voxelizer version>.clusters` next to the glTF (the versions in the name, so
+  branches with different versions sharing `assets/` keep separate files),
+  keyed by a hash of the loaded geometry (and, for a
+  voxelizing model, its voxel materials and their texture bytes) and versioned
+  with meshoptimizer (`kCacheVersion`, cluster.cpp, 8 since the far-field
+  voxels; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
+  the first load after a change prints "Building clusters" and rewrites it
+  (an unwritable cache only warns). The cache also stores each mesh's
+  per-DAG-level group BVH (`nodes`, `levels`), uploaded to a shared node
   pool (`ClusterNodeInfo`, children rebased into the node or cluster
   pool) and level table. `selectClustersBvh` is the CPU reference for the
   GPU traversal (cull.comp's level band, cluster_traverse.comp's node
-  test): it must select exactly the clusters `lodVisible` accepts.
+  test): it must select exactly the clusters `lodVisible` accepts, each at
+  its `clusterThresholds` (voxel clusters switch at `kVoxelPixels` x the
+  threshold, cluster_cull.comp).
 - Known issues and deferred work live in `docs/backlog.md`, not here: add
   a row for anything deferred, remove it in the commit that resolves it.

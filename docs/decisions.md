@@ -1261,6 +1261,18 @@ slice 5's compression and streaming stay deferred.
   1050 MiB of vertices (`--scatter 100` with placement, Debug): 6696 MiB
   of device memory against 5697 MiB at 1.5x. Slack stays below a third of
   each pool.
+- **Trimmed before placement** (G1, 2026-11-24): with the voxel pools the
+  slack reached 1.79 GB at `--trees` (6279 MiB allocated, 4491 MiB used),
+  and the far-field splat's 1.5 GB transient then went past the 16 GB
+  RTX 4080, so the driver paged and the splat took 55 s. `setPlacement`
+  first copies every pool into an exact-size buffer (`trimPools`; models
+  are loaded by then; a later upload grows again): device memory 14481 ->
+  12932 MiB, splat 55 s -> 0.33 s. One pool at a time, each old one freed
+  before the next is allocated: trimming all ten in one submit exceeded
+  device memory and VMA (`VMA_MEMORY_USAGE_AUTO`) silently placed 2.2 GB
+  of voxel and cluster pools in system memory (forest edge 1440p 24.6 ->
+  42.3 ms, found by bisection). `createBuffer` now warns when a GPU-only
+  buffer lands outside device memory.
 - **Limits that remain** are structural and checked in `uploadMesh`, each
   with its own error: work items pack a first cluster index into 26 bits
   (`kMaxClusterIndex`, cull.glsl); vertex offsets are int32 and other
@@ -4783,7 +4795,9 @@ breakdown is being measured by the g1 lane.
 
 Chosen (medium confidence on the numbers):
 
-- Resident <= 12 GB and transient peak <= 14 GB at the showcase views,
+- Resident <= 12 GiB (12288 MiB) and transient peak <= 14 GiB (14336 MiB),
+  device-local (VMA's blocks on the DEVICE_LOCAL heaps, the figure the
+  capture runs print first), at the showcase views,
   printed by every capture run. Every spec states its VRAM delta. g1 may
   not merge above main's peak.
 - Geometry compression (backlog "Cluster vertices are 48 B uncompressed",
@@ -4797,3 +4811,111 @@ Chosen (medium confidence on the numbers):
 Rejected: no budget (the g1 overshoot would have merged unnoticed), and a
 lower resolution or texture cap as the first lever (it trades the look the
 gate protects).
+
+## Cull list caps from measured need (G1, 2026-11-24)
+
+- **Caps = the most any evidence view needs at 1440p, plus 50%**, not
+  powers of two (nothing in the code needs them): measured with the caps
+  raised and every frame's counts (the first frame, without occlusion
+  history, needs the most). Voxel quads 24660000 (fly-toward 16435665); the
+  other three from the high overview (below). The margin is wide because a
+  full voxel list leaves holes where main drew triangles (backlog).
+- **The high overview (1119 4354 -431)** first needed 13615592 voxel
+  clusters per phase: a far tree drew its terminal groups, 4-8 clusters per
+  voxelizing mesh, because regions on either side of the mesh origin never
+  merge by halving their keys. The last few clusters now merge into one per
+  mesh (`finish()`, cluster.cpp; kVoxelizerVersion 10): 4431087 voxel
+  clusters, 5964036 work items, 3640526 nodes, and the caps cover it +50%
+  (work items 8950000, nodes 5460000, voxel clusters 6650000): 0 dropped,
+  48.3 ms against main's 47.2, device-local peak 14261 MiB. One cluster per
+  tree across meshes is the far tile tier's job.
+- **Paid for by smaller far-field splat slices**: `kFarSliceBytes` 1 GiB
+  -> 256 MiB (slices 7/2/1 -> 30/5/1, splat 335 ms, image unchanged within
+  repeat-run noise); device-local peak 14671 -> 13874 MiB before the caps,
+  14014 MiB with them (all heaps 14110, main 14743).
+- **Memory figures are device-local** (VMA blocks on DEVICE_LOCAL heaps;
+  the all-heaps total in brackets), and the peak now covers model load
+  (sampled when a pool grows: 13114 MiB, below the far-field peak).
+
+## Voxel clusters cast into the cascades (G1 Task 8, G11, 2026-11-24)
+
+- **The same voxels, seen from the sun, in cascades 0-3**: cascade 4
+  (`shadowFarCells`) switches every cell with trees to its far cell
+  (cell_cull.comp skips the pixel test in a shadow view), so placed trees
+  cast there as far-cell voxels and only hand-placed instances reach the
+  cluster cull. In cascades 0-3, cluster_cull.comp lists voxel clusters as
+  in the main view, voxel_bricks.comp keeps a voxel
+  where the stable coverage hash falls under its opacity along the sun (and
+  drops those hidden deeper than kVoxelHiddenDepth toward it), and
+  voxel_instance.mesh draws each as an orthographic quad facing the sun,
+  depth only. No cascade path disables LOD pruning: the cascades keep
+  their orthographic LOD (1 texel, 0.25 in cascades 0-1).
+- **Self-shadow counted once**: voxel_instance.frag already attenuates by
+  the voxel's optical depth out of its model toward the sun and traces from
+  where the sun ray leaves the mesh's box, so the cascades add only other
+  trees. A caster moved half a voxel away from the sun changed nothing
+  (edge 21.11 -> 21.27), so the voxels' own leaves were not the darkening.
+- **Coverage against the ray-traced truth** (`--shadows rt`, full BLAS),
+  1440p, region mean: forest edge (rows 200-1000) g1 21.11, main ray traced
+  21.41, main raster 28.95; overview crop g1 97.97, ray traced 99.19, main
+  raster 106.75. Main's coarse cascades under-shadow (thin leaves simplify
+  away at one texel); g1 lands within 1.5% of the truth.
+- **Cost** (all five cascades in one frame, `sun shadows:` max): edge 84.7
+  ms against main's 80.6, overview 27.0 against 40.7.
+
+## Voxels inside the cluster DAG (G1, 2026-11-24)
+
+- **What**: tree models carry voxel levels inside their cluster LOD DAG
+  (vendored clusterlod.h hook, `cluster.cpp`); distant foliage switches per
+  cluster group from triangles to voxels drawn as camera-facing quads lit
+  through the leaf model, cast into the sun cascades (entry above), and the
+  far field's templates come from the same voxelizer. Spec
+  `specs/2026-11-24-dag-voxel-foliage-design.md`, plan and ledger beside it.
+- **Measured against main, 1440p** (plan ledger, evidence index): forest
+  edge 24.5 ms against 37.1, summit 20.4 / 32.0, overview 22.4 / 25.2,
+  interior looking up 18.1 / 21.8, fly-toward 24.4 / 32.9, far horizon 26.0
+  / 31.7; high overview 48.8 / 47.2 (main's image drops 463,757 entries, the
+  criterion is waived there); device-local peak 14261 MiB (all heaps 14357,
+  main 14743); warm startup 81.2 s / 85.5 s; forest still jitter 0.49 / 2.66.
+- **Far-field palette, an accepted deviation (user)**: one palette entry
+  per mesh slot (`kFarSlots` = 8, reflected and transmitted colour), not
+  per-voxel albedo and transmission as the plan's Task 6 said; revisit with
+  the far tile tier.
+- **The darker forest is accepted as correct shadowing (user)**: against
+  main ray traced (`--shadows rt`) on fly frame 010, OKLCh, g1's residual is
+  at most L 0.021, C 0.001, h 1.5 deg per region, while main's raster is
+  brighter by L 0.021-0.135 and less blue by up to 93 deg of hue in the
+  understory (more shadow raises the sky's share of the light). Overview
+  ground (main raster's lit gaps): g1 96.67, ray traced 101.21, main raster
+  144.84; there g1's mask reads lit 6.9%, crown 25.5%, shadowed 67.6%
+  against 17.3 / 11.5 / 71.2 ray traced: voxel crowns cover more of the
+  gaps from above, the shadowing matches. Brightness is a lighting and grade
+  matter, not a g1 change.
+
+## Caster LOD of one texel in every cascade (G1, 2026-11-24)
+
+- **Why**: with the voxel casters and the cascade counters read back, the
+  sun cascades dropped entries at five of the seven evidence views (forest
+  edge 12.85M). Per cascade at the edge (`--shadow-refresh`), cascade 1
+  saturated both lists: drawn clusters at kMaxDrawnClusters (2^21, also
+  near the GPU's 2^22 mesh dispatch limit) and voxel quads at 24.66M, while
+  cascades 2-3 at one texel needed 7-18k triangle clusters. Cascades 0-1
+  kept a 0.25-texel caster error "for thin foliage": several casters per
+  texel of a 2048^2 map that filters over +-1.5 texels.
+- **Chosen**: `lodErrorPixels` 1 in every cascade, for triangle clusters
+  and voxel levels alike (they share the threshold). Pulled forward from
+  resume.md step 3 ("relax the 0.25 px caster LOD").
+- **Measured, 1440p** (`--shadow-refresh`, every cascade every frame):
+  drops 0 at edge, interior looking up, fly-toward, overview within the
+  committed caps (max cascade drawn clusters 939289, quads 15.5M); GPU
+  109.6 -> 78.6, 85.6 -> 60.3, 92.8 -> 64.8, 49.2 -> 47.3 ms; edge without
+  the flag 24.7 ms; peak unchanged (14261 MiB device-local).
+- **No thinner shadows against the ray-traced truth** (main `--shadows
+  rt`): overview ground mask mean 96.66 (0.25: 96.67; truth 101.21), classes
+  unchanged; OKLCh edge canopy/understory L -0.005/-0.007 (0.25:
+  -0.004/-0.007), fly-toward canopy L +0.005 (0.25: +0.011). Near dappled
+  shade, canopy from 40 m above: mean 84.78 -> 85.42, look side-by-side
+  `.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg`.
+- **User, 2026-11-24: keep one texel in every cascade** (saw the side by
+  side, found the two nearly identical).
+

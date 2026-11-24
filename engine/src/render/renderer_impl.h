@@ -129,8 +129,12 @@ struct Renderer::Impl {
   uint32_t drawnInstances = 0;
   uint32_t drawnClusters = 0;
   uint32_t drawnTriangles = 0;
+  // Over the run, main view and cascades (draw reads them back).
   uint32_t droppedEntries = 0;
   std::array<uint32_t, 5> droppedByList{};
+  CullNeed mainNeed;
+  CullNeed cascadeNeed;
+  std::array<CullNeed, kShadowCascades> cascadeNeeds{};
   uint32_t drawnTerrainNodes = 0;
   uint32_t drawnCells = 0;
   uint32_t drawnFarCells = 0;
@@ -161,6 +165,7 @@ struct Renderer::Impl {
   LightBasis shadowBasis;
   Vec3 shadowSun;
   bool shadowStale = true;
+  bool shadowRefresh = false;
   Buffer shadowCounters;
   Buffer shadowDrawLists;
   VkPipeline shadowPipeline = VK_NULL_HANDLE;
@@ -250,6 +255,17 @@ struct Renderer::Impl {
   uint32_t clusterNodeCount = 0;
   uint32_t clusterLevelCount = 0;
   uint32_t traversalDepths = 0;
+  // The voxel clusters' bricks (GpuVoxelBrick), voxels (PackedVoxel) and
+  // axis depth words, bump-allocated too; voxelPoolInfo holds their
+  // addresses (GpuVoxelPools, SceneData.voxelPools), rewritten when one
+  // grows. voxelInstanceList: the voxel lists, made with the first voxels.
+  Buffer voxelBrickPool;
+  Buffer voxelPool;
+  Buffer voxelAxisPool;
+  Buffer voxelPoolInfo;
+  Buffer voxelInstanceList;
+  uint32_t voxelBrickCount = 0;
+  uint32_t voxelCount = 0;
   // Culling output, both phases: instance chunks for the instance cull, BVH
   // nodes for the traversal, work items for the cluster cull, cluster draw
   // lists, and the DrawCounters (indirect arguments and statistics).
@@ -369,25 +385,17 @@ struct Renderer::Impl {
   bool terrainShadowValid = false;
   bool terrainShadowPending = false;
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
-  // The mid tier (protovoxel.h): the prototypes' brick pools and the voxel
-  // instance and brick lists cull.comp and voxel_bricks.comp append.
-  Buffer protoVoxelPrototypes;
-  Buffer protoVoxelLevels;
-  Buffer protoVoxelData;
-  Buffer protoVoxelOcclusion;
-  Buffer protoVoxelCoords;
-  Buffer protoVoxelInfo;
-  Buffer voxelInstanceList;
-  // Each prototype's finest voxel (m; 0: none), for PrototypeInfo.
-  std::vector<float> protoFinestVoxel;
   VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
-  VkPipeline voxelBandPipeline = VK_NULL_HANDLE;
   VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
-  bool voxelTrees = true;
+  // Voxel clusters' quads into a cascade (voxel_instance.mesh, depth only).
+  VkPipeline voxelShadowCasterPipeline = VK_NULL_HANDLE;
+  bool voxelLod = true;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;
+  double drawnVoxelArea = 0.0;
+  uint32_t drawnSubpixelVoxels = 0;
 
   VkSampler nearestSampler = VK_NULL_HANDLE;
   VkSampler linearSampler = VK_NULL_HANDLE;
@@ -522,6 +530,13 @@ struct Renderer::Impl {
   bool cloudShadowFullRefresh = true;
 
   std::vector<GpuMesh> meshes;
+  // Per mesh, its far-field template voxels (ClusterLod::farBricks and
+  // farVoxels; empty unless it voxelizes), for buildFarField.
+  struct MeshFarVoxels {
+    std::vector<VoxelBrickRef> bricks;
+    std::vector<PackedVoxel> voxels;
+  };
+  std::vector<MeshFarVoxels> meshFarVoxels;
 
   std::optional<std::filesystem::path> capturePath;
   std::optional<std::filesystem::path> albedoCapturePath;
@@ -578,6 +593,9 @@ struct Renderer::Impl {
   // A buffer at least 1.5x larger than `pool` that holds `bytes`, or none
   // if `pool` already does.
   Buffer grownPool(const Buffer &pool, VkDeviceSize bytes, VkBufferUsageFlags usage);
+  // Shrinks every mesh pool to the bytes in use (growth leaves up to a
+  // third unused), before placement and the far field allocate.
+  void trimPools();
   Buffer uploadStorage(const void *data, VkDeviceSize bytes);
   void writeTexture(uint32_t index, VkImageView view, VkSampler sampler,
                     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -602,7 +620,7 @@ struct Renderer::Impl {
   void buildPlacedTlas(std::span<const Prototype> prototypes,
                        std::span<const PlacementLayer> layers,
                        const std::vector<std::array<float, 4>> &bounds);
-  // The far field of the current placement: prototype bake, then the
+  // The far field of the current placement: prototype templates, then the
   // splat over the placed table (offsets: setPlacement's per (cell, layer)).
   void buildFarField(std::span<const Prototype> prototypes,
                      std::span<const PlacementLayer> layers,
@@ -632,7 +650,23 @@ struct Renderer::Impl {
   void destroyStreamBuffers(Stream &stream);
   void destroyStream();
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
-  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
+  // Writes the voxel pools' addresses into voxelPoolInfo.
+  void writeVoxelPoolInfo();
+  // Copies counters into the frame's readback slot (0: main view, 1 + i:
+  // cascade i).
+  void readBackCounters(VkCommandBuffer cmd, const FrameData &frame, const Buffer &counters,
+                        uint32_t slot);
+  void readCounters(FrameData &frame);
+  // VMA's allocated blocks on the device-local heaps (VRAM), and on all
+  // heaps (system memory too).
+  struct MemoryUse {
+    VkDeviceSize deviceLocal = 0;
+    VkDeviceSize all = 0;
+  };
+  MemoryUse memoryUse() const;
+  // The largest memoryUse while models load (a growing pool's old and new
+  // buffers coexist), printed with the TLAS line.
+  MemoryUse loadPeak;
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {
     VkDeviceAddress scene;
@@ -648,6 +682,8 @@ struct Renderer::Impl {
                         const ShadowCull *shadow = nullptr);
   void cullClusters(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
                     const ShadowCull *shadow = nullptr);
+  void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase,
+                         const ShadowCull *shadow = nullptr);
   // Raster sun shadows (renderer_shadows.cpp). plan runs on the CPU before
   // the scene upload and fills scene.sunShadows; record renders what plan chose.
   void createSunShadows();

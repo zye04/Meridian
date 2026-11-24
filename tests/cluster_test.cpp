@@ -2,11 +2,15 @@
 #include <meridian/mesh.h>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 
 using namespace meridian;
 
@@ -55,7 +59,7 @@ Cut selectCut(const MeshData &mesh, const ClusterLod &lod, Vec3 camera,
               float threshold) {
   Cut cut;
   for (const Cluster &c : lod.clusters) {
-    if (!lodVisible(c, camera, 1.0f, 1.0f, 0.1f, 1080.0f, threshold)) {
+    if (!lodVisible(c, camera, 1.0f, 1.0f, 0.1f, 1080.0f, {threshold, threshold})) {
       continue;
     }
     cut.triangles += c.triangleCount;
@@ -80,7 +84,7 @@ TEST_CASE("a mesh smaller than a cluster is one original cluster") {
   CHECK(c.refined.error < 0.0f);
   CHECK(c.self.error == FLT_MAX);
   for (float threshold : {0.0f, 1.0f, 1000.0f}) {
-    CHECK(lodVisible(c, {0, 1, 100}, 1.0f, 1.0f, 0.1f, 1080.0f, threshold));
+    CHECK(lodVisible(c, {0, 1, 100}, 1.0f, 1.0f, 0.1f, 1080.0f, {threshold, threshold}));
   }
 }
 
@@ -158,6 +162,16 @@ TEST_CASE("cluster cache round-trips") {
                       lods[i].levels.size() * sizeof(ClusterLevelInfo)) == 0);
   }
   std::filesystem::remove(file);
+}
+
+TEST_CASE("cluster cache file name carries the cache and voxelizer versions") {
+  const std::string extension = clusterCacheExtension();
+  char expected[64];
+  std::snprintf(expected, sizeof(expected), ".v%08x.%u.clusters", clusterCacheVersion(),
+                voxelizerVersion());
+  CHECK(extension == expected);
+  CHECK(std::filesystem::path("a/tree.gltf").replace_extension(extension).filename().string() ==
+        "tree" + extension);
 }
 
 TEST_CASE("cluster cache rejects another source key") {
@@ -354,9 +368,10 @@ void checkBvh(const ClusterLod &lod) {
 
 std::vector<uint32_t> flatCut(const ClusterLod &lod, Vec3 camera, float scale,
                               float projY, float threshold) {
+  const std::vector<LodThresholds> thresholds = clusterThresholds(lod, threshold);
   std::vector<uint32_t> cut;
   for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
-    if (lodVisible(lod.clusters[i], camera, scale, projY, 0.1f, 1440.0f, threshold)) {
+    if (lodVisible(lod.clusters[i], camera, scale, projY, 0.1f, 1440.0f, thresholds[i])) {
       cut.push_back(i);
     }
   }
@@ -412,9 +427,10 @@ TEST_CASE("selectClustersBvh orthographic equals lodVisible") {
           std::vector<uint32_t> bvh = selectClustersBvh(lod, camera, scale, 1.0f, 0.1f, 1.0f,
                                                         threshold, pixelsPerMeter);
           std::sort(bvh.begin(), bvh.end());
+          const std::vector<LodThresholds> thresholds = clusterThresholds(lod, threshold);
           std::vector<uint32_t> flat;
           for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
-            if (lodVisible(lod.clusters[i], camera, scale, 1.0f, 0.1f, 1.0f, threshold,
+            if (lodVisible(lod.clusters[i], camera, scale, 1.0f, 0.1f, 1.0f, thresholds[i],
                            pixelsPerMeter)) {
               flat.push_back(i);
             }
@@ -518,4 +534,335 @@ TEST_CASE("added leaf vertices survive the cluster cache") {
   REQUIRE(read->front().addedPositions.size() == lod.addedPositions.size());
   CHECK(std::memcmp(read->front().addedPositions.data(), lod.addedPositions.data(),
                     lod.addedPositions.size() * sizeof(Vec3)) == 0);
+}
+
+namespace {
+
+// A 6 m crown of disjoint leaf quads around (0, 5, 0) on a 4 m trunk
+// cylinder: what the DAG voxel levels are for.
+MeshData leafCrown(uint32_t leaves, uint32_t seed, uint32_t tessellation = 1) {
+  MeshData mesh;
+  uint32_t state = seed * 747796405u + 2891336453u;
+  const auto rnd = [&] {
+    state = state * 747796405u + 2891336453u;
+    return float((state >> 8) & 0xFFFFFF) / float(0x1000000);
+  };
+  for (uint32_t i = 0; i < leaves; ++i) {
+    Vec3 c{rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1};
+    if (length(c) > 1.0f) {
+      --i;
+      continue;
+    }
+    c = Vec3{c.x * 3.0f, 5.0f + c.y * 3.0f, c.z * 3.0f};
+    const Vec3 n = normalize(Vec3{rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1 + 1e-3f});
+    const Vec3 a = normalize(cross(n, Vec3{0.31f, 0.53f, 0.79f}));
+    const Vec3 b = cross(n, a);
+    const float s = 0.08f + 0.06f * rnd();
+    // A leaf of tessellation^2 quads, as traced leaves are many triangles.
+    const uint32_t base = uint32_t(mesh.vertices.size());
+    const uint32_t side = tessellation + 1;
+    for (uint32_t y = 0; y < side; ++y) {
+      for (uint32_t x = 0; x < side; ++x) {
+        Vertex v;
+        const float u = float(x) / tessellation, w = float(y) / tessellation;
+        // Curved, as real leaves are: flat ones simplify without error.
+        const float bend = 0.5f * s * ((2.0f * u - 1.0f) * (2.0f * u - 1.0f) +
+                                       (2.0f * w - 1.0f) * (2.0f * w - 1.0f));
+        v.position = c + a * (s * (2.0f * u - 1.0f)) + b * (s * (2.0f * w - 1.0f)) + n * bend;
+        v.normal = n;
+        v.uvX = u;
+        v.uvY = w;
+        mesh.vertices.push_back(v);
+      }
+    }
+    for (uint32_t y = 0; y < tessellation; ++y) {
+      for (uint32_t x = 0; x < tessellation; ++x) {
+        const uint32_t i = base + y * side + x;
+        mesh.indices.insert(mesh.indices.end(), {i, i + 1, i + side + 1, i, i + side + 1, i + side});
+      }
+    }
+  }
+  mesh.leaf = true;
+  mesh.voxelize = true;
+  return mesh;
+}
+
+const ClusterLod &cachedCrown() {
+  static const VoxelMaterial material{};
+  static const ClusterLod lod = [] {
+    const MeshData mesh = leafCrown(6000, 1);
+    const VoxelSource source{{&material, 1}};
+    return buildClusterLod(mesh, &source);
+  }();
+  return lod;
+}
+
+size_t cachedCrownVertexCount() {
+  static const size_t count = leafCrown(6000, 1).vertices.size();
+  return count;
+}
+
+bool isVoxel(const Cluster &c) { return c.brickCount > 0; }
+
+} // namespace
+
+TEST_CASE("voxel levels appear above a crown's triangles and stay voxels") {
+  const ClusterLod &lod = cachedCrown();
+  size_t voxels = 0;
+  for (const Cluster &c : lod.clusters) {
+    voxels += isVoxel(c);
+  }
+  CHECK(voxels > 0);
+  CHECK(!lod.bricks.empty());
+  // A triangle cluster is never made from voxels.
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c) || c.refinedGroup < 0) {
+      continue;
+    }
+    for (const Cluster &child : lod.clusters) {
+      if (int32_t(child.group) == c.refinedGroup) {
+        CHECK(!isVoxel(child));
+      }
+    }
+  }
+  // Voxel errors are their lattice edges: powers of two.
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      CHECK(std::exp2(std::round(std::log2(c.voxelEdge))) == c.voxelEdge);
+      CHECK(c.refined.error >= c.voxelEdge); // the leaf-area move may raise it
+    }
+  }
+}
+
+TEST_CASE("the mixed DAG is consistent and monotonic, so the cut covers the surface once") {
+  // lodVisible draws a group's members while its bounds project over the
+  // threshold and its replacements once they don't: exactly one side is
+  // drawn if every member shares the group's bounds, every replacement
+  // shares them as its refined bounds, and no cluster's own error projects
+  // larger than its group's from any camera.
+  const ClusterLod &lod = cachedCrown();
+  std::map<uint32_t, LodBounds> groupBounds;
+  for (const Cluster &c : lod.clusters) {
+    const auto [it, inserted] = groupBounds.emplace(c.group, c.self);
+    CHECK(std::memcmp(&it->second, &c.self, sizeof(LodBounds)) == 0);
+  }
+  for (const Cluster &c : lod.clusters) {
+    if (c.refinedGroup < 0) {
+      continue;
+    }
+    REQUIRE(groupBounds.count(uint32_t(c.refinedGroup)) == 1);
+    CHECK(std::memcmp(&groupBounds[uint32_t(c.refinedGroup)], &c.refined, sizeof(LodBounds)) == 0);
+    for (float distance : {0.5f, 5.0f, 20.0f, 100.0f, 500.0f, 3000.0f}) {
+      for (const Vec3 dir : {Vec3{0, 0, 1}, normalize(Vec3{1, 1, 0})}) {
+        const Vec3 camera = Vec3{0.0f, 5.0f, 0.0f} + dir * distance;
+        CHECK(projectedErrorPixels(c.self, camera, 1.0f, 1.2f, 0.1f, 1440.0f) >=
+              projectedErrorPixels(c.refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f));
+      }
+    }
+  }
+}
+
+TEST_CASE("every voxel root switches no later than its triangles") {
+  // A voxel root draws while its self projects over kVoxelPixels x the
+  // threshold, its triangles while their group projects over the threshold:
+  // both draw unless the first condition implies the second.
+  const ClusterLod &lod = cachedCrown();
+  std::set<uint32_t> triangleGroups;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c)) {
+      triangleGroups.insert(c.group);
+    }
+  }
+  size_t roots = 0;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c) || c.refinedGroup < 0 || !triangleGroups.count(uint32_t(c.refinedGroup))) {
+      continue;
+    }
+    ++roots;
+    for (float distance : {20.0f, 60.0f, 200.0f, 700.0f, 3000.0f}) {
+      for (const Vec3 dir : {Vec3{0, 0, 1}, normalize(Vec3{1, 1, 0})}) {
+        const Vec3 camera = Vec3{0.0f, 5.0f, 0.0f} + dir * distance;
+        CHECK(projectedErrorPixels(c.self, camera, 1.0f, 1.2f, 0.1f, 1440.0f) >=
+              kVoxelPixels * projectedErrorPixels(c.refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f));
+      }
+    }
+  }
+  CHECK(roots > 0);
+}
+
+TEST_CASE("selectClustersBvh equals lodVisible over mixed levels") {
+  checkTraversal(cachedCrown(), {0.0f, 5.0f, 0.0f});
+}
+
+TEST_CASE("a voxel cluster's error scales with instance scale like a triangle cluster's") {
+  const ClusterLod &lod = cachedCrown();
+  const auto voxel = std::find_if(lod.clusters.begin(), lod.clusters.end(), isVoxel);
+  REQUIRE(voxel != lod.clusters.end());
+  const Vec3 camera{0.0f, 5.0f, 5000.0f};
+  const float one = projectedErrorPixels(voxel->refined, camera, 1.0f, 1.2f, 0.1f, 1440.0f);
+  const float two = projectedErrorPixels(voxel->refined, camera, 2.0f, 1.2f, 0.1f, 1440.0f);
+  CHECK(two == doctest::Approx(2.0f * one).epsilon(0.01));
+}
+
+TEST_CASE("a mesh that does not opt in gets no voxels") {
+  static const VoxelMaterial material{};
+  MeshData crown = leafCrown(2000, 4);
+  crown.voxelize = false;
+  const VoxelSource source{{&material, 1}};
+  const ClusterLod lod = buildClusterLod(crown, &source);
+  CHECK(lod.bricks.empty());
+  CHECK(lod.farBricks.empty());
+  for (const Cluster &c : lod.clusters) {
+    CHECK(!isVoxel(c));
+  }
+}
+
+TEST_CASE("the cluster source key changes when a voxelized texture changes") {
+  std::vector<MeshData> meshes{leafCrown(10, 2)};
+  std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};
+  const VoxelMaterial material{};
+  const uint32_t primitiveMaterial = 0;
+  const std::array<int, 3> imageOf{0, -1, -1};
+  const auto key = [&] {
+    return clusterSourceKey(meshes, textures, {&material, 1}, {&primitiveMaterial, 1},
+                            {&imageOf, 1});
+  };
+  const uint64_t a = key();
+  textures[0][2] = 9;
+  CHECK(key() != a);
+  meshes[0].voxelize = false;
+  textures[0][2] = 3;
+  CHECK(key() != a);
+}
+
+TEST_CASE("the cluster source key changes when a voxelized material changes") {
+  const std::vector<MeshData> meshes{leafCrown(10, 2)};
+  const std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};
+  std::vector<VoxelMaterial> materials(2);
+  std::vector<uint32_t> primitiveMaterial{0};
+  std::vector<std::array<int, 3>> imageOf{{0, -1, -1}, {-1, -1, -1}};
+  const auto key = [&] {
+    return clusterSourceKey(meshes, textures, materials, primitiveMaterial, imageOf);
+  };
+  const uint64_t a = key();
+  const auto changes = [&](auto &field, auto value) {
+    const auto old = field;
+    field = value;
+    const bool changed = key() != a;
+    field = old;
+    return changed;
+  };
+  CHECK(changes(materials[0].baseColorFactor.y, 0.5f));
+  CHECK(changes(materials[0].alphaMask, true));
+  CHECK(changes(materials[0].alphaCutoff, 0.3f));
+  CHECK(changes(materials[0].roughnessFactor, 0.7f));
+  CHECK(changes(materials[0].diffuseTransmission, 0.4f));
+  CHECK(changes(materials[0].transmissionColor.z, 0.2f));
+  CHECK(changes(primitiveMaterial[0], 1u));
+  CHECK(changes(imageOf[0][0], -1));
+  CHECK(changes(imageOf[1][1], 0));
+  CHECK(key() == a);
+}
+
+TEST_CASE("voxel bricks and axis depths round-trip the cluster cache") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  bakeModelAxisDepths(lods);
+  const auto file = cacheFile("meridian_voxel_round_trip.clusters");
+  writeClusterCache(file, 7, lods);
+  const auto read = readClusterCache(file, 7);
+  REQUIRE(read);
+  CHECK(std::memcmp((*read)[0].bricks.data(), lods[0].bricks.data(),
+                    lods[0].bricks.size() * sizeof(VoxelBrickRef)) == 0);
+  CHECK(std::memcmp((*read)[0].voxels.data(), lods[0].voxels.data(),
+                    lods[0].voxels.size() * sizeof(PackedVoxel)) == 0);
+  CHECK((*read)[0].voxelAxis == lods[0].voxelAxis);
+  REQUIRE(!lods[0].farBricks.empty());
+  REQUIRE((*read)[0].farVoxels.size() == lods[0].farVoxels.size());
+  CHECK(std::memcmp((*read)[0].farBricks.data(), lods[0].farBricks.data(),
+                    lods[0].farBricks.size() * sizeof(VoxelBrickRef)) == 0);
+  CHECK(std::memcmp((*read)[0].farVoxels.data(), lods[0].farVoxels.data(),
+                    lods[0].farVoxels.size() * sizeof(PackedVoxel)) == 0);
+  std::filesystem::remove(file);
+}
+
+TEST_CASE("a crown voxel's optical depth out of the model grows toward the crown's centre") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  bakeModelAxisDepths(lods);
+  REQUIRE(lods[0].voxelAxis.size() == lods[0].voxels.size());
+  // Over the finest voxel level: voxels on the +x side see more crown toward
+  // -x (the axis depth nibble 1) than toward +x (nibble 0).
+  float edge = FLT_MAX;
+  for (const Cluster &c : lods[0].clusters) {
+    if (isVoxel(c)) {
+      edge = std::min(edge, c.voxelEdge);
+    }
+  }
+  double towardCentre = 0, outward = 0;
+  for (const Cluster &c : lods[0].clusters) {
+    if (!isVoxel(c) || c.voxelEdge != edge) {
+      continue;
+    }
+    for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
+      const VoxelBrickRef &brick = lods[0].bricks[b];
+      uint32_t voxel = brick.firstVoxel;
+      for (uint32_t i = 0; i < 64; ++i) {
+        if (!((brick.occupied >> i) & 1u)) {
+          continue;
+        }
+        const float x = (brick.origin[0] + float(i % 4) + 0.5f) * edge;
+        const uint32_t axis = lods[0].voxelAxis[voxel++];
+        if (x > 1.5f) {
+          outward += axis & 0xF;
+          towardCentre += (axis >> 4) & 0xF;
+        }
+      }
+    }
+  }
+  CHECK(towardCentre > 2.0 * outward);
+}
+
+TEST_CASE("a mesh's voxel levels converge to one cluster") {
+  // Every group that goes to voxels joins one hierarchy per mesh, so a far
+  // tree draws one cluster per mesh, not one per group (the Megascans
+  // beech's leaves had 17475 voxel roots and, as separate subtrees, 1650
+  // terminal clusters; then 4-8 per mesh, the regions around the origin).
+  size_t terminal = 0;
+  for (const Cluster &c : cachedCrown().clusters) {
+    terminal += isVoxel(c) && c.self.error == FLT_MAX;
+  }
+  CHECK(terminal == 1);
+}
+
+TEST_CASE("no voxel is finer than the mesh's height / 512") {
+  const ClusterLod &lod = cachedCrown();
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      CHECK(c.voxelEdge >= 6.0f / 512.0f / 2.0f); // the crown is ~6 m tall; edges are powers of two
+    }
+  }
+}
+
+TEST_CASE("voxels hidden from every direction are dropped from the bricks") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  size_t before = lods[0].voxels.size();
+  bakeModelAxisDepths(lods);
+  const ClusterLod &lod = lods[0];
+  CHECK(lod.voxels.size() <= before);
+  REQUIRE(lod.voxelAxis.size() == lod.voxels.size());
+  CHECK(validClusterLod(lod, cachedCrownVertexCount()));
+  // Kept voxels are visible from some direction, except the one a cluster
+  // keeps when none of its voxels is.
+  size_t hiddenKept = 0, voxelClusters = 0;
+  for (uint32_t axis : lod.voxelAxis) {
+    float least = 1e9f;
+    for (int k = 0; k < 6; ++k) {
+      least = std::min(least, float((axis >> (4 * k)) & 15u) * kVoxelAxisDepthStep);
+    }
+    hiddenKept += least > kVoxelHiddenDepth;
+  }
+  for (const Cluster &c : lod.clusters) {
+    voxelClusters += isVoxel(c);
+  }
+  CHECK(hiddenKept <= voxelClusters);
+  CHECK(lod.voxels.size() < before); // a 6 m crown has an inside
 }

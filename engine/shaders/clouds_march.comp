@@ -28,7 +28,6 @@ layout(set = 2, binding = 2, r32f) uniform writeonly image2D cloudDepth;
 const float kMinStep = 60.0;
 const float kStepGrowth = 0.016;
 const int kMaxSteps = 128;
-const float kMaxExposedLuminance = 60000.0;
 
 // Haze between the camera and distance d (m) along the ray: in-scattered
 // luminance (sun illuminance 1) and transmittance. Within the aerial

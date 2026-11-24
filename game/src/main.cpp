@@ -9,6 +9,7 @@
 #include <meridian/placement.h>
 #include "geo_channels.h"
 #include <meridian/renderer.h>
+#include <meridian/shadow_cascades.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
 #include <meridian/weather.h>
@@ -726,8 +727,9 @@ struct Options {
   bool voxelFarShadows = true;
   bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
-  bool voxelTrees = true;
+  bool voxelLod = true;
   bool occlusion = true;
+  bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
   meridian::ShadowMode shadows = meridian::ShadowMode::Raster;
   std::optional<meridian::Bloom> bloom;
@@ -855,6 +857,8 @@ Options parseOptions(int argc, char **argv) {
       } else {
         throw std::runtime_error("--shadows takes raster or rt");
       }
+    } else if (arg == "--shadow-refresh") {
+      options.shadowRefresh = true;
     } else if (arg == "--no-occlusion") {
       options.occlusion = false;
     } else if (arg == "--lod-error") {
@@ -955,12 +959,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--gi takes off or probes");
       }
       options.gi = mode == "probes";
-    } else if (arg == "--voxel-trees" && i + 1 < argc) {
+    } else if (arg == "--voxel-lod" && i + 1 < argc) {
       const std::string mode = argv[++i];
       if (mode != "on" && mode != "off") {
-        throw std::runtime_error("--voxel-trees takes on or off");
+        throw std::runtime_error("--voxel-lod takes on or off");
       }
-      options.voxelTrees = mode == "on";
+      options.voxelLod = mode == "on";
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -986,7 +990,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-trees on|off, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1156,6 +1160,7 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setShadowMode(options.shadows);
+  renderer.setShadowRefresh(options.shadowRefresh);
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
@@ -1163,7 +1168,7 @@ int main(int argc, char **argv) {
   if (options.albedoCapturePath) {
     renderer.enableAlbedoCapture();
   }
-  renderer.setVoxelTrees(options.voxelTrees);
+  renderer.setVoxelLod(options.voxelLod);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setGrade(kStartingGrade);
   renderer.setCloudsEnabled(options.clouds);
@@ -1520,6 +1525,7 @@ int main(int argc, char **argv) {
                 100.0 * renderer.referenceNoise());
   }
   if (!interactive) {
+    renderer.drainStatistics();
     renderer.printAmbient();
     std::printf("sun shadows: %u cascade renders, max %.2f ms\n", renderer.sunShadowRenderCount(),
                 renderer.sunShadowMaxMs());
@@ -1527,8 +1533,8 @@ int main(int argc, char **argv) {
     std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
                 "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "
                 "%u dropped by full "
-                "cull lists (chunks %u, work items %u, clusters %u, terrain nodes %u, "
-                "bvh nodes %u), placed %u, %u validation errors\n",
+                "cull lists (most in a frame, cascades included: chunks %u, work items %u, "
+                "clusters %u, terrain nodes %u, bvh nodes %u), placed %u, %u validation errors\n",
                 totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
                 renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
                 renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
@@ -1538,6 +1544,12 @@ int main(int argc, char **argv) {
                 drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
                 renderer.placedInstanceCount(),
                 renderer.validationErrorCount());
+    if (renderer.drawnVoxelQuadCount() > 0) {
+      std::printf("voxel quads %u: area %.0f px = %.2f x the render's pixels, %.1f%% under 1 px\n",
+                  renderer.drawnVoxelQuadCount(), renderer.drawnVoxelQuadArea(),
+                  renderer.drawnVoxelQuadComplexity(),
+                  100.0 * renderer.drawnSubpixelVoxelQuads() / renderer.drawnVoxelQuadCount());
+    }
     const meridian::Renderer::StreamStats stream = renderer.streamStats();
     std::printf("streamed: %u layers, window %ux%u, ring %u slots, %u live\n", stream.layers,
                 stream.window, stream.window, stream.ringInstances, stream.live);
@@ -1558,6 +1570,29 @@ int main(int argc, char **argv) {
                 "%.0f deg, gustiness %.2f (game time %.0f s)\n",
                 here.coverage, here.type, here.wind.speed10m, from, here.wind.gustiness,
                 gameSeconds);
+    for (const bool cascades : {false, true}) {
+      const meridian::CullNeed need = renderer.cullNeed(cascades);
+      std::printf("cull list need, %s, most in a frame: chunks %u, work items %u, bvh nodes %u, "
+                  "drawn clusters %u, voxel clusters %u, voxel quads %u, terrain nodes %u, "
+                  "retest clusters %u; %u dropped\n",
+                  cascades ? "sun shadow cascades" : "main view", need.chunks, need.workItems,
+                  need.traversalNodes, need.drawnClusters, need.voxelClusters, need.voxelQuads,
+                  need.terrainNodes, need.retestClusters, need.dropped);
+    }
+    for (uint32_t i = 0; i < meridian::kShadowCascades; ++i) {
+      const meridian::CullNeed need = renderer.cascadeCullNeed(i);
+      std::printf("cull list need, cascade %u: chunks %u, work items %u, bvh nodes %u, drawn "
+                  "clusters %u, voxel clusters %u, voxel quads %u; %u dropped\n",
+                  i, need.chunks, need.workItems, need.traversalNodes, need.drawnClusters,
+                  need.voxelClusters, need.voxelQuads, need.dropped);
+    }
+    std::fflush(stdout);
+    if (renderer.droppedCullEntryCount() > 0) {
+      std::fprintf(stderr,
+                   "WARNING: up to %u entries dropped by full cull lists in a frame (main view "
+                   "and sun shadow cascades): the image is incomplete\n",
+                   renderer.droppedCullEntryCount());
+    }
   }
   return renderer.validationErrorCount() == 0 && benchmarkWritten ? 0 : 1;
 }

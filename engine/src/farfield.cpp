@@ -105,12 +105,76 @@ Voxel unpackVoxel(uint32_t voxel) {
   return out;
 }
 
-float farExtinctionFromPasses(uint32_t passes, uint32_t rays) {
-  if (passes >= rays) {
-    return 0.0f;
+FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t paletteBase,
+                                  std::span<FarSlotColor> colors) {
+  FarBakeGrid grid;
+  int64_t lo[3] = {INT64_MAX, INT64_MAX, INT64_MAX}, hi[3] = {INT64_MIN, INT64_MIN, INT64_MIN};
+  std::vector<const VoxelGrid *> grids;
+  for (const VoxelGrid &slot : slots) {
+    grids.push_back(&slot);
+    for (const VoxelBrick &brick : slot.bricks) {
+      for (uint32_t i = 0; i < 64; ++i) {
+        if ((brick.occupied >> i) & 1u) {
+          const int64_t at[3] = {brick.origin[0] + int64_t(i % 4), brick.origin[1] + int64_t(i / 4 % 4),
+                                 brick.origin[2] + int64_t(i / 16)};
+          for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], at[k]);
+            hi[k] = std::max(hi[k], at[k]);
+          }
+        }
+      }
+    }
   }
-  const double pass = std::max(static_cast<double>(passes), 0.5) / rays;
-  return static_cast<float>(-std::log(pass) / kFarTemplateVoxel);
+  if (lo[0] > hi[0]) {
+    return grid;
+  }
+  grid.origin = Vec3{float(lo[0]), float(lo[1]), float(lo[2])} * kFarTemplateVoxel;
+  for (int k = 0; k < 3; ++k) {
+    grid.size[k] = uint32_t(hi[k] - lo[k] + 1);
+  }
+  const size_t count = size_t{grid.size[0]} * grid.size[1] * grid.size[2];
+  const auto index = [&](const VoxelBrick &brick, uint32_t i) {
+    return size_t(brick.origin[0] + int64_t(i % 4) - lo[0]) +
+           grid.size[0] * (size_t(brick.origin[1] + int64_t(i / 4 % 4) - lo[1]) +
+                           size_t{grid.size[1]} * size_t(brick.origin[2] + int64_t(i / 16) - lo[2]));
+  };
+  grid.extinction.assign(count, 0.0f);
+  grid.normal.assign(count, Vec3{});
+  grid.albedo.assign(count, paletteBase);
+  std::vector<float> best(count, -1.0f);
+  for (size_t s = 0; s < slots.size(); ++s) {
+    for (const VoxelBrick &brick : slots[s].bricks) {
+      for (uint32_t i = 0; i < 64; ++i) {
+        if (!((brick.occupied >> i) & 1u)) {
+          continue;
+        }
+        const VoxelPayload &v = brick.voxels[i];
+        FarSlotColor &color = colors[s];
+        color.coverage += v.coverage;
+        color.albedo = color.albedo + v.albedo * v.coverage;
+        color.transmission = color.transmission + v.transmission * v.coverage;
+        const size_t at = index(brick, i);
+        if (v.coverage > best[at]) {
+          best[at] = v.coverage;
+          grid.albedo[at] = static_cast<uint8_t>(paletteBase + s);
+        }
+      }
+    }
+  }
+  for (const VoxelBrick &brick : combineVoxelGrids(grids).bricks) {
+    for (uint32_t i = 0; i < 64; ++i) {
+      if ((brick.occupied >> i) & 1u) {
+        const VoxelPayload &v = brick.voxels[i];
+        const size_t at = index(brick, i);
+        grid.extinction[at] = (v.depth[0] + v.depth[1] + v.depth[2]) / (3.0f * kFarTemplateVoxel);
+        // One hemisphere, so filterFarTemplate's extinction-weighted mean
+        // doesn't cancel opposite signs of the same axis.
+        const Vec3 axis = normalLobe(v).axis;
+        grid.normal[at] = dot(axis, Vec3{0.3f, 1.0f, 0.2f}) < 0.0f ? axis * -1.0f : axis;
+      }
+    }
+  }
+  return grid;
 }
 
 FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
