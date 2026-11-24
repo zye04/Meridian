@@ -178,7 +178,8 @@ only); a nonzero total also ends the run with a `WARNING: up to N entries
 dropped by full cull lists in a frame` line on stderr. Two `cull list need,
 main view|sun shadow cascades, most in a frame:` lines give each list's
 largest phase, queue or bucket over the run (the need while nothing drops,
-a lower bound once something does; the caps in gpu_types.h). A GPU-only
+a lower bound once something does; the caps in gpu_types.h), then one
+`cull list need, cascade N:` line per sun shadow cascade. A GPU-only
 buffer placed outside device memory prints `warning: a N MiB GPU buffer is
 outside device memory` when it is created.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
