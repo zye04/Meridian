@@ -22,16 +22,15 @@ const uint kCounterVoxelDrops = 176u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 1u << 20;
-const uint kMaxVoxelBricks = 1u << 22;
 const uint kMaxVoxelQuads = 1u << 23;
-// Where the lists start in SceneData.voxelInstances (uvec2 entries).
-const uint kVoxelBrickListBase = 2u * kMaxVoxelInstances;
-const uint kVoxelQuadListBase = kVoxelBrickListBase + 2u * kMaxVoxelBricks;
+// Where the voxel lists start in SceneData.voxelInstances (uvec2 entries:
+// cluster entry | terrain sun << 31, pool brick << 6 | voxel), per phase
+// after the cluster lists.
+const uint kVoxelQuadListBase = 2u * kMaxVoxelInstances;
 
-// The first uint of a phase's voxel list in SceneData.voxelInstances viewed
-// as uints (list = phase * 2).
+// The first entry of a phase's voxel list (list = phase * 2).
 uint voxelQuadListStart(uint list) {
-    return 2u * kVoxelQuadListBase + (list >> 1) * kMaxVoxelQuads;
+    return kVoxelQuadListBase + (list >> 1) * kMaxVoxelQuads;
 }
 
 // A voxel this deep in its model seen from the camera (its axis depths,

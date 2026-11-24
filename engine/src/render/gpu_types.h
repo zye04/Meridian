@@ -563,10 +563,10 @@ struct SceneData {
   GpuSunShadows sunShadows;
   // The voxel pools (GpuVoxelPools), the voxel lists (per phase
   // kMaxVoxelInstances entries (instance, voxel cluster), then per phase
-  // kMaxVoxelBricks entries (cluster entry, pool brick | terrain sun << 31),
-  // then per phase kMaxVoxelQuads uints (brick entry << 6 | voxel)) and the
-  // DrawCounters (voxel_instance.mesh reads its counts). voxelLod: voxel
-  // clusters replace triangles (0: triangles everywhere, an A/B).
+  // kMaxVoxelQuads entries (cluster entry | terrain sun << 31, pool brick
+  // << 6 | voxel)) and the DrawCounters (voxel_instance.mesh reads its
+  // counts). voxelLod: voxel clusters replace triangles (0: triangles
+  // everywhere, an A/B).
   VkDeviceAddress voxelPools = 0;
   VkDeviceAddress voxelInstances = 0;
   VkDeviceAddress drawCounters = 0;
@@ -641,7 +641,8 @@ struct ClusterInfo {
   // The mesh it belongs to: placed instances name only a prototype.
   uint32_t mesh = 0;
   // A voxel cluster's lattice edge (> 0): then firstTriangle and
-  // triangleCount are its bricks in the voxel brick pool (GpuVoxelBrick).
+  // triangleCount are its bricks in the voxel brick pool (GpuVoxelBrick)
+  // and vertexCount is 1 when the group it replaces is triangles.
   // 0 for triangles, -1 for triangles whose group voxel clusters replace
   // (with voxel LOD off that group is never replaced).
   float voxelEdge = 0.0f;
@@ -1038,7 +1039,6 @@ static_assert(sizeof(FarBakeVoxel) == 288);
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
 constexpr uint32_t kMaxVoxelInstances = 1u << 20;
-constexpr uint32_t kMaxVoxelBricks = 1u << 22;
 constexpr uint32_t kMaxVoxelQuads = 1u << 23;
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at

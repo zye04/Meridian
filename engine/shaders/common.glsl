@@ -81,6 +81,13 @@ layout(buffer_reference, std430) readonly buffer MeshBuffer {
 
 // Up to 128 triangles of one level of a mesh's LOD DAG, in mesh space.
 // Must match ClusterInfo in C++ (see meridian::Cluster).
+// Voxel clusters replace each other at this multiple of the LOD threshold
+// (pixels per voxel edge at the switch to a coarser level): coverage-built
+// foliage fills its crown's volume, so finer voxels cost the cube. The group
+// where triangles give way to voxels keeps the threshold itself, so the cut
+// stays exact. Must match gpu_types.h.
+const float kVoxelPixels = 2.0;
+
 struct ClusterInfo {
     // Culling sphere.
     vec3 boundsCenter;
@@ -102,8 +109,9 @@ struct ClusterInfo {
     // The mesh it belongs to: placed instances name only a prototype.
     uint mesh;
     // A voxel cluster's lattice edge (> 0; firstTriangle and triangleCount
-    // are then its bricks, voxel_lod.glsl); 0 for triangles, -1 for
-    // triangles whose group voxel clusters replace.
+    // are then its bricks, voxel_lod.glsl, and vertexCount is 1 when the
+    // group it replaces is triangles); 0 for triangles, -1 for triangles
+    // whose group voxel clusters replace.
     float voxelEdge;
 };
 

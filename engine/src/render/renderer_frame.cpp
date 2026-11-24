@@ -700,7 +700,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->drawnVoxelQuads = 0;
     for (uint32_t phase = 0; phase < 2; ++phase) {
       impl_->drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
-      impl_->drawnVoxelBricks += std::min(counters->voxelBricks[phase], kMaxVoxelBricks);
+      impl_->drawnVoxelBricks += counters->voxelBricks[phase];
       impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
     }
     impl_->visitedBvhNodes = counters->bvhNodes;

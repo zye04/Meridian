@@ -40,7 +40,8 @@ void seedTraversal(uint id, LoadedInstance instance, MeshInfo mesh) {
                                  pixelsPerError;
         // With voxel LOD off the triangles under voxel levels never give way
         // (cluster_cull.comp), so no level is too coarse to seed.
-        if (finest <= scene.lodErrorPixels &&
+        // Voxel levels switch at kVoxelPixels times the threshold.
+        if (finest <= scene.lodErrorPixels * kVoxelPixels &&
             (scene.voxelLod == 0u ||
              projectedError(center, root.lodRadius * instance.scale,
                             level.maxError * instance.scale) > scene.lodErrorPixels)) {

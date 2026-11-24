@@ -340,7 +340,7 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
   }
   bakeModelAxisDepths(lods);
   for (size_t i = 0; i < meshes.size(); ++i) {
-    meshes[i].clusters.voxelAxis = lods[i].voxelAxis;
+    meshes[i].clusters = lods[i];
   }
   for (MeshData &mesh : meshes) {
     appendClusterVertices(mesh);

@@ -143,17 +143,23 @@ void main() {
     if (!voxelLod && cluster.voxelEdge > 0.0) {
         return;
     }
+    // A group whose members and replacement are both voxels switches at
+    // kVoxelPixels times the threshold; the one where triangles give way to
+    // voxels at the threshold, on both of its sides.
+    bool voxel = cluster.voxelEdge > 0.0;
+    float selfThreshold = voxel ? threshold * kVoxelPixels : threshold;
+    float refinedThreshold = voxel && cluster.vertexCount == 0u ? threshold * kVoxelPixels : threshold;
     // Terminal clusters carry FLT_MAX: always too coarse to replace.
     bool replacementTooCoarse =
         (!voxelLod && cluster.voxelEdge < 0.0) ||
         projectedError((transform * vec4(cluster.selfCenter, 1.0)).xyz,
                        cluster.selfRadius * scale, cluster.selfError * scale) >
-            threshold;
+            selfThreshold;
     bool fineEnough =
         cluster.refinedError < 0.0 ||
         projectedError((transform * vec4(cluster.refinedCenter, 1.0)).xyz,
                        cluster.refinedRadius * scale,
-                       cluster.refinedError * scale) <= threshold;
+                       cluster.refinedError * scale) <= refinedThreshold;
     if (!replacementTooCoarse || !fineEnough) {
         return;
     }

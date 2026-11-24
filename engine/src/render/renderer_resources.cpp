@@ -410,11 +410,15 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   if (clustered) {
     // Triangle clusters whose group voxel clusters replace (the voxel LOD
     // A/B keeps drawing them instead).
-    std::vector<uint8_t> voxelGroup;
+    std::vector<uint8_t> voxelGroup, triangleGroup;
     for (const Cluster &c : lod.clusters) {
       if (c.brickCount > 0 && c.refinedGroup >= 0) {
         voxelGroup.resize(std::max<size_t>(voxelGroup.size(), size_t(c.refinedGroup) + 1), 0);
         voxelGroup[size_t(c.refinedGroup)] = 1;
+      }
+      if (c.brickCount == 0) {
+        triangleGroup.resize(std::max<size_t>(triangleGroup.size(), size_t(c.group) + 1), 0);
+        triangleGroup[c.group] = 1;
       }
     }
     clusterInfos.reserve(lod.clusters.size());
@@ -432,6 +436,13 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
         info.firstTriangle = impl_->voxelBrickCount + c.firstBrick;
         info.triangleCount = c.brickCount;
         info.voxelEdge = c.voxelEdge;
+        // Made from triangles: its refined side switches at the threshold
+        // itself (kVoxelPixels).
+        info.vertexCount = c.refinedGroup >= 0 && !voxelGroup.empty() &&
+                                   size_t(c.refinedGroup) < triangleGroup.size() &&
+                                   triangleGroup[size_t(c.refinedGroup)]
+                               ? 1u
+                               : 0u;
       } else {
         info.firstVertex = impl_->clusterVertexCount + c.firstVertex;
         info.firstTriangle = impl_->clusterTriangleCount + c.firstTriangle;
@@ -757,8 +768,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   }
   if (brickCount > 0 && impl_->voxelInstanceList.buffer == VK_NULL_HANDLE) {
     impl_->voxelInstanceList =
-        impl_->createBuffer(2 * (VkDeviceSize{kMaxVoxelInstances} + kMaxVoxelBricks) * 8 +
-                                2 * VkDeviceSize{kMaxVoxelQuads} * 4,
+        impl_->createBuffer(2 * (VkDeviceSize{kMaxVoxelInstances} + kMaxVoxelQuads) * 8,
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                             0);
