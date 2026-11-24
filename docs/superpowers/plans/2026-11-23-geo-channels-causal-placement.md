@@ -223,4 +223,9 @@ Status: plan, awaiting user review (2026-11-23).
 ## Notes (filled during execution)
 
 - Baseline F1 (Task 5): `Forest score: precision 0.546, recall 0.320, F1 0.403 (cells 250000, truth forest 69.4%)` (relief-0.5, today's mask rule; precision under the 69.4% base rate: the noise forest is no better than chance)
-- Tuning rounds (Task 8):
+- Score metric: kappa added (Task 8 ruling); baseline kappa -0.225.
+- Tuning rounds (Task 8), forest rule on relief-0.5 (kappa / F1 / ours vs truth 69.4%):
+  1. slope 18-38, cluster 120 m 0.3, sun cleared above 1.06: 0.385 / 0.740 / 49.4%
+  2. slope 14-34, no cluster: 0.461 / 0.829 / 67.2% (also tried: 14-34 + cluster 0.429; 18-38 no cluster 0.438; 10-30 0.437)
+  3. 14-34 + cluster 0.15: 0.449; + dry ramp (TWI 6-9): 0.438 (no gain)
+  4. 12-36: 0.461; 16-32: 0.456 (no gain) -> stop; final = round 2

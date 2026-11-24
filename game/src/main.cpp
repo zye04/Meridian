@@ -7,6 +7,7 @@
 #include <meridian/camera_route.h>
 #include <meridian/model.h>
 #include <meridian/placement.h>
+#include "geo_channels.h"
 #include <meridian/renderer.h>
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
@@ -244,22 +245,28 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
   return added;
 }
 
-// One mask: the forest inside it, lone trees in its exact complement; the
-// terrain material's forest floor follows it too. kPlacementSeed seeds it.
-constexpr float kMaskFrequency = 1.0f / 1500.0f, kMaskThreshold = 0.45f, kMaskEdge = 0.08f;
 constexpr uint32_t kPlacementSeed = 1;
 constexpr uint32_t kForestLayerId = 1;
 
-// The forest layer's rule, shared by placeScenery and --score-forest.
+// The forest layer's rule, shared by placeScenery and --score-forest. On
+// the Napf the forest is what farming left: slopes too steep to mow or
+// graze (from ~14 degrees, closed by ~34) stay wooded, and the sunniest
+// slopes are cleared for pasture. Tuned against the relief patch's canopy
+// (--score-forest: kappa 0.461, F1 0.829); cluster noise lowered the score.
 meridian::DensityRule forestRule() {
-  return {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold, kMaskEdge,
-          1.0f / 120.0f, 0.3f};
+  meridian::DensityRule rule{14.0f, 90.0f, -1e9f, 1e9f, 20.0f / 76.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             0.0f};
+  rule.channels[0] = meridian::geo::ramp(meridian::geo::kSunExposure,
+                                         meridian::geo::encodeSunExposure(1.5f),
+                                         meridian::geo::encodeSunExposure(1.06f));
+  return rule;
 }
 
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
-void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed) {
+void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed,
+                  bool geoChannels) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -412,21 +419,40 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   tint(grassTufts, {1.15f, 1.9f, 0.95f});
   tint(hawkbit, {1.1f, 1.0f, 0.6f});
 
+  // Causal layers: each reads the ground's geo channels (geo_channels.h)
+  // and, where one layer grows in another's shade or gaps, that layer's
+  // density (PlacementLayer::parent). Noise only varies density inside the
+  // extent the channels give (clusters, gaps), never decides it.
+  namespace geo = meridian::geo;
+  using meridian::ChannelRamp;
   std::vector<PlacementLayer> layers;
+  std::optional<PlacementLayer> forestLayer; // a copy: layers grows
   if (!forest.empty()) {
-    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(),
-                      0.8f * treeScale, 1.2f * treeScale, Rotation::Yaw, 0.3f});
-    layers.push_back({2, lone, 40.0f,
-                      {0.0f, 25.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold,
-                       -kMaskEdge, 0.0f, 0.0f},
-                      0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f});
-    layers[0].farField = layers[1].farField = farField;
+    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(), 0.8f * treeScale,
+                      1.2f * treeScale, Rotation::Yaw, 0.3f});
+    layers.back().farField = farField;
+    // Field trees stand on the open pasture the forest leaves.
+    PlacementLayer loneTrees{2, lone, 40.0f,
+                             {0.0f, 30.0f, -1e9f, 1e9f, 0.3f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+                             0.9f * treeScale, 1.3f * treeScale, Rotation::Yaw, 0.3f};
+    loneTrees.farField = farField;
+    loneTrees.parent = meridian::parentRamp(layers.front(), 0.5f, 0.1f);
+    layers.push_back(loneTrees);
+    forestLayer = layers.front();
   }
+  // Under-canopy layers follow the forest's density; without trees they go.
+  const auto underForest = [&](PlacementLayer layer, float lo, float hi) {
+    if (forestLayer) {
+      layer.parent = meridian::parentRamp(*forestLayer, lo, hi);
+      layers.push_back(layer);
+    }
+  };
   if (!saplings.empty()) {
-    layers.push_back({12, saplings, 15.0f,
-                      {0.0f, 42.0f, -1e9f, 1e9f, 0.15f, kMaskFrequency, kMaskThreshold, kMaskEdge,
-                       1.0f / 40.0f, 0.5f},
-                      0.8f, 1.2f, Rotation::Yaw, 0.1f, 150.0f});
+    // Saplings in the gaps of the closed forest, where light reaches the floor.
+    underForest({12, saplings, 15.0f,
+                 {0.0f, 90.0f, -1e9f, 1e9f, 0.15f, 0.0f, 0.0f, 0.0f, 1.0f / 40.0f, 0.5f}, 0.8f,
+                 1.2f, Rotation::Yaw, 0.1f, 150.0f},
+                0.4f, 0.8f);
   }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).
@@ -437,47 +463,97 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
                       {rockStart, 90.0f, -1e9f, 1e9f, (rockFull - rockStart) / (90.0f - rockStart),
                        0.0f, 0.0f, 0.0f, 1.0f / 80.0f, 0.6f},
                       0.5f, 1.5f, Rotation::Full, 0.3f, 1500.0f});
+    // Scree: smaller rocks that fell from the steep ground above, densest at
+    // its foot and thinning out along the runout.
+    PlacementLayer scree{13, rocks, 8.0f,
+                         {0.0f, 45.0f, -1e9f, 1e9f, 0.2f, 0.0f, 0.0f, 0.0f, 1.0f / 30.0f, 0.5f},
+                         0.25f, 0.7f, Rotation::Full, 0.15f, 600.0f};
+    scree.rule.channels[0] = geo::ramp(geo::kTalus, geo::encodeTalus(0.15f), geo::encodeTalus(0.6f));
+    layers.push_back(scree);
   }
-  // Patches come from the mask at a layer-specific frequency (a threshold,
-  // so drifts have gaps between them), clumping from the layer's cluster
-  // noise. Flat to moderate slopes only, well under the rock material's.
+  // Meadow plants by how dry and sunny the ground is: poppies, goldenrod
+  // and hawkbit on warm, well-drained ground; clover where it stays moist.
+  // The grass stops where the forest closes. Patches come from the mask at
+  // a layer-specific frequency (gaps between drifts), clumping from the
+  // layer's cluster noise. Flat to moderate slopes only.
+  const ChannelRamp sunny =
+      geo::ramp(geo::kSunExposure, geo::encodeSunExposure(0.85f), geo::encodeSunExposure(1.05f));
+  const ChannelRamp dry = geo::ramp(geo::kWetness, geo::encodeWetness(7.0f), geo::encodeWetness(4.5f));
+  const ChannelRamp moist =
+      geo::ramp(geo::kWetness, geo::encodeWetness(4.0f), geo::encodeWetness(6.5f));
   struct Patch {
     uint32_t id;
     const std::vector<std::pair<uint32_t, float>> &variants;
     float footprint, slopeMax, patchFrequency, patchThreshold, clusterAmount;
     float scaleMin, scaleMax, drawDistance;
-    float streamFullDensity = 0.0f;
+    float streamFullDensity;
+    std::array<ChannelRamp, 2> ground;
+    bool open; // not under the closed forest
   };
-  // Streamed (last field > 0, see PlacementLayer::streamFullDensity): the
-  // grass mat everywhere grass grows, so no ground shows, seed-head tufts
-  // and hawkbit in clumped patches, sparse clover; poppies and goldenrod
-  // stay static, sparse accents.
-  for (const Patch &patch : {Patch{4, poppy, 4.0f, 25.0f, 1.0f / 37.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
-                             Patch{5, hawkbit, 0.3f, 28.0f, 1.0f / 15.0f, 0.50f, 1.0f, 2.0f, 2.8f, 120.0f, 30.0f},
-                             Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f},
-                             Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f},
-                             Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, 1.0f, 1.5f, 120.0f, 30.0f},
-                             Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f}}) {
+  // Streamed (streamFullDensity > 0, see PlacementLayer::streamFullDensity):
+  // the grass mat everywhere grass grows, so no ground shows, seed-head
+  // tufts and hawkbit in clumped patches, sparse clover; poppies and
+  // goldenrod stay static, sparse accents.
+  for (const Patch &patch :
+       {Patch{4, poppy, 4.0f, 25.0f, 1.0f / 37.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f, 0.0f, {sunny, dry}, true},
+        Patch{5, hawkbit, 0.3f, 28.0f, 1.0f / 15.0f, 0.50f, 1.0f, 2.0f, 2.8f, 120.0f, 30.0f, {sunny, {}}, true},
+        Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f, 0.0f, {sunny, dry}, true},
+        Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f, {moist, {}}, true},
+        Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, 1.0f, 1.5f, 120.0f, 30.0f, {}, true},
+        Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f, {}, true}}) {
     if (!patch.variants.empty() && (streamed || patch.streamFullDensity == 0.0f)) {
-      layers.push_back({patch.id, patch.variants, patch.footprint,
-                        {0.0f, patch.slopeMax, -1e9f, 1e9f, 0.4f, patch.patchFrequency,
-                         patch.patchThreshold, 0.08f, 1.0f / 6.0f, patch.clusterAmount},
-                        patch.scaleMin, patch.scaleMax, Rotation::Yaw, 0.02f, patch.drawDistance,
-                        patch.streamFullDensity});
+      PlacementLayer layer{patch.id, patch.variants, patch.footprint,
+                           {0.0f, patch.slopeMax, -1e9f, 1e9f, 0.4f, patch.patchFrequency,
+                            patch.patchThreshold, 0.08f, 1.0f / 6.0f, patch.clusterAmount},
+                           patch.scaleMin, patch.scaleMax, Rotation::Yaw, 0.02f, patch.drawDistance,
+                           patch.streamFullDensity};
+      layer.rule.channels[0] = patch.ground[0];
+      layer.rule.channels[1] = patch.ground[1];
+      if (patch.open && forestLayer) {
+        layer.parent = meridian::parentRamp(*forestLayer, 0.6f, 0.2f);
+      }
+      layers.push_back(layer);
     }
   }
-  // Ferns on shaded, steeper slopes; with trees also the forest floor from
-  // its edge in (the mask ramp is one-sided, so no band along the edge).
+  // Ferns where the ground stays moist and shaded; with trees, mostly under
+  // the canopy's edge.
   if (!fern.empty()) {
-    layers.push_back({9, fern, 12.0f,
-                      {20.0f, 40.0f, -1e9f, 1e9f, 0.3f, 0.0f, 0.0f, 0.0f, 1.0f / 15.0f, 1.0f},
-                      0.8f, 1.2f, Rotation::Yaw, 0.02f, 150.0f});
-    if (trees) {
-      layers.push_back({10, fern, 12.0f,
-                        {0.0f, 40.0f, -1e9f, 1e9f, 0.3f, kMaskFrequency, kMaskThreshold - 0.05f,
-                         kMaskEdge, 1.0f / 15.0f, 0.6f},
-                        0.8f, 1.2f, Rotation::Yaw, 0.02f, 150.0f});
+    PlacementLayer ferns{9, fern, 12.0f,
+                         {0.0f, 45.0f, -1e9f, 1e9f, 0.3f, 0.0f, 0.0f, 0.0f, 1.0f / 15.0f, 1.0f},
+                         0.8f, 1.2f, Rotation::Yaw, 0.02f, 150.0f};
+    ferns.rule.channels[0] = moist;
+    ferns.rule.channels[1] =
+        geo::ramp(geo::kSunExposure, geo::encodeSunExposure(1.0f), geo::encodeSunExposure(0.75f));
+    if (forestLayer) {
+      ferns.parent = meridian::parentRamp(*forestLayer, 0.2f, 0.6f);
     }
+    layers.push_back(ferns);
+  }
+  if (!geoChannels) {
+    // Without the ground's channels only the layers that read none remain.
+    // When a parent goes, a layer that grows under it (rising ramp:
+    // saplings) goes too; one that avoids it (inverted: grass, field trees)
+    // stays without it.
+    std::printf("No geo channels for the terrain: causal placement layers skipped\n");
+    const auto reads = [](const meridian::DensityRule &rule) {
+      return std::any_of(rule.channels.begin(), rule.channels.end(),
+                         [](const ChannelRamp &ramp) { return ramp.channel >= 0; });
+    };
+    std::vector<uint32_t> kept;
+    std::erase_if(layers, [&](PlacementLayer &layer) {
+      if (reads(layer.rule)) {
+        return true;
+      }
+      if (layer.parent &&
+          std::find(kept.begin(), kept.end(), layer.parent->layerId) == kept.end()) {
+        if (layer.parent->lo < layer.parent->hi) {
+          return true;
+        }
+        layer.parent.reset();
+      }
+      kept.push_back(layer.id);
+      return false;
+    });
   }
   if (layers.empty()) {
     std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
@@ -968,7 +1044,10 @@ Options parseOptions(int argc, char **argv) {
 
 // The forest rule against a canopy truth (tools/canopy-truth.py): a cell is
 // forest when the rule's mean density over a 4x4 grid of points in it is at
-// least one half. Prints precision, recall and F1 of the forest class.
+// least one half. Prints precision, recall and F1 of the forest class, and
+// Cohen's kappa: agreement beyond chance, the one to judge by when the truth
+// is mostly forest (calling everything forest scores F1 0.82 on the relief
+// patch, kappa 0).
 int scoreForest(const Options &options) {
   const auto heightPath = options.terrainPath.value_or(
       std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height");
@@ -1018,8 +1097,14 @@ int scoreForest(const Options &options) {
   const double precision = truePositive / std::max(1.0, double(truePositive + falsePositive));
   const double recall = truePositive / std::max(1.0, double(truePositive + falseNegative));
   const double f1 = precision + recall > 0.0 ? 2.0 * precision * recall / (precision + recall) : 0.0;
-  std::printf("Forest score: precision %.3f, recall %.3f, F1 %.3f (cells %u, truth forest %.1f%%)\n",
-              precision, recall, f1, columns * rows, 100.0 * truthForest / (columns * rows));
+  const double n = double(columns) * rows;
+  const double observed = (n - falsePositive - falseNegative) / n;
+  const double ours = (truePositive + falsePositive) / n, real = truthForest / n;
+  const double chance = ours * real + (1.0 - ours) * (1.0 - real);
+  const double kappa = chance < 1.0 ? (observed - chance) / (1.0 - chance) : 0.0;
+  std::printf("Forest score: kappa %.3f, precision %.3f, recall %.3f, F1 %.3f (cells %u, truth "
+              "forest %.1f%%, ours %.1f%%)\n",
+              kappa, precision, recall, f1, columns * rows, 100.0 * real, 100.0 * ours);
   return 0;
 }
 
@@ -1179,7 +1264,7 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer, options.trees, options.farField, options.streamed);
+    placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);
   }
 
   meridian::Weather weather(1, meridian::weatherPreset(options.weather));

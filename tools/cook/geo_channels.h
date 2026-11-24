@@ -4,6 +4,8 @@
 // its byte: shared by the cook, which writes them, and the game, whose
 // placement rules read them. The engine knows none of this.
 
+#include <meridian/placement.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -36,6 +38,12 @@ inline float decodeSunExposure(float b) { return b / 255.0f * 1.5f; }
 // Closeness 0..1 (0 = out of reach).
 inline uint8_t encodeTalus(float closeness) {
   return closeness > 0.0f ? std::max<uint8_t>(1, toByte(closeness * 255.0f)) : 0;
+}
+
+// A placement rule's ramp over a channel between two encoded bytes (lo > hi
+// inverts it).
+inline ChannelRamp ramp(Channel channel, uint8_t lo, uint8_t hi) {
+  return {static_cast<int32_t>(channel), static_cast<float>(lo), static_cast<float>(hi)};
 }
 
 } // namespace meridian::geo
