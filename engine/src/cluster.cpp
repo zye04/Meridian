@@ -31,12 +31,12 @@ constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 1;
-// Voxels replace a group's triangles at no worse an error when they number
-// at most this many per triangle the group draws now (a voxel draws as one
-// quad). Not per simplified triangle: sloppy simplification of disjoint
-// leaves deletes leaves, which is the thinning the voxels exist to stop.
-constexpr double kVoxelPrimitiveRatio = 2.0;
+constexpr uint32_t kVoxelizerVersion = 8;
+// A voxel cluster holds the bricks of one aligned region this many voxels
+// on a side (8^3 bricks at most): fine levels of sparse foliage still fill
+// clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
+// overflowed the voxel list at the forest overview).
+constexpr int64_t kRegionVoxels = 32;
 static_assert(sizeof(ClusterBvhNode) == 48 && sizeof(ClusterLevelInfo) == 16);
 
 template <typename T> void writeArray(std::ofstream &out, const std::vector<T> &v) {
@@ -385,34 +385,43 @@ struct VoxelLevels {
   std::vector<GroupRange> &groupRanges;
   std::vector<int> &refinedGroups;
   std::vector<int> &clusterGroups;
-  std::vector<VoxelGrid> pending;
+  // No voxel finer than the mesh's height / 512: it sets where voxels take
+  // over (the first level whose error reaches it), ~117 m for a 25 m beech
+  // at 1440p, where its triangles are sub-pixel and many.
+  float minEdge = 1e-4f;
 
-  static int decide(void *context, const unsigned int *indices, size_t indexCount, float minError,
-                    float maxError, size_t triangles, float *voxelError) {
-    return static_cast<VoxelLevels *>(context)->decide(indices, indexCount, minError, maxError,
-                                                       triangles, voxelError);
+  static float edgeFor(void *context, float minError, float maxError) {
+    return static_cast<VoxelLevels *>(context)->edgeFor(minError, maxError);
   }
-  static void attach(void *context, int token, int group, clodBounds bounds, int depth) {
-    static_cast<VoxelLevels *>(context)->attach(token, group, bounds, depth);
+  static void emit(void *context, const unsigned int *indices, size_t indexCount, float edge,
+                   int group, clodBounds, int depth) {
+    static_cast<VoxelLevels *>(context)->emit(indices, indexCount, edge, group, depth);
   }
 
-  int decide(const unsigned int *indices, size_t indexCount, float minError, float maxError,
-             size_t triangles, float *voxelError) {
-    // The coarsest edge no worse than the triangles, but not finer than what
-    // the children already show (errors stay monotonic up the DAG).
-    const float floorEdge = std::exp2(std::ceil(std::log2(std::max(minError, 1e-4f))));
-    float edge = maxError == FLT_MAX ? floorEdge : std::exp2(std::floor(std::log2(maxError)));
-    edge = std::max(edge, floorEdge);
-    if (edge > maxError) {
-      return -1;
-    }
-    // A voxel per edge^2 of surface at least (one facing the axis), so
-    // groups whose area alone needs far more voxels than triangles are
-    // continuous surfaces that simplify well: skip voxelizing them.
-    double area = 0.0;
-    std::vector<VoxelTriangle> source(indexCount / 3);
-    for (size_t t = 0; t < source.size(); ++t) {
-      VoxelTriangle &v = source[t];
+  // Voxels take over once they are no worse than the triangles (Nanite
+  // Foliage's rule): the coarsest lattice edge at or under the triangles'
+  // error, not finer than the mesh's minimum edge (0: keep the triangles).
+  // Not a primitive count contest: only the voxels a view sees draw
+  // (coverage, hidden voxels skipped), every triangle does. The group's
+  // error is at least its children's (clodBuild; monotonic, the next
+  // level's twice the edge is over it again). Stuck groups (maxError
+  // FLT_MAX) would draw forever: voxels at once.
+  float edgeFor(float minError, float maxError) const {
+    const float floorEdge = std::exp2(std::floor(std::log2(minEdge)));
+    const float edge =
+        maxError == FLT_MAX
+            ? std::max(floorEdge, std::exp2(std::ceil(std::log2(std::max(minError, minEdge)))))
+            : std::max(floorEdge, std::exp2(std::floor(std::log2(maxError))));
+    return edge <= maxError ? edge : 0.0f;
+  }
+
+  // A group that went to voxels (clodBuild pools a pass's groups by cell):
+  // its triangles voxelized, split by region, wait for the shared hierarchy
+  // (finish).
+  void emit(const unsigned int *indices, size_t indexCount, float edge, int group, int depth) {
+    std::vector<VoxelTriangle> triangles(indexCount / 3);
+    for (size_t t = 0; t < triangles.size(); ++t) {
+      VoxelTriangle &v = triangles[t];
       for (int k = 0; k < 3; ++k) {
         const Vertex &vertex = mesh.vertices[indices[t * 3 + k]];
         v.p[k] = vertex.position;
@@ -420,43 +429,18 @@ struct VoxelLevels {
         v.uv[k][0] = vertex.uvX;
         v.uv[k][1] = vertex.uvY;
       }
-      v.material = this->source.material;
-      area += 0.5 * length(cross(v.p[1] - v.p[0], v.p[2] - v.p[0]));
+      v.material = source.material;
     }
-    if (maxError == FLT_MAX) {
-      // Stuck: start where the surface alone fits the triangle budget.
-      edge = std::max(edge, float(std::exp2(std::ceil(std::log2(
-                                std::sqrt(area / double(std::max<size_t>(triangles, 1))))))));
-    } else if (area / (double(edge) * edge) > 8.0 * double(triangles)) {
-      return -1;
-    }
-    VoxelGrid grid = voxelize(source, this->source.materials, edge);
-    const auto count = [](const VoxelGrid &g) {
-      size_t n = 0;
-      for (const VoxelBrick &brick : g.bricks) {
-        n += std::popcount(brick.occupied);
+    const VoxelGrid grid = voxelize(triangles, source.materials, edge);
+    for (const Region &r : regions(grid)) {
+      VoxelGrid part;
+      part.edge = edge;
+      for (uint32_t b : r.bricks) {
+        part.bricks.push_back(grid.bricks[b]);
       }
-      return n;
-    };
-    size_t voxels = count(grid);
-    if (voxels == 0) {
-      return -1;
+      levels[edge].push_back({std::move(part), group, r.key});
     }
-    if (maxError == FLT_MAX) {
-      // Simplification is stuck: these triangles would draw at every
-      // distance (sub-pixel leaves that thin and shimmer). Voxels always
-      // take over, coarse enough to cost no more than the triangles.
-      while (voxels > triangles) {
-        grid = mergeVoxelGrid(grid);
-        edge *= 2.0f;
-        voxels = count(grid);
-      }
-    } else if (voxels > size_t(kVoxelPrimitiveRatio * double(triangles))) {
-      return -1;
-    }
-    *voxelError = edge;
-    pending.push_back(std::move(grid));
-    return int(pending.size() - 1);
+    firstDepth = std::max(firstDepth, depth + 1);
   }
 
   struct Region {
@@ -466,14 +450,15 @@ struct VoxelLevels {
 
   static int64_t floorDiv(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
 
-  // A level's voxel clusters: the bricks of each aligned 4^3-brick region.
+  // A level's voxel clusters: the bricks of each aligned kRegionVoxels^3
+  // region.
   static std::vector<Region> regions(const VoxelGrid &grid) {
     std::map<std::array<int64_t, 3>, Region> byKey;
     for (uint32_t b = 0; b < grid.bricks.size(); ++b) {
       const VoxelBrick &brick = grid.bricks[b];
-      const std::array<int64_t, 3> key = {floorDiv(brick.origin[0], 16),
-                                          floorDiv(brick.origin[1], 16),
-                                          floorDiv(brick.origin[2], 16)};
+      const std::array<int64_t, 3> key = {floorDiv(brick.origin[0], kRegionVoxels),
+                                          floorDiv(brick.origin[1], kRegionVoxels),
+                                          floorDiv(brick.origin[2], kRegionVoxels)};
       Region &r = byKey[key];
       r.key = key;
       r.bricks.push_back(b);
@@ -485,16 +470,73 @@ struct VoxelLevels {
     return out;
   }
 
-  // A cluster for a region's bricks; its group (self) is set by the caller.
-  Cluster regionCluster(const VoxelGrid &grid, const Region &region, int refined) {
+  // One voxel hierarchy for the whole mesh, edge by edge from the finest:
+  // the clusters of each coarser region form a group, replaced by one
+  // cluster of their voxels combined (whichever group each came from) and
+  // merged to the next edge, which joins the groups that went to voxels at
+  // that edge. Down to a handful of clusters, as a far tree draws.
+  void finish() {
+    int depth = firstDepth;
+    while (!levels.empty()) {
+      auto level = levels.begin();
+      const float edge = level->first;
+      std::vector<Node> nodes = std::move(level->second);
+      levels.erase(level);
+      size_t voxels = 0;
+      for (const Node &n : nodes) {
+        for (const VoxelBrick &b : n.grid.bricks) {
+          voxels += std::popcount(b.occupied);
+        }
+      }
+      // The lattice is anchored at the origin, so regions on either side of
+      // it never merge: the last group may hold up to 8 clusters.
+      if (levels.empty() && voxels <= 64) {
+        std::vector<Sphere> spheres;
+        std::vector<Cluster> clusters;
+        for (const Node &n : nodes) {
+          clusters.push_back(regionCluster(n.grid, n.refined));
+          spheres.push_back({clusters.back().boundsCenter, clusters.back().boundsRadius});
+        }
+        const Sphere s = enclose(spheres);
+        emitGroup(clusters, {s.center, s.radius, FLT_MAX}, depth);
+        return;
+      }
+      std::map<std::array<int64_t, 3>, std::vector<uint32_t>> parents;
+      for (uint32_t i = 0; i < nodes.size(); ++i) {
+        parents[{floorDiv(nodes[i].key[0], 2), floorDiv(nodes[i].key[1], 2),
+                 floorDiv(nodes[i].key[2], 2)}]
+            .push_back(i);
+      }
+      for (const auto &[key, members] : parents) {
+        std::vector<Cluster> clusters;
+        std::vector<Sphere> spheres;
+        std::vector<const VoxelGrid *> grids;
+        for (uint32_t i : members) {
+          clusters.push_back(regionCluster(nodes[i].grid, nodes[i].refined));
+          spheres.push_back({clusters.back().boundsCenter, clusters.back().boundsRadius});
+          const LodBounds &refined = groups[nodes[i].refined];
+          spheres.push_back({refined.center, refined.radius});
+          grids.push_back(&nodes[i].grid);
+        }
+        // The group's bounds enclose its members' and their own groups', so
+        // projected errors stay monotonic along every path.
+        const Sphere s = enclose(spheres);
+        const int id = emitGroup(clusters, {s.center, s.radius, edge * 2.0f}, depth);
+        levels[edge * 2.0f].push_back({mergeVoxelGrid(combineVoxelGrids(grids)), id, key});
+      }
+      ++depth;
+    }
+  }
+
+  // A cluster of a region's bricks; its group (self) is set by emitGroup.
+  Cluster regionCluster(const VoxelGrid &grid, int refined) {
     Cluster c;
     c.firstBrick = uint32_t(lod.bricks.size());
-    c.brickCount = uint32_t(region.bricks.size());
+    c.brickCount = uint32_t(grid.bricks.size());
     c.voxelEdge = grid.edge;
     c.refinedGroup = refined;
     Vec3 lo{FLT_MAX, FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX, -FLT_MAX};
-    for (uint32_t b : region.bricks) {
-      const VoxelBrick &brick = grid.bricks[b];
+    for (const VoxelBrick &brick : grid.bricks) {
       VoxelBrickRef ref;
       for (int k = 0; k < 3; ++k) {
         ref.origin[k] = brick.origin[k];
@@ -520,81 +562,12 @@ struct VoxelLevels {
     return c;
   }
 
-  void attach(int token, int group, clodBounds, int depth) {
-    VoxelGrid grid = std::move(pending[token]);
-    // Clusters of the current level, waiting for the group that replaces
-    // them, with their regions' keys.
-    std::vector<Cluster> level;
-    std::vector<std::array<int64_t, 3>> keys;
-    for (const Region &r : regions(grid)) {
-      level.push_back(regionCluster(grid, r, group));
-      keys.push_back(r.key);
-    }
-    while (true) {
-      ++depth;
-        size_t voxels = 0;
-      for (const Cluster &c : level) {
-        for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
-          voxels += std::popcount(lod.bricks[b].occupied);
-        }
-      }
-      // The lattice is anchored at the origin, so regions on either side of
-      // it never merge: the last group may hold up to 8 clusters.
-      if (voxels <= 64) {
-        std::vector<uint32_t> all(level.size());
-        std::iota(all.begin(), all.end(), 0u);
-        emitGroup(level, all, LodBounds{}, depth, true);
-        return;
-      }
-      // The next level: edge x2, regions twice as large; each of its
-      // clusters replaces the current clusters inside its region.
-      const VoxelGrid coarse = mergeVoxelGrid(grid);
-      std::vector<Cluster> next;
-      std::vector<std::array<int64_t, 3>> nextKeys;
-      for (const Region &r : regions(coarse)) {
-        std::vector<uint32_t> members;
-        for (uint32_t i = 0; i < level.size(); ++i) {
-          if (floorDiv(keys[i][0], 2) == r.key[0] && floorDiv(keys[i][1], 2) == r.key[1] &&
-              floorDiv(keys[i][2], 2) == r.key[2]) {
-            members.push_back(i);
-          }
-        }
-        // The group's bounds enclose its members' and their own groups', so
-        // projected errors stay monotonic along every path.
-        std::vector<Sphere> spheres;
-        for (uint32_t i : members) {
-          spheres.push_back({level[i].boundsCenter, level[i].boundsRadius});
-          const LodBounds &refined = groups[level[i].refinedGroup];
-          spheres.push_back({refined.center, refined.radius});
-        }
-        const Sphere s = enclose(spheres);
-        const int id = emitGroup(level, members, {s.center, s.radius, coarse.edge}, depth, false);
-        next.push_back(regionCluster(coarse, r, id));
-        nextKeys.push_back(r.key);
-      }
-      level = std::move(next);
-      keys = std::move(nextKeys);
-      grid = coarse;
-    }
-  }
-
-  // Emits level[members] as one group (contiguous, as GroupRange wants);
-  // terminal groups are never replaced (error FLT_MAX).
-  int emitGroup(const std::vector<Cluster> &level, const std::vector<uint32_t> &members,
-                LodBounds bounds, int depth, bool terminal) {
-    if (terminal) {
-      std::vector<Sphere> spheres;
-      for (uint32_t i : members) {
-        spheres.push_back({level[i].boundsCenter, level[i].boundsRadius});
-      }
-      const Sphere s = enclose(spheres);
-      bounds = {s.center, s.radius, FLT_MAX};
-    }
+  // Emits clusters as one group (contiguous, as GroupRange wants).
+  int emitGroup(const std::vector<Cluster> &clusters, LodBounds bounds, int depth) {
     const int id = int(groups.size());
     groups.push_back(bounds);
-    groupRanges.push_back({depth, uint32_t(lod.clusters.size()), uint32_t(members.size())});
-    for (uint32_t i : members) {
-      Cluster c = level[i];
+    groupRanges.push_back({depth, uint32_t(lod.clusters.size()), uint32_t(clusters.size())});
+    for (Cluster c : clusters) {
       c.self = bounds;
       c.group = uint32_t(id);
       lod.clusters.push_back(c);
@@ -603,6 +576,14 @@ struct VoxelLevels {
     }
     return id;
   }
+
+  struct Node {
+    VoxelGrid grid; // one region's bricks
+    int refined;
+    std::array<int64_t, 3> key;
+  };
+  std::map<float, std::vector<Node>> levels;
+  int firstDepth = 0;
 };
 
 } // namespace
@@ -630,12 +611,19 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
   std::vector<unsigned int> localVertices(kMaxClusterTriangles * 3);
   std::vector<unsigned char> localTriangles(kMaxClusterTriangles * 3);
   clodConfig config = clodDefaultConfig(kMaxClusterTriangles);
-  VoxelLevels voxelLevels{mesh,          voxels ? *voxels : VoxelSource{}, lod, groups,
-                          groupRanges,   refinedGroups, clusterGroups, {}};
+  VoxelLevels voxelLevels{mesh, voxels ? *voxels : VoxelSource{}, lod, groups,
+                          groupRanges, refinedGroups, clusterGroups};
   if (voxels && mesh.voxelize) {
+    float lo = FLT_MAX, hi = -FLT_MAX;
+    for (const Vertex &v : mesh.vertices) {
+      lo = std::min(lo, v.position.y);
+      hi = std::max(hi, v.position.y);
+    }
+    voxelLevels.minEdge = std::max((hi - lo) / 512.0f, 1e-4f);
     config.voxel_context = &voxelLevels;
-    config.voxel_decide = &VoxelLevels::decide;
-    config.voxel_attach = &VoxelLevels::attach;
+    config.voxel_edge = &VoxelLevels::edgeFor;
+    config.voxel_emit = &VoxelLevels::emit;
+    config.voxel_cell = float(kRegionVoxels);
   }
   clodBuild(config, input,
             [&](clodGroup group, const clodCluster *clusters, size_t count) {
@@ -671,6 +659,7 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
               }
               return groupIndex;
             });
+  voxelLevels.finish();
 
   for (size_t i = 0; i < lod.clusters.size(); ++i) {
     const int refined = refinedGroups[i];
@@ -925,6 +914,66 @@ void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
       }
       meshes[r.mesh].voxelAxis[r.voxel] = word;
     }
+  }
+  // Drop what no direction sees.
+  const uint32_t hidden = uint32_t(std::ceil(kVoxelHiddenDepth / kVoxelAxisDepthStep));
+  const auto visible = [&](uint32_t word) {
+    for (int k = 0; k < 6; ++k) {
+      if (((word >> (4 * k)) & 15u) <= hidden) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (ClusterLod &lod : meshes) {
+    std::vector<VoxelBrickRef> bricks;
+    std::vector<PackedVoxel> voxels;
+    std::vector<uint32_t> axis;
+    for (Cluster &c : lod.clusters) {
+      if (c.brickCount == 0) {
+        continue;
+      }
+      const uint32_t firstBrick = uint32_t(bricks.size());
+      for (uint32_t b = c.firstBrick; b < c.firstBrick + c.brickCount; ++b) {
+        const VoxelBrickRef &brick = lod.bricks[b];
+        VoxelBrickRef kept = brick;
+        kept.firstVoxel = uint32_t(voxels.size());
+        kept.occupied = 0;
+        uint32_t voxel = brick.firstVoxel;
+        for (uint32_t i = 0; i < 64; ++i) {
+          if (!((brick.occupied >> i) & 1u)) {
+            continue;
+          }
+          if (visible(lod.voxelAxis[voxel])) {
+            kept.occupied |= uint64_t{1} << i;
+            voxels.push_back(lod.voxels[voxel]);
+            axis.push_back(lod.voxelAxis[voxel]);
+          }
+          ++voxel;
+        }
+        if (kept.occupied != 0) {
+          bricks.push_back(kept);
+        }
+      }
+      // A cluster keeps at least one brick: none of them visible would mean
+      // a solid block, never the case for foliage, but a voxel cluster must
+      // stay one.
+      if (bricks.size() == firstBrick) {
+        VoxelBrickRef brick = lod.bricks[c.firstBrick];
+        const uint32_t i = uint32_t(std::countr_zero(brick.occupied));
+        brick.occupied = uint64_t{1} << i;
+        const uint32_t voxel = lod.bricks[c.firstBrick].firstVoxel;
+        brick.firstVoxel = uint32_t(voxels.size());
+        voxels.push_back(lod.voxels[voxel]);
+        axis.push_back(lod.voxelAxis[voxel]);
+        bricks.push_back(brick);
+      }
+      c.firstBrick = firstBrick;
+      c.brickCount = uint32_t(bricks.size()) - firstBrick;
+    }
+    lod.bricks = std::move(bricks);
+    lod.voxels = std::move(voxels);
+    lod.voxelAxis = std::move(axis);
   }
 }
 

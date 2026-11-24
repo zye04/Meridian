@@ -361,10 +361,10 @@ public:
   // Off by default; Probes lights ambient from the terrain-following probe
   // clipmap traced against the heightfield and the far field.
   void setGiMode(GiMode mode);
-  // On by default: trees whose triangles go sub-pixel draw as their
-  // prototype's voxels; off keeps their clusters up to the far switch (for
-  // A/B comparisons). Needs a far field (setPlacement).
-  void setVoxelTrees(bool enabled);
+  // On by default: the voxel levels of the meshes' cluster DAGs replace their
+  // triangles where the LOD cut picks them; off keeps the triangles at every
+  // distance (an A/B: what the voxels stand in for).
+  void setVoxelLod(bool enabled);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

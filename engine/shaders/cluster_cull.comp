@@ -4,6 +4,7 @@
 #include "common.glsl"
 #include "cull.glsl"
 #include "terrain.glsl"
+#include "voxel_lod.glsl"
 
 // Cluster culling and LOD selection, one workgroup per work item (a group
 // of clusters a BVH leaf reached, cluster_traverse.comp) and one thread per
@@ -13,7 +14,8 @@
 // follows Nanite's two passes: phase 0 tests against last frame's depth
 // pyramid and queues what it hides for a retest against this frame's
 // (phase kCullRetest), so nothing visible is dropped. Survivors append to
-// the draw list of their mesh's bucket for mesh.mesh.
+// the draw list of their mesh's bucket for mesh.mesh, voxel clusters to
+// the phase's voxel list for voxel_bricks.comp.
 
 layout(local_size_x = 64) in;
 
@@ -55,8 +57,31 @@ uint terrainSunCode(MeshInfo mesh, vec3 world, float radius, uint clusterIndex,
     return terrainOccludes(cull.scene, origin, direction, kShadowRayLength) ? 0u : 1u;
 }
 
+// A voxel cluster: (instance, cluster) in the phase's voxel list, one
+// voxel_bricks.comp workgroup each.
+void drawVoxels(uint instanceIndex, uint clusterIndex) {
+    uint phase = min(cull.phase, 1u);
+    uint counter = kCounterVoxelDispatch + phase * 3u;
+    uint slot = atomicAdd(cull.counters.counters[counter], 1u);
+    if (slot >= kMaxVoxelInstances) {
+        atomicAdd(cull.counters.counters[counter], uint(-1));
+        atomicAdd(cull.counters.counters[kCounterVoxelDrops], 1u);
+        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
+        return;
+    }
+    cull.scene.voxelInstances.entries[phase * kMaxVoxelInstances + slot] =
+        uvec2(instanceIndex, clusterIndex);
+}
+
 void draw(uint instanceIndex, uint clusterIndex, ClusterInfo cluster, vec3 world,
           float radius) {
+    if (cluster.voxelEdge > 0.0) {
+        // Until voxel clusters cast into the cascades (G11), they cast nothing.
+        if (cull.scene.shadowView == 0u) {
+            drawVoxels(instanceIndex, clusterIndex);
+        }
+        return;
+    }
     MeshInfo mesh = cull.scene.meshes.meshes[cluster.mesh];
     // Retested clusters are drawn in the late pass.
     uint list = (cull.scene.shadowView != 0u ? 0u : min(cull.phase, 1u)) * kDrawBuckets +
@@ -112,11 +137,18 @@ void main() {
     float scale = instance.scale;
 
     float threshold = cull.scene.lodErrorPixels;
+    // With voxel LOD off, voxel clusters never draw and the triangles they
+    // replace never give way (terminal).
+    bool voxelLod = cull.scene.voxelLod != 0u;
+    if (!voxelLod && cluster.voxelEdge > 0.0) {
+        return;
+    }
     // Terminal clusters carry FLT_MAX: always too coarse to replace.
     bool replacementTooCoarse =
+        (!voxelLod && cluster.voxelEdge < 0.0) ||
         projectedError((transform * vec4(cluster.selfCenter, 1.0)).xyz,
                        cluster.selfRadius * scale, cluster.selfError * scale) >
-        threshold;
+            threshold;
     bool fineEnough =
         cluster.refinedError < 0.0 ||
         projectedError((transform * vec4(cluster.refinedCenter, 1.0)).xyz,

@@ -93,6 +93,11 @@ VoxelGrid voxelize(std::span<const VoxelTriangle> triangles,
 // its material is the children's, weighted by their coverage.
 VoxelGrid mergeVoxelGrid(const VoxelGrid &fine);
 
+// Grids of the same edge as one: where voxels coincide their optical
+// depths add (independent media) up to the opaque limit, and their material
+// is weighted by coverage.
+VoxelGrid combineVoxelGrids(std::span<const VoxelGrid *const> grids);
+
 // Reference for tests: the optical depth of the voxel at voxelLo along axis
 // from raysPerSide^2 rays at the cell centres of its face, each blocked when
 // it crosses a triangle (passing the alpha test) inside the voxel.

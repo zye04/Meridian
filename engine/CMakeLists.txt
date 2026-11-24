@@ -122,7 +122,6 @@ add_shader(gi_albedo.comp gi_albedo_scatter.comp SCATTER ${MARCH_DEFINES})
 add_shader(gi_albedo.comp gi_albedo_resolve.comp ${MARCH_DEFINES})
 add_shader(cluster_cull.comp cluster_cull.comp ${MARCH_DEFINES})
 add_shader(voxel_instance.frag voxel_instance.frag ${MARCH_DEFINES})
-add_shader(voxel_instance.frag voxel_band.frag VOXEL_BAND ${MARCH_DEFINES})
 add_shader(voxel_bricks.comp voxel_bricks.comp ${MARCH_DEFINES})
 add_shader(placement.comp placement_count.comp PLACEMENT_COUNT)
 add_shader(placement.comp placement_write.comp PLACEMENT_WRITE)
@@ -148,7 +147,6 @@ add_library(meridian STATIC
     src/clusterlod.cpp
     src/frame_stats.cpp
     src/farfield.cpp
-    src/protovoxel.cpp
     src/voxelize.cpp
     src/grade.cpp
     src/model.cpp

@@ -34,9 +34,12 @@ void main() {
     LoadedInstance instance = loadInstance(scene, entry.x);
     ClusterNodeInfo node = scene.clusterNodes.nodes[entry.y];
     float scale = instance.scale;
-    if (projectedError((instance.transform * vec4(node.lodCenter, 1.0)).xyz,
+    // With voxel LOD off the triangles under voxel levels never give way
+    // (cluster_cull.comp): no node is too coarse to visit.
+    if (scene.voxelLod != 0u &&
+        projectedError((instance.transform * vec4(node.lodCenter, 1.0)).xyz,
                        node.lodRadius * scale, node.lodError * scale) <=
-        scene.lodErrorPixels) {
+            scene.lodErrorPixels) {
         return;
     }
 

@@ -134,7 +134,6 @@ void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 c
       copy.drawLists = shadowDrawLists.address;
       copy.shadowView = 1;
       copy.shadowFarCells = i + 1 == kShadowCascades ? 1 : 0;
-      copy.voxelTrees = 0;
       copy.orthoPixelsPerMeter = static_cast<float>(1.0 / window.texel);
       // Foliage is thin: at one texel its leaves simplify away and the crowns
       // shade too bright, so the near cascades keep four times the detail.

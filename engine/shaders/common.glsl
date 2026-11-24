@@ -101,7 +101,10 @@ struct ClusterInfo {
     uint triangleCount;
     // The mesh it belongs to: placed instances name only a prototype.
     uint mesh;
-    uint pad0;
+    // A voxel cluster's lattice edge (> 0; firstTriangle and triangleCount
+    // are then its bricks, voxel_lod.glsl); 0 for triangles, -1 for
+    // triangles whose group voxel clusters replace.
+    float voxelEdge;
 };
 
 layout(buffer_reference, std430) readonly buffer ClusterBuffer {
@@ -210,8 +213,8 @@ const float kCellSize = 64.0;
 
 // A placed prototype. Must match PrototypeInfo in C++: its meshes
 // (PrototypeMeshBuffer from firstMesh; a ray hit's geometry index counts
-// from there), their bounding sphere and BLAS, the projected size below
-// finest voxel (0: no voxels) and its draw distance (0: none).
+// from there), their bounding sphere and BLAS and its draw distance (0:
+// none).
 struct PrototypeInfo {
     uint firstMesh;
     uint meshCount;
@@ -222,7 +225,7 @@ struct PrototypeInfo {
     vec3 boundsCenter;
     float boundsRadius;
     uvec2 blasAddress;
-    float voxelSize;
+    float pad;
     float maxDrawDistance;
 };
 
@@ -489,8 +492,8 @@ layout(buffer_reference, std430) readonly buffer FarShadowTexelBuffer {
     uint words[];
 };
 
-// Declared here, defined in protovoxel.glsl.
-layout(buffer_reference) buffer ProtoVoxelBuffer;
+// Declared here, defined in voxel_lod.glsl.
+layout(buffer_reference) buffer VoxelPoolBuffer;
 
 layout(buffer_reference, std430) buffer VoxelInstanceBuffer {
     uvec2 entries[];
@@ -627,13 +630,14 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint shadowMode;
     float shadowDrawMargin;
     SunShadows sunShadows;
-    // The prototype voxels, the voxel instance lists (per phase, entries
-    // (instance, mip)) and the DrawCounters (voxel_instance.mesh's counts);
-    // voxelTrees: trees past the mid switch draw as voxels.
-    ProtoVoxelBuffer protoVoxels;
+    // The voxel pools, the voxel lists (per phase, entries (instance, voxel
+    // cluster), then bricks, then voxels) and the DrawCounters
+    // (voxel_instance.mesh's counts); voxelLod: voxel clusters replace
+    // triangles (0: triangles everywhere).
+    VoxelPoolBuffer voxelPools;
     VoxelInstanceBuffer voxelInstances;
     VoxelCounterBuffer drawCounters;
-    uint voxelTrees;
+    uint voxelLod;
     // The terrain shadow-height map (terrain_shadow.comp; must match
     // SceneData): whether it serves, texels (height, occluder distance), the
     // window's origin (x, z), axes away from the sun and across it, texel

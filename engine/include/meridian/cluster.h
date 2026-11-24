@@ -98,6 +98,10 @@ struct ClusterLod {
 };
 
 constexpr float kVoxelAxisDepthStep = 0.5f;
+// A voxel this deep in its model from the camera shows through less than 3%
+// of the time (voxel_lod.glsl's kVoxelHiddenDepth): voxel_bricks.comp skips
+// it, and bakeModelAxisDepths drops voxels this deep from every direction.
+constexpr float kVoxelHiddenDepth = 3.5f;
 
 // What a mesh's voxel levels are made of: its material, by index into
 // materials (images decoded on the CPU).
@@ -106,17 +110,20 @@ struct VoxelSource {
   uint32_t material = 0;
 };
 
-// With voxels (and mesh.voxelize), groups whose voxels beat their simplified
-// triangles become voxel clusters: the lattice edge is the largest power of
-// two at or under the triangles' error but not under the group's children's,
-// and the voxels must not outnumber the triangles they replace. Above such a
-// group the levels are voxels, an octree of 4^3-brick regions, each level
-// doubling the edge (mergeVoxelGrid).
+// With voxels (and mesh.voxelize), a group becomes voxel clusters once its
+// voxels are no worse than its simplified triangles: the lattice edge is the
+// largest power of two at or under the triangles' error, not under the
+// mesh's height / 512, and their error at least the children's. Above, one voxel hierarchy
+// per mesh: each level groups the clusters of a twice-as-large region,
+// whichever group they came from, and doubles the edge (combineVoxelGrids,
+// mergeVoxelGrid).
 ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels = nullptr);
 
 // Fills every ClusterLod::voxelAxis of one model's meshes: the optical depth
 // through all of the model's voxels at the same edge, from each voxel's
-// centre out along the six axis directions.
+// centre out along the six axis directions. Then drops the voxels deeper
+// than kVoxelHiddenDepth along all six (no view sees them, the sun's
+// included), and the bricks that leave empty.
 void bakeModelAxisDepths(std::vector<ClusterLod> &meshes);
 
 // Simplification error in pixels on a screen `screenHeight` pixels tall,

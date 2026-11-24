@@ -2,35 +2,32 @@
 #extension GL_EXT_mesh_shader : require
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
-#include "farfield.glsl"
-#include "protovoxel.glsl"
+#include "voxel_lod.glsl"
 
-// 64 voxels of a voxel list (voxel_bricks.comp; phase * 2 + band in
+// 64 voxels of a phase's voxel list (voxel_bricks.comp; phase * 2 in
 // pc.drawList) per workgroup, a thread each: the voxel is a camera-facing
-// quad at its center, the Nanite Foliage way (rasterized, not marched). A
-// cube seen along unit direction d (prototype space) covers v^2 (|dx| + |dy|
-// + |dz|) on screen and its mean chord is v / (|dx| + |dy| + |dz|):
+// quad at its centre, the Nanite Foliage way (rasterized, not marched). A
+// cube seen along unit direction d (mesh space) covers v^2 (|dx| + |dy| +
+// |dz|) on screen and its mean chord is v / (|dx| + |dy| + |dz|):
 // voxel_bricks.comp drew it with the opacity of that chord, and the quad
-// gets that area, so over many voxels the coverage matches the baked
-// extinction.
+// gets that area, so over many voxels the coverage matches the voxels'.
 
 layout(local_size_x = 64) in;
 layout(triangles, max_vertices = 256, max_primitives = 128) out;
 
-// Flat: the voxel center relative to the camera (flat world), its packed
-// voxel and occlusion word, the instance and the brick's pool index |
-// terrain sun << 31, and the center in prototype space.
+// Flat: the voxel centre relative to the camera (flat world), its packed
+// voxel, (instance, terrain sun, axis word, cluster) and the centre in
+// mesh space.
 layout(location = 0) flat out vec3 outRelative[];
-layout(location = 1) flat out uvec2 outVoxel[];
-layout(location = 2) flat out uvec2 outBrick[];
+layout(location = 1) flat out uvec4 outVoxel[];
+layout(location = 2) flat out uvec4 outInfo[];
 layout(location = 3) flat out vec3 outLocal[];
 
 void main() {
     SceneBuffer scene = pc.scene;
     uint list = pc.drawList;
     uint phase = list >> 1;
-    uint count = min(scene.drawCounters.counters[kCounterVoxelQuads + list],
-                     voxelQuadListCapacity(list));
+    uint count = min(scene.drawCounters.counters[kCounterVoxelQuads + list], kMaxVoxelQuads);
     uint first = gl_WorkGroupID.x * 64u;
     uint n = first < count ? min(count - first, 64u) : 0u;
     SetMeshOutputsEXT(n * 4u, n * 2u);
@@ -40,33 +37,32 @@ void main() {
     }
     uint q = voxelQuadListStart(list) + first + slot;
     uint entry = scene.voxelInstances.entries[q >> 1][q & 1u];
-    uvec2 brick = scene.voxelInstances.entries[kVoxelBrickListBase + phase * kMaxVoxelBricks +
-                                               (entry >> 6)];
+    uvec2 brickEntry = scene.voxelInstances.entries[kVoxelBrickListBase + phase * kMaxVoxelBricks +
+                                                    (entry >> 6)];
     uint i = entry & 63u;
-    uvec2 tree = scene.voxelInstances.entries[brick.x];
-    LoadedInstance instance = loadInstance(scene, tree.x);
-    ProtoVoxelBuffer pv = scene.protoVoxels;
-    PrototypeVoxels info = pv.prototypes.prototypes[instance.meshOrPrototype];
-    float v = pv.levels.levels[info.firstLevel + tree.y].voxelSize;
-    uint pool = brick.y & 0x7FFFFFFFu;
-    uint coords = pv.brickCoords.voxels[pool];
-    ivec3 voxel = ivec3(coords & 0x3FFu, (coords >> 10) & 0x3FFu, coords >> 20) * 4 +
-                  ivec3(i & 3u, (i >> 2) & 3u, i >> 4);
-    vec3 local = info.lo + (vec3(voxel) + 0.5) * v;
+    uvec2 clusterEntry = scene.voxelInstances.entries[brickEntry.x];
+    LoadedInstance instance = loadInstance(scene, clusterEntry.x);
+    ClusterInfo cluster = scene.clusters.clusters[clusterEntry.y];
+    VoxelPoolBuffer pools = scene.voxelPools;
+    float v = cluster.voxelEdge;
+    VoxelBrick brick = pools.bricks.bricks[brickEntry.y & 0x7FFFFFFFu];
+    uint voxel = voxelSlot(brick, i);
+    vec3 local = (vec3(voxelCoords(brick, i)) + 0.5) * v;
     vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
     vec3 view = normalize(transpose(mat3(instance.transform)) * relative);
     float spread = abs(view.x) + abs(view.y) + abs(view.z);
 
     vec4 center = scene.viewProjection * displayedPosition(scene, relative);
     vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * abs(scene.projectionScale);
-    uvec2 packed = uvec2(pv.voxels.voxels[pool * 64u + i], pv.occlusion.voxels[pool * 64u + i]);
+    uvec4 packed = pools.voxels.voxels[voxel];
+    uvec4 info = uvec4(clusterEntry.x, brickEntry.y >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {
         uint vertex = slot * 4u + corner;
         vec2 offset = vec2(corner & 1u, corner >> 1) * 2.0 - 1.0;
         gl_MeshVerticesEXT[vertex].gl_Position = center + vec4(offset * halfSize, 0.0, 0.0);
         outRelative[vertex] = relative;
         outVoxel[vertex] = packed;
-        outBrick[vertex] = uvec2(tree.x, brick.y);
+        outInfo[vertex] = info;
         outLocal[vertex] = local;
     }
     gl_PrimitiveTriangleIndicesEXT[slot * 2u] = uvec3(0u, 1u, 3u) + slot * 4u;

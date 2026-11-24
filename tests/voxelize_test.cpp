@@ -258,3 +258,20 @@ TEST_CASE("a packed voxel round-trips within its quantization") {
   CHECK(std::abs(dot(lobe.axis, axis)) > 0.999f);
   CHECK(lobe.alignment == doctest::Approx(0.7f).epsilon(0.01));
 }
+
+TEST_CASE("combined grids add coincident voxels' optical depths, as independent media") {
+  std::vector<VoxelTriangle> a, b;
+  quad(a, {0.0f, 0.0f, 0.2f}, 1.0f, 2);
+  quad(b, {0.0f, 0.0f, 0.7f}, 0.5f, 2);
+  const VoxelMaterial material{};
+  const VoxelGrid ga = voxelize(a, {&material, 1}, 1.0f);
+  const VoxelGrid gb = voxelize(b, {&material, 1}, 1.0f);
+  const VoxelGrid *grids[] = {&ga, &gb};
+  const VoxelGrid both = combineVoxelGrids(grids);
+  const VoxelPayload *va = voxelAt(ga, 0, 0, 0), *vb = voxelAt(gb, 0, 0, 0), *v = voxelAt(both, 0, 0, 0);
+  REQUIRE(va);
+  REQUIRE(vb);
+  REQUIRE(v);
+  CHECK(v->depth[2] == doctest::Approx(std::min(va->depth[2] + vb->depth[2], kOpaque)));
+  CHECK(both.bricks.size() == 1);
+}

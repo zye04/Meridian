@@ -525,7 +525,7 @@ namespace {
 
 // A 6 m crown of disjoint leaf quads around (0, 5, 0) on a 4 m trunk
 // cylinder: what the DAG voxel levels are for.
-MeshData leafCrown(uint32_t leaves, uint32_t seed) {
+MeshData leafCrown(uint32_t leaves, uint32_t seed, uint32_t tessellation = 1) {
   MeshData mesh;
   uint32_t state = seed * 747796405u + 2891336453u;
   const auto rnd = [&] {
@@ -543,16 +543,29 @@ MeshData leafCrown(uint32_t leaves, uint32_t seed) {
     const Vec3 a = normalize(cross(n, Vec3{0.31f, 0.53f, 0.79f}));
     const Vec3 b = cross(n, a);
     const float s = 0.08f + 0.06f * rnd();
+    // A leaf of tessellation^2 quads, as traced leaves are many triangles.
     const uint32_t base = uint32_t(mesh.vertices.size());
-    for (int k = 0; k < 4; ++k) {
-      Vertex v;
-      v.position = c + a * (k == 1 || k == 2 ? s : -s) + b * (k >= 2 ? s : -s);
-      v.normal = n;
-      v.uvX = k == 1 || k == 2 ? 1.0f : 0.0f;
-      v.uvY = k >= 2 ? 1.0f : 0.0f;
-      mesh.vertices.push_back(v);
+    const uint32_t side = tessellation + 1;
+    for (uint32_t y = 0; y < side; ++y) {
+      for (uint32_t x = 0; x < side; ++x) {
+        Vertex v;
+        const float u = float(x) / tessellation, w = float(y) / tessellation;
+        // Curved, as real leaves are: flat ones simplify without error.
+        const float bend = 0.5f * s * ((2.0f * u - 1.0f) * (2.0f * u - 1.0f) +
+                                       (2.0f * w - 1.0f) * (2.0f * w - 1.0f));
+        v.position = c + a * (s * (2.0f * u - 1.0f)) + b * (s * (2.0f * w - 1.0f)) + n * bend;
+        v.normal = n;
+        v.uvX = u;
+        v.uvY = w;
+        mesh.vertices.push_back(v);
+      }
     }
-    mesh.indices.insert(mesh.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+    for (uint32_t y = 0; y < tessellation; ++y) {
+      for (uint32_t x = 0; x < tessellation; ++x) {
+        const uint32_t i = base + y * side + x;
+        mesh.indices.insert(mesh.indices.end(), {i, i + 1, i + side + 1, i, i + side + 1, i + side});
+      }
+    }
   }
   mesh.leaf = true;
   mesh.voxelize = true;
@@ -567,6 +580,11 @@ const ClusterLod &cachedCrown() {
     return buildClusterLod(mesh, &source);
   }();
   return lod;
+}
+
+size_t cachedCrownVertexCount() {
+  static const size_t count = leafCrown(6000, 1).vertices.size();
+  return count;
 }
 
 bool isVoxel(const Cluster &c) { return c.brickCount > 0; }
@@ -643,19 +661,16 @@ TEST_CASE("a voxel cluster's error scales with instance scale like a triangle cl
   CHECK(two == doctest::Approx(2.0f * one).epsilon(0.01));
 }
 
-TEST_CASE("a continuous surface keeps every triangle level; voxels only where it ends") {
+TEST_CASE("a mesh that does not opt in gets no voxels") {
   static const VoxelMaterial material{};
-  MeshData grid = bumpyGrid(100);
-  const ClusterLod plain = buildClusterLod(grid);
-  grid.voxelize = true;
+  MeshData crown = leafCrown(2000, 4);
+  crown.voxelize = false;
   const VoxelSource source{{&material, 1}};
-  const ClusterLod lod = buildClusterLod(grid, &source);
-  size_t triangleClusters = 0, voxelClusters = 0;
+  const ClusterLod lod = buildClusterLod(crown, &source);
+  CHECK(lod.bricks.empty());
   for (const Cluster &c : lod.clusters) {
-    (isVoxel(c) ? voxelClusters : triangleClusters)++;
+    CHECK(!isVoxel(c));
   }
-  CHECK(triangleClusters == plain.clusters.size());
-  CHECK(voxelClusters <= 8); // its last group: the regions around the lattice origin
 }
 
 TEST_CASE("the cluster source key changes when a voxelized texture changes") {
@@ -718,4 +733,51 @@ TEST_CASE("a crown voxel's optical depth out of the model grows toward the crown
     }
   }
   CHECK(towardCentre > 2.0 * outward);
+}
+
+TEST_CASE("a mesh's voxel levels converge: its coarsest voxels are a handful of clusters") {
+  // Every group that goes to voxels joins one hierarchy per mesh, so a far
+  // tree draws a few clusters, not one per group (the Megascans beech's
+  // leaves had 17475 voxel roots and, as separate subtrees, 1650 terminal
+  // clusters).
+  size_t terminal = 0;
+  for (const Cluster &c : cachedCrown().clusters) {
+    terminal += isVoxel(c) && c.self.error == FLT_MAX;
+  }
+  CHECK(terminal >= 1);
+  CHECK(terminal <= 8);
+}
+
+TEST_CASE("no voxel is finer than the mesh's height / 512") {
+  const ClusterLod &lod = cachedCrown();
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      CHECK(c.voxelEdge >= 6.0f / 512.0f / 2.0f); // the crown is ~6 m tall; edges are powers of two
+    }
+  }
+}
+
+TEST_CASE("voxels hidden from every direction are dropped from the bricks") {
+  std::vector<ClusterLod> lods{cachedCrown()};
+  size_t before = lods[0].voxels.size();
+  bakeModelAxisDepths(lods);
+  const ClusterLod &lod = lods[0];
+  CHECK(lod.voxels.size() <= before);
+  REQUIRE(lod.voxelAxis.size() == lod.voxels.size());
+  CHECK(validClusterLod(lod, cachedCrownVertexCount()));
+  // Kept voxels are visible from some direction, except the one a cluster
+  // keeps when none of its voxels is.
+  size_t hiddenKept = 0, voxelClusters = 0;
+  for (uint32_t axis : lod.voxelAxis) {
+    float least = 1e9f;
+    for (int k = 0; k < 6; ++k) {
+      least = std::min(least, float((axis >> (4 * k)) & 15u) * kVoxelAxisDepthStep);
+    }
+    hiddenKept += least > kVoxelHiddenDepth;
+  }
+  for (const Cluster &c : lod.clusters) {
+    voxelClusters += isVoxel(c);
+  }
+  CHECK(hiddenKept <= voxelClusters);
+  CHECK(lod.voxels.size() < before); // a 6 m crown has an inside
 }

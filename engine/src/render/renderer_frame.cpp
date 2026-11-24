@@ -254,11 +254,11 @@ void Renderer::Impl::cullInstances(VkCommandBuffer cmd, const FrameData &frame,
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 }
 
-// The voxel trees cull.comp listed in this phase become bricks to draw
-// (voxel_bricks.comp, one workgroup per tree).
+// The voxel clusters cluster_cull.comp listed in this phase become bricks
+// and voxels to draw (voxel_bricks.comp, one workgroup per cluster).
 void Renderer::Impl::expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame,
                                        uint32_t phase) {
-  if (protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+  if (voxelInstanceList.buffer == VK_NULL_HANDLE) {
     return;
   }
   const CullConstants constants = cullConstants(frame, phase, nullptr);
@@ -527,7 +527,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 }
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
-void Renderer::setVoxelTrees(bool enabled) { impl_->voxelTrees = enabled; }
+void Renderer::setVoxelLod(bool enabled) { impl_->voxelLod = enabled; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
@@ -701,8 +701,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     for (uint32_t phase = 0; phase < 2; ++phase) {
       impl_->drawnVoxelTrees += std::min(counters->voxelDispatch[phase][0], kMaxVoxelInstances);
       impl_->drawnVoxelBricks += std::min(counters->voxelBricks[phase], kMaxVoxelBricks);
-      impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads) +
-                                std::min(counters->voxelQuads[phase][1], kMaxVoxelBandQuads);
+      impl_->drawnVoxelQuads += std::min(counters->voxelQuads[phase][0], kMaxVoxelQuads);
     }
     impl_->visitedBvhNodes = counters->bvhNodes;
     std::copy(std::begin(counters->drops), std::end(counters->drops),
@@ -863,10 +862,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->updateFarShadow(lighting.sunDirection, scene);
   impl_->updateTerrainShadow(lighting.sunDirection, camera.position, frame.sceneBuffer.address,
                              scene);
-  scene.protoVoxels = impl_->protoVoxelInfo.address;
+  scene.voxelPools = impl_->voxelPoolInfo.address;
   scene.voxelInstances = impl_->voxelInstanceList.address;
   scene.drawCounters = impl_->drawCounters.address;
-  scene.voxelTrees = impl_->protoVoxelInfo.buffer != VK_NULL_HANDLE && impl_->voxelTrees ? 1 : 0;
+  scene.voxelLod = impl_->voxelInstanceList.buffer != VK_NULL_HANDLE && impl_->voxelLod ? 1 : 0;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;
@@ -950,11 +949,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->cullCells(cmd, frame, 0);
   endPass("cull cells");
   impl_->cullInstances(cmd, frame, 0);
-  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull early");
   impl_->traverseClusters(cmd, frame, 0);
   endPass("traverse");
   impl_->cullClusters(cmd, frame, 0);
+  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull clusters");
   impl_->recordFarShadow(cmd);
   endPass("far shadow");
@@ -1184,25 +1183,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        sizeof(scenePush), &scenePush);
   };
 
-  // The voxel trees' voxels (voxel_instance.mesh), one workgroup per 64; the
-  // phase rides in drawList.
+  // The voxel clusters' voxels (voxel_instance.mesh), one workgroup per 64;
+  // the phase rides in drawList (list phase * 2; the odd lists are unused).
   auto drawVoxelTrees = [&](uint32_t phase) {
-    if (impl_->protoVoxelInfo.buffer == VK_NULL_HANDLE) {
+    if (impl_->voxelInstanceList.buffer == VK_NULL_HANDLE) {
       return;
     }
     vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
-    for (uint32_t band = 0; band < 2; ++band) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        band ? impl_->voxelBandPipeline : impl_->voxelInstancePipeline);
-      PushConstants listPush = scenePush;
-      listPush.drawList = phase * 2 + band;
-      vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(listPush),
-                         &listPush);
-      impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
-          cmd, impl_->drawCounters.buffer,
-          offsetof(DrawCounters, voxelTasks) + listPush.drawList * sizeof(DrawCounters::voxelTasks[0][0]),
-          1, sizeof(DrawCounters::voxelTasks[0][0]));
-    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->voxelInstancePipeline);
+    PushConstants listPush = scenePush;
+    listPush.drawList = phase * 2;
+    vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(listPush),
+                       &listPush);
+    impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
+        cmd, impl_->drawCounters.buffer,
+        offsetof(DrawCounters, voxelTasks) + listPush.drawList * sizeof(DrawCounters::voxelTasks[0][0]),
+        1, sizeof(DrawCounters::voxelTasks[0][0]));
     vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0, sizeof(scenePush),
                        &scenePush);
   };
@@ -1226,9 +1222,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("pyramid");
   impl_->cullCells(cmd, frame, 1);
   impl_->cullInstances(cmd, frame, 1);
-  impl_->expandVoxelBricks(cmd, frame, 1);
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
+  impl_->expandVoxelBricks(cmd, frame, 1);
   endPass("cull late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,

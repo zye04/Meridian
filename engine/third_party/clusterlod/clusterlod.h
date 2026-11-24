@@ -16,7 +16,7 @@
 
 #include <stddef.h>
 
-struct clodBounds; // Meridian: for clodConfig::voxel_attach
+struct clodBounds; // Meridian: for clodConfig::voxel_emit
 
 struct clodConfig
 {
@@ -78,15 +78,17 @@ struct clodConfig
 	bool optimize_clusters;
 	int optimize_clusters_level;
 
-	// Meridian: voxel levels. When voxel_decide is set, every group that is about to be simplified (or that is stuck) is offered
-	// to it with the original triangles it covers (vertex index triples), the error its children already have (min_error), the
-	// error its simplified triangles would have (max_error, FLT_MAX when simplification is stuck) and the triangle count it
-	// draws now. It returns a token >= 0 to replace the group with voxels at *voxel_error (min_error <= *voxel_error <=
-	// max_error), or -1. A replaced group is output with error *voxel_error, voxel_attach receives its id, and its triangles
-	// are not simplified further: the voxel levels above it are the caller's.
+	// Meridian: voxel levels. When voxel_edge is set, every group about to be simplified (or stuck) asks it for a voxel edge
+	// from the error its children have (min_error) and the error its simplified triangles would have (max_error, FLT_MAX when
+	// simplification is stuck): 0 keeps the triangles. The groups of one pass that go to voxels are pooled per edge and
+	// regrouped by cells of voxel_cell edges (clusters by their bound's centre), so a region of voxels comes from few groups;
+	// each cell is output as one group with error max(edge, its clusters' error), and voxel_emit receives its id and the
+	// original triangles it covers (vertex index triples). Its triangles are not simplified further: the voxel levels above
+	// are the caller's.
 	void* voxel_context;
-	int (*voxel_decide)(void* context, const unsigned int* source_indices, size_t source_index_count, float min_error, float max_error, size_t triangles, float* voxel_error);
-	void (*voxel_attach)(void* context, int token, int group, clodBounds bounds, int depth);
+	float (*voxel_edge)(void* context, float min_error, float max_error);
+	void (*voxel_emit)(void* context, const unsigned int* source_indices, size_t source_index_count, float edge, int group, clodBounds bounds, int depth);
+	float voxel_cell;
 };
 
 struct clodMesh
@@ -829,7 +831,7 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 	std::vector<unsigned int> original_indices;
 	std::vector<unsigned char> source_visited;
 	std::vector<unsigned int> group_sources;
-	if (config.voxel_decide)
+	if (config.voxel_edge)
 	{
 		original_indices = cluster_indices;
 		for (Cluster& cluster : clusters)
@@ -839,16 +841,55 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 		}
 	}
 
-	// Meridian: offers a group to voxel_decide; returns its token or -1
-	auto offerVoxels = [&](const Cluster* group, size_t group_size, float min_error, float max_error, size_t triangles, float* voxel_error) -> int
+	// Meridian: the clusters of groups going to voxels in this pass, per edge
+	std::vector<std::pair<float, std::vector<Cluster> > > voxel_pool;
+	auto poolVoxels = [&](const Cluster* group, size_t group_size, float edge)
 	{
-		if (!config.voxel_decide)
-			return -1;
-		group_sources.clear();
-		source_visited.assign(sources.size(), 0);
-		for (size_t j = 0; j < group_size; ++j)
-			flattenSources(sources, original_indices, group[j].source, source_visited, group_sources);
-		return config.voxel_decide(config.voxel_context, group_sources.data(), group_sources.size(), min_error, max_error, triangles, voxel_error);
+		size_t k = 0;
+		while (k < voxel_pool.size() && voxel_pool[k].first != edge)
+			++k;
+		if (k == voxel_pool.size())
+			voxel_pool.push_back(std::make_pair(edge, std::vector<Cluster>()));
+		voxel_pool[k].second.insert(voxel_pool[k].second.end(), group, group + group_size);
+	};
+	// Meridian: outputs the pooled clusters as one group per cell and hands each to voxel_emit
+	auto emitVoxels = [&](int depth)
+	{
+		for (auto& [edge, pool] : voxel_pool)
+		{
+			const float cell = config.voxel_cell * edge;
+			std::sort(pool.begin(), pool.end(), [&](const Cluster& a, const Cluster& b)
+			          {
+				          for (int k = 0; k < 3; ++k)
+				          {
+					          float ca = floorf(a.bounds.center[k] / cell), cb = floorf(b.bounds.center[k] / cell);
+					          if (ca != cb)
+						          return ca < cb;
+				          }
+				          return false; });
+			for (size_t first = 0; first < pool.size();)
+			{
+				size_t last = first + 1;
+				for (; last < pool.size(); ++last)
+				{
+					bool same = true;
+					for (int k = 0; k < 3; ++k)
+						same &= floorf(pool[first].bounds.center[k] / cell) == floorf(pool[last].bounds.center[k] / cell);
+					if (!same)
+						break;
+				}
+				clodBounds bounds = boundsMerge(&pool[first].bounds, last - first, sizeof(Cluster));
+				bounds.error = std::max(edge, bounds.error);
+				const int id = outputGroup(config, mesh, &pool[first], last - first, cluster_indices, bounds, depth, output_context, output_callback);
+				group_sources.clear();
+				source_visited.assign(sources.size(), 0);
+				for (size_t j = first; j < last; ++j)
+					flattenSources(sources, original_indices, pool[j].source, source_visited, group_sources);
+				config.voxel_emit(config.voxel_context, group_sources.data(), group_sources.size(), edge, id, bounds, depth);
+				first = last;
+			}
+		}
+		voxel_pool.clear();
 	};
 
 	std::vector<Cluster> pending;
@@ -893,25 +934,24 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 			const float children_error = bounds.error;
 			if (simplified.size() > merged.size() * config.simplify_threshold)
 			{
-				float voxel_error = 0.f;
-				const int token = offerVoxels(group, group_size, children_error, FLT_MAX, merged.size() / 3, &voxel_error);
-				bounds.error = token >= 0 ? voxel_error : FLT_MAX; // terminal group, won't simplify further
-				const int id = outputGroup(config, mesh, group, group_size, cluster_indices, bounds, depth, output_context, output_callback);
-				if (token >= 0)
-					config.voxel_attach(config.voxel_context, token, id, bounds, depth);
+				const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, FLT_MAX) : 0.f;
+				if (edge > 0.f)
+				{
+					poolVoxels(group, group_size, edge);
+					continue;
+				}
+				bounds.error = FLT_MAX; // terminal group, won't simplify further
+				outputGroup(config, mesh, group, group_size, cluster_indices, bounds, depth, output_context, output_callback);
 				continue; // simplification is stuck; abandon the merge
 			}
 
 			// enforce error monotonicity (with an optional hierarchical factor to separate transitions more)
 			bounds.error = std::max(bounds.error * config.simplify_error_merge_previous, error) + error * config.simplify_error_merge_additive;
 
-			float voxel_error = 0.f;
-			const int token = offerVoxels(group, group_size, children_error, bounds.error, merged.size() / 3, &voxel_error);
-			if (token >= 0)
+			const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, bounds.error) : 0.f;
+			if (edge > 0.f)
 			{
-				bounds.error = voxel_error;
-				const int id = outputGroup(config, mesh, group, group_size, cluster_indices, bounds, depth, output_context, output_callback);
-				config.voxel_attach(config.voxel_context, token, id, bounds, depth);
+				poolVoxels(group, group_size, edge);
 				continue; // the voxel levels above are the caller's
 			}
 
@@ -931,7 +971,7 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 				pending[j].bounds = bounds;
 
 			// Meridian: the new clusters cover the group's sources
-			if (config.voxel_decide)
+			if (config.voxel_edge)
 			{
 				SourceNode node = {0, 0, {}};
 				for (size_t j = 0; j < group_size; ++j)
@@ -941,6 +981,8 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 				sources.push_back(std::move(node));
 			}
 		}
+
+		emitVoxels(depth);
 
 		clusters.swap(pending);
 		cluster_indices.swap(pending_indices);
@@ -953,13 +995,17 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 		const Cluster& cluster = clusters[0];
 
 		clodBounds bounds = cluster.bounds;
-		float voxel_error = 0.f;
-		const int token = offerVoxels(clusters.data(), clusters.size(), bounds.error, FLT_MAX, cluster.index_count / 3, &voxel_error);
-		bounds.error = token >= 0 ? voxel_error : FLT_MAX; // terminal group, won't simplify further
-
-		const int id = outputGroup(config, mesh, clusters.data(), clusters.size(), cluster_indices, bounds, depth, output_context, output_callback);
-		if (token >= 0)
-			config.voxel_attach(config.voxel_context, token, id, bounds, depth);
+		const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, bounds.error, FLT_MAX) : 0.f;
+		if (edge > 0.f)
+		{
+			poolVoxels(clusters.data(), clusters.size(), edge);
+			emitVoxels(depth);
+		}
+		else
+		{
+			bounds.error = FLT_MAX; // terminal group, won't simplify further
+			outputGroup(config, mesh, clusters.data(), clusters.size(), cluster_indices, bounds, depth, output_context, output_callback);
+		}
 	}
 }
 

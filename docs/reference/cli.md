@@ -174,8 +174,8 @@ geometry), per list: chunks, work items, clusters, terrain nodes, bvh
 nodes.
 They also print drawn terrain nodes (2048 triangles each), `cells N`
 (placement cells visible), `far cells N` (cells drawn as far-field
-voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
-voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
+voxels), `voxel trees N (bricks B, voxels V)` (voxel clusters drawn,
+their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
 with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
@@ -273,10 +273,12 @@ window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin). `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
-`--voxel-trees on|off` (default on; needs the far field): a tree whose
-prototype's finest voxel (height / 128) projects under 2 px draws as that
-prototype's voxels, rasterized (architecture.md, Frame); off keeps its clusters up to the
-far switch (A/B).
+`--voxel-lod on|off` (default on): the voxel levels of tree models' cluster
+DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
+mesh over 4 m tall) replace their triangles where the LOD cut picks them,
+rasterized as ~1 px quads (architecture.md, Frame); off keeps the triangles
+at every distance, the voxels' target (A/B; slower: the traversal visits
+every level).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

@@ -250,6 +250,17 @@ struct Renderer::Impl {
   uint32_t clusterNodeCount = 0;
   uint32_t clusterLevelCount = 0;
   uint32_t traversalDepths = 0;
+  // The voxel clusters' bricks (GpuVoxelBrick), voxels (PackedVoxel) and
+  // axis depth words, bump-allocated too; voxelPoolInfo holds their
+  // addresses (GpuVoxelPools, SceneData.voxelPools), rewritten when one
+  // grows. voxelInstanceList: the voxel lists, made with the first voxels.
+  Buffer voxelBrickPool;
+  Buffer voxelPool;
+  Buffer voxelAxisPool;
+  Buffer voxelPoolInfo;
+  Buffer voxelInstanceList;
+  uint32_t voxelBrickCount = 0;
+  uint32_t voxelCount = 0;
   // Culling output, both phases: instance chunks for the instance cull, BVH
   // nodes for the traversal, work items for the cluster cull, cluster draw
   // lists, and the DrawCounters (indirect arguments and statistics).
@@ -369,22 +380,10 @@ struct Renderer::Impl {
   bool terrainShadowValid = false;
   bool terrainShadowPending = false;
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
-  // The mid tier (protovoxel.h): the prototypes' brick pools and the voxel
-  // instance and brick lists cull.comp and voxel_bricks.comp append.
-  Buffer protoVoxelPrototypes;
-  Buffer protoVoxelLevels;
-  Buffer protoVoxelData;
-  Buffer protoVoxelOcclusion;
-  Buffer protoVoxelCoords;
-  Buffer protoVoxelInfo;
-  Buffer voxelInstanceList;
-  // Each prototype's finest voxel (m; 0: none), for PrototypeInfo.
-  std::vector<float> protoFinestVoxel;
   VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;
-  VkPipeline voxelBandPipeline = VK_NULL_HANDLE;
   VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
-  bool voxelTrees = true;
+  bool voxelLod = true;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;
@@ -632,6 +631,8 @@ struct Renderer::Impl {
   void destroyStreamBuffers(Stream &stream);
   void destroyStream();
   void resetDrawCounters(VkCommandBuffer cmd, const Buffer &counters);
+  // Writes the voxel pools' addresses into voxelPoolInfo.
+  void writeVoxelPoolInfo();
   void expandVoxelBricks(VkCommandBuffer cmd, const FrameData &frame, uint32_t phase);
   // A cascade's cull: its own scene copy and counters (null: the main view).
   struct ShadowCull {

@@ -4,7 +4,6 @@
 #include "common.glsl"
 #include "cull.glsl"
 #include "farfield.glsl"
-#include "protovoxel.glsl"
 
 // GPU-driven instance culling, one workgroup per chunk of up to 64
 // instances (cell_cull.comp emits them), one thread per instance, in two
@@ -17,9 +16,8 @@
 // Placed instances are tested with their prototype's bounds and draw
 // distance. Survivors seed the cluster BVH traversal
 // (cluster_traverse.comp) with the root of every DAG level of their meshes
-// that can hold the LOD cut; a tree past the mid switch (its prototype's
-// finest voxel under kVoxelSwitchPixels) is appended to the phase's voxel
-// instance list instead, and over the band before that, both.
+// that can hold the LOD cut, voxel levels included (cluster_cull.comp lists
+// the voxel clusters the cut picks).
 
 layout(local_size_x = 64) in;
 
@@ -40,35 +38,17 @@ void seedTraversal(uint id, LoadedInstance instance, MeshInfo mesh) {
                            ? level.minError * instance.scale * scene.orthoPixelsPerMeter
                            : level.minError * instance.scale / max(farthest, scene.nearPlane) *
                                  pixelsPerError;
+        // With voxel LOD off the triangles under voxel levels never give way
+        // (cluster_cull.comp), so no level is too coarse to seed.
         if (finest <= scene.lodErrorPixels &&
-            projectedError(center, root.lodRadius * instance.scale,
-                           level.maxError * instance.scale) > scene.lodErrorPixels) {
+            (scene.voxelLod == 0u ||
+             projectedError(center, root.lodRadius * instance.scale,
+                            level.maxError * instance.scale) > scene.lodErrorPixels)) {
             if (!pushNode(cull.phase, 0u, uvec2(id, level.rootNode))) {
                 countDrops(4u, 1u);
             }
         }
     }
-}
-
-// The instance as voxels at the coarsest mip whose voxel projects to at
-// most kVoxelMipPixels: (id, mip) in its phase's list, which voxel_bricks.comp
-// expands into bricks (one workgroup per entry).
-bool appendVoxelInstance(uint id, LoadedInstance instance, PrototypeInfo prototype,
-                         vec3 relative) {
-    SceneBuffer scene = cull.scene;
-    uint phase = cull.phase & 1u;
-    uint levelCount = scene.protoVoxels.prototypes.prototypes[instance.meshOrPrototype].levelCount;
-    uint mip = voxelMip(scene, length(relative), prototype.voxelSize, instance.scale, levelCount);
-    uint counter = kCounterVoxelDispatch + phase * 3u;
-    uint slot = atomicAdd(cull.counters.counters[counter], 1u);
-    if (slot >= kMaxVoxelInstances) {
-        atomicAdd(cull.counters.counters[counter], uint(-1));
-        atomicAdd(cull.counters.counters[kCounterVoxelDrops], 1u);
-        atomicAdd(cull.counters.counters[kCounterOverflow], 1u);
-        return false;
-    }
-    scene.voxelInstances.entries[phase * kMaxVoxelInstances + slot] = uvec2(id, mip);
-    return true;
 }
 
 void main() {
@@ -136,12 +116,6 @@ void main() {
     atomicAdd(cull.counters.counters[kCounterInstances], 1u);
     if (!instance.placed) {
         seedTraversal(id, instance, scene.meshes.meshes[instance.meshOrPrototype]);
-        return;
-    }
-    // Shadow cascades draw clusters only: a voxel tree would cast nothing.
-    float blend = scene.shadowView != 0u ? 0.0 : instanceVoxelBlend(scene, instance, prototype);
-    // A tree the full voxel list dropped keeps its clusters.
-    if (blend > 0.0 && appendVoxelInstance(id, instance, prototype, relative) && blend >= 1.0) {
         return;
     }
     for (uint i = 0u; i < prototype.meshCount; ++i) {

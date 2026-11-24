@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Evidence for the distant-forest work (G1): each view with the voxels as the
-# renderer draws them and with full-detail triangles (the voxels' target),
+# renderer draws them and with triangles everywhere at the default LOD error
+# (the voxels' target; full detail overflows the cull lists at forest views),
 # plus a fly-toward sequence across the switch distances.
 #   tools/g1-evidence.sh BUILD OUT [game args]
 # VOXEL_OFF_FLAG selects the triangles-everywhere A/B flag.
@@ -30,7 +31,7 @@ for v in "${views[@]}"; do
   read -r name x y z yaw pitch <<< "$v"
   run "$name" --camera "$x" "$y" "$z" "$yaw" "$pitch" --capture "$out/$name.png"
   # shellcheck disable=SC2086
-  run "${name}_tri" --camera "$x" "$y" "$z" "$yaw" "$pitch" $off --lod-error 0 \
+  run "${name}_tri" --camera "$x" "$y" "$z" "$yaw" "$pitch" $off \
     --capture "$out/${name}_tri.png"
 done
 run fly --camera 700 1300 -400 -1.55 -0.1 --camera-velocity -40 -3 0 \
