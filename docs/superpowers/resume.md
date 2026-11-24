@@ -119,7 +119,7 @@ messages and temp files inside the worktree (`.superpowers/`), never a
 shared scratchpad; every game run through `flock /tmp/meridian-gpu.lock`;
 never `pkill`/`killall` or any name-pattern kill (stop only PIDs you
 started); `assets/` is a symlink to `/home/zye/Projects/dev/meridian/assets`
-(check the placement hash in CLAUDE.md before measuring); captures at
+(check the placement hash in `docs/reference/cli.md` before measuring); captures at
 2560x1440 and GPU ms compared only with identical `Render WxH` lines (the
 headless 1440p output when the monitor sleeps, memory native-1440-rule);
 DLSS SDK reuse via

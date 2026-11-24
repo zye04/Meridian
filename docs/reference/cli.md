@@ -1,0 +1,313 @@
+# Meridian: game CLI, controls and views
+
+Reference for the game binary: every flag, the overlays, capture and
+benchmark modes, and the named views. Read the part you need; CLAUDE.md
+keeps the build/test/capture essentials. Every game run goes through
+`flock /tmp/meridian-gpu.lock` (examples omit it).
+
+## Controls, overlays, benchmark
+
+Controls: WASD, mouse, Esc. Fly mode: Space/Ctrl up/down, 30 m/s,
+Shift x5. `F` toggles walk mode: eye 1.7 m above the ground, WASD horizontal at 1.4 m/s (Shift 5 m/s), no vertical keys.
+`G` opens the grading panel (Dear ImGui overlay): every `Grade` field,
+sun azimuth/elevation, haze, bloom (intensity, scatter) and an Effects
+section (`Effects`, renderer.h, `Renderer::setEffects`: parallax on/off + depth x0..4,
+parallax self-shadow, terrain detail on/off (the 0.3 m noise on the two finest levels; off by default since the relief test), micro shadows on/off + strength (also darkens plant bases: architecture.md "Plant micro occlusion"), contact shadows on/off
+(off skips the dispatch) + length x0..3, bloom on/off, cloud outline strength 0..3, cut-out mip bias -2..2, stable TAA on/off), with Save, Load, Reset and a "show built-in
+grade" A/B box. It frees the cursor and freezes the camera while open;
+changes apply at once. Save writes the grade file,
+`$XDG_CONFIG_HOME/meridian/grade.json` (default
+`~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
+names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
+`haze`, `fovDegrees`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
+startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
+`--grade FILE` loads a grade file in any run (A/B captures of a tuned
+look); `--overlay grade|perf` opens a panel at startup (it is in captures;
+repeat the flag for both).
+`F3` toggles the performance overlay (passive, top right, the cursor stays
+captured): FPS, frame / CPU / GPU ms, per-pass GPU ms, a 5 s frame-time
+graph, AVG / 0.1% / 1% / 5% low / MAX FPS over the last 10 s. x% low =
+1000 / mean of the slowest ceil(x% n) frames (`frame_stats.h`). `F4` (or its
+Record button) records every frame to `meridian-<timestamp>.csv` in the
+working directory (`frame,frame_ms,cpu_ms,gpu_ms,<one column per GPU
+pass>`; the path is relative to the cwd; frame_ms is present to present, cpu_ms is frame_ms minus the time
+blocked on fence and acquire, GPU columns are the newest finished frame,
+2 frames behind) and prints the summary on stop; a recording still
+running at exit is written too, and on a write error the run keeps it
+in memory and reports. `--benchmark SECONDS FILE.csv` (SECONDS > 0; not
+with `--capture` or the camera velocities) is a timed run with real
+frame times, static camera and no camera input (Esc still quits; the
+partial recording is written): FILE.csv is checked writable up front, 60
+warm-up frames, then SECONDS recorded; writes the CSV, prints the
+summary, exits. `--route FILE` (only with `--benchmark`; camera_route.h,
+`TIME X Y Z YAW PITCH [LABEL]` per line) flies the camera along the keys
+(t = 0 in warm-up, then real seconds since recording started; a label
+starts a segment). `python3 -I tools/bench-route.py bench.csv
+tools/routes/parity.route` prints per-segment avg / 1% low fps, avg ms
+and the 4 heaviest passes, flagging BELOW 180 (route) and BELOW 105
+(segment). The parity route (~60 s, run it with `--trees`): meadow,
+grass, forest-edge, forest-interior, aerial.
+
+## Captures
+
+Automated visual check (deterministic, ~4 s, exit code 1 on any Vulkan
+validation error):
+
+```bash
+./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--trees] [--lod-error PX] --capture out.png [--frames N]
+```
+
+## Reference path tracer
+
+`--reference SPP` (with `--capture`; not with `--benchmark`,
+`--capture-sequence`, `--capture-albedo` or camera velocities) is the
+reference path tracer (spec `2026-11-23-reference-path-tracer-design.md`,
+renderer_reference.cpp, reference.comp): after the `--frames` warm-up the
+exposure and game time freeze and every frame adds one path traced sample
+per pixel (TLAS + heightfield, materials through surface.glsl as the raster
+path) to an accumulation that replaces the upscaler's output, bloom off;
+after SPP samples the capture saves it and the run prints `Reference: N
+spp, total S s, noise P%` (median over 16x16 tiles of the relative standard
+error of the tile mean); `reference` in `GPU passes:` is one sample's ms.
+`--reference-mode radiance|albedo|white|leaf|sun` (default radiance):
+`albedo` accumulates the primary hit's diffuse albedo (compare with a raster
+`--capture-albedo`); `white`, `leaf`, `sun` are the integrator's furnace
+checks. Compare against a raster capture with `--effects pom=0 --bloom 0 0`
+(and `--streamed off` where meadow shows) via `tools/reference-compare.py`.
+Known differences: the reference's terrain is the bilinear heightfield
+(no near detail displacement), blended materials trace as opaque, distant
+trees are their full geometry (the raster's voxels are what is judged).
+`--capture-albedo FILE.pfm` (with `--capture`) also saves the linear
+diffuse albedo the shading used on the same frame (scene attachment 3,
+kept alive for the run by `Renderer::enableAlbedoCapture`; the sky reads
+0.5); `python3 -I tools/albedo-audit.py FILE.pfm tools/albedo-regions.json
+VIEW` prints per-region mean albedo against approximate physical ranges
+and, for single-material rects, a source texture (materials spec D6).
+A `.pfm` capture path writes the linear HDR image the tonemap reads
+(the upscaler's output, pre-exposed) instead, for luminance ratios.
+
+## Motion gates
+
+Motion sharpness: add `--camera-velocity X Y Z` (m/s) and/or
+`--camera-angular-velocity YAW PITCH` (rad/s; `--camera-yaw-rate YAW` is
+short for `YAW 0`), fixed 1/60 s steps ending at
+`--camera`, and compare with the still capture of the same view:
+`python3 -I tools/image-gates.py laplacian motion.png` (Laplacian std:
+the gate is the motion frame's absolute sharpness, minimums anchored to
+TAA v2; `ratio` is the informational motion/still column; also
+`shimmer`, `ssim`, `diff`). The whole motion gate set runs with `tools/motion-gates.sh BUILD OUT [game args]`
+(`GPU_RUNS=5` adds per-pass GPU medians). `--capture-sequence N` also
+saves `<capture stem>_NNN.png` every N frames (fly-throughs,
+time-lapses); per-pass GPU ms of such runs are inflated by the readbacks.
+
+## Field of view, haze, anti-aliasing
+
+`--fov DEGREES` (horizontal, 30 < x < 150, default 70, matched to the Chlorophyll
+frames; `verticalFov` in camera.h derives the vertical angle from the window
+aspect every frame) sets the field of view. Interactive runs also read
+`fovDegrees` from the grade file (explicit `--fov` wins); the G panel's "Field
+of view" slider (50..110) saves, loads and resets with the Look. Captures
+taken before this change used ~101 degrees horizontal (fixed fovY 1.2 rad), so
+old views and gate images are not comparable.
+
+`--haze clean|summer|summer-hazy` picks the aerosol (default summer:
+a clean summer day's boundary layer, AOD 0.03 from the valley floor (5th
+percentile of the terrain) to 1.2 km above it with a smooth top, plus
+a free-troposphere background (H 2 km) with 0.01 above the top, ~0.05
+in all over the floor; startup prints `Haze layer:`; summer-hazy:
+haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
+clean = Bruneton's very clean defaults, for A/B).
+
+`--aa dlss|taa` picks the anti-aliasing: DLSS (default; DLAA at
+native 1440p unless `--dlss-mode` says otherwise; falls back to TAA with
+the log line `DLSS unavailable: <reason>; using TAA` when NGX reports no
+Super Resolution, e.g. non-NVIDIA GPUs or the `-DMERIDIAN_DLSS=OFF` build), or our
+own TAA at native resolution (taa.comp, the fallback, an A/B). `--rr on|off` (default off: Super
+Resolution DLAA, ~2.3 ms at 1440p against RR's ~4.7, decisions.md) picks
+Ray Reconstruction under DLSS, an A/B
+(preset F, `kRayReconstructionPreset` in dlss.cpp; falls back to Super
+Resolution DLAA with `DLSS Ray Reconstruction unavailable; using Super
+Resolution`). `--dlss-mode dlaa|quality|balanced|performance` (default
+dlaa) and `--dlss-preset E|F|J|K|L|M` (Super
+Resolution only; default: M for DLAA, Quality and Balanced, NGX's own
+for Performance, `defaultPreset` in dlss.cpp; A/B override) set DLSS. `--render-scale S` (0 < S <= 1, default 1) renders the scene
+at the display size times S for TAA (`--aa taa`); DLSS picks its own render size.
+Startup prints `Render WxH, display WxH, jitter phases N, mip bias B,
+DLSS|DLSS Ray Reconstruction|TAA` and, with the DLSS module, `DLSS: SDK
+310.9.16, Super Resolution ..., Ray Reconstruction ... (preset F)`.
+
+## Weather and clouds
+
+Weather: `--weather clear|fair|broken|overcast` (default `fair`),
+`--time-scale X` (game seconds per real second), `--weather-front
+SECONDS` (blend from the start preset to overcast over that many game
+seconds; the change enters at the front line 60 km upwind and travels
+with the wind). Capture runs print the exposure (EV100), the sky
+irradiance with clouds and clear (x sun), the open-ground illuminance (lux) that bounds the exposure, and the weather at the camera (coverage,
+type, wind speed and the direction it comes from, gustiness, game time).
+`--clouds off` skips the cloud march, composite, cloud shadows and sky
+capture (A/B). Ambient light (diffuse irradiance, the specular sky
+fallback) includes the clouds through the sky capture, taken at the
+camera. Front time-lapse: `--weather fair --weather-front 600
+--time-scale 600 --capture-sequence 20 --frames 1200` from the ground or
+above-layer view (the overcast deck reaches the camera after ~800 frames).
+Surfaces (mesh.frag, terrain too) multiply the sun by `cloudShadow` at
+their flat world position: the shadow map within ~13.8 km of the camera
+(horizontally and across the sun), blended over 1.5 km into the
+coverage-based fallback beyond (`1 - k R` per crossing, darkened by the
+number of clouds a low sun's ray crosses; calibrated against the map);
+the map fades out as the sun sets (6 to 3 degrees).
+`--dump-weather-map out.png` saves the weather map after the last frame
+(R coverage, G type, B precipitation; row 0 = north) and prints its
+window; two dumps at `--time-scale 0` and `--time-scale 60 --frames 60`
+show one game minute of drift.
+
+## LOD, placement, far field, GI, shadows
+
+`--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
+detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=1,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
+sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
+(occlusion culling A/B). Capture runs print drawn instances, clusters,
+triangles and entries dropped by full cull lists (nonzero = missing
+geometry), per list: chunks, work items, clusters, terrain nodes, bvh
+nodes.
+They also print drawn terrain nodes (2048 triangles each), `cells N`
+(placement cells visible), `far cells N` (cells drawn as far-field
+voxels), `voxel trees N (bricks B, voxels V)` (trees drawn as prototype
+voxels, their bricks and voxel quads, both phases), `bvh nodes N` (cluster group BVH nodes the
+traversal visited), `placed N`
+(placed instances), and `GPU passes:`
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
+tonemap, overlay when a panel is open; they sum to the total). A
+new pass is one `endPass("name")` call in `renderer_frame.cpp`.
+
+## Views, trees, scatter, placement layers, far field, GI and shadow modes
+
+Useful views (Napf terrain; ground 1354.2 m at the start): the default
+start is eye height on a ridge top at (1119, -431), 1.5 km east of the
+Napf summit (-359, -465, 1406.7 m), looking at it past the sample models
+(`1119 1355.9 -431 -1.55 -0.1`); open view toward the summit
+`1119 1356 -431 -1.55 -0.02`; full-ground view `1119 1355.9 -431 -1.55
+-0.25`; LOD transitions from above `1119 1420 -431 -1.55 -0.6`; high
+overview (3000 m above the ground) `1119 4354 -431 -1.55 -0.35`; across
+the crop's east edge into the mirrored terrain `6500 3500 0 1.57 -0.6`;
+sunset, long ridge shadows across the valleys, `1119 1500 -431 3.14 -0.15
+--sun 0.9 0.05 -0.4`; far horizon from the summit `-359 1408.7 -465 1.57
+0`; float precision far out, at the crop's corner (ground 1286.5 m),
+`7000 1288.2 7000 -1.55 -0.25` (compare its `--camera-velocity 5 0 0`
+Laplacian with the still's). Placed forests (seed 1, all of these need `--trees`): forest edge
+`600 1205.6 -400 -1.55 0.02`; forest interior `85 1158.6 -53 -1.55
+0.25`; forest overview `700 1450 -400 -1.55 -0.5`;
+canopy from 40 m above `85 1200 -53 -1.55 -1.2`; a
+placed moss rock close up `1944.3 953.4 -1923.9 -1.55 -0.4`; trees on
+the summit ridge at ~1.5 km: the open view toward the summit.
+`--trees` brings the trees back; by default they are hidden (no tree
+prototypes loaded, no forest or lone-tree layers, no forest floor in the
+terrain material, no tree models in `--scatter`), until they are textured
+and keep their coverage (`docs/backlog.md`). With `--trees` the Megascans
+Trees cooked from Unreal (`assets/source/megascans/<species>/SM_*`,
+docs/assets.md) are used when present: beech, hornbeam and alder forests and
+lone trees, saplings under the canopy (layer 12), every cooked
+variant; startup prints `Megascans Trees: F forest, L lone, S sapling
+prototypes`. Without them, the Megaplants.
+Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
+the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
+0.5`, stratocumulus the fair view with `--weather broken`, overcast
+`1119 1356 -431 -1.55 0.25 --weather overcast`; fair cumulus from the
+ground `1119 1355.9 -431 -1.55 0.15`; above the layer `1119 6500 -431
+-1.55 -0.25` (pitch -0.1 looks across the weather map's 30 km edge);
+inside the layer (half-resolution march) `1119 3200 -431 -1.55 0`; the
+summit silhouette against clouds `1119 1356 -431 -1.55 0.03`; look
+development (`tools/cloud-compare.sh`, each beside its photo in
+`assets/reference/clouds/`, git-ignored): midday from the ground looking
+up `1119 1356 -431 -1.55 0.5 --sun 0.45 0.85 0.25` (cloud1, cloud5), the
+same toward the horizon at pitch 0.1 (cloud3, cloud4), sunset from above
+the layer `1119 5500 -431 -1.55 -0.2 --sun -0.998 0.05 0.03 --weather
+broken` (cloud2);
+the script also captures `.pfm`s with clouds on and off and prints the
+sunlit tops and the bases over the clear sky behind them, the cover, the
+spread of the bases and the shading contrast, and the same measured on
+the photos (display-referred, so compare the capture's image line); dusk
+clouds `1119 1355.9 -431 -1.55 0.15 --sun -0.7 0.035 0.7` (sun 2 deg up;
+`-0.05` for just below the horizon). Cloud motion checks (Laplacian vs
+the still, and vs `--clouds off`): fast turn, the fair view with
+`--camera-yaw-rate 1`; toward the layer `1119 1900 -431 -1.55 0.1
+--camera-velocity -60 20 0`; across the base (quarter -> half switch at
+2550 m, base 2800 m) `1119 2950 -431 -1.55 0.1 --camera-velocity -30 250
+0` (with `--capture-sequence 2` for the sequence); summit silhouette
+with clouds drifting across the view `1119 1356 -431 2.5 0.12
+--time-scale 1.5` (~10 m/s, 80% lateral; still: `--time-scale 0`;
+Laplacian on the crop `1000x340+900+560`, since whole frames are
+dominated by terrain); strafing past the marble wall's top
+`1119 1356 -431 -1.55 0.03 --time-scale 1.5 --camera-velocity 0 0 10`.
+`--scatter N` places N random Poly Haven models and imported Megaplants
+trees within 150 m of the start (fixed seed; loading 21 models, 14M
+triangles, makes Debug startup ~2.5 min); over the scatter:
+`1119 1362 -431 -1.55 -0.25`; a 27 m beech (with `--scatter 100`):
+`1115.47 1366.85 -429.72 1.223 0`. Missing models drop out of the pick,
+so without the Megaplants trees the same seed places different content
+and these views differ.
+The game places rocks over the whole Napf at load (`placeScenery` in
+main.cpp; 21281 on steep ground, 124776 scree along rockfall runouts),
+poppies, goldenrod and ferns (~200k together; ferns ~46k under the forest
+with `--trees`), streamed meadow layers around the camera (a short grass mat,
+seed-head tufts in patches, hawkbit drifts (grasses and hawkbit graded
+by `Prototype::tint`), clover: ring ~6.8M slots,
+~2.2M live; building their dense dither patterns adds ~10 s to Release
+and ~59 s to Debug startup on the first run only: the patterns are cached,
+see CLAUDE.md Gotchas), plus forests, lone trees and saplings with `--trees`
+(~3.1M instances; all of these are causal layers on the `.geo` channels), which loads the rocks (and with `--trees` the
+trees) as prototypes: Debug startup
+~95 s, Release ~18 s. `--terrain FILE` loads another heightfield instead of `assets/terrain/napf.height` (e.g. the relief patch). `--placement off` skips it (Release ~11 s:
+heightfield pyramid, normal map and transcoding the terrain's 4K
+textures, ~8.7 s of it); use it for captures that
+don't need placement. `--streamed off` drops only the streamed meadow layers
+(grass mat, tufts, hawkbit, clover; not in the TLAS), so a raster capture
+shows what `--reference` traces; the static table and its hash are unchanged. Debug runs print `placement check:` (GPU table vs
+the CPU reference, must be 0 mismatches), `stream check:` (every
+regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
+`placement hash 0x...` of the static table (0x07e033157372f778 for seed 1 without
+trees, 0x5353fab653ec154d with `--trees`, both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+window WxW, ring C slots, N live`. Loading
+placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
+before and after compaction, cell margin). `--far-field off` draws
+every tree as clusters instead of distant forest cells as voxels (A/B).
+`--voxel-trees on|off` (default on; needs the far field): a tree whose
+prototype's finest voxel (height / 128) projects under 2 px draws as that
+prototype's voxels, rasterized (architecture.md, Frame); off keeps its clusters up to the
+far switch (A/B).
+`--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
+beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
+in the TLAS and read the far shadow map of the bricks instead
+(`farfield_shadow.comp`, farfield.h: 8 m texels, 16-bit depth of the first
+0.5-opacity point along the sun, read with a normal offset and a
+slope-scaled bias, built on frame 1 and rebuilt a slice per
+frame into a second map when the sun turns more than 0.1 degrees; a sun more
+than 1 degree off the built map falls back to the per-ray brick march);
+`tlas` traces every tree for every receiver (legacy A/B, to go with the
+TLAS; also what `--far-field off` does). Debug prints `far shadow map check:` (GPU map vs the CPU
+replica) and the first build's ms.
+`--gi off|probes` (default probes since 2026-11-23; off is the A/B and
+the fallback for weaker GPUs, where crown sky visibility is the only canopy
+occlusion of ambient): `probes`
+lights the ambient term from global-illumination probes (spec
+`docs/superpowers/specs/2026-11-20-gi-design.md`): a camera-centred
+clipmap (5 levels, 2-32 m columns, 48^2 columns x 8 slices above the
+terrain under each column), traced in compute against the heightfield
+pyramid (`terrainRayDistance`) and, with `--trees`, the far-field voxels;
+ground hits read a ground radiance cache (4 levels of 256^2 texels at 1-8
+m, albedo from the rendered image, relit by the sun with terrain, tree and
+cloud shadow plus the probes' own irradiance), misses the sky-view LUT + sky
+capture. No ray tracing.
+`--shadows raster|rt` (default raster; rt is an A/B, decisions.md): the
+sun's visibility of objects
+(trees, rocks, plants, models) from the cascaded shadow maps (lighting.glsl
+`cascadeVisibility`: 3x3 tent PCF from 4 hardware depth-compare taps
+(`shadowSampler`, the cascades' `sampler2DShadow` view of the bindless
+table), finest cascade within its radius,
+blended into the next over the outer 15%), or `rt` from one TLAS ray per
+pixel toward a point on the sun disk. Either way the terrain march,
+cloud shadow, contact shadows and the far path stay. Capture runs print
+`sun shadows: N cascade renders, max X ms` (the slowest shadow pass of
+the run: the re-render hitch).
