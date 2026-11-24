@@ -539,21 +539,22 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       return std::any_of(rule.channels.begin(), rule.channels.end(),
                          [](const ChannelRamp &ramp) { return ramp.channel >= 0; });
     };
-    std::vector<uint32_t> kept;
-    std::erase_if(layers, [&](PlacementLayer &layer) {
+    std::vector<PlacementLayer> kept;
+    for (PlacementLayer layer : layers) {
       if (reads(layer.rule)) {
-        return true;
+        continue;
       }
-      if (layer.parent &&
-          std::find(kept.begin(), kept.end(), layer.parent->layerId) == kept.end()) {
+      if (layer.parent && std::none_of(kept.begin(), kept.end(), [&](const PlacementLayer &k) {
+            return k.id == layer.parent->layerId;
+          })) {
         if (layer.parent->lo < layer.parent->hi) {
-          return true;
+          continue;
         }
         layer.parent.reset();
       }
-      kept.push_back(layer.id);
-      return false;
-    });
+      kept.push_back(std::move(layer));
+    }
+    layers = std::move(kept);
   }
   if (layers.empty()) {
     std::printf("Nothing to place (see tools/fetch-sample-assets.sh)\n");
@@ -1052,9 +1053,16 @@ int scoreForest(const Options &options) {
   const auto heightPath = options.terrainPath.value_or(
       std::filesystem::path(MERIDIAN_ASSET_DIR) / "terrain" / "napf.height");
   const meridian::Heightfield field = meridian::loadHeightfield(heightPath);
-  std::optional<meridian::GeoChannels> geo;
-  if (std::filesystem::exists(meridian::geoPathFor(heightPath))) {
-    geo = meridian::loadGeoChannels(meridian::geoPathFor(heightPath));
+  if (!std::filesystem::exists(meridian::geoPathFor(heightPath))) {
+    std::fprintf(stderr, "--score-forest needs %s (meridian-cook --geo)\n",
+                 meridian::geoPathFor(heightPath).c_str());
+    return 1;
+  }
+  const meridian::GeoChannels geo = meridian::loadGeoChannels(meridian::geoPathFor(heightPath));
+  if (!meridian::geoMatches(geo, field)) {
+    std::fprintf(stderr, "%s does not match the heightfield\n",
+                 meridian::geoPathFor(heightPath).c_str());
+    return 1;
   }
   std::ifstream file(*options.scoreForestPath, std::ios::binary);
   uint32_t header[3] = {};
@@ -1082,7 +1090,7 @@ int scoreForest(const Options &options) {
         for (int a = 0; a < 4; ++a) {
           const float sx = static_cast<float>(column * cell) + (a + 0.5f) * cell / 4.0f - 0.5f;
           const float sz = static_cast<float>(row * cell) + (b + 0.5f) * cell / 4.0f - 0.5f;
-          sum += meridian::densityAt(field, geo ? &*geo : nullptr, layer, kPlacementSeed,
+          sum += meridian::densityAt(field, &geo, layer, kPlacementSeed,
                                      toFixed(sx, field.width), toFixed(sz, field.height));
         }
       }
@@ -1176,12 +1184,16 @@ int main(int argc, char **argv) {
   // layers read.
   bool geoChannels = false;
   if (const auto geoPath = meridian::geoPathFor(heightPath); std::filesystem::exists(geoPath)) {
-    const meridian::GeoChannels geo = meridian::loadGeoChannels(geoPath);
-    if (meridian::geoMatches(geo, terrain)) {
-      renderer.setGeoChannels(geo);
-      geoChannels = true;
-    } else {
-      std::printf("%s does not match the heightfield; ignored\n", geoPath.c_str());
+    try {
+      const meridian::GeoChannels geo = meridian::loadGeoChannels(geoPath);
+      if (meridian::geoMatches(geo, terrain)) {
+        renderer.setGeoChannels(geo);
+        geoChannels = true;
+      } else {
+        std::printf("%s does not match the heightfield; ignored\n", geoPath.c_str());
+      }
+    } catch (const std::exception &error) {
+      std::printf("%s; ignored\n", error.what());
     }
   }
   const float floorKm = valleyFloorKm(terrain);

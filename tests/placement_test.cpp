@@ -508,3 +508,15 @@ TEST_CASE("a channel rule without geo throws") {
   rule.channels[1] = {3, 10.0f, 20.0f};
   CHECK_THROWS(densityAt(planeField(64, 2.0f, 10.0f), nullptr, makeLayer(rule), 1, 0, 0));
 }
+
+TEST_CASE("placementReadsChannels sees the rule's and the parent's ramps") {
+  PlacementLayer layer = makeLayer(openRule());
+  CHECK_FALSE(placementReadsChannels(layer));
+  DensityRule reading = openRule();
+  reading.channels[2] = {1, 10.0f, 20.0f};
+  CHECK(placementReadsChannels(makeLayer(reading)));
+  PlacementLayer parent = makeLayer(reading);
+  parent.id = 1;
+  layer.parent = parentRamp(parent, 0.2f, 0.8f);
+  CHECK(placementReadsChannels(layer));
+}

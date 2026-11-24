@@ -286,6 +286,10 @@ void Renderer::setTerrain(const Heightfield &field) {
       impl_->uploadStorage(pyramid.data(), pyramid.size() * sizeof(uint32_t));
 
   impl_->heightfield = field;
+  // The old terrain's channels and forest floor no longer apply.
+  impl_->geo.reset();
+  impl_->destroyBuffer(impl_->geoBuffer);
+  terrain.forestEnabled = 0;
   if (!field.samples.empty()) {
     impl_->shadowCasterTop =
         field.minHeight +

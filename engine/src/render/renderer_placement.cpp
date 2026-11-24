@@ -254,6 +254,10 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     throw std::runtime_error("setPlacement needs a static layer");
   }
   for (size_t l = 0; l < allLayers.size(); ++l) {
+    // The GPU would read missing channels as 0; the CPU reference throws.
+    if (placementReadsChannels(allLayers[l]) && !r.geo) {
+      throw std::runtime_error("a placement layer reads geo channels; call setGeoChannels first");
+    }
     const auto &parent = allLayers[l].parent;
     if (parent && std::none_of(allLayers.begin(), allLayers.begin() + static_cast<ptrdiff_t>(l),
                                [&](const PlacementLayer &p) { return p.id == parent->layerId; })) {

@@ -189,15 +189,9 @@ Factors densityAtFixed(const Heightfield &heights, const GeoChannels *geo,
   return factors;
 }
 
-bool readsChannels(const DensityRule &rule) {
-  return std::any_of(rule.channels.begin(), rule.channels.end(),
-                     [](const ChannelRamp &ramp) { return ramp.channel >= 0; });
-}
-
 // Throws unless the layer's rules have the channels they read.
 void checkGeo(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer) {
-  const bool reads = readsChannels(layer.rule) || (layer.parent && readsChannels(layer.parent->rule));
-  if (reads && !geo) {
+  if (placementReadsChannels(layer) && !geo) {
     throw std::runtime_error("placement layer reads geo channels, but none were given");
   }
   if (geo && !geoMatches(*geo, field)) {
@@ -530,6 +524,14 @@ PlacementParent placementParent(const Heightfield &field, const PlacementLayer &
 
 ParentRamp parentRamp(const PlacementLayer &parent, float lo, float hi) {
   return {parent.id, parent.rule, lo, hi};
+}
+
+bool placementReadsChannels(const PlacementLayer &layer) {
+  const auto reads = [](const DensityRule &rule) {
+    return std::any_of(rule.channels.begin(), rule.channels.end(),
+                       [](const ChannelRamp &ramp) { return ramp.channel >= 0; });
+  };
+  return reads(layer.rule) || (layer.parent && reads(layer.parent->rule));
 }
 
 uint32_t geoTexelIndex(uint32_t sample, uint32_t ratio, uint32_t channelSize) {

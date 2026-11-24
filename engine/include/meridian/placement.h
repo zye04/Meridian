@@ -150,6 +150,8 @@ PlacementField placementField(const Heightfield &field);
 PlacementRule placementRule(const Heightfield &field, const DensityRule &rule);
 PlacementParent placementParent(const Heightfield &field, const PlacementLayer &layer,
                                 uint32_t seed);
+// Whether the layer's rule or its parent's reads a geo channel.
+bool placementReadsChannels(const PlacementLayer &layer);
 // A heightfield sample's geo texel along one axis.
 uint32_t geoTexelIndex(uint32_t sample, uint32_t ratio, uint32_t channelSize);
 // Cumulative weights in 1/65536, last = 65536: pick the first prototype
