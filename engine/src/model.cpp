@@ -309,7 +309,7 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
   const uint64_t key = clusterSourceKey(meshes, voxels.textureBytes, voxels.materials,
                                         voxels.primitiveMaterial, voxels.imageOf);
   std::filesystem::path cache = gltf;
-  cache.replace_extension(".clusters");
+  cache.replace_extension(clusterCacheExtension());
   auto cached = readClusterCache(cache, key);
   bool valid = cached && cached->size() == meshes.size();
   for (size_t i = 0; valid && i < meshes.size(); ++i) {

@@ -12,6 +12,7 @@
 #include <numeric>
 #include <bit>
 #include <cfloat>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -763,6 +764,12 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
     std::filesystem::remove(partial, error);
     throw std::runtime_error("cannot write " + file.string());
   }
+}
+
+std::string clusterCacheExtension() {
+  char extension[32];
+  std::snprintf(extension, sizeof(extension), ".v%08x.clusters", kCacheVersion);
+  return extension;
 }
 
 std::optional<std::vector<ClusterLod>>

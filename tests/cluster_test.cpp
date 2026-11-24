@@ -163,6 +163,15 @@ TEST_CASE("cluster cache round-trips") {
   std::filesystem::remove(file);
 }
 
+TEST_CASE("cluster cache file name carries the cache version") {
+  const std::string extension = clusterCacheExtension();
+  CHECK(extension.size() == std::string(".v00000000.clusters").size());
+  CHECK(extension.starts_with(".v"));
+  CHECK(extension.ends_with(".clusters"));
+  CHECK(std::filesystem::path("a/tree.gltf").replace_extension(extension).filename().string() ==
+        "tree" + extension);
+}
+
 TEST_CASE("cluster cache rejects another source key") {
   const auto file = cacheFile("meridian_key.clusters");
   writeClusterCache(file, 42, {buildClusterLod(bumpyGrid(4))});
