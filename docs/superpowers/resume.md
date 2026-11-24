@@ -29,6 +29,8 @@ placement").
   - `far-m-shadow2`: voxel trees cast into cascades 0-3 (#11).
   - `meadow-y`: far-field grass match WIP.
   - `clouds-25d`, `clouds-25d-mip`: paused 2.5D clouds (volumetric kept).
+  - `farm-cpuvox`: CPU voxelizer prototype (tools/cpuvox), the starting
+    point of the DAG voxel design (`specs/2026-11-24-dag-voxel-foliage-design.md`).
   - origin only: `clouds` (pre-rebase clouds lane, superseded), `ground2`
     (natural terrain transitions WIP), `ground2-cliffs` (non-repeating
     cliffs WIP).
@@ -45,6 +47,9 @@ placement").
 
 ## Waiting for the user
 
+0. DAG voxel foliage design (G1, `specs/2026-11-24-dag-voxel-foliage-design.md`):
+   approve, then writing-plans. User chose the Chlorophyll / Nanite Foliage
+   way (voxels inside the cluster LOD hierarchy) on 2026-11-24.
 1. Broadleaf forest floor spec (`specs/2026-11-24-broadleaf-forest-floor-design.md`):
    approve, then writing-plans (group 1: cook, audit, photos; group 2 on the
    geo channels, now on main). The Megascans pack is in ~/Downloads (66 zips).
