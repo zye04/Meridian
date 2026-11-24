@@ -287,6 +287,11 @@ struct Renderer::Impl {
   // and on the GPU (a uvec2 per texel).
   std::optional<GeoChannels> geo;
   Buffer geoBuffer;
+  // The forest floor (TerrainMaterial::forestLayerId): setPlacement bakes
+  // that layer's density per geo texel into forestFloorImage
+  // (terrain.forestTexture).
+  uint32_t forestLayerId = 0;
+  Image forestFloorImage;
   // Placement (renderer_placement.cpp): the placed table (24-bit ids from
   // kPlacedBase) and one Cell per grid cell; empty until setPlacement.
   Buffer placedInstances;

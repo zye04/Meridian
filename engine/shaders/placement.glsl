@@ -19,6 +19,11 @@ struct PlacementRule {
   uint clusterAmount;
   int channels[4][3];
 };
+// Per geo texel its 8 channel bytes (meridian/geo.h).
+layout(buffer_reference, std430) readonly buffer GeoTexels {
+    uvec2 texels[];
+};
+
 // Must match PlacementParent in placement.h.
 struct PlacementParent {
   PlacementRule rule;

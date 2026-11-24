@@ -1140,7 +1140,7 @@ int main(int argc, char **argv) {
   };
   meridian::TerrainMaterial material;
   if (options.trees) {
-    material.forest = {kMaskFrequency, kMaskThreshold, kMaskEdge, kPlacementSeed};
+    material.forestLayerId = kForestLayerId;
   }
   bool layersLoaded = true;
   for (const Role &role : roles) {

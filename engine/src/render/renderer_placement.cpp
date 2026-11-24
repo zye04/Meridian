@@ -503,6 +503,71 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
           .count();
 
+  // The forest floor (TerrainMaterial::forestLayerId): that static layer's
+  // density at every geo texel (4-sample blocks without channels), in the
+  // same integer math as the trees.
+  r.terrain.forestEnabled = 0;
+  const auto forest = std::find_if(layers.begin(), layers.end(), [&](const PlacementLayer &l) {
+    return r.forestLayerId != 0 && l.id == r.forestLayerId;
+  });
+  if (forest != layers.end()) {
+    const uint32_t width = r.geo ? r.geo->width : (field.width + 3) / 4;
+    const uint32_t height = r.geo ? r.geo->height : (field.height + 3) / 4;
+    const uint32_t pairs = (width + 1) / 2;
+    Buffer texels = r.createBuffer(VkDeviceSize{pairs} * height * sizeof(uint32_t),
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                   0);
+    VkPipeline forestPipeline =
+        createComputePipeline(dev, "placement_forest.comp", placementLayout);
+    PlacementConstants forestConstants = constants;
+    forestConstants.counts = texels.address;
+    forestConstants.layerCount = static_cast<uint32_t>(forest - layers.begin());
+    forestConstants.gridColumns = pairs;
+    if (r.terrain.forestTexture == 0) {
+      if (r.textures.size() + 1 > kMaxTextures) {
+        throw std::runtime_error("texture table is full");
+      }
+      r.terrain.forestTexture = static_cast<uint32_t>(r.textures.size());
+      r.textures.resize(r.textures.size() + 1);
+    }
+    r.destroyImage(r.forestFloorImage);
+    r.forestFloorImage = r.createImage(VK_FORMAT_R16_UNORM, {width, height, 1},
+                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
+    r.submitNow([&](VkCommandBuffer cmd) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, forestPipeline);
+      vkCmdPushConstants(cmd, placementLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         sizeof(forestConstants), &forestConstants);
+      vkCmdDispatch(cmd, (pairs + 7) / 8, (height + 7) / 8, 1);
+      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK_ACCESS_2_TRANSFER_READ_BIT);
+      transitionImage(cmd, {r.forestFloorImage.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT});
+      VkBufferImageCopy region{};
+      region.bufferRowLength = pairs * 2;
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {width, height, 1};
+      vkCmdCopyBufferToImage(cmd, texels.buffer, r.forestFloorImage.image,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+      transitionImage(cmd, {r.forestFloorImage.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+    });
+    vkDestroyPipeline(dev, forestPipeline, nullptr);
+    r.destroyBuffer(texels);
+    r.writeTexture(r.terrain.forestTexture, r.forestFloorImage.view, r.linearSampler);
+    r.terrain.forestEnabled = 1;
+  }
+
   releaseTemporaries(r.stream.active());
 
   r.placementGrid = grid;

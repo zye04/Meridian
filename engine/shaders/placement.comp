@@ -12,16 +12,23 @@
 //   PLACEMENT_STREAM: per frame, one workgroup per (streamed slot being
 //     updated, streamed layer): the kept points of that slot's new cell into
 //     the run's fixed range of the ring, their dither thresholds, and the
-//     run's cell record with its coordinates.
+//     run's cell record with its coordinates;
+//   PLACEMENT_FOREST: at load, one layer's density at the centre sample of
+//     every geo texel (the forest floor, surface.glsl), two texels per
+//     thread packed as 16-bit into counts; layerCount holds the layer's
+//     index, gridColumns the texture's width in texel pairs.
 // Keep/reject mirrors evaluatePoint (placement.cpp) in integer math; the
 // order comes from the offsets, never from atomics, so the table is
 // deterministic.
 
-#if defined(PLACEMENT_COUNT) + defined(PLACEMENT_WRITE) + defined(PLACEMENT_STREAM) != 1
-#error define one of PLACEMENT_COUNT, PLACEMENT_WRITE and PLACEMENT_STREAM
+#if defined(PLACEMENT_COUNT) + defined(PLACEMENT_WRITE) + defined(PLACEMENT_STREAM) + \
+        defined(PLACEMENT_FOREST) != 1
+#error define one of PLACEMENT_COUNT, PLACEMENT_WRITE, PLACEMENT_STREAM and PLACEMENT_FOREST
 #endif
 
+#ifndef PLACEMENT_FOREST
 layout(local_size_x = 64) in;
+#endif
 
 // Must match GpuPlacementLayer in gpu_types.h.
 struct PlacementLayer {
@@ -39,10 +46,6 @@ struct PlacementLayer {
 
 layout(buffer_reference, std430) readonly buffer HeightWords {
     uint words[];
-};
-// Per geo texel its 8 channel bytes (meridian/geo.h).
-layout(buffer_reference, std430) readonly buffer GeoTexels {
-    uvec2 texels[];
 };
 layout(buffer_reference, std430) readonly buffer PlacementLayers {
     PlacementLayer layers[];
@@ -163,6 +166,8 @@ float heightAt(float x, float z) {
     return height;
 }
 
+uint layerDensity(PlacementLayer layer, uint layerSeed, ivec2 p, uvec2 s, out uint mask);
+
 bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, uint point,
               out ivec2 p, out uint mask) {
     mask = 0u;
@@ -171,7 +176,13 @@ bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
     if (!placementInsideCrop(pc.field, p)) {
         return false;
     }
-    uvec2 s = placementNearestSample(pc.field, p);
+    return placementKeep(pattern.y, layerDensity(layer, layerSeed, p,
+                                                 placementNearestSample(pc.field, p), mask));
+}
+
+// The layer's density (with its parent) at fixed-point p, whose nearest
+// sample is s.
+uint layerDensity(PlacementLayer layer, uint layerSeed, ivec2 p, uvec2 s, out uint mask) {
     uint i0 = s.x > 0u ? s.x - 1u : 0u;
     uint i1 = min(s.x + 1u, pc.field.width - 1u);
     uint j0 = s.y > 0u ? s.y - 1u : 0u;
@@ -194,8 +205,36 @@ bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
         density = placementMul16(density, placementRampEither16(int(parentDensity),
                                                                 layer.parent.lo, layer.parent.hi));
     }
-    return placementKeep(pattern.y, density);
+    return density;
 }
+
+#ifdef PLACEMENT_FOREST
+// Texel t's density at its centre sample t * ratio + ratio / 2 (geo texels,
+// or 4-sample blocks without channels).
+uint forestTexel(PlacementLayer layer, uint layerSeed, uvec2 t) {
+    uint ratio = pc.geoWidth != 0u ? pc.geoRatio : 4u;
+    uvec2 s = min(t * ratio + ratio / 2u, uvec2(pc.field.width, pc.field.height) - 1u);
+    ivec2 p = ivec2(pc.field.originX, pc.field.originZ) + ivec2(s * pc.field.spacing);
+    uint mask;
+    return layerDensity(layer, layerSeed, p, s, mask);
+}
+
+layout(local_size_x = 8, local_size_y = 8) in;
+void main() {
+    uint width = pc.geoWidth != 0u ? pc.geoWidth : (pc.field.width + 3u) / 4u;
+    uint height = pc.geoWidth != 0u ? pc.geoHeight : (pc.field.height + 3u) / 4u;
+    uvec2 pair = gl_GlobalInvocationID.xy;
+    if (pair.x >= pc.gridColumns || pair.y >= height) {
+        return;
+    }
+    PlacementLayer layer = pc.layers.layers[pc.layerCount];
+    uint layerSeed = placementLayerSeed(layer.id, pc.seed);
+    uint a = forestTexel(layer, layerSeed, uvec2(2u * pair.x, pair.y));
+    uint b = 2u * pair.x + 1u < width ? forestTexel(layer, layerSeed, uvec2(2u * pair.x + 1u, pair.y))
+                                      : 0u;
+    pc.counts.counts[pair.y * pc.gridColumns + pair.x] = a | b << 16u;
+}
+#else
 
 #ifdef PLACEMENT_COUNT
 shared uint keptCount;
@@ -386,4 +425,5 @@ void main() {
     }
 #endif
 }
+#endif
 #endif

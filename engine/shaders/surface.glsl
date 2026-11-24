@@ -473,18 +473,19 @@ void groundPatches(vec2 p, out float patches, out float edge) {
     edge = (rotatedFbm(q, 8.0, 23u) - 0.5) * 0.5;
 }
 
-// The forest mask noise (placement.glsl, bit-exact with the trees') at this
-// pixel, 0..1; -1 without a forest or outside the heightfield's crop, where
-// nothing is placed.
-float forestMask(Terrain terrain) {
-    vec2 halfSize = 0.5 * (vec2(terrain.width, terrain.height) - 1.0) * terrain.spacing;
-    if (terrain.forestMaskPeriod == 0u || any(greaterThan(abs(surfaceIn.worldPosition.xz), halfSize))) {
+// The forest layer's density at this pixel, 0..1: placement.comp's
+// PLACEMENT_FOREST bake (the trees' integer rule at each geo texel's centre)
+// filtered bilinearly. -1 without a forest layer or outside the
+// heightfield's crop, where nothing is placed.
+float forestDensity(Terrain terrain) {
+    vec2 size = vec2(terrain.width, terrain.height);
+    vec2 halfSize = 0.5 * (size - 1.0) * terrain.spacing;
+    if (terrain.forestEnabled == 0u ||
+        any(greaterThan(abs(surfaceIn.worldPosition.xz), halfSize))) {
         return -1.0;
     }
-    ivec2 p = ivec2(round(surfaceIn.worldPosition.xz * 65536.0));
-    return float(placementFbm16(uint(p.x) ^ 0x80000000u, uint(p.y) ^ 0x80000000u,
-                                terrain.forestMaskPeriod, kPlacementMaskOctaves,
-                                terrain.forestMaskSeed ^ kPlacementMaskSalt)) / 65535.0;
+    vec2 uv = (surfaceIn.worldPosition.xz / terrain.spacing + 0.5 * size) / size;
+    return textureLod(textures[terrain.forestTexture], uv, 0.0).r;
 }
 
 // Laplacian of the ground height (1/m) over ~24 m, from the normal map's
@@ -676,13 +677,12 @@ Surface terrainSurface(vec3 normal) {
     w[2] = flatGround * smoothstep(0.02, 0.04, curvature + edge * 0.02);
     w[3] = max(belowRock, smoothstep(0.03, 0.06, -curvature + edge * 0.02)) *
            smoothstep(0.42, 0.62, patches - curvature * 10.0 + edge * 0.5);
-    float m = forestMask(terrain);
-    float lo = float(terrain.forestMaskLo) / 65535.0;
-    float d = float(terrain.forestMaskHi - terrain.forestMaskLo) / 65535.0;
-    // Path over the outer half of the trees' ramp (sparse outer trees),
-    // floor from its middle in, under the canopy.
-    w[4] = m < 0.0 ? 0.0 : smoothstep(lo - 0.25 * d, lo + 0.25 * d, m + edge * d);
-    w[5] = m < 0.0 ? 0.0 : smoothstep(lo + 0.4 * d, lo + d, m + edge * d);
+    float forest = forestDensity(terrain);
+    // Path where the trees thin out at the edge; full floor from 0.6 of
+    // the trees' density in (cluster noise keeps it under 1 inside, and a
+    // partial floor would blend, and pay for, several layers).
+    w[4] = forest < 0.0 ? 0.0 : smoothstep(0.0, 0.2, forest + edge * 0.5);
+    w[5] = forest < 0.0 ? 0.0 : smoothstep(0.2, 0.6, forest + edge);
     w[6] = (1.0 - flatGround) * smoothstep(0.045, 0.08, curvature + edge * 0.03);
     w[7] = (1.0 - smoothstep(terrain.rockNormalY.y, terrain.rockNormalY.y + 0.04, normal.y)) *
            smoothstep(0.3, 0.5, patches + edge);

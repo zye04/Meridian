@@ -106,20 +106,10 @@ struct TerrainLayer {
 // Placement rules that follow rock (boulders) use the same values.
 constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 
-// The forest placement layer's mask (its DensityRule's maskFrequency,
-// maskThreshold, maskEdge) and the placement seed. The forest floor follows
-// the same noise, so floor and trees agree. frequency 0: no forest floor.
-struct ForestMask {
-  float frequency = 0.0f;
-  float threshold = 0.0f;
-  float edge = 0.0f;
-  uint32_t seed = 0;
-};
-
 // Where each terrain layer goes (mesh.frag, terrainSurface): meadow grass
 // on open ground; clover in damp flat hollows; mud in valley bottoms; worn
 // soil on ridges and the slopes below rock; forest path at forest edges and
-// forest floor inside (the forest mask); gravel in channels; scree at the
+// forest floor inside (the forest layer's density); gravel in channels; scree at the
 // foot of rock; rock on cliffs. Flat ground above the snow line is snow.
 enum class GiMode { Off, Probes };
 
@@ -136,7 +126,9 @@ struct TerrainMaterial {
   // large-scale noise picks one per region. Rock is triplanar, the rest
   // hex-tiled top-down projections.
   std::array<std::vector<TerrainLayer>, static_cast<size_t>(TerrainRole::Count)> layers;
-  ForestMask forest;
+  // The placement layer (PlacementLayer::id) whose density the forest path
+  // and floor follow, so floor and trees agree; 0 = no forest floor.
+  uint32_t forestLayerId = 0;
   // Meters above sea level; snow fades in over the 40 m above it.
   float snowLine = 4000.0f;
 };

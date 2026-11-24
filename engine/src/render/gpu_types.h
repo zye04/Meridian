@@ -283,12 +283,12 @@ struct GpuTerrain {
   // The camera's x/z wrapped by kTerrainNoiseWrap.
   float noiseOffset[2] = {};
   float rockNormalY[2] = {kRockNormalY[0], kRockNormalY[1]};
-  // The trees' ramp over the forest mask noise (placement.glsl, the forest
-  // rule's maskPeriod; 0 = no forest floor).
-  uint32_t forestMaskPeriod = 0;
-  int32_t forestMaskLo = 0;
-  int32_t forestMaskHi = 0;
-  uint32_t forestMaskSeed = 0;
+  // The forest floor (surface.glsl forestDensity), when forestEnabled: the
+  // forest layer's density per geo texel (R16_UNORM, bindless, linear
+  // clamp), baked at setPlacement.
+  uint32_t forestTexture = 0;
+  uint32_t forestEnabled = 0;
+  uint32_t forestPad[2] = {};
   float detailScale = 1.0f; // terrain_detail.glsl: 0 turns the detail relief off
   uint32_t padding = 0; // keeps the next SceneData member 16-byte aligned
 };

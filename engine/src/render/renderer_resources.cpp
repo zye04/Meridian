@@ -344,9 +344,6 @@ void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
   if (total > static_cast<size_t>(kMaxTerrainLayers)) {
     throw std::runtime_error("terrain material: more than kMaxTerrainLayers layers");
   }
-  if (material.forest.frequency > 0.0f && material.forest.edge <= 0.0f) {
-    throw std::runtime_error("terrain material: the forest mask's edge must be positive");
-  }
   GpuTerrain &terrain = impl_->terrain;
   uint32_t count = 0;
   for (int role = 0; role < kTerrainRoles; ++role) {
@@ -357,17 +354,10 @@ void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
     }
   }
   terrain.layerCount = count;
-  terrain.forestMaskPeriod = 0;
-  if (material.forest.frequency > 0.0f) {
-    DensityRule rule{};
-    rule.maskFrequency = material.forest.frequency;
-    rule.maskThreshold = material.forest.threshold;
-    rule.maskEdge = material.forest.edge;
-    const PlacementRule mask = placementRule(impl_->heightfield, rule);
-    terrain.forestMaskPeriod = mask.maskPeriod;
-    terrain.forestMaskLo = mask.maskLo;
-    terrain.forestMaskHi = mask.maskHi;
-    terrain.forestMaskSeed = material.forest.seed;
+  // setPlacement bakes the floor for this layer id.
+  impl_->forestLayerId = material.forestLayerId;
+  if (material.forestLayerId == 0) {
+    terrain.forestEnabled = 0;
   }
   terrain.snowLine = material.snowLine;
   terrain.enabled = 1;

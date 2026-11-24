@@ -343,12 +343,11 @@ struct Terrain {
     vec2 noiseOffset;
     // Ground turns to rock from normal.y = y down to x (kRockNormalY).
     vec2 rockNormalY;
-    // The trees' ramp over the forest mask noise (placement.glsl; period
-    // 0 = no forest floor).
-    uint forestMaskPeriod;
-    int forestMaskLo;
-    int forestMaskHi;
-    uint forestMaskSeed;
+    // The forest floor (surface.glsl forestDensity), when forestEnabled: the
+    // forest layer's density per geo texel (bindless, linear clamp).
+    uint forestTexture;
+    uint forestEnabled;
+    uint forestPad[2];
     // Multiplies the detail relief (terrain_detail.glsl); 0 = off.
     float detailScale;
     uint padding;
