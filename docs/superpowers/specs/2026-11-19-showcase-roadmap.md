@@ -25,16 +25,16 @@ graph LR
   M4 --> M5
 ```
 
-- **M1 terrain** (done; spec `2026-11-19-terrain-15km-design.md`,
-  plan `../plans/2026-11-19-terrain-15km.md`): Napf swissALTI3D 2 m
+- **M1 terrain** (done; spec `../archive/specs/2026-11-19-terrain-15km-design.md`,
+  plan `../archive/plans/2026-11-19-terrain-15km.md`): Napf swissALTI3D 2 m
   heightfield, GPU CDLOD, heightfield-marched sun shadows,
   camera-relative rendering, curvature display warp to the horizon,
   wrapped terrain UVs, walk mode.
 - **M2 forests**, split in two: M2a forests and rocks (spec
-  `2026-11-19-forests-design.md`, plan `../plans/2026-11-19-forests.md`;
-  far field `2026-11-20-far-field-design.md`) and M2b forest lighting
-  (spec `2026-11-19-forest-lighting-design.md`, plan
-  `../plans/2026-11-19-forest-lighting.md`). The specs supersede this
+  `../archive/specs/2026-11-19-forests-design.md`, plan `../archive/plans/2026-11-19-forests.md`;
+  far field `../archive/specs/2026-11-20-far-field-design.md`) and M2b forest lighting
+  (spec `../archive/specs/2026-11-19-forest-lighting-design.md`, plan
+  `../archive/plans/2026-11-19-forest-lighting.md`). The specs supersede this
   bullet where they differ: the level-range cut gave way to a
   cluster-group BVH traversal, and far trees became hemi-octahedral
   impostors mid-range plus per-cell voxel bricks beyond ~4 km. As first
@@ -60,8 +60,8 @@ graph LR
   with motion vectors that include last frame's wind; flower patches
   from the same density masks; far grass fades into a matching terrain
   shading layer so the ground never reads bare.
-- **M4 clouds** (spec `2026-11-19-clouds-weather-design.md`, plan
-  `../plans/2026-11-19-clouds-weather.md`): 2.5D cumulus layer (weather
+- **M4 clouds** (spec `../archive/specs/2026-11-19-clouds-weather-design.md`, plan
+  `../archive/plans/2026-11-19-clouds-weather.md`): 2.5D cumulus layer (weather
   map + 3D Worley-Perlin noise), ray-marched at quarter resolution with
   temporal reprojection (Schneider/Nubis 2015-17, Hillaire 2016),
   composited with the existing Hillaire 2020 aerial perspective, plus a

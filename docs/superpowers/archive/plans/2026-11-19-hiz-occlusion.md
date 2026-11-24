@@ -10,7 +10,7 @@
 
 **Tech Stack:** C++20, Vulkan 1.3 (sampler min/max reduction, core 1.2), GLSL compute, doctest.
 
-**Spec:** `docs/superpowers/specs/2026-11-19-hiz-occlusion-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-19-hiz-occlusion-design.md`
 
 ## Global Constraints
 

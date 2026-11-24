@@ -18,7 +18,7 @@ tent PCF lookup into the cascades.
 
 **Tech Stack:** C++20, Vulkan 1.3 mesh shaders, GLSL, doctest.
 
-**Spec:** `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md`
 
 ## Global Constraints
 

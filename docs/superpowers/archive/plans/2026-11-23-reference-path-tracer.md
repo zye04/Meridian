@@ -10,7 +10,7 @@ Status: done (2026-11-23)
 
 **Tech Stack:** C++20, Vulkan 1.3, GLSL compute with `GL_EXT_ray_query`, Python 3 + numpy for the comparison tool.
 
-**Spec:** `docs/superpowers/specs/2026-11-23-reference-path-tracer-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-23-reference-path-tracer-design.md`
 
 ## Global Constraints
 

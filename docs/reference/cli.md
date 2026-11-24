@@ -61,7 +61,7 @@ validation error):
 
 `--reference SPP` (with `--capture`; not with `--benchmark`,
 `--capture-sequence`, `--capture-albedo` or camera velocities) is the
-reference path tracer (spec `2026-11-23-reference-path-tracer-design.md`,
+reference path tracer (spec `docs/superpowers/archive/specs/2026-11-23-reference-path-tracer-design.md`,
 renderer_reference.cpp, reference.comp): after the `--frames` warm-up the
 exposure and game time freeze and every frame adds one path traced sample
 per pixel (TLAS + heightfield, materials through surface.glsl as the raster

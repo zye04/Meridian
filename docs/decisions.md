@@ -1008,7 +1008,7 @@ foliage that survives simplification).
   bricks (L0 4 m, L1 8 m, L2 16 m). The world bricks are also the far ray
   field: a sun shadow map built from them for far receivers now, sky
   visibility in M2b (replacing M2b's 2D canopy field). Spec:
-  `docs/superpowers/specs/2026-11-20-far-field-design.md`.
+  `docs/superpowers/archive/specs/2026-11-20-far-field-design.md`.
 - **Why three tiers:** the Task 8 prototype (per-cell bricks beyond 4 km,
   clusters nearer) measured the early scene pass at ~13 ms at the overview,
   mostly cluster raster of trees inside 4 km, whose coarse DAG foliage
@@ -1271,7 +1271,7 @@ slice 5's compression and streaming stay deferred.
 
 ## Motion clarity: DLSS 4.5, Ray Reconstruction, TAA v2, grading (2026-11-20)
 
-Spec: `docs/superpowers/specs/2026-11-20-motion-clarity-design.md`.
+Spec: `docs/superpowers/archive/specs/2026-11-20-motion-clarity-design.md`.
 
 **The smear is in the TAA history, not in the motion vectors.**
 - Measured at 1080p, eye-height ground view, motion/still Laplacian:
@@ -2093,7 +2093,7 @@ rock's 2-3 m tiles drew a grid from ~50 m out, which the 4x far sample
   3 hex taps x 4 maps per rock variant, both variants on ~40% of the rock.
 ## Weather state and wind (M4 clouds, 2026-11-19)
 
-Spec: `docs/superpowers/specs/2026-11-19-clouds-weather-design.md`.
+Spec: `docs/superpowers/archive/specs/2026-11-19-clouds-weather-design.md`.
 
 - **Weather state** (`weather.h`): coverage, type (0 stratus/overcast ..
   1 cumulus, above 1 reserved for cumulonimbus), precipitation (carried,
@@ -2819,7 +2819,7 @@ and draw path. Debug builds check every regenerated cell against
 `evaluatePoint`. Streamed instances are not in the TLAS. They receive
 sun shadows, but cast only screen-space contact shadows. Whether they
 should be in the TLAS is open (plan task 4). Plan:
-`docs/superpowers/plans/2026-11-20-streamed-placement.md`.
+`docs/superpowers/archive/plans/2026-11-20-streamed-placement.md`.
 
 - **Seamless thinning (2026-11-20):** the mat must leave no edge, ring
   or pop. The keep fraction is full density, then (fullDensity/d)^2,
@@ -3049,7 +3049,7 @@ default". User decision: raster rendering in the style of Chlorophyll
 Engine (no ray tracing, art-directed), for image clarity, motion clarity
 and performance. RR's reason to be the default was the ray-traced sun
 shadow's per-pixel noise; the raster sun shadows that replace the ray
-(spec `2026-11-20-raster-sun-shadows-design.md`) have none to denoise.
+(spec `superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md`) have none to denoise.
 
 - **Choice:** `--rr` defaults to off: DLSS Super Resolution DLAA, preset
   M (the SR default). `--rr on` stays as an A/B. Under SR the upscaler
@@ -3126,7 +3126,7 @@ off|probes|hybrid` (default off until the look is accepted).
 User direction: raster rendering, no ray tracing. Replaces the per-pixel
 TLAS shadow ray for objects (see "Shadows" at the top, which chose RT);
 the terrain march, cloud shadow, contact shadows and the far path stay.
-Spec `docs/superpowers/specs/2026-11-20-raster-sun-shadows-design.md`.
+Spec `docs/superpowers/archive/specs/2026-11-20-raster-sun-shadows-design.md`.
 
 - **Choice:** cached, camera-centred cascaded shadow maps (a coarse
   clipmap), not virtual shadow maps. VSMs cache per page and match screen
@@ -4167,7 +4167,7 @@ and DLAA is how DLSS is commonly shipped as pure anti-aliasing.
 
 Status: implemented 2026-11-23 (spec
 `2026-11-21-materials-fidelity-design.md` section 2, D1 and D2; plan
-`plans/2026-11-22-leaf-geometry.md`).
+`superpowers/archive/plans/2026-11-22-leaf-geometry.md`).
 
 - **Problem:** the Megascans Trees' leaves and decoration are
   alpha-tested cards. Their cut-out edge depends on a texture fetch whose
@@ -4483,8 +4483,8 @@ honour the standard the engine imports; asset semantics belong to the cook.
 
 ## Reference path tracer (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-reference-path-tracer-design.md`, plan
-`superpowers/plans/2026-11-23-reference-path-tracer.md`. Every lighting
+Spec `superpowers/archive/specs/2026-11-23-reference-path-tracer-design.md`, plan
+`superpowers/archive/plans/2026-11-23-reference-path-tracer.md`. Every lighting
 question had been judged against photos and measured ranges, which can
 reject an outlier but cannot say whether an approximation is right (#32's
 trunk tint). Unreal and Unity HDRP ship a path tracer for this; we had the
@@ -4534,8 +4534,8 @@ bindless materials, the heightfield march).
 
 ## GI probes: foliage lit where the ray meets it (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-gi-canopy-radiance-design.md`, plan
-`superpowers/plans/2026-11-23-gi-canopy-radiance.md`. The reference path
+Spec `superpowers/archive/specs/2026-11-23-gi-canopy-radiance-design.md`, plan
+`superpowers/archive/plans/2026-11-23-gi-canopy-radiance.md`. The reference path
 tracer measured the forest edge's shaded trunk at 2.1x its luminance and too
 green (B/G 0.61 vs 0.84) under the probes. An ablation against the
 reference (one term neutralized per variant, Release, 2560x1440, `--trees
@@ -4611,7 +4611,7 @@ area.
 
 ## Backlit canopy: leaf sun side and crowns without tuft occlusion (2026-11-23)
 
-Spec `superpowers/specs/2026-11-23-backlit-direct-design.md`. The reference
+Spec `superpowers/archive/specs/2026-11-23-backlit-direct-design.md`. The reference
 put the backlit forest edge (`--sun -0.9 0.4 0.15`) at 1.4-2.5x the raster
 on the sunward side, the same with `--gi off`. Ablation (Release,
 2560x1440, `--trees --effects pom=0 --bloom 0 0 --streamed off`, references

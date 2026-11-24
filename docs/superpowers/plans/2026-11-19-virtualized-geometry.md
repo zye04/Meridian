@@ -1,6 +1,6 @@
 # Virtualized geometry slice 1 (cluster LOD raster) Implementation Plan
 
-**Status:** slice 1 done on main (6af0c51..f1ccccd); slice 5's hierarchical traversal done in M2a Task 7 (`docs/superpowers/plans/2026-11-19-forests.md`); slices 2-4 and slice 5's compression and streaming are deferred, see `docs/backlog.md`.
+**Status:** slice 1 done on main (6af0c51..f1ccccd); slice 5's hierarchical traversal done in M2a Task 7 (`docs/superpowers/archive/plans/2026-11-19-forests.md`); slices 2-4 and slice 5's compression and streaming are deferred, see `docs/backlog.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

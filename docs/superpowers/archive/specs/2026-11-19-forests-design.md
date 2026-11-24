@@ -2,7 +2,7 @@
 
 **Status:** done (2026-11-24 review): placed forests, the cluster BVH and the voxel far field are on main; see the plan's Status line.
 
-Milestone M2 of the showcase roadmap (`2026-11-19-showcase-roadmap.md`) is
+Milestone M2 of the showcase roadmap (`../../specs/2026-11-19-showcase-roadmap.md`) is
 split in two, each visible on screen with its own GPU budget:
 
 - **M2a forests (this document):** procedural placement, instance cells,

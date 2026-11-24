@@ -17,6 +17,8 @@ Docs, read on demand:
 - `docs/superpowers/{specs,plans}/`: designs and implementation plans
   (Status line at the top); milestones in
   `specs/2026-11-19-showcase-roadmap.md`.
+- `docs/superpowers/archive/{specs,plans}/`: finished specs and plans,
+  moved out of the way; read one only when a decisions.md entry points to it.
 - `docs/assets.md`: Megascans and Fab asset import.
 - `docs/reference/cli.md`: every game flag, controls, overlays (G grade
   panel, F3/F4 perf), benchmark and route, reference path tracer, weather,

@@ -10,7 +10,7 @@
 
 **Tech Stack:** C++20, Vulkan 1.3, GLSL compute, doctest.
 
-**Spec:** `docs/superpowers/specs/2026-11-19-clouds-weather-design.md` (read it with this plan).
+**Spec:** `docs/superpowers/archive/specs/2026-11-19-clouds-weather-design.md` (read it with this plan).
 
 ## Global Constraints
 

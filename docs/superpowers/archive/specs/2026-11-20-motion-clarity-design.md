@@ -259,7 +259,7 @@ explicitly (user requirement). The design below is what it implements.
   (0.66 scale) and the gates are re-measured there.
 - RR's slot (<= 3.0 ms) replaces TAA + the shadow denoiser, and exceeds
   the showcase roadmap's 0.7 ms atmosphere/TAA/exposure/tonemap allotment
-  (`2026-11-19-showcase-roadmap.md`). The roadmap budget is updated with
+  (`../../specs/2026-11-19-showcase-roadmap.md`). The roadmap budget is updated with
   measured numbers when this work lands (open question below).
 - RR takes no exposure input; the pre-exposed colour is fine.
 

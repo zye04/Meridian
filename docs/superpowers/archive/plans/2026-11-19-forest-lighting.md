@@ -10,7 +10,7 @@
 
 **Tech Stack:** C++20, Vulkan 1.3, `VK_NV_partitioned_acceleration_structure`, `VK_EXT_opacity_micromap`, ray queries, GLSL, doctest.
 
-**Spec:** `docs/superpowers/specs/2026-11-19-forest-lighting-design.md` (read it with this plan, and the M2a spec it builds on). Starts after M2a (`docs/superpowers/plans/2026-11-19-forests.md`) is complete; its recorded measurements (TLAS build/memory, shadow cost, frame vs ~7.7 ms) are inputs.
+**Spec:** `docs/superpowers/archive/specs/2026-11-19-forest-lighting-design.md` (read it with this plan, and the M2a spec it builds on). Starts after M2a (`docs/superpowers/archive/plans/2026-11-19-forests.md`) is complete; its recorded measurements (TLAS build/memory, shadow cost, frame vs ~7.7 ms) are inputs.
 
 ## Global Constraints
 
@@ -49,7 +49,7 @@
 
 ### Task 2: (moved to M2a) Far ray field
 
-Superseded on 2026-11-20: the 2D canopy field is replaced by M2a's voxel far field (`docs/superpowers/specs/2026-11-20-far-field-design.md`; M2a Tasks 8-9), which already provides `farFieldTransmittance(worldOrigin, direction, startDistance, maxDistance, skipTlasCells)`, its CPU replica and tests. M2b only adds the per-cell TLAS flags (Task 4). The number is kept so references stay valid.
+Superseded on 2026-11-20: the 2D canopy field is replaced by M2a's voxel far field (`docs/superpowers/archive/specs/2026-11-20-far-field-design.md`; M2a Tasks 8-9), which already provides `farFieldTransmittance(worldOrigin, direction, startDistance, maxDistance, skipTlasCells)`, its CPU replica and tests. M2b only adds the per-cell TLAS flags (Task 4). The number is kept so references stay valid.
 
 ---
 

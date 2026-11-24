@@ -10,7 +10,7 @@ Status: done (2026-11-23)
 
 **Tech Stack:** GLSL (Vulkan compute), C++20, doctest.
 
-**Spec:** `docs/superpowers/specs/2026-11-23-gi-canopy-radiance-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-23-gi-canopy-radiance-design.md`
 
 ## Global Constraints
 

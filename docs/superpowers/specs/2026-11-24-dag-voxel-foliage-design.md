@@ -7,7 +7,7 @@ Issue #1 (G1, distant forests read as grey speckle); also closes the
 backlog rows "Voxel switch band with opaque leaves", "Far-field bake needs
 ray queries", "Crown light optical depth from the prototype voxel grids"
 and issue #11 (G11, no tree shadows at distance) where the shadow task
-lands. Supersedes the mid tier of `2026-11-20-far-field-design.md`
+lands. Supersedes the mid tier of `../archive/specs/2026-11-20-far-field-design.md`
 (rasterized prototype voxels, decisions.md "Mid tier: rasterized prototype
 voxels").
 
