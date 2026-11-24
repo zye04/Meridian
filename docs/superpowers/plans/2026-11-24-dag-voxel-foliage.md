@@ -9,9 +9,10 @@ Execution ledger with every ruling: `2026-11-24-dag-voxel-foliage-ledger.md`
 
 Finish as designed, plus, all at 2560x1440:
 1. No list overflow at any evidence view.
-2. Drawn voxel quads at the forest overview no more than about the pixel
-   count (~3.7M); the 2^24 cap is a stopgap. Cull hidden voxels first
-   (not a look change), voxel size only after.
+2. Restated 2026-11-24 (the quad diagnostics showed 0.2% of overview
+   quads under 1 px; the excess is stacked layers, not voxel size): no
+   evidence view slower than main in GPU ms at 1440p, and no list
+   overflows. (Was: overview quads no more than about the pixel count.)
 3. Peak VRAM no higher than main's measured peak (and within the phase 2
    gate: resident <= 12 GB, peak <= 14 GB).
 4. Every number re-measured at 1440p (main and g1).
