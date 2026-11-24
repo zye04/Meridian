@@ -306,7 +306,8 @@ constexpr uint32_t kVoxelTextureSize = 512;
 // glTF, building and caching them when it is missing or stale.
 void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &meshes,
                   VoxelInputs &voxels) {
-  const uint64_t key = clusterSourceKey(meshes, voxels.textureBytes);
+  const uint64_t key = clusterSourceKey(meshes, voxels.textureBytes, voxels.materials,
+                                        voxels.primitiveMaterial, voxels.imageOf);
   std::filesystem::path cache = gltf;
   cache.replace_extension(".clusters");
   auto cached = readClusterCache(cache, key);

@@ -1069,7 +1069,10 @@ bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> f
 }
 
 uint64_t clusterSourceKey(std::span<const MeshData> meshes,
-                          std::span<const std::vector<uint8_t>> voxelTextures) {
+                          std::span<const std::vector<uint8_t>> voxelTextures,
+                          std::span<const VoxelMaterial> voxelMaterials,
+                          std::span<const uint32_t> primitiveMaterial,
+                          std::span<const std::array<int, 3>> materialTextures) {
   // FNV-1a: the cache stays valid exactly as long as what it was built from.
   uint64_t hash = 14695981039346656037ull;
   const auto mix = [&](const void *data, size_t bytes) {
@@ -1090,6 +1093,19 @@ uint64_t clusterSourceKey(std::span<const MeshData> meshes,
     mix(&size, sizeof(size));
     mix(texture.data(), texture.size());
   }
+  // Field by field: the image pointers are per load and the struct has padding.
+  const uint64_t materialCounts[] = {voxelMaterials.size(), primitiveMaterial.size(),
+                                     materialTextures.size()};
+  mix(materialCounts, sizeof(materialCounts));
+  for (const VoxelMaterial &m : voxelMaterials) {
+    const float factors[] = {m.baseColorFactor.x,   m.baseColorFactor.y,   m.baseColorFactor.z,
+                             float(m.alphaMask),    m.alphaCutoff,         m.diffuseTransmission,
+                             m.transmissionColor.x, m.transmissionColor.y, m.transmissionColor.z,
+                             m.roughnessFactor};
+    mix(factors, sizeof(factors));
+  }
+  mix(primitiveMaterial.data(), primitiveMaterial.size_bytes());
+  mix(materialTextures.data(), materialTextures.size_bytes());
   mix(&kVoxelizerVersion, sizeof(kVoxelizerVersion));
   return hash;
 }

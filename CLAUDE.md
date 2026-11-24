@@ -227,7 +227,8 @@ the trees back (hidden by default). Capture runs print validation errors,
   changes for the same constants (e.g. `placementHash`). Warm startup
   spends ~0.1 s there (Release ~10 s and Debug ~59 s cold).
 - `loadGltf` caches each model's cluster LOD hierarchy as `<name>.clusters`
-  next to the glTF, keyed by a hash of the loaded geometry and versioned
+  next to the glTF, keyed by a hash of the loaded geometry (and, for a
+  voxelizing model, its voxel materials and their texture bytes) and versioned
   with meshoptimizer (`kCacheVersion`, cluster.cpp, 7 since meshoptimizer
   v1.3; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
   the first load after a change prints "Building clusters" and rewrites it

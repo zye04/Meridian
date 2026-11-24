@@ -2,6 +2,7 @@
 #include <meridian/mesh.h>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -676,12 +677,48 @@ TEST_CASE("a mesh that does not opt in gets no voxels") {
 TEST_CASE("the cluster source key changes when a voxelized texture changes") {
   std::vector<MeshData> meshes{leafCrown(10, 2)};
   std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};
-  const uint64_t a = clusterSourceKey(meshes, textures);
+  const VoxelMaterial material{};
+  const uint32_t primitiveMaterial = 0;
+  const std::array<int, 3> imageOf{0, -1, -1};
+  const auto key = [&] {
+    return clusterSourceKey(meshes, textures, {&material, 1}, {&primitiveMaterial, 1},
+                            {&imageOf, 1});
+  };
+  const uint64_t a = key();
   textures[0][2] = 9;
-  CHECK(clusterSourceKey(meshes, textures) != a);
+  CHECK(key() != a);
   meshes[0].voxelize = false;
   textures[0][2] = 3;
-  CHECK(clusterSourceKey(meshes, textures) != a);
+  CHECK(key() != a);
+}
+
+TEST_CASE("the cluster source key changes when a voxelized material changes") {
+  const std::vector<MeshData> meshes{leafCrown(10, 2)};
+  const std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};
+  std::vector<VoxelMaterial> materials(2);
+  std::vector<uint32_t> primitiveMaterial{0};
+  std::vector<std::array<int, 3>> imageOf{{0, -1, -1}, {-1, -1, -1}};
+  const auto key = [&] {
+    return clusterSourceKey(meshes, textures, materials, primitiveMaterial, imageOf);
+  };
+  const uint64_t a = key();
+  const auto changes = [&](auto &field, auto value) {
+    const auto old = field;
+    field = value;
+    const bool changed = key() != a;
+    field = old;
+    return changed;
+  };
+  CHECK(changes(materials[0].baseColorFactor.y, 0.5f));
+  CHECK(changes(materials[0].alphaMask, true));
+  CHECK(changes(materials[0].alphaCutoff, 0.3f));
+  CHECK(changes(materials[0].roughnessFactor, 0.7f));
+  CHECK(changes(materials[0].diffuseTransmission, 0.4f));
+  CHECK(changes(materials[0].transmissionColor.z, 0.2f));
+  CHECK(changes(primitiveMaterial[0], 1u));
+  CHECK(changes(imageOf[0][0], -1));
+  CHECK(changes(imageOf[1][1], 0));
+  CHECK(key() == a);
 }
 
 TEST_CASE("voxel bricks and axis depths round-trip the cluster cache") {
