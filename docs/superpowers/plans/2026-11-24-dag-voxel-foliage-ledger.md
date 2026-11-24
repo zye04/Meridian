@@ -181,3 +181,39 @@ Fly steps (python3 -I .superpowers/g1/q2/fly_steps.py): mean 27.39 33.83 peak 48
 Lit-fraction check (python3 -I .superpowers/g1/q2/mask_classes.py): g1 T8 lit 6.9% crown 25.5% shadowed ground 67.6% (means crown 111.0, shadowed 83.5); main rt lit 17.3% crown 11.5% shadowed 71.2% (100.7, 82.7). The caster pass applies coverage (voxel_bricks.comp noise < opacity along the sun in shadowView), so no caster change. User 2026-11-24: far palette kept (accepted deviation), darker forest accepted; Task 7 closed.
 Review delta check (3265ce3..3c0b816): no defects found (details in the report). Drain: frames still in flight at the end of a run were never read back (a --frames 1 run reported nothing); readCounters per frame (countersPending set at submit), Renderer::drainStatistics waits for and reads the rest before the capture report. Review item 4 backlit pair (--trees --camera 700 1450 -400 -1.55 -0.5 --sun -0.93 0.36 -0.02; main with --shadows rt), OKLCh g1 - ray traced: far L +0.001 C -0.001 h -2.8; mid L -0.002 C -0.001 h -3.6; near L -0.006 C -0.001 h -3.2: not darker beyond 0.02, code left. Finding: backlit inside the forest (--camera 700 1300 -400 -1.55 -0.1, same sun) the cascades drop 1559700 with drawn clusters at kMaxDrawnClusters (2097152).
 Correction (Task 8 ruling "all cascades"): cascade 4 (shadowFarCells) switches every cell with trees to its far cell (cell_cull.comp:57 skips the pixel test in a shadow view), so voxel clusters cast in cascades 0-3, far-cell voxels in 4 (decisions.md and architecture.md corrected). Review row on selfDepth: half wrong, bakeModelAxisDepths sums all of the model meshes at the same edge.
+Pass 5 (762a1a4; .superpowers/g1/t9d/pass5.sh: seven views with --trees --shadow-refresh, then edge and overview without it):
+  r_edge: GPU 109.60 ms 12851942 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 4121524, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 7050, work items 410319, bvh nodes 322958, drawn clusters 238081, voxel clusters 265338, voxel quads 11572080; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 40915, work items 3973708, bvh nodes 3290388, drawn clusters 2097152, voxel clusters 2430995, voxel quads 24660000; 12851942 dropped
+  r_summit: GPU 70.25 ms 138622 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 138622, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 34011, work items 1589481, bvh nodes 1308284, drawn clusters 137234, voxel clusters 979749, voxel quads 12684807; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 39884, work items 3701381, bvh nodes 3066492, drawn clusters 2097152, voxel clusters 2264527, voxel quads 11732800; 138622 dropped
+  r_overview: GPU 49.16 ms 0 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 3321, work items 721665, bvh nodes 680337, drawn clusters 5668, voxel clusters 435555, voxel quads 10055247; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 40438, work items 3587079, bvh nodes 2972020, drawn clusters 292771, voxel clusters 2193373, voxel quads 7426336; 0 dropped
+  r_under: GPU 85.64 ms 1395692 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 1395692, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 5665, work items 102096, bvh nodes 105237, drawn clusters 275978, voxel clusters 61526, voxel quads 2176973; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 41571, work items 4069570, bvh nodes 3370124, drawn clusters 2097152, voxel clusters 2489903, voxel quads 19680778; 1395692 dropped
+  r_high: GPU 52.41 ms 0 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 20571, work items 5964036, bvh nodes 3640526, drawn clusters 0, voxel clusters 4431087, voxel quads 3671069; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 31803, work items 13, bvh nodes 13, drawn clusters 6, voxel clusters 0, voxel quads 0; 0 dropped
+  r_horizon: GPU 79.09 ms 275243 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 275243, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 30266, work items 1890889, bvh nodes 1668410, drawn clusters 197400, voxel clusters 1125624, voxel quads 10299784; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 41536, work items 3638581, bvh nodes 3014738, drawn clusters 2097152, voxel clusters 2225518, voxel quads 13548289; 275243 dropped
+  r_fly: GPU 92.80 ms 2145786 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 2145786, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 23385, work items 993214, bvh nodes 866611, drawn clusters 304099, voxel clusters 627192, voxel quads 16552571; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 40646, work items 3831091, bvh nodes 3172072, drawn clusters 2097152, voxel clusters 2343145, voxel quads 19690216; 2145786 dropped
+  edge: GPU 24.56 ms 12851942 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 4121524, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 7050, work items 410319, bvh nodes 322958, drawn clusters 238081, voxel clusters 265338, voxel quads 11572080; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 40915, work items 3973708, bvh nodes 3290388, drawn clusters 2097152, voxel clusters 2430995, voxel quads 24660000; 12851942 dropped
+  overview: GPU 22.33 ms 0 dropped by full cull lists (most in a frame, cascades included: chunks 0, work items 0, clusters 0, terrain nodes 0, bvh nodes 0) 
+    cull list need, main view, most in a frame: chunks 3321, work items 721665, bvh nodes 680337, drawn clusters 5668, voxel clusters 435555, voxel quads 10055247; 0 dropped
+    cull list need, sun shadow cascades, most in a frame: chunks 40438, work items 3587079, bvh nodes 2972020, drawn clusters 292771, voxel clusters 2193373, voxel quads 7426336; 0 dropped
+  peak (all runs): device memory allocated at peak 14261 MiB (all heaps 14357 MiB)
+Cascade need with temporary caps (kMaxDrawnClusters 2^22, the device's maxMeshWorkGroupCount; 2^23 refused at startup; kMaxVoxelQuads 2^25; vertex pool spilled, ms invalid):
+  m_edge: cull list need, sun shadow cascades, most in a frame: chunks 40915, work items 3973708, bvh nodes 3290388, drawn clusters 4194304, voxel clusters 2430995, voxel quads 33390418; 2024372 dropped
+WARNING: up to 2024372 entries dropped by full cull lists in a frame (main view and sun shadow cascades): the image is incomplete
+  m_under: cull list need, sun shadow cascades, most in a frame: chunks 41571, work items 4069570, bvh nodes 3370124, drawn clusters 3492844, voxel clusters 2489903, voxel quads 19680778; 0 dropped
+  m_fly: cull list need, sun shadow cascades, most in a frame: chunks 40646, work items 3831091, bvh nodes 3172072, drawn clusters 4194304, voxel clusters 2343145, voxel quads 19690216; 48634 dropped
+WARNING: up to 48634 entries dropped by full cull lists in a frame (main view and sun shadow cascades): the image is incomplete
+Near-view means before (item7, 8738167) / after 6d8c2c0 (pass5): edge 20.19/20.24, overview 116.35/116.37, summit 114.49/114.49, interior 23.46/23.34. mask_classes on pass5/overview.png: lit 6.8% crown 25.2% shadowed 68.0% (was 6.9/25.5/67.6).
