@@ -500,6 +500,8 @@ void Renderer::dumpWeatherMap(const std::filesystem::path &path) {
     region.imageExtent = {kSize, kSize, 1};
     vkCmdCopyImageToBuffer(cmd, impl_->weatherMap.image, VK_IMAGE_LAYOUT_GENERAL,
                            readback.buffer, 1, &region);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(impl_->allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");
@@ -528,6 +530,8 @@ void Renderer::printAmbient() {
     vkCmdCopyBuffer(cmd, impl_->skyIrradianceBuffer.buffer, readback.buffer, 1, &irradiance);
     const VkBufferCopy exposure{0, sizeof(SkyIrradiance), sizeof(ExposureState)};
     vkCmdCopyBuffer(cmd, impl_->exposureBuffer.buffer, readback.buffer, 1, &exposure);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(impl_->allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");

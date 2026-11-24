@@ -457,7 +457,9 @@ void Renderer::Impl::buildTlas(VkCommandBuffer cmd, FrameData &frame) {
 
   barrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
   barrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-  barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+  // Compute too: the reference path tracer traces the TLAS in the same frame.
+  barrier.dstStageMask =
+      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
   barrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
   vkCmdPipelineBarrier2(cmd, &dependency);
 }
@@ -1676,6 +1678,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_NONE, 0});
+  }
+  if (gradeReadback.buffer != VK_NULL_HANDLE || albedoCapturing || capturing) {
+    // A fence wait alone doesn't make device writes visible to the host.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   }
 
   check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");

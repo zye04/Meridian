@@ -143,8 +143,12 @@ double Renderer::referenceNoise() {
   impl.submitNow([&](VkCommandBuffer cmd) {
     const VkBufferCopy sum{0, 0, bytes};
     const VkBufferCopy squares{0, bytes, bytes};
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     vkCmdCopyBuffer(cmd, impl.referenceSum.buffer, staging.buffer, 1, &sum);
     vkCmdCopyBuffer(cmd, impl.referenceSquares.buffer, staging.buffer, 1, &squares);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(impl.allocator, staging.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");
