@@ -334,3 +334,10 @@ TEST_CASE("a slanted plane blocks the analytic share of each voxel's rays") {
   CHECK(low->depth[1] == 0.0f);
   CHECK(high->depth[1] == 0.0f);
 }
+
+TEST_CASE("voxelize rejects a mesh beyond the voxel key's range") {
+  const std::vector<VoxelTriangle> tris = {tri({0, 0, 0}, {1, 0, 0}, {0, 1, 0}),
+                                           tri({0, 0, 2.0e6f}, {1, 0, 2.0e6f}, {0, 1, 2.0e6f})};
+  const VoxelMaterial material{};
+  CHECK_THROWS(voxelize(tris, {&material, 1}, 1.0f));
+}

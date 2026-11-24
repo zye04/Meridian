@@ -1317,6 +1317,11 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &accelerationProperties;
   vkGetPhysicalDeviceProperties2(physical.value().physical_device, &properties);
+  // The voxel passes' dispatches stay within the limits checked here: one
+  // voxel_bricks.comp workgroup per voxel cluster, one voxel_instance.mesh
+  // workgroup per 64 voxel quads.
+  static_assert(kMaxVoxelInstances <= kMaxWorkItems);
+  static_assert((kMaxVoxelQuads + 63) / 64 <= kMaxDrawnClusters);
   if (meshProperties.maxMeshWorkGroupCount[0] < kMaxDrawnClusters ||
       meshProperties.maxMeshWorkGroupTotalCount < kMaxDrawnClusters ||
       properties.properties.limits.maxComputeWorkGroupCount[0] < kMaxWorkItems) {

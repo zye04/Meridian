@@ -4,6 +4,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 
@@ -258,6 +259,17 @@ NormalLobe normalLobe(const VoxelPayload &v) {
 
 VoxelGrid voxelize(std::span<const VoxelTriangle> triangles,
                    std::span<const VoxelMaterial> materials, float edge) {
+  // voxelKey packs each lattice coordinate in 21 bits.
+  for (const VoxelTriangle &t : triangles) {
+    for (const Vec3 &p : t.p) {
+      for (int axis = 0; axis < 3; ++axis) {
+        const double c = std::floor(double(comp(p, axis)) / edge);
+        if (c < -double(kKeyBias) || c >= double(kKeyBias)) {
+          throw std::runtime_error("voxelize: a vertex lies beyond 2^20 voxels of the origin");
+        }
+      }
+    }
+  }
   const size_t threads =
       std::clamp<size_t>(std::thread::hardware_concurrency(), 1, triangles.size() / 4096 + 1);
   std::vector<VoxelMap> maps(threads);
