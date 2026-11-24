@@ -4815,15 +4815,18 @@ gate protects).
 - **Caps = the most any evidence view needs at 1440p, plus 50%**, not
   powers of two (nothing in the code needs them): measured with the caps
   raised and every frame's counts (the first frame, without occlusion
-  history, needs the most). Work items 2310000 (summit 1537911), traversal
-  nodes 1970000 (summit 1308284), voxel clusters 2330000 (summit 1546756),
-  voxel quads 24660000 (fly-toward 16435665). The margin is wide because a
+  history, needs the most). Voxel quads 24660000 (fly-toward 16435665); the
+  other three from the high overview (below). The margin is wide because a
   full voxel list leaves holes where main drew triangles (backlog).
-- **The high overview (1119 4354 -431) is left dropping**, with a warning:
-  it needs 13615592 voxel clusters per phase, 5477393 work items and
-  3154414 nodes, about 965 MB of lists at +50% (device-local peak ~14.5
-  GB, over the 14.4 GB gate), and draws in 82.4 ms uncapped against main's
-  47.2. Fewer clusters at that distance is the far tile tier's job.
+- **The high overview (1119 4354 -431)** first needed 13615592 voxel
+  clusters per phase: a far tree drew its terminal groups, 4-8 clusters per
+  voxelizing mesh, because regions on either side of the mesh origin never
+  merge by halving their keys. The last few clusters now merge into one per
+  mesh (`finish()`, cluster.cpp; kVoxelizerVersion 10): 4431087 voxel
+  clusters, 5964036 work items, 3640526 nodes, and the caps cover it +50%
+  (work items 8950000, nodes 5460000, voxel clusters 6650000): 0 dropped,
+  48.3 ms against main's 47.2, device-local peak 14261 MiB. One cluster per
+  tree across meshes is the far tile tier's job.
 - **Paid for by smaller far-field splat slices**: `kFarSliceBytes` 1 GiB
   -> 256 MiB (slices 7/2/1 -> 30/5/1, splat 335 ms, image unchanged within
   repeat-run noise); device-local peak 14671 -> 13874 MiB before the caps,

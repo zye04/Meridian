@@ -33,7 +33,7 @@ constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 9;
+constexpr uint32_t kVoxelizerVersion = 10;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -495,8 +495,10 @@ struct VoxelLevels {
         }
       }
       // The lattice is anchored at the origin, so regions on either side of
-      // it never merge: the last group may hold up to 8 clusters.
-      if (levels.empty() && voxels <= 64) {
+      // it never merge by halving their keys: the last few clusters merge
+      // into one, so a far mesh draws a single cluster.
+      const bool last = levels.empty() && voxels <= 64;
+      if (last && nodes.size() == 1) {
         std::vector<Sphere> spheres;
         std::vector<Cluster> clusters;
         for (const Node &n : nodes) {
@@ -509,9 +511,10 @@ struct VoxelLevels {
       }
       std::map<std::array<int64_t, 3>, std::vector<uint32_t>> parents;
       for (uint32_t i = 0; i < nodes.size(); ++i) {
-        parents[{floorDiv(nodes[i].key[0], 2), floorDiv(nodes[i].key[1], 2),
-                 floorDiv(nodes[i].key[2], 2)}]
-            .push_back(i);
+        const std::array<int64_t, 3> parent = {floorDiv(nodes[i].key[0], 2),
+                                               floorDiv(nodes[i].key[1], 2),
+                                               floorDiv(nodes[i].key[2], 2)};
+        parents[last ? std::array<int64_t, 3>{} : parent].push_back(i);
       }
       for (const auto &[key, members] : parents) {
         std::vector<Cluster> clusters;
@@ -768,7 +771,8 @@ void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
 
 std::string clusterCacheExtension() {
   char extension[32];
-  std::snprintf(extension, sizeof(extension), ".v%08x.clusters", kCacheVersion);
+  std::snprintf(extension, sizeof(extension), ".v%08x.%u.clusters", kCacheVersion,
+                kVoxelizerVersion);
   return extension;
 }
 

@@ -165,7 +165,8 @@ TEST_CASE("cluster cache round-trips") {
 
 TEST_CASE("cluster cache file name carries the cache version") {
   const std::string extension = clusterCacheExtension();
-  CHECK(extension.size() == std::string(".v00000000.clusters").size());
+  // ".v<cache version, 8 hex>.<voxelizer version>.clusters"
+  CHECK(extension[10] == '.');
   CHECK(extension.starts_with(".v"));
   CHECK(extension.ends_with(".clusters"));
   CHECK(std::filesystem::path("a/tree.gltf").replace_extension(extension).filename().string() ==
@@ -819,17 +820,16 @@ TEST_CASE("a crown voxel's optical depth out of the model grows toward the crown
   CHECK(towardCentre > 2.0 * outward);
 }
 
-TEST_CASE("a mesh's voxel levels converge: its coarsest voxels are a handful of clusters") {
+TEST_CASE("a mesh's voxel levels converge to one cluster") {
   // Every group that goes to voxels joins one hierarchy per mesh, so a far
-  // tree draws a few clusters, not one per group (the Megascans beech's
-  // leaves had 17475 voxel roots and, as separate subtrees, 1650 terminal
-  // clusters).
+  // tree draws one cluster per mesh, not one per group (the Megascans
+  // beech's leaves had 17475 voxel roots and, as separate subtrees, 1650
+  // terminal clusters; then 4-8 per mesh, the regions around the origin).
   size_t terminal = 0;
   for (const Cluster &c : cachedCrown().clusters) {
     terminal += isVoxel(c) && c.self.error == FLT_MAX;
   }
-  CHECK(terminal >= 1);
-  CHECK(terminal <= 8);
+  CHECK(terminal == 1);
 }
 
 TEST_CASE("no voxel is finer than the mesh's height / 512") {

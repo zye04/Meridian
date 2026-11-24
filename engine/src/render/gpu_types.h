@@ -77,9 +77,8 @@ constexpr uint32_t kDrawBuckets = 4;
 // dropped and counted, and the counts that size indirect dispatches stay at
 // capacity (the device must allow dispatches that large).
 // List caps: the most the six evidence views need at 1440p, plus 50%
-// (decisions.md "Cull list caps from measured need"; the high overview does not
-// fit and drops with a warning).
-constexpr uint32_t kMaxWorkItems = 2310000;
+// (decisions.md "Cull list caps from measured need").
+constexpr uint32_t kMaxWorkItems = 8950000;
 // Per culling phase: instance chunks (up to 64 consecutive ids) the cell cull
 // emits. Every cell of the crop visible needs ~55K + 2.9M / 64 = ~100K.
 constexpr uint32_t kMaxChunks = 1u << 17;
@@ -88,7 +87,7 @@ constexpr uint32_t kMaxRetestClusters = 1u << 20;
 // The cluster BVH traversal: kBvhDepths dispatches per phase at most, over
 // three node queues of (instance, node) entries (cluster_traverse.comp).
 constexpr uint32_t kBvhDepths = 12;
-constexpr uint32_t kMaxTraversalNodes = 1970000;
+constexpr uint32_t kMaxTraversalNodes = 5460000;
 constexpr uint32_t kDrawBucketBlended = 4;
 
 #ifdef NDEBUG
@@ -1009,7 +1008,7 @@ static_assert(sizeof(FarCheckConstants) == 32);
 
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
-constexpr uint32_t kMaxVoxelInstances = 2330000;
+constexpr uint32_t kMaxVoxelInstances = 6650000;
 constexpr uint32_t kMaxVoxelQuads = 24660000;
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at

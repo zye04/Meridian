@@ -248,7 +248,7 @@ the trees back (hidden by default). Capture runs print validation errors,
   changes for the same constants (e.g. `placementHash`). Warm startup
   spends ~0.1 s there (Release ~10 s and Debug ~59 s cold).
 - `loadGltf` caches each model's cluster LOD hierarchy as
-  `<name>.v<version>.clusters` next to the glTF (the version in the name, so
+  `<name>.v<version>.<voxelizer version>.clusters` next to the glTF (the versions in the name, so
   branches with different versions sharing `assets/` keep separate files),
   keyed by a hash of the loaded geometry (and, for a
   voxelizing model, its voxel materials and their texture bytes) and versioned

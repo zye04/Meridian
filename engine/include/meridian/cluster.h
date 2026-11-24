@@ -182,9 +182,9 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
 // Derived-data cache of every primitive's hierarchy in one file. sourceKey
 // identifies the source it was built from; any other key, version or a
 // short file reads as nullopt.
-// The cache file's extension, carrying the cache version, so builds with
-// different versions sharing one assets/ keep separate files instead of
-// rebuilding each other's (e.g. ".v00080110.clusters").
+// The cache file's extension, carrying the cache and voxelizer versions, so
+// builds with different versions sharing one assets/ keep separate files
+// instead of rebuilding each other's (e.g. ".v00080406.10.clusters").
 std::string clusterCacheExtension();
 void writeClusterCache(const std::filesystem::path &file, uint64_t sourceKey,
                        const std::vector<ClusterLod> &lods);
