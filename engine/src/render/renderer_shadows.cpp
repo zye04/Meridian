@@ -59,7 +59,8 @@ void Renderer::Impl::createSunShadows() {
   shadowCounters = createBuffer(
       sizeof(DrawCounters),
       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-          VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       0);
   shadowDrawLists = createBuffer(VkDeviceSize{kDrawBuckets} * kMaxDrawnClusters * 2 *
                                      sizeof(uint32_t),
