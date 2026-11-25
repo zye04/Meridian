@@ -5013,3 +5013,28 @@ gate protects).
   (one run; debug path only), L 0.577 -> 0.578. Raster default unchanged
   (the condition is false there). 0 dropped, 0 validation errors.
 
+## Voxel crown residual after fixes 1-2: what it is (voxel-look round 3, 2026-11-25)
+
+- **Coverage was sky, not pale branches**: the albedo guide marks sky with
+  0.498 grey; the round-2 "pale branch" pixels (B/G 1.0-1.5) were sky seen
+  through crown gaps. Share of the voxel mask: `--voxel-lod near` 6.7%
+  against voxels 1.9% at 30 m, 2.6% against 1.1% at 12 m. With sky taken
+  out, albedo matches (near/voxels 0.986x, 0.979x).
+- **Split of delta L** (voxels - near, png OKLab, class mix vs within):
+  30 m -0.023 = coverage (sky gaps) -0.012 + within leaf -0.0045, grey
+  -0.0052, sky edge -0.0018; 12 m -0.018 = coverage -0.003 + leaf -0.0076
+  + grey -0.0063.
+- **Shading terms per albedo** (linear, sky-normalised, voxels/near): sun
+  diffuse 0.704x (30 m) and 0.792x (12 m); ambient 0.973x and 1.009x;
+  specular 1.29x and 1.12x (absolute). The sun visibility is already
+  higher (0.389 against 0.353), and leafPhase = Gamma / (pi G) matches the
+  visible-leaf integral (backscatter 2 rho / 3 pi), so the sun-diffuse gap
+  is in the voxel's inputs (lobe axis, alignment, transmission bake) or in
+  how its one aligned leaf stands for many: a design question, no try
+  made (backlog).
+- **Handover at cascade 3**: voxel luminance over distance (start view
+  raised to 1700 m, sky-normalised) steps 0.2165 (1050-1075 m) -> 0.1543
+  (1100-1125 m); the box-exit path is ~0.72x the cascade path at the same
+  distance (cascades everywhere: 0.219, box exit everywhere: 0.154). A
+  visible seam ring at ~1.1 km; backlog.
+
