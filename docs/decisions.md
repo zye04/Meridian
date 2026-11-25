@@ -5151,3 +5151,50 @@ build the TLAS, so no shader executes a query on a null TLAS address.
   above run-to-run noise.
 - `--shadows rt` (forest edge) and `--reference 16` (start view) still run
   with 0 validation errors.
+
+## Debug views and report bundle (debug-tools round 1, 2026-11-25)
+
+The user judges by eye, the lanes by numbers; between them was a
+256-colour screenshot and a hand-rebuilt pose. Engines close that gap
+with buffer visualisation modes (Unreal's Buffer Visualization and Nanite
+Visualize: Clusters/Triangles/LOD; Frostbite and id Tech debug views) and
+an editor pick that reads a per-pixel object id. Round 1 builds the
+minimum of that: an id target, a report key and two views.
+
+- Premise: there was no per-pixel instance or cluster id. The
+  architecture's "visibility buffer" is per-instance occlusion flags, not a
+  deferred id buffer; scene attachment 6 was already the sun light (the
+  doc's "6-7 reserved" was stale), 7 was free.
+- Id: scene attachment 7, RGBA32UI (kind << 24 | 24-bit instance id,
+  cluster index or far entry, distance, material), written by mesh.frag
+  (clusters through a mesh.mesh varying, and the terrain),
+  voxel_instance.frag, voxel.frag and sky.frag through one include
+  (debug_id.glsl). Mesh and material names are the glTF names loadGltf
+  passes to `Renderer::setMeshName`/`setMaterialName`; the cluster's DAG
+  level comes from a CPU table built at upload from each level's BVH.
+- First try: the id written always, to a null attachment when off
+  (VK_EXT_dynamic_rendering_unused_attachments). Forest edge `--trees`
+  (Release, Render 2560x1440 DLSS): scene early 10.73 -> 13.44 ms, GPU
+  23.96 -> 26.70 ms. A null attachment does not make the export free.
+- Kept (the variant): DEBUG_ID shader variants and a second set of the
+  eight scene pipelines with attachment 7, made only while a view or the
+  report is on (`createScenePipelines(true)`; one hitch on toggle). Off,
+  the pass has seven attachments and main's shaders: scene early 10.89 ms,
+  GPU 24.07 ms (single-frame numbers, run noise). `Loaded: resident 11998
+  MiB` before and after; the id target (59 MB at 1440p), the debug albedo
+  (only when no diffuse albedo exists) and the level table exist only
+  while on.
+- Views bypass the upscaler: debug_view.frag replaces the tonemap and reads
+  attachments 3 and 7 at the nearest render pixel. Report: shot (the frame
+  without view or crosshair), every view of the same frame rendered
+  offscreen from the kept attachments, pixel.json at the centre pixel,
+  look.json and a repro line (`--game-time` added so an interactive
+  moment's clock can be matched).
+- Measured: trunk view `1320.78 1292.08 -468.17 0.369 0.6 --sun -0.207
+  0.819 0.535 --trees`, report at frame 60: pixel.json names
+  `SM_BlackAlder_Field_04.gltf`, triangles, DAG level 0, 1.22 m; its
+  repro.txt's capture differs from the shot by 0.5735/255 mean, two runs
+  of the same repro line by 0.4909/255 (this `--trees` view is not
+  deterministic to 1e-6). Forest edge with `--debug-view lod`: a European
+  beech (Forest_03) at 19.9 m, level 1. 0 validation errors in every run
+  (Release with asserts and validation).

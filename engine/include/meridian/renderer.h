@@ -1,6 +1,7 @@
 #pragma once
 
 #include <meridian/camera.h>
+#include <meridian/debug_view.h>
 #include <meridian/grade.h>
 #include <meridian/math/mat4.h>
 #include <meridian/mesh.h>
@@ -442,6 +443,24 @@ public:
   // and sky irradiance on an upward-facing surface (relative to the sun's
   // illuminance), with the clouds and of the clear sky alone.
   void printAmbient();
+
+  // Debug views and the pixel pick. The id target (scene attachment 7) and
+  // the views' resources exist only while a view is on or keepDebugTargets
+  // is set; they are made before the next frame and freed when neither is.
+  void setDebugView(DebugView view);
+  DebugView debugView() const;
+  void keepDebugTargets(bool keep);
+  // Wait for the GPU, then: what render pixel (x, y) of the last frame shows
+  // (needs the debug targets during that frame), or a view of that frame
+  // saved as a display-sized PNG.
+  std::optional<PixelPick> pick(uint32_t x, uint32_t y);
+  bool saveDebugView(DebugView view, const std::filesystem::path &path);
+  // Names reported by pick (loadGltf sets the glTF names).
+  void setMeshName(MeshId mesh, std::string name);
+  void setMaterialName(MaterialId material, std::string name);
+  // Render size of the frames (the debug targets', pick's pixels).
+  uint32_t renderWidth() const;
+  uint32_t renderHeight() const;
 
   // Vulkan validation errors reported so far (Debug builds only).
   uint32_t validationErrorCount() const;

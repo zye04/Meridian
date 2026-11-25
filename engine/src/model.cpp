@@ -444,6 +444,7 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
           textureInfo(m.diffuseTransmission->diffuseTransmissionColorTexture), ColorSpace::Srgb);
     }
     materials.push_back(renderer.createMaterial(material));
+    renderer.setMaterialName(materials.back(), std::string(m.name));
   }
   const MaterialId defaultMaterial = renderer.createMaterial({});
 
@@ -540,6 +541,9 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
                                 ? materials[*primitive.materialIndex]
                                 : defaultMaterial;
       meshes[i].push_back(renderer.uploadMesh(primitives[next++], material));
+      renderer.setMeshName(meshes[i].back(), path.filename().string() + "/" +
+                                                 std::string(asset.meshes[i].name) + "#" +
+                                                 std::to_string(meshes[i].size() - 1));
     }
   }
 

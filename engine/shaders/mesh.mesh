@@ -31,6 +31,10 @@ layout(location = 10) flat out float outStreamFade[];
 // -1 where mesh.frag marches the terrain per fragment.
 layout(location = 11) flat out float outTerrainSun[];
 layout(location = 12) out float outCrownVisibility[];
+#ifdef DEBUG_ID
+// (instance id, cluster index) for the debug id (debug_id.glsl).
+layout(location = 13) flat out uvec2 outDebugId[];
+#endif
 
 // Tree crowns get no sky inside: leaves deep in the crown see the sky through
 // the leaves around them. The crown is the ellipsoid inscribed in the mesh's
@@ -128,6 +132,9 @@ void main() {
         outTint[i] = tint;
         outStreamFade[i] = instance.fade;
         outTerrainSun[i] = terrainSun;
+#ifdef DEBUG_ID
+        outDebugId[i] = uvec2(entry.x & 0xFFFFFFu, entry.y);
+#endif
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = tuft ? clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0) : 1.0;
         outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;

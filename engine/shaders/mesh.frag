@@ -6,6 +6,8 @@
 #include "material.glsl"
 #include "terrain.glsl"
 #include "lighting.glsl"
+#define DEBUG_ID_MESH
+#include "debug_id.glsl"
 #ifdef TERRAIN
 #include "placement.glsl"
 #endif
@@ -263,6 +265,7 @@ void main() {
     vec2 currentUv = inCurrentClip.xy / inCurrentClip.w * 0.5;
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;
     outMotion = previousUv - currentUv;
+    writeMeshDebugId(inRelativePosition, inMaterialIndex);
 #ifdef ALPHA_BLEND
     outTransparency = coverage;
     outSunLight = vec4(0.0, 0.0, 0.0, coverage);

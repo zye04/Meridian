@@ -4,7 +4,7 @@ struct GLFWwindow;
 
 namespace meridian {
 
-enum class Key { Escape, W, A, S, D, F, G, F3, F4, Space, LeftShift, LeftControl };
+enum class Key { Escape, W, A, S, D, F, G, F3, F4, F5, F6, Space, LeftShift, LeftControl };
 
 struct MouseDelta {
   float x = 0.0f;

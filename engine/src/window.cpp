@@ -28,6 +28,10 @@ int toGlfwKey(Key key) {
     return GLFW_KEY_F3;
   case Key::F4:
     return GLFW_KEY_F4;
+  case Key::F5:
+    return GLFW_KEY_F5;
+  case Key::F6:
+    return GLFW_KEY_F6;
   case Key::Space:
     return GLFW_KEY_SPACE;
   case Key::LeftShift:

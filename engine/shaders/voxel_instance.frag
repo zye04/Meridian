@@ -7,6 +7,7 @@
 #include "terrain.glsl"
 #include "lighting.glsl"
 #include "voxel_lod.glsl"
+#include "debug_id.glsl"
 
 // A voxel of a voxel cluster (voxel_instance.mesh draws it as a
 // camera-facing quad), shaded flat at its centre as the leaves it stands in
@@ -120,6 +121,7 @@ void main() {
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
     outSunLight =
         vec4(min(sunRadiance * hazeTransmittance * exposure, vec3(kMaxExposedLuminance)), 1.0);
+    writeDebugId(kDebugVoxels, inInfo.x, inInfo.w, relative, ~0u);
 
     // Motion of the flat point, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).

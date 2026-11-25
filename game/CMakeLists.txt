@@ -1,4 +1,4 @@
-add_executable(game src/main.cpp src/overlay.cpp src/perf_overlay.cpp)
+add_executable(game src/main.cpp src/overlay.cpp src/perf_overlay.cpp src/report.cpp)
 target_link_libraries(game PRIVATE meridian)
 # geo_channels.h: what the geo channels mean (header only, shared with the cook).
 target_include_directories(game PRIVATE ${CMAKE_SOURCE_DIR}/tools/cook)

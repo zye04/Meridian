@@ -347,6 +347,7 @@ void Renderer::Impl::createBloomChain() {
 }
 
 void Renderer::Impl::destroySwapchain() {
+  destroyDebugTargets();
   destroyCloudTargets();
   upscaler.reset();
   vkDestroyDescriptorPool(device.device, bloomPool, nullptr);
@@ -990,6 +991,78 @@ void Renderer::Impl::createScene() {
   terrain.nodes = terrainLists.address + VkDeviceSize{2} * kMaxTerrainNodes * kNodeSize;
 }
 
+// The pipelines that draw into the scene attachments; with debugId, the set
+// with attachment 7 and the DEBUG_ID shader variants.
+void Renderer::Impl::createScenePipelines(bool debugId) {
+  VkDevice dev = device.device;
+  const VkFormat formats[] = {kHdrFormat,    kMotionFormat,
+                              kTransparencyMaskFormat, kAlbedoFormat,
+                              kAlbedoFormat, kNormalRoughnessFormat,
+                              kSunLightFormat, kDebugIdFormat};
+  // Attachment 7 only in the debug set (debug_id.glsl).
+  const std::span<const VkFormat> sceneFormats(formats, debugId ? 8 : 7);
+  // Opaque and masked geometry is drawn as culled clusters (mesh shader),
+  // blended geometry as whole meshes from the CPU (vertex shader).
+  PipelineDesc meshDesc{.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh",
+                        .fragmentShader = debugId ? "mesh_debug.frag" : "mesh.frag",
+                        .layout = sceneLayout,
+                        .colorFormats = sceneFormats,
+                        .depthFormat = kDepthFormat,
+                        .dynamicCullMode = true};
+  meshPipeline = createGraphicsPipeline(dev, meshDesc);
+  // Alpha testing (discard) disables early depth testing, so masked
+  // materials are shaded after a depth-only alpha-test prepass and shade
+  // only the fragments whose depth equals the prepass's.
+  meshDesc.meshShader = "mesh.mesh";
+  meshDesc.fragmentShader = "mesh_masked_depth.frag";
+  meshDesc.noColorWrites = true;
+  maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.noColorWrites = false;
+  meshDesc.depthEqualNoWrite = true;
+  meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
+  meshDesc.fragmentShader = debugId ? "mesh_masked_debug.frag" : "mesh_masked.frag";
+  maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.depthEqualNoWrite = false;
+  meshDesc.meshShader = nullptr;
+  meshDesc.vertexShader = "mesh.vert";
+  meshDesc.fragmentShader = "mesh_blended.frag";
+  meshDesc.alphaBlend = true;
+  blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+
+  // The CDLOD terrain: opaque, back faces culled.
+  meshDesc.vertexShader = nullptr;
+  meshDesc.meshShader = "terrain.mesh";
+  meshDesc.fragmentShader = debugId ? "terrain_debug.frag" : "terrain.frag";
+  meshDesc.alphaBlend = false;
+  terrainPipeline = createGraphicsPipeline(dev, meshDesc);
+
+  // Far cells' canopy boxes, back faces culled; voxel.frag writes the march's
+  // depth behind the face (conservative depth_less).
+  meshDesc.meshShader = "voxel.mesh";
+  meshDesc.fragmentShader = debugId ? "voxel_debug.frag" : "voxel.frag";
+  voxelPipeline = createGraphicsPipeline(dev, meshDesc);
+  // Voxel clusters: one camera-facing quad per voxel.
+  meshDesc.meshShader = "voxel_instance.mesh";
+  meshDesc.fragmentShader = debugId ? "voxel_instance_debug.frag" : "voxel_instance.frag";
+  voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
+  skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "sky.vert",
+                                             .fragmentShader =
+                                                 debugId ? "sky_debug.frag" : "sky.frag",
+                                             .layout = sceneLayout,
+                                             .colorFormats = sceneFormats,
+                                             .depthFormat = kDepthFormat,
+                                             .depthTest = false});
+}
+
+void Renderer::Impl::destroyScenePipelines() {
+  for (VkPipeline *pipeline : {&skyPipeline, &meshPipeline, &maskedMeshPipeline,
+                               &maskedDepthPipeline, &blendedMeshPipeline, &terrainPipeline,
+                               &voxelPipeline, &voxelInstancePipeline}) {
+    vkDestroyPipeline(device.device, *pipeline, nullptr);
+    *pipeline = VK_NULL_HANDLE;
+  }
+}
+
 void Renderer::Impl::createPipelines() {
   VkDevice dev = device.device;
 
@@ -1008,52 +1081,7 @@ void Renderer::Impl::createPipelines() {
   check(vkCreatePipelineLayout(dev, &sceneLayoutInfo, nullptr, &sceneLayout),
         "vkCreatePipelineLayout");
 
-  const VkFormat sceneFormats[] = {kHdrFormat,    kMotionFormat,
-                                   kTransparencyMaskFormat, kAlbedoFormat,
-                                   kAlbedoFormat, kNormalRoughnessFormat,
-                                   kSunLightFormat};
-  // Opaque and masked geometry is drawn as culled clusters (mesh shader),
-  // blended geometry as whole meshes from the CPU (vertex shader).
-  PipelineDesc meshDesc{.meshShader = "mesh.mesh",
-                        .fragmentShader = "mesh.frag",
-                        .layout = sceneLayout,
-                        .colorFormats = sceneFormats,
-                        .depthFormat = kDepthFormat,
-                        .dynamicCullMode = true};
-  meshPipeline = createGraphicsPipeline(dev, meshDesc);
-  // Alpha testing (discard) disables early depth testing, so masked
-  // materials are shaded after a depth-only alpha-test prepass and shade
-  // only the fragments whose depth equals the prepass's.
-  meshDesc.fragmentShader = "mesh_masked_depth.frag";
-  meshDesc.noColorWrites = true;
-  maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
-  meshDesc.noColorWrites = false;
-  meshDesc.depthEqualNoWrite = true;
-  meshDesc.fragmentShader = "mesh_masked.frag";
-  maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
-  meshDesc.depthEqualNoWrite = false;
-  meshDesc.meshShader = nullptr;
-  meshDesc.vertexShader = "mesh.vert";
-  meshDesc.fragmentShader = "mesh_blended.frag";
-  meshDesc.alphaBlend = true;
-  blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
-
-  // The CDLOD terrain: opaque, back faces culled.
-  meshDesc.vertexShader = nullptr;
-  meshDesc.meshShader = "terrain.mesh";
-  meshDesc.fragmentShader = "terrain.frag";
-  meshDesc.alphaBlend = false;
-  terrainPipeline = createGraphicsPipeline(dev, meshDesc);
-
-  // Far cells' canopy boxes, back faces culled; voxel.frag writes the march's
-  // depth behind the face (conservative depth_less).
-  meshDesc.meshShader = "voxel.mesh";
-  meshDesc.fragmentShader = "voxel.frag";
-  voxelPipeline = createGraphicsPipeline(dev, meshDesc);
-  // Voxel clusters: one camera-facing quad per voxel.
-  meshDesc.meshShader = "voxel_instance.mesh";
-  meshDesc.fragmentShader = "voxel_instance.frag";
-  voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
+  createScenePipelines(false);
 
   VkPushConstantRange postPushRange{};
   postPushRange.stageFlags =
@@ -1160,13 +1188,6 @@ void Renderer::Impl::createPipelines() {
       createComputePipeline(dev, "aerial_perspective_lut.comp", sceneLayout);
   skyIrradiancePipeline =
       createComputePipeline(dev, "sky_irradiance.comp", sceneLayout);
-
-  skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "sky.vert",
-                                             .fragmentShader = "sky.frag",
-                                             .layout = sceneLayout,
-                                             .colorFormats = sceneFormats,
-                                             .depthFormat = kDepthFormat,
-                                             .depthTest = false});
 
   const VkFormat swapchainFormat[] = {swapchain.image_format};
   tonemapPipeline =
@@ -1432,7 +1453,6 @@ Renderer::~Renderer() {
   impl_->destroyTerrainShadow();
   vkDestroyPipeline(dev, impl_->tonemapPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->gradeLutPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->skyPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyIrradiancePipeline, nullptr);
   vkDestroyPipeline(dev, impl_->aerialPerspectiveLutPipeline, nullptr);
   vkDestroyPipeline(dev, impl_->skyViewLutPipeline, nullptr);
@@ -1456,13 +1476,9 @@ Renderer::~Renderer() {
   vkDestroyPipelineLayout(dev, impl_->cullLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->postLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->gradeLayout, nullptr);
-  vkDestroyPipeline(dev, impl_->meshPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->maskedMeshPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->maskedDepthPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->blendedMeshPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->terrainPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->voxelPipeline, nullptr);
-  vkDestroyPipeline(dev, impl_->voxelInstancePipeline, nullptr);
+  // Destroyed here whichever set is in use; destroySwapchain mustn't remake them.
+  impl_->debugPipelines = false;
+  impl_->destroyScenePipelines();
   vkDestroyPipeline(dev, impl_->terrainSelectPipeline, nullptr);
   vkDestroyPipelineLayout(dev, impl_->terrainSelectLayout, nullptr);
   vkDestroyPipelineLayout(dev, impl_->sceneLayout, nullptr);

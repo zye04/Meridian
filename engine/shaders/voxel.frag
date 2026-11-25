@@ -29,6 +29,7 @@ layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
+#include "debug_id.glsl"
 #endif
 layout(depth_less) out float gl_FragDepth;
 
@@ -139,6 +140,7 @@ void main() {
     outSpecularAlbedo = vec4(mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0), 1.0);
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
     outSunLight = vec4(sunRadiance * hazeTransmittance * exposure, 1.0);
+    writeDebugId(kDebugFarCell, 0u, inEntry, relative, ~0u);
 
     // Motion of the flat hit, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).

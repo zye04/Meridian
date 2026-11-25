@@ -11,6 +11,7 @@ layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
+#include "debug_id.glsl"
 
 void main() {
     vec3 direction = normalize(inViewRay);
@@ -44,5 +45,6 @@ void main() {
     outSpecularAlbedo = vec4(0.0);
     outNormalRoughness = vec4(0.0);
     outSunLight = vec4(0.0);
+    writeDebugId(kDebugSky, 0u, 0u, vec3(1.0 / 0.0), ~0u);
     outMotion = (previousClip.xy / previousClip.w - currentClip.xy / currentClip.w) * 0.5;
 }

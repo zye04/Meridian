@@ -84,6 +84,11 @@ engine/src/render/         renderer internals:
                            trace and albedo feedback dispatches
   renderer_reference.cpp   reference path tracer: accumulation buffers,
                            its pipeline, the per-frame dispatch, noise
+  renderer_debug.cpp       debug views and pick: the debug targets and
+                           pipeline set (made and freed with
+                           updateDebugTargets), debug_view.frag in place
+                           of the tonemap, pick (one id + albedo texel),
+                           saveDebugView; debug_view.h is the public part
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -144,6 +149,7 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
 game/src/main.cpp          scene setup, fly camera, CLI options
 game/src/overlay.{h,cpp}   grading panel (ImGui widgets), grade file
                            with sun, haze and bloom (Look), G toggle
+game/src/report.{h,cpp}    the report bundle (F6, --report-at; cli.md)
 game/src/perf_overlay.{h,cpp}  performance overlay (F3), CSV recording
                            (F4, --benchmark); frame_stats.h: lows
 tools/cook/                meridian-cook; tree.cpp (--tree: simplify,
@@ -369,7 +375,9 @@ LUT bake (grade_lut.comp: grade + AgX into a 65^3 RGBA16F 3D LUT; frame 1
 and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
-AgX-inset colour) + +-1 LSB dither into the sRGB swapchain -> overlay
+AgX-inset colour) + +-1 LSB dither into the sRGB swapchain; with a debug
+view, debug_view.frag instead, reading scene attachments 3 and 7 at the
+nearest render pixel -> overlay
 (only after `Renderer::beginOverlay()`: ImGui drawn onto the swapchain in a
 second rendering pass, style colours linearized because the target
 encodes sRGB; no pass otherwise, so a hidden overlay costs nothing;
@@ -397,8 +405,14 @@ the layouts behind them.
   R8, 3 diffuse albedo RGBA8 (`diffuseColor`), 4 specular albedo RGBA8
   (the DFG pre-integrated `mix(dfg.x, dfg.y, f0)`), 5 normal RGBA16F (world
   `N`, facing the viewer on double-sided surfaces) with perceptual roughness
-  in alpha; 6-7 are reserved. Sky writes 0.5 / 0 / 0; the blended pipeline
-  masks 3-5 off. The guide images (plus a render-sized R16F specular hit
+  in alpha; 6 sun light RGBA16F (contact shadows); 7 debug id RGBA32UI
+  (debug_id.glsl: kind << 24 | instance, cluster or far entry, distance,
+  material), only while a debug view or the report is on: then the scene
+  pipelines are the debug set (`createScenePipelines(true)`, the DEBUG_ID
+  shader variants, eight attachments; the blended one writes none), and
+  attachment 3 falls back to a debug albedo image when neither GI nor the
+  upscaler made one; off, the pass has seven attachments and main's
+  shaders. Sky writes 0.5 / 0 / 0; the blended pipeline masks 3-5 off. The guide images (plus a render-sized R16F specular hit
   distance cleared to 65504, the guide's sky value: no ray-traced
   reflections) exist only when the upscaler `wantsGuides()` (Ray
   Reconstruction); otherwise those views are null and the writes are
