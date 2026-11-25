@@ -98,14 +98,28 @@ void main() {
     vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
     if (rayDirection.y > -sin(scene.sunAngularRadius)) {
         vec3 sunLocal = normalize(toLocal * rayDirection);
-        vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
-        vec3 lo = mesh.boundsCenter - halfExtent, hi = mesh.boundsCenter + halfExtent;
-        float selfDepth = voxelBoxDepth(axisWord, sunLocal);
-        vec3 exitPoint =
-            world + rayDirection * (voxelBoxExit(lo, hi, inLocal, sunLocal) * scale + kExitBias);
-        float visibility = float(inInfo.y) * exp(-selfDepth) *
-                           traceSunVisibility(exitPoint, exitPoint, rayDirection, 0.0, false,
-                                              exitPoint - scene.cameraPosition, s.normal);
+        // Cascades 0-3 hold the voxels as casters (the coarsest one, far
+        // cells): there the voxel takes the sun as a leaf does, from just
+        // past its own caster. Beyond (and in the blend into the far cells,
+        // which hold its model too) it shades itself through its depth out
+        // of the model and traces from where the sun ray leaves the box.
+        float casterRadius = scene.sunShadows.cascades[kShadowCascades - 2u].radius *
+                             (1.0 - kCascadeBlendFraction);
+        float visibility;
+        if (length(relative) < casterRadius) {
+            vec3 origin = world + rayDirection * (cluster.voxelEdge * scale);
+            visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
+                                            origin - scene.cameraPosition, rayDirection);
+        } else {
+            vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
+            vec3 lo = mesh.boundsCenter - halfExtent, hi = mesh.boundsCenter + halfExtent;
+            vec3 exitPoint =
+                world + rayDirection * (voxelBoxExit(lo, hi, inLocal, sunLocal) * scale + kExitBias);
+            visibility = exp(-voxelBoxDepth(axisWord, sunLocal)) *
+                         traceSunVisibility(exitPoint, exitPoint, rayDirection, 0.0, false,
+                                            exitPoint - scene.cameraPosition, s.normal);
+        }
+        visibility *= float(inInfo.y);
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);
         }

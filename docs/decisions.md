@@ -4850,7 +4850,8 @@ gate protects).
   voxel_instance.mesh draws each as an orthographic quad facing the sun,
   depth only. No cascade path disables LOD pruning: the cascades keep
   their orthographic LOD (1 texel, 0.25 in cascades 0-1).
-- **Self-shadow counted once**: voxel_instance.frag already attenuates by
+- **Self-shadow counted once** (superseded inside cascades 0-3 by "Voxel
+  sun visibility from the cascades", 2026-11-25): voxel_instance.frag already attenuates by
   the voxel's optical depth out of its model toward the sun and traces from
   where the sun ray leaves the mesh's box, so the cascades add only other
   trees. A caster moved half a voxel away from the sun changed nothing
@@ -4918,4 +4919,43 @@ gate protects).
   `.superpowers/g1/c1/sbs_canopy_025_vs_1.jpg`.
 - **User, 2026-11-24: keep one texel in every cascade** (saw the side by
   side, found the two nearly identical).
+
+## Voxel sun visibility from the cascades (voxel-look fix 1, 2026-11-25)
+
+- **Problem**: DAG voxels read darker and bluer than the triangles they
+  replace: OKLab L in the voxel mask -0.047 to -0.061 at 60-12 m, hue
+  +14 to +22 deg. Cause (voxel-look diagnosis): the box-exit design
+  ("Self-shadow counted once") shades a voxel through exp(-selfDepth), its
+  optical depth out of the whole model; per pixel at 30 m that is mean
+  0.158 (p10 0.009, p50 0.093), and with the cascade term 0.123, where a
+  forced-triangle leaf seen at the same pixels gets 0.353 (p10 0.013,
+  p50 0.262, p90 0.870). That rule predates voxel casters in the cascades.
+- **Chosen**: where cascades 0-3 hold the voxels as casters (inside
+  cascade 3's radius before its blend into the far-cell cascade 4, which
+  holds the same model as far cells), the voxel takes the sun as a leaf
+  does: traceSunVisibility at the voxel plus one voxel edge toward the sun,
+  no exp(-selfDepth). Beyond, the box-exit sample with exp(-selfDepth)
+  stays. Triangles lit through the same voxel casters had already matched
+  the ray-traced truth (L 0.461 against 0.463), so the casters carry the
+  crown's own shadow.
+- **Measured, 1440p, voxel mask, against `--voxel-lod near`**: sun
+  visibility at 30 m mean 0.389 (p10 0.006, p50 0.284, p90 0.962) against
+  the triangles' 0.353. Delta L 60/45/30/20/12 m: -0.052/-0.047/-0.060/
+  -0.058/-0.061 before, -0.001/-0.003/-0.026/-0.010/-0.022 after; hue gap
+  +15 to +22 deg -> -8 to +4 deg. Backlit sun at 30 m -0.075 -> -0.039,
+  high sun -0.085 -> -0.025. Local contrast at or under the triangles'
+  (30 m 0.0912 against 0.0979): no acne from the coverage hash. Frame time
+  unchanged (forest edge 24.62 -> 24.52 ms, overview 22.62 -> 22.36 ms),
+  0 dropped.
+- **Variant rejected**: one global clumping factor, exp(-0.4 selfDepth)
+  (calibrated offline to the triangles' mean): delta L -0.012/-0.009/
+  -0.033/-0.022/-0.032, worse at every stop, and it compresses the
+  distribution (p10 too high, p90 too low) where the cascade lookup keeps
+  its shape. The 4-bit 0.5-step depth quantization does not show in local
+  contrast (clump 0.0909 against default 0.0909 at 30 m).
+- **Not accepted yet**: 30 m and 12 m stay outside +-0.015, and backlit and
+  high sun too, while the sun visibility already exceeds the triangles'.
+  The rest of the gap is in the voxel's shading terms (aligned share,
+  spherical-leaf phase, specular), not its visibility. `--shadows rt` keeps
+  the box-exit path (no cascade radii there): unchanged, L 0.415.
 
