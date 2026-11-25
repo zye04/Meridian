@@ -5074,3 +5074,29 @@ gate protects).
 - **Cost**: overview (`700 1450 -400 -1.55 -0.5`), two runs each: GPU
   22.57 / 22.41 -> 22.10 / 22.07 ms, voxel trees 7.75 / 7.66 -> 7.30 /
   7.28 ms; 0 dropped, cascades included.
+
+## Voxel look round 4: target switch, far trunks, small trunks, overview hue (voxel-look, 2026-11-25)
+
+- **Switching tree**: forest hornbeam Forest_05 (instance 1621093, scale
+  1.05; prototype ids checked against the glTF bounds), approached from
+  45 m to 10 m with a clear corridor. Its leaves switch between 45 and
+  30 m (tint: voxel share of the target 0.90 at 45 m, 0.01 at 30 m), not
+  at the dump's 17-24 m (that is the 1 px estimate; voxels switch at
+  kVoxelPixels x the threshold). Stops, target-crown mask, voxels against
+  `--voxel-lod near`: 45 m dL -0.032 (p10 -0.008, p50 -0.051, p90
+  -0.034), C 0.041 against 0.050, h +6.7; 30/20/12 m (triangles) within
+  0.009. Walk at 5 m/s, frame pairs 3 frames apart: while the target is
+  voxels (30-46 m) frame-pair |dL| exceeds the triangles' by up to
+  +0.046 and L by -0.062 at ~37 m; across the switch (24-30 m) up to
+  +0.022; after it +0.001. The bar fails on this tree.
+- **Far trunks**: at 120-140 m (lone alder view) the trunks are still
+  triangles inside voxel crowns; at 200-300 m voxel trunks are 1-2 px
+  with no visible holes, in a frame half covered by a near branch.
+- **The voxel trunk at 22 m**: a beech Forest_08 (7.6 m model): fix 2's
+  floor gives its solid parts 15 mm voxels, switching at ~17-20 m.
+  Proposal (backlog): floor a solid cluster's edge at its own thickness.
+- **Overview hue** (raster h 126.6 against ray traced 136.6 for the mean
+  linear colour of the voxel pixels, 97% under 1088 m): specular is the
+  same in both (h 291, 3.6-3.7% of Y); the diffuse term carries it (h
+  123.7, C 0.038 against 130.6, 0.033): the cascades give far crowns
+  more sun than the ray (backlog).
