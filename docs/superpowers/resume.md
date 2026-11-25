@@ -65,10 +65,14 @@ unconditional", "VRAM budget").
    and at the far field), the drop warning over the whole run, voxel
    casters, the caster LOD of one texel in every cascade.
 4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed"),
-   after the trunk lane merges (it may change the vertex format). Done
-   2026-11-25: the TLAS and BLAS only for `--shadows rt` and `--reference`
-   (decisions.md "TLAS and BLAS only for ray-traced modes"), resident 13956
-   -> 11998 MiB at the forest edge.
+   in a fresh lane once trunk-fix merges (it may change the vertex
+   format). It must keep a position path the BLAS build can read:
+   `buildBlas` reads float3 positions straight from the vertex pool at
+   the vertex stride (renderer_resources.cpp:178-182). No new content
+   (forest floor, more species, texture packs) before it lands. Done
+   2026-11-25 (merge 3d51440): the TLAS and BLAS only for `--shadows rt`
+   and `--reference` (decisions.md "TLAS and BLAS only for ray-traced
+   modes"), resident 13956 -> 11998 MiB at the forest edge.
 5. Visibility buffer: spec, then build (structural: spec and plan).
 6. Ambient occlusion respecified on the resolve: GTAO or the visibility
    bitmask, chosen in that spec.
@@ -102,10 +106,10 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   of the run (over the gate; the `Loaded:` line reads 13956, the frames
   allocate 32 MiB more; the `TLAS:` line's 13282 predates the far field's
   731 MiB), peak 14160
-  MiB at the far field, on the 16 GB card. Without the TLAS and BLAS
-  (step 4): `Loaded:` 11998 MiB, peaks 13086 MiB (models loading) and
-  12411 MiB (far field), inside both gates with 290 MiB of resident
-  headroom; vertex compression is the next saving.
+  MiB at the far field, on the 16 GB card. Main at 3d51440 meets the
+  gate at the forest edge (`--trees`): resident 11998 MiB (`Loaded:`),
+  peak 13086 MiB (models loading; far field 12411), 290 MiB of resident
+  headroom. No content before vertex compression (step 4).
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.
