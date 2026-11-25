@@ -651,12 +651,14 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
     for (MeshId id : prototypes[p].meshes) {
       meshList.push_back(id.index);
     }
-    VkDeviceSize built = 0;
-    r.prototypeBlas.push_back(r.buildBlas(
-        std::span(meshList).subspan(info.firstMesh, info.meshCount), &built));
-    builtBytes += built;
-    blasBytes += r.prototypeBlas.back().size;
-    info.blasAddress = r.prototypeBlas.back().address;
+    if (r.rayTracing) {
+      VkDeviceSize built = 0;
+      r.prototypeBlas.push_back(r.buildBlas(
+          std::span(meshList).subspan(info.firstMesh, info.meshCount), &built));
+      builtBytes += built;
+      blasBytes += r.prototypeBlas.back().size;
+      info.blasAddress = r.prototypeBlas.back().address;
+    }
     // The largest draw distance of its layers; 0 if any has none. A
     // far-field layer's prototype is in no other layer (setPlacement).
     bool unlimited = false;
@@ -695,6 +697,19 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
   r.cellDrawDistance = unlimited ? 0.0f : drawDistance;
 
   r.createVisibility();
+  const auto buildStart = Clock::now();
+  if (!r.rayTracing) {
+    r.submitNow([&](VkCommandBuffer cmd) { r.uploadInstances(cmd, r.frames[0]); });
+    r.instancesDirty = false;
+    const Renderer::Impl::MemoryUse use = r.memoryUse();
+    constexpr double kMiB = 1.0 / (1 << 20);
+    std::printf("TLAS: off (no ray-traced mode); cell margin %.1f m; device memory allocated "
+                "%.0f MiB (all heaps %.0f MiB), at peak while models loaded %.0f MiB (all heaps "
+                "%.0f MiB)\n",
+                margin, use.deviceLocal * kMiB, use.all * kMiB, r.loadPeak.deviceLocal * kMiB,
+                r.loadPeak.all * kMiB);
+    return;
+  }
   r.createTlas(r.placedCount + kMaxInstances);
   VkDevice dev = r.device.device;
   const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(TlasFillConstants)};
@@ -719,7 +734,6 @@ void Renderer::Impl::buildPlacedTlas(std::span<const Prototype> prototypes,
   vkDestroyPipeline(dev, fillPipeline, nullptr);
   vkDestroyPipelineLayout(dev, fillLayout, nullptr);
 
-  const auto buildStart = Clock::now();
   r.submitNow([&](VkCommandBuffer cmd) {
     r.uploadInstances(cmd, r.frames[0]);
     r.buildTlas(cmd, r.frames[0]);

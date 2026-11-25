@@ -26,6 +26,13 @@ void toFloat3(float out[3], DVec3 v) {
 
 void Renderer::setShadowMode(ShadowMode mode) { impl_->shadowMode = mode; }
 
+void Renderer::setRayTracing(bool enabled) {
+  if (!impl_->instances.empty() || impl_->placedCount > 0) {
+    throw std::runtime_error("setRayTracing must come before addInstance and setPlacement");
+  }
+  impl_->rayTracing = enabled;
+}
+
 void Renderer::setShadowRefresh(bool refresh) { impl_->shadowRefresh = refresh; }
 
 uint32_t Renderer::sunShadowRenderCount() const { return impl_->shadowRenderCount; }
@@ -105,6 +112,9 @@ void Renderer::Impl::destroySunShadows() {
 void Renderer::Impl::planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 camera,
                                     Vec3 sunDirection) {
   shadowPlanned.fill(false);
+  if (shadowMode == ShadowMode::Rt && !rayTracing) {
+    throw std::runtime_error("ShadowMode::Rt needs setRayTracing(true)");
+  }
   scene.shadowMode = shadowMode == ShadowMode::Rt ? 1 : 0;
   if (shadowMode == ShadowMode::Rt) {
     shadowRendered.fill(false);

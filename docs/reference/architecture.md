@@ -56,8 +56,9 @@ engine/src/render/         renderer internals:
                            rebuild rule, terrain_shadow.comp dispatch
   renderer_placement.cpp   setPlacement: count, scan, write at load (two
                            submits), Debug check against evaluatePoint;
-                           buildPlacedTlas: prototype BLAS + PrototypeInfo,
-                           cell margin, TLAS fill (tlas_fill.comp) + build
+                           buildPlacedTlas: PrototypeInfo, cell margin;
+                           with rayTracing prototype BLAS, TLAS fill
+                           (tlas_fill.comp) + build
   renderer_farfield.cpp    far field at setPlacement: prototype templates
                            from the meshes' 1 m voxels (cluster cache),
                            splat of the placed table into world bricks
@@ -184,7 +185,8 @@ the sun.
 ## Frame (renderer_frame.cpp, in order)
 
 Instance table upload + TLAS build over all instances (only on the first
-frame and after instances change; one TLAS shared by both frames; its
+frame and after instances change; the TLAS only with
+`Renderer::setRayTracing`, i.e. `--shadows rt` or `--reference`; one TLAS shared by both frames; its
 records are the placed instances', written once at setPlacement by
 tlas_fill.comp, then the hand-placed ones', copied in before each build) -> terrain
 shadow (terrain_shadow.comp, renderer_terrain_shadow.cpp, only when the sun

@@ -4804,9 +4804,8 @@ Chosen (medium confidence on the numbers):
   about 4x on tree memory) moves ahead of any new content pack. The
   broadleaf forest floor cook waits for it or for measured headroom.
 - To check: how much the TLAS and the full-detail BLAS hold on the default
-  raster path. If g1 removes the last ray query from it, building them only
-  for `--shadows rt`, `--far-shadows tlas` and `--reference` may be the
-  largest single saving.
+  raster path. Done: "TLAS and BLAS only for ray-traced modes" (1958 MiB
+  at the forest edge).
 
 Rejected: no budget (the g1 overshoot would have merged unnoticed), and a
 lower resolution or texture cap as the first lever (it trades the look the
@@ -5109,3 +5108,46 @@ peak stays the `TLAS:` line's load peak and the `Far field:` line's peak.
   same in both (h 291, 3.6-3.7% of Y); the diffuse term carries it (h
   123.7, C 0.038 against 130.6, 0.033): the cascades give far crowns
   more sun than the ray (backlog).
+
+## TLAS and BLAS only for ray-traced modes (step 4, 2026-11-25)
+
+The raster default traced one ray query: in `traceSunVisibility`
+(lighting.glsl) a receiver past `kFarShadowDistance` (4 km, with the far
+shadow map on) skipped the cascades and queried the TLAS for the non-tree
+casters (rocks, scree, saplings, hand-placed models). Those casters are not
+drawn past 1500, 600 and 150 m, so in raster mode a far receiver now takes
+objects from the far field alone. The ray query now runs only when
+`scene.shadowMode` is 1 (`--shadows rt`), a value uniform over every draw,
+and in reference.comp, which only `--reference` dispatches; both modes
+build the TLAS, so no shader executes a query on a null TLAS address.
+
+- `Renderer::setRayTracing(bool)` (default off, before `addInstance` and
+  `setPlacement`; the game sets it for `--shadows rt` or `--reference`)
+  builds the prototype BLAS, the hand-placed meshes' BLAS, the TLAS, its
+  scratch and record buffers. Off, setPlacement uploads the instance table
+  and prints `TLAS: off`. `ShadowMode::Rt` or `beginReference` without it
+  throws. `--far-shadows tlas` needs no TLAS of its own: in raster mode it
+  turns the far shadow map off and the cascades shade receivers to 5.12 km.
+- The earlier claim ("Raster sun shadows are the default") that the far
+  field's bake uses the TLAS and BLAS no longer holds: renderer_farfield.cpp
+  bakes from the meshes' voxels. The GI probes never used them either.
+- Measured (Release, 2560x1440, `Render 2560x1440, display 2560x1440`;
+  main eb10736 + the `Loaded:` print, then this change):
+
+  | forest edge `--trees` | main | this |
+  |---|---|---|
+  | `Loaded: resident` (MiB) | 13956 | 11998 |
+  | end of run (MiB, temporary print) | 13988 | 12030 |
+  | peak at models loading / far field (MiB) | 13054 / 14160 | 13086 / 12411 |
+
+  The pools held TLAS 598, scratch 261, records 209, 97 prototype BLAS 800
+  and 15 mesh BLAS 3 MiB (1871 MiB); VMA's blocks drop 1958 MiB. Start view
+  (no trees): `TLAS:` line 3712 -> 3608 MiB. Resident is now 290 MiB under
+  the 12288 MiB gate.
+- Look: forest overview `700 1450 -400 -1.55 -0.5` and a high view to the
+  horizon `700 1800 -400 -1.55 -0.12`, both `--trees`, main against this:
+  mean difference 0.616 and 0.2295/255, SSIM 0.9978 and 0.9981; two runs of
+  main differ by 0.607 and 0.2291/255 (SSIM 0.9979, 0.9981). No difference
+  above run-to-run noise.
+- `--shadows rt` (forest edge) and `--reference 16` (start view) still run
+  with 0 validation errors.

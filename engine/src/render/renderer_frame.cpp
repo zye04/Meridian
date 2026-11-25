@@ -1020,7 +1020,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   if (impl_->instancesDirty) {
     impl_->uploadInstances(cmd, frame);
-    impl_->buildTlas(cmd, frame);
+    if (impl_->rayTracing) {
+      if (impl_->tlas.handle == VK_NULL_HANDLE) {
+        impl_->createTlas(impl_->placedCount + kMaxInstances);
+      }
+      impl_->buildTlas(cmd, frame);
+    }
     impl_->instancesDirty = false;
   }
   endPass("upload + tlas");

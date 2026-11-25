@@ -64,10 +64,11 @@ unconditional", "VRAM budget").
    Done with g1: the VRAM print (device-local and all heaps, peak at load
    and at the far field), the drop warning over the whole run, voxel
    casters, the caster LOD of one texel in every cascade.
-4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed");
-   the TLAS/BLAS memory check (build them only for `--shadows rt`,
-   `--far-shadows tlas`, `--reference` if g1 removes the last ray query
-   from the default path).
+4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed"),
+   after the trunk lane merges (it may change the vertex format). Done
+   2026-11-25: the TLAS and BLAS only for `--shadows rt` and `--reference`
+   (decisions.md "TLAS and BLAS only for ray-traced modes"), resident 13956
+   -> 11998 MiB at the forest edge.
 5. Visibility buffer: spec, then build (structural: spec and plan).
 6. Ambient occlusion respecified on the resolve: GTAO or the visibility
    bitmask, chosen in that spec.
@@ -101,8 +102,10 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   of the run (over the gate; the `Loaded:` line reads 13956, the frames
   allocate 32 MiB more; the `TLAS:` line's 13282 predates the far field's
   731 MiB), peak 14160
-  MiB at the far field, on the 16 GB card. Vertex compression (step 4) is
-  the planned saving.
+  MiB at the far field, on the 16 GB card. Without the TLAS and BLAS
+  (step 4): `Loaded:` 11998 MiB, peaks 13086 MiB (models loading) and
+  12411 MiB (far field), inside both gates with 290 MiB of resident
+  headroom; vertex compression is the next saving.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.

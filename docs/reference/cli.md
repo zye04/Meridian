@@ -59,7 +59,7 @@ validation error):
 
 ## Reference path tracer
 
-`--reference SPP` (with `--capture`; not with `--benchmark`,
+`--reference SPP` (with `--capture`; builds the TLAS and BLAS; not with `--benchmark`,
 `--capture-sequence`, `--capture-albedo` or camera velocities) is the
 reference path tracer (spec `docs/superpowers/archive/specs/2026-11-23-reference-path-tracer-design.md`,
 renderer_reference.cpp, reference.comp): after the `--frames` warm-up the
@@ -286,7 +286,10 @@ window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin, then VMA's blocks on the
 device-local heaps and, in brackets, on all heaps including system
-memory, now and at the peak while models loaded); the far field's line gives the same pair at its peak.
+memory, now and at the peak while models loaded); without `--shadows rt` or
+`--reference` nothing is ray traced, no TLAS or BLAS is built and it
+prints `TLAS: off (no ray-traced mode)` with the cell margin and the same
+memory figures. The far field's line gives the same pair at its peak.
 Every run prints `Loaded: resident N MiB device memory allocated (all heaps
 M MiB)` once at the first draw, after everything loaded: the VRAM gate's
 resident figure. `--far-field off` draws
@@ -310,8 +313,11 @@ in the TLAS and read the far shadow map of the bricks instead
 slope-scaled bias, built on frame 1 and rebuilt a slice per
 frame into a second map when the sun turns more than 0.1 degrees; a sun more
 than 1 degree off the built map falls back to the per-ray brick march);
-`tlas` traces every tree for every receiver (legacy A/B, to go with the
-TLAS; also what `--far-field off` does). Debug prints `far shadow map check:` (GPU map vs the CPU
+`tlas` turns the far shadow map off: with `--shadows rt` every receiver
+traces every tree in the TLAS (legacy A/B; also what `--far-field off`
+does), in raster mode receivers past 4 km take objects from the cascades
+(up to cascade 4's 5.12 km). Raster mode with the far shadow map takes only
+the far field past 4 km, no TLAS ray. Debug prints `far shadow map check:` (GPU map vs the CPU
 replica) and the first build's ms.
 `--gi off|probes` (default probes since 2026-11-23; off is the A/B and
 the fallback for weaker GPUs, where crown sky visibility is the only canopy
@@ -332,7 +338,8 @@ sun's visibility of objects
 (`shadowSampler`, the cascades' `sampler2DShadow` view of the bindless
 table), finest cascade within its radius,
 blended into the next over the outer 15%), or `rt` from one TLAS ray per
-pixel toward a point on the sun disk. Either way the terrain march,
+pixel toward a point on the sun disk (`rt` builds the TLAS and BLAS, which
+the raster default doesn't). Either way the terrain march,
 cloud shadow, contact shadows and the far path stay. Capture runs print
 `sun shadows: N cascade renders, max X ms` (the slowest shadow pass of
 the run: the re-render hitch). `--shadow-refresh` re-renders all five

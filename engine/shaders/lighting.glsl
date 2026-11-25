@@ -27,9 +27,9 @@ const float kMinPerceptualRoughness = 0.045;
 const uint kShadowCasterMask = 0x01u;
 const uint kFarFieldCasterMask = 0x04u;
 // Receivers farther from the camera than this see the far field's voxels
-// instead of the trees in the TLAS (when SceneData.voxelFarShadows is set):
-// the far switch's distance for a 25 m tree at 1440p. One representation
-// per ray, so no tree occludes twice.
+// instead of the trees in the TLAS or the cascades (when
+// SceneData.voxelFarShadows is set): the far switch's distance for a 25 m
+// tree at 1440p. One representation per ray, so no tree occludes twice.
 const float kFarShadowDistance = 4000.0;
 
 // Alpha-masked geometry is non-opaque in the acceleration structure, so the
@@ -188,16 +188,20 @@ float cascadeVisibility(vec3 relative, vec3 normal) {
 // terrain itself (cluster_cull.comp's per-cluster visibility).
 // In raster shadow mode (shadowMode 0) objects come from the cascades at
 // relative (camera-relative position) and normal instead of the ray query,
-// except beyond kFarShadowDistance, which keeps its TLAS query.
+// and beyond kFarShadowDistance from nothing but the far field: the other
+// casters (rocks, saplings) aren't drawn that far, and without a ray-traced
+// mode there is no TLAS.
 float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start,
                          bool marchTerrain, vec3 relative, vec3 normal) {
     bool far = pc.scene.voxelFarShadows != 0u &&
                distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
     float objects = 1.0;
-    if (pc.scene.shadowMode == 0u && !far) {
-        objects = cascadeVisibility(relative, normal);
-        if (objects <= 0.0) {
-            return 0.0;
+    if (pc.scene.shadowMode == 0u) {
+        if (!far) {
+            objects = cascadeVisibility(relative, normal);
+            if (objects <= 0.0) {
+                return 0.0;
+            }
         }
     } else {
         rayQueryEXT query;

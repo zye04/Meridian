@@ -4,7 +4,7 @@ C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
 world, grand scale. Sun shadows are raster (cached cascaded shadow maps);
 hardware ray tracing is still required (`--shadows rt` A/B,
-`--far-shadows tlas`). The setting is open,
+`--reference`; the TLAS and BLAS are built only for those). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:

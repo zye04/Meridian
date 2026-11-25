@@ -142,6 +142,7 @@ struct Renderer::Impl {
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
   ShadowMode shadowMode = ShadowMode::Raster;
+  bool rayTracing = false;
   bool loadPrinted = false;
   // Reference path tracer (renderer_reference.cpp): accumulation per pixel
   // (rgb sum + count, luminance sum of squares), display-sized.
@@ -238,7 +239,7 @@ struct Renderer::Impl {
   // frames in flight, and its instance records: the placed instances'
   // (tlas_fill.comp, at setPlacement), then the hand-placed ones' (copied
   // from FrameData::instanceBuffer at each build). Sized for placedCount +
-  // kMaxInstances records.
+  // kMaxInstances records. Only with rayTracing.
   AccelerationStructure tlas;
   Buffer tlasScratch;
   Buffer tlasRecords;
