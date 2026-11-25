@@ -736,6 +736,13 @@ void Renderer::drainStatistics() {
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     float deltaSeconds) {
   VkDevice dev = impl_->device.device;
+  if (!impl_->loadPrinted) {
+    // The VRAM gate's resident figure: everything loaded, far field included.
+    impl_->loadPrinted = true;
+    const Impl::MemoryUse use = impl_->memoryUse();
+    std::printf("Loaded: resident %.0f MiB device memory allocated (all heaps %.0f MiB)\n",
+                use.deviceLocal / double(1 << 20), use.all / double(1 << 20));
+  }
 
   int width = 0;
   int height = 0;

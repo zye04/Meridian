@@ -142,6 +142,7 @@ struct Renderer::Impl {
   float lodErrorPixels = 1.0f;
   bool occlusionCulling = true;
   ShadowMode shadowMode = ShadowMode::Raster;
+  bool loadPrinted = false;
   // Reference path tracer (renderer_reference.cpp): accumulation per pixel
   // (rgb sum + count, luminance sum of squares), display-sized.
   bool referencing = false;

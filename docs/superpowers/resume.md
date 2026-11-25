@@ -93,12 +93,16 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   ms (90 fps); 1% low >= 60 fps in every segment, hop frames excluded. 180
   fps is a stretch figure, not a gate. Proof of technique, not a merge
   gate.
-- VRAM: resident <= 12 GiB (12288 MiB), transient peak <= 14 GiB (14336
-  MiB), device-local, at the showcase views, printed by every capture run;
-  every spec states its VRAM delta. Main after the g1 merge (forest edge,
-  `--trees`): resident 13383 MiB (over the gate; the cull list caps sized
-  for the voxel views), peak 14261 MiB (all heaps 14357), on the 16 GB
-  card. Vertex compression (step 4) is the planned saving.
+- VRAM: resident <= 12 GiB (12288 MiB), the `Loaded: resident` line
+  (first draw, far field included); transient peak <= 14 GiB (14336 MiB),
+  the `TLAS:` and `Far field:` lines' peaks; device-local, at the showcase
+  views, printed by every capture run; every spec states its VRAM delta.
+  Main at eb10736 (forest edge, `--trees`): resident 13988 MiB at the end
+  of the run (over the gate; the `Loaded:` line reads 13956, the frames
+  allocate 32 MiB more; the `TLAS:` line's 13282 predates the far field's
+  731 MiB), peak 14160
+  MiB at the far field, on the 16 GB card. Vertex compression (step 4) is
+  the planned saving.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.

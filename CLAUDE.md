@@ -126,7 +126,9 @@ the trees back (hidden by default). Capture runs print validation errors,
 - Gates (decisions.md "Performance gate restated", "VRAM budget"): route
   average <= 8.3 ms, heaviest segment <= 11.1 ms, 1% low >= 60 fps per
   segment (hop frames excluded) at 2560x1440 DLAA with GI on; VRAM
-  resident <= 12 GB and transient peak <= 14 GB at the showcase views.
+  resident <= 12 GB (the `Loaded: resident` line, printed at the first
+  draw after everything loaded) and transient peak <= 14 GB (the `TLAS:`
+  and `Far field:` lines' peaks) at the showcase views.
   Every spec states its VRAM delta; a branch may not merge above main's
   peak. Proof of technique, not a merge gate for frame time.
 

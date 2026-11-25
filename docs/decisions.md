@@ -4812,6 +4812,15 @@ Rejected: no budget (the g1 overshoot would have merged unnoticed), and a
 lower resolution or texture cap as the first lever (it trades the look the
 gate protects).
 
+Measurement point (2026-11-25, step 4): the resident figure is the
+`Loaded: resident` line, printed once at the first draw, after every load
+(the far field included). The `TLAS:` line's "device memory allocated"
+comes before the far field and understated it: main at eb10736, forest
+edge `--trees`, 2560x1440, read 13282 MiB there, 13956 MiB on the
+`Loaded:` line and 13988 MiB at the end of the run (a temporary print;
+the first frames allocate the last 32 MiB). The
+peak stays the `TLAS:` line's load peak and the `Far field:` line's peak.
+
 ## Cull list caps from measured need (G1, 2026-11-24)
 
 - **Caps = the most any evidence view needs at 1440p, plus 50%**, not
