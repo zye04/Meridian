@@ -33,6 +33,11 @@ struct MeshData {
   // Part of a model that gets voxel levels in its cluster DAG
   // (voxelizesModel).
   bool voxelize = false;
+  // The height of the whole model, for a solid (non-foliage) part of a
+  // voxelizing model: its finest voxel follows the model, so a short part
+  // (a trunk base) doesn't voxelize at millimetre edges while the crown
+  // keeps its triangles. 0 for foliage, whose own height sets its switch.
+  float voxelModelHeight = 0.0f;
   // Seeds its voxel clusters' coverage hash (voxel_bricks.comp): from the
   // cluster cache key and the primitive's index, so a rebuild or another
   // load order keeps the pattern. Not cached.

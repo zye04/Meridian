@@ -118,7 +118,8 @@ struct VoxelSource {
 // With voxels (and mesh.voxelize), a group becomes voxel clusters once its
 // voxels are no worse than its simplified triangles: the lattice edge is the
 // largest power of two at or under the triangles' error, not under the
-// mesh's height / 512, and their error at least the children's. Above, one voxel hierarchy
+// height / 512 of the mesh or its model (voxelModelHeight, the larger), and
+// their error at least the children's. Above, one voxel hierarchy
 // per mesh: each level groups the clusters of a twice-as-large region,
 // whichever group they came from, and doubles the edge (combineVoxelGrids,
 // mergeVoxelGrid).

@@ -33,7 +33,7 @@ constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 10;
+constexpr uint32_t kVoxelizerVersion = 11;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -387,7 +387,7 @@ struct VoxelLevels {
   std::vector<GroupRange> &groupRanges;
   std::vector<int> &refinedGroups;
   std::vector<int> &clusterGroups;
-  // No voxel finer than the mesh's height / 512: it sets where voxels take
+  // No voxel finer than the model's height / 512: it sets where voxels take
   // over (the first level whose error reaches it), ~117 m for a 25 m beech
   // at 1440p, where its triangles are sub-pixel and many.
   float minEdge = 1e-4f;
@@ -635,7 +635,7 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels) {
       lo = std::min(lo, v.position.y);
       hi = std::max(hi, v.position.y);
     }
-    voxelLevels.minEdge = std::max((hi - lo) / 512.0f, 1e-4f);
+    voxelLevels.minEdge = std::max(std::max(hi - lo, mesh.voxelModelHeight) / 512.0f, 1e-4f);
     config.voxel_context = &voxelLevels;
     config.voxel_edge = &VoxelLevels::edgeFor;
     config.voxel_emit = &VoxelLevels::emit;

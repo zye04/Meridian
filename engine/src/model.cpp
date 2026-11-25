@@ -4,6 +4,7 @@
 #include <fastgltf/tools.hpp>
 #include <mikktspace.h>
 
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -513,8 +514,18 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
       }
       voxels.materials.push_back({});
       voxels.imageOf.push_back({-1, -1, -1});
-      for (MeshData &primitive : primitives) {
-        primitive.voxelize = true;
+      float lo = FLT_MAX, hi = -FLT_MAX;
+      for (const MeshData &primitive : primitives) {
+        for (const Vertex &v : primitive.vertices) {
+          lo = std::min(lo, v.position.y);
+          hi = std::max(hi, v.position.y);
+        }
+      }
+      for (size_t i = 0; i < primitives.size(); ++i) {
+        primitives[i].voxelize = true;
+        // Solid parts take the model's finest voxel; foliage keeps its own,
+        // which sets where the crown switches.
+        primitives[i].voxelModelHeight = foliage[i] ? 0.0f : hi - lo;
       }
     } else {
       voxels.primitiveMaterial.clear();

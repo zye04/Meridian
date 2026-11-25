@@ -842,6 +842,22 @@ TEST_CASE("no voxel is finer than the mesh's height / 512") {
   }
 }
 
+TEST_CASE("a short part of a tall model voxelizes no finer than the model's height / 512") {
+  static const VoxelMaterial material{};
+  MeshData mesh = leafCrown(1500, 2); // ~6 m tall
+  mesh.voxelModelHeight = 48.0f;
+  const VoxelSource source{{&material, 1}};
+  const ClusterLod lod = buildClusterLod(mesh, &source);
+  bool voxels = false;
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      voxels = true;
+      CHECK(c.voxelEdge >= 48.0f / 512.0f / 2.0f);
+    }
+  }
+  CHECK(voxels);
+}
+
 TEST_CASE("voxels hidden from every direction are dropped from the bricks") {
   std::vector<ClusterLod> lods{cachedCrown()};
   size_t before = lods[0].voxels.size();

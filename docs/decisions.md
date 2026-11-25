@@ -4959,3 +4959,38 @@ gate protects).
   spherical-leaf phase, specular), not its visibility. `--shadows rt` keeps
   the box-exit path (no cascade radii there): unchanged, L 0.415.
 
+## Solid parts voxelize no finer than their model (voxel-look fix 2, 2026-11-25)
+
+- **Problem**: the beech's trunk-base mesh (8,990 triangles, 2.91 m tall,
+  overlapping the bark from 1.57 m) went to voxels at 4-18 m with
+  3.9-15.6 mm edges, while its leaves switch at 68-80 m and its bark at
+  66-148 m: a voxel pattern on the trunk at walking distance, z-fighting
+  against the bark in the overlap (local contrast 0.035 against 0.003 as
+  triangles at 12 m) and grass through holes in the voxel shell at 60 m.
+- **Cause**: not a stalled simplifier. buildClusterLod floors the voxel
+  edge at the mesh's own height / 512 (the comment's intent was the
+  model's: "~117 m for a 25 m beech"). 2.91 / 512 = 5.7 mm floors to
+  2^-8 m = 3.9 mm, exactly the finest dumped edge, so the trunk base
+  switched as soon as its triangles' error reached millimetres. The holes:
+  a voxel on a solid surface keeps itself by the coverage hash against its
+  opacity, which a thin shell at mm edges leaves under 1.
+- **Try (rejected)**: every primitive of a voxelizing model takes the
+  model's height. Foliage meshes shorter than their model then switched
+  later too: voxel pixels at the stops halved (30 m 0.121 -> 0.063 of the
+  frame).
+- **Chosen**: only solid (non-foliage) parts take the model's height
+  (`MeshData::voxelModelHeight`, set by loadGltf from the same foliage
+  test voxelizesModel uses); foliage keeps its own. No asset names, no
+  distance constant. kVoxelizerVersion 10 -> 11 (the cluster cache files).
+- **Measured, 1440p**: trunk bases are triangles at 60, 30, 12 and 6 m
+  (tint frames, `.superpowers/voxel-look/cap/tint_fix2_sbs.jpg`), so the
+  overlap z-fight and the 60 m holes are gone at these stops; voxel
+  pixels 0.121 -> 0.116 at 30 m (crowns kept). In the old voxel mask,
+  with fix 1, delta L against `--voxel-lod near` +0.006 at 30 m and
+  -0.004 at 12 m: solid branch pixels that voxels covered are triangles
+  again; in the new mask (still voxels) -0.024 and -0.020, fix 1's
+  remaining gap. Cost: forest edge 24.52 -> 25.51 ms (+2.1M triangles),
+  overview 22.36 -> 22.40 ms; 0 dropped, cascades included.
+- **Still open**: a solid part voxelizes beyond its model's switch with
+  the same thin-shell coverage, so a far trunk can still show holes.
+
