@@ -113,6 +113,11 @@ constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 // foot of rock; rock on cliffs. Flat ground above the snow line is snow.
 enum class GiMode { Off, Probes };
 
+// Near: the debug reference for the voxels' look; the main view keeps the
+// triangles of instances within 150 m, the cascades keep their voxel casters
+// (Off drops those casters too).
+enum class VoxelLod { Off, On, Near };
+
 // What requestCapture saves: the displayed frame (PNG, or the linear HDR
 // image the tonemap read for a .pfm path), or the linear diffuse albedo the
 // shading used (render-sized .pfm; needs enableAlbedoCapture).
@@ -397,7 +402,7 @@ public:
   // On by default: the voxel levels of the meshes' cluster DAGs replace their
   // triangles where the LOD cut picks them; off keeps the triangles at every
   // distance (an A/B: what the voxels stand in for).
-  void setVoxelLod(bool enabled);
+  void setVoxelLod(VoxelLod mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

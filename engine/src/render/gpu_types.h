@@ -567,8 +567,8 @@ struct SceneData {
   // kMaxVoxelInstances entries (instance, voxel cluster), then per phase
   // kMaxVoxelQuads entries (cluster entry | terrain sun << 31, pool brick
   // << 6 | voxel)) and the DrawCounters (voxel_instance.mesh reads its
-  // counts). voxelLod: voxel clusters replace triangles (0: triangles
-  // everywhere, an A/B).
+  // counts). voxelLod: voxel clusters replace triangles (VoxelLod: 0
+  // triangles everywhere, 1 on, 2 near; voxelLodAt in common.glsl).
   VkDeviceAddress voxelPools = 0;
   VkDeviceAddress voxelInstances = 0;
   VkDeviceAddress drawCounters = 0;

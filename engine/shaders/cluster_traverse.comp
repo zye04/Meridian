@@ -37,7 +37,7 @@ void main() {
     float scale = instance.scale;
     // With voxel LOD off the triangles under voxel levels never give way
     // (cluster_cull.comp): no node is too coarse to visit.
-    if (scene.voxelLod != 0u &&
+    if (voxelLodAt(scene, instance.transform[3].xyz) &&
         projectedError((instance.transform * vec4(node.lodCenter, 1.0)).xyz,
                        node.lodRadius * scale, node.lodError * scale) <=
             scene.lodErrorPixels) {

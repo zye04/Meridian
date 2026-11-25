@@ -4850,7 +4850,8 @@ gate protects).
   voxel_instance.mesh draws each as an orthographic quad facing the sun,
   depth only. No cascade path disables LOD pruning: the cascades keep
   their orthographic LOD (1 texel, 0.25 in cascades 0-1).
-- **Self-shadow counted once**: voxel_instance.frag already attenuates by
+- **Self-shadow counted once** (superseded inside cascades 0-3 by "Voxel
+  sun visibility from the cascades", 2026-11-25): voxel_instance.frag already attenuates by
   the voxel's optical depth out of its model toward the sun and traces from
   where the sun ray leaves the mesh's box, so the cascades add only other
   trees. A caster moved half a voxel away from the sun changed nothing
@@ -4919,3 +4920,183 @@ gate protects).
 - **User, 2026-11-24: keep one texel in every cascade** (saw the side by
   side, found the two nearly identical).
 
+## Voxel sun visibility from the cascades (voxel-look fix 1, 2026-11-25)
+
+- **Problem**: DAG voxels read darker and bluer than the triangles they
+  replace: OKLab L in the voxel mask -0.047 to -0.061 at 60-12 m, hue
+  +14 to +22 deg. Cause (voxel-look diagnosis): the box-exit design
+  ("Self-shadow counted once") shades a voxel through exp(-selfDepth), its
+  optical depth out of the whole model; per pixel at 30 m that is mean
+  0.158 (p10 0.009, p50 0.093), and with the cascade term 0.123, where a
+  forced-triangle leaf seen at the same pixels gets 0.353 (p10 0.013,
+  p50 0.262, p90 0.870). That rule predates voxel casters in the cascades.
+- **Chosen**: where cascades 0-3 hold the voxels as casters (inside
+  cascade 3's radius before its blend into the far-cell cascade 4, which
+  holds the same model as far cells), the voxel takes the sun as a leaf
+  does: traceSunVisibility at the voxel plus one voxel edge toward the sun,
+  no exp(-selfDepth). Beyond, the box-exit sample with exp(-selfDepth)
+  stays. Triangles lit through the same voxel casters had already matched
+  the ray-traced truth (L 0.461 against 0.463), so the casters carry the
+  crown's own shadow.
+- **Measured, 1440p, voxel mask, against `--voxel-lod near`**: sun
+  visibility at 30 m mean 0.389 (p10 0.006, p50 0.284, p90 0.962) against
+  the triangles' 0.353. Delta L 60/45/30/20/12 m: -0.052/-0.047/-0.060/
+  -0.058/-0.061 before, -0.001/-0.003/-0.026/-0.010/-0.022 after; hue gap
+  +15 to +22 deg -> -8 to +4 deg. Backlit sun at 30 m -0.075 -> -0.039,
+  high sun -0.085 -> -0.025. Local contrast at or under the triangles'
+  (30 m 0.0912 against 0.0979): no acne from the coverage hash. Frame time
+  unchanged (forest edge 24.62 -> 24.52 ms, overview 22.62 -> 22.36 ms),
+  0 dropped.
+- **Variant rejected**: one global clumping factor, exp(-0.4 selfDepth)
+  (calibrated offline to the triangles' mean): delta L -0.012/-0.009/
+  -0.033/-0.022/-0.032, worse at every stop, and it compresses the
+  distribution (p10 too high, p90 too low) where the cascade lookup keeps
+  its shape. The 4-bit 0.5-step depth quantization does not show in local
+  contrast (clump 0.0909 against default 0.0909 at 30 m).
+- **Not accepted yet**: 30 m and 12 m stay outside +-0.015, and backlit and
+  high sun too, while the sun visibility already exceeds the triangles'.
+  The rest of the gap is in the voxel's shading terms (aligned share,
+  spherical-leaf phase, specular), not its visibility. `--shadows rt` keeps
+  the box-exit path (no cascade radii there): unchanged, L 0.415.
+
+## Solid parts voxelize no finer than their model (voxel-look fix 2, 2026-11-25)
+
+- **Problem**: the beech's trunk-base mesh (8,990 triangles, 2.91 m tall,
+  overlapping the bark from 1.57 m) went to voxels at 4-18 m with
+  3.9-15.6 mm edges, while its leaves switch at 68-80 m and its bark at
+  66-148 m: a voxel pattern on the trunk at walking distance, z-fighting
+  against the bark in the overlap (local contrast 0.035 against 0.003 as
+  triangles at 12 m) and grass through holes in the voxel shell at 60 m.
+- **Cause**: not a stalled simplifier. buildClusterLod floors the voxel
+  edge at the mesh's own height / 512 (the comment's intent was the
+  model's: "~117 m for a 25 m beech"). 2.91 / 512 = 5.7 mm floors to
+  2^-8 m = 3.9 mm, exactly the finest dumped edge, so the trunk base
+  switched as soon as its triangles' error reached millimetres. The holes:
+  a voxel on a solid surface keeps itself by the coverage hash against its
+  opacity, which a thin shell at mm edges leaves under 1.
+- **Try (rejected)**: every primitive of a voxelizing model takes the
+  model's height. Foliage meshes shorter than their model then switched
+  later too: voxel pixels at the stops halved (30 m 0.121 -> 0.063 of the
+  frame).
+- **Chosen**: only solid (non-foliage) parts take the model's height
+  (`MeshData::voxelModelHeight`, set by loadGltf from the same foliage
+  test voxelizesModel uses); foliage keeps its own. No asset names, no
+  distance constant. kVoxelizerVersion 10 -> 11 (the cluster cache files).
+- **Measured, 1440p**: trunk bases are triangles at 60, 30, 12 and 6 m
+  (tint frames, `.superpowers/voxel-look/cap/tint_fix2_sbs.jpg`), so the
+  overlap z-fight and the 60 m holes are gone at these stops; voxel
+  pixels 0.121 -> 0.116 at 30 m (crowns kept). In the old voxel mask,
+  with fix 1, delta L against `--voxel-lod near` +0.006 at 30 m and
+  -0.004 at 12 m: solid branch pixels that voxels covered are triangles
+  again; in the new mask (still voxels) -0.024 and -0.020, fix 1's
+  remaining gap. Cost: forest edge 24.52 -> 25.51 ms (+2.1M triangles),
+  overview 22.36 -> 22.40 ms; 0 dropped, cascades included.
+- **Still open**: a solid part voxelizes beyond its model's switch with
+  the same thin-shell coverage, so a far trunk can still show holes.
+
+## Ray-traced shadows: voxels trace from themselves (voxel-look item 4, 2026-11-25)
+
+- **Problem**: fix 1 gave voxels the sun from the cascades at the voxel
+  only inside cascade 3's radius; `--shadows rt` fills no cascade radii,
+  so under it voxels kept the box-exit sample (exp(-selfDepth) times a
+  ray from where the sun leaves the mesh box), and the ray-traced A/B no
+  longer took the same path as the raster default.
+- **Chosen**: under `--shadows rt` the voxel takes the first branch at
+  every distance: one voxel toward the sun, then traceSunVisibility, whose
+  ray meets the model's own triangles in the TLAS as a leaf's ray does
+  (one condition, voxel_instance.frag). Beyond kFarShadowDistance the far
+  branch is the same one the triangles take.
+- **Measured, 1440p, voxel mask, against `--voxel-lod near` under the
+  same shadow mode**: RT 30 m -0.047 -> -0.026 (raster -0.025), 12 m
+  -0.048 -> -0.021 (raster -0.019): the RT gap now mirrors the raster one.
+  Overview from above (700 1450 -400): RT voxel-tree pass 19.05 -> 21.46 ms
+  (one run; debug path only), L 0.577 -> 0.578. Raster default unchanged
+  (the condition is false there). 0 dropped, 0 validation errors.
+
+## Voxel crown residual after fixes 1-2: what it is (voxel-look round 3, 2026-11-25)
+
+- **Coverage was sky, not pale branches**: the albedo guide marks sky with
+  0.498 grey; the round-2 "pale branch" pixels (B/G 1.0-1.5) were sky seen
+  through crown gaps. Share of the voxel mask: `--voxel-lod near` 6.7%
+  against voxels 1.9% at 30 m, 2.6% against 1.1% at 12 m. With sky taken
+  out, albedo matches (near/voxels 0.986x, 0.979x).
+- **Split of delta L** (voxels - near, png OKLab, class mix vs within):
+  30 m -0.023 = coverage (sky gaps) -0.012 + within leaf -0.0045, grey
+  -0.0052, sky edge -0.0018; 12 m -0.018 = coverage -0.003 + leaf -0.0076
+  + grey -0.0063.
+- **Shading terms per albedo** (linear, sky-normalised, voxels/near): sun
+  diffuse 0.704x (30 m) and 0.792x (12 m); ambient 0.973x and 1.009x;
+  specular 1.29x and 1.12x (absolute). The sun visibility is already
+  higher (0.389 against 0.353), and leafPhase = Gamma / (pi G) matches the
+  visible-leaf integral (backscatter 2 rho / 3 pi), so the sun-diffuse gap
+  is in the voxel's inputs (lobe axis, alignment, transmission bake) or in
+  how its one aligned leaf stands for many: a design question, no try
+  made (backlog).
+- **Handover at cascade 3**: voxel luminance over distance (start view
+  raised to 1700 m, sky-normalised) steps 0.2165 (1050-1075 m) -> 0.1543
+  (1100-1125 m); the box-exit path is ~0.72x the cascade path at the same
+  distance (cascades everywhere: 0.219, box exit everywhere: 0.154). A
+  visible seam ring at ~1.1 km; backlog.
+
+
+## Voxels take the sun from the cascades at every distance (voxel-look seam fix, 2026-11-25)
+
+- **Problem**: fix 1 gave voxels the cascades inside cascade 3's blend
+  start (~1088 m) and kept, beyond it, the model's optical depth toward
+  the sun times a trace from the mesh box's exit. The two disagree: crowns
+  stepped darker and bluer at ~1.1 km, a ring seen from above (round 3:
+  Y/sky 0.2165 -> 0.1543).
+- **Premise**: past cascade 3 the cascades still cover the voxel:
+  cascade 3 blends into cascade 4 up to 1280 m, and cascade 4 (5120 m)
+  casts every cell's far cell, the bricks marched along the sun to opacity
+  0.5, its own tree's included. So the voxel's own model shades it there
+  too, coarsely (5 m texels): the self-shadow keeps the cascade path's
+  level, not the box exit's. Beyond kFarShadowDistance (4000 m)
+  traceSunVisibility takes its far path either way.
+- **Checked against `--shadows rt`** (valid since 295d8ed), two views from
+  1700 m spanning the seam (`1119 1700 -431` yaw 0 and 1.55, pitch
+  -0.25), linear captures normalised by clear sky, voxel pixels by
+  distance (OKLab of the normalised linear): step of crown L from
+  950-1088 m to 1088-1180 m, view yaw 0 / yaw 1.55: ray traced +0.014 /
+  +0.029; box exit (before) -0.034 / +0.015; cascades everywhere +0.017 /
+  +0.039; the variant, box exit with selfDepth x 0.19 (matched to the
+  cascades in 1088-1180 m in both views), +0.018 / +0.040. Hue across the
+  step (yaw 0): ray traced 184 -> 189, before 153 -> 201, cascades
+  153 -> 153, variant 153 -> 152; p10/p90 follow the ray-traced step with
+  the cascades (p90 +0.014 against +0.014), the variant compresses them
+  (p10 +0.038, p90 -0.000). Images: `.superpowers/voxel-look/cap/r4/seam_{n,e}/sheet.jpg`.
+- **Chosen**: cascades everywhere; the box-exit branch, `voxelBoxExit` and
+  the voxel's mesh-space centre varying go. No tuned constant; the
+  variant matched the mean but not the spread.
+- **Still off, not the seam**: inside 1088 m the cascade path is already
+  brighter and greener than the ray-traced one at ~1 km (view yaw 0:
+  +0.034 L, hue 153 against 184; backlog), and stays so beyond.
+- **Cost**: overview (`700 1450 -400 -1.55 -0.5`), two runs each: GPU
+  22.57 / 22.41 -> 22.10 / 22.07 ms, voxel trees 7.75 / 7.66 -> 7.30 /
+  7.28 ms; 0 dropped, cascades included.
+
+## Voxel look round 4: target switch, far trunks, small trunks, overview hue (voxel-look, 2026-11-25)
+
+- **Switching tree**: forest hornbeam Forest_05 (instance 1621093, scale
+  1.05; prototype ids checked against the glTF bounds), approached from
+  45 m to 10 m with a clear corridor. Its leaves switch between 45 and
+  30 m (tint: voxel share of the target 0.90 at 45 m, 0.01 at 30 m), not
+  at the dump's 17-24 m (that is the 1 px estimate; voxels switch at
+  kVoxelPixels x the threshold). Stops, target-crown mask, voxels against
+  `--voxel-lod near`: 45 m dL -0.032 (p10 -0.008, p50 -0.051, p90
+  -0.034), C 0.041 against 0.050, h +6.7; 30/20/12 m (triangles) within
+  0.009. Walk at 5 m/s, frame pairs 3 frames apart: while the target is
+  voxels (30-46 m) frame-pair |dL| exceeds the triangles' by up to
+  +0.046 and L by -0.062 at ~37 m; across the switch (24-30 m) up to
+  +0.022; after it +0.001. The bar fails on this tree.
+- **Far trunks**: at 120-140 m (lone alder view) the trunks are still
+  triangles inside voxel crowns; at 200-300 m voxel trunks are 1-2 px
+  with no visible holes, in a frame half covered by a near branch.
+- **The voxel trunk at 22 m**: a beech Forest_08 (7.6 m model): fix 2's
+  floor gives its solid parts 15 mm voxels, switching at ~17-20 m.
+  Proposal (backlog): floor a solid cluster's edge at its own thickness.
+- **Overview hue** (raster h 126.6 against ray traced 136.6 for the mean
+  linear colour of the voxel pixels, 97% under 1088 m): specular is the
+  same in both (h 291, 3.6-3.7% of Y); the diffuse term carries it (h
+  123.7, C 0.038 against 130.6, 0.033): the cascades give far crowns
+  more sun than the ray (backlog).

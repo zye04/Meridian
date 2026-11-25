@@ -1,4 +1,4 @@
-# Resume here (entry point; updated 2026-11-24)
+# Resume here (entry point; updated 2026-11-25)
 
 Read this file first, ask the open questions below, and update the file
 before ending the session. It holds current truth only: open questions,
@@ -34,6 +34,7 @@ buffer), the DAG voxel design is approved.
 | `main` | `../meridian-main` | main's worktree; the g1 merge was built and verified here |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
+| `voxel-look` | `../meridian-voxel-look` | merged into main 2026-11-25; its notes, tools and captures in `.superpowers/voxel-look/` (RESUME.md) |
 
 Lane report shape (every lane ends its report with these five, numbers
 at 2560x1440): done, measured, look (image paths), needs from the user,
@@ -115,9 +116,19 @@ cascade".
 - Known gap: at the overview the voxel crowns cover more of the clearings
   than triangle crowns (crown 25.5% of the clearing mask against 11.5% in
   main ray traced; backlog row).
-- Next: the user's fly-through on merged main; then a diagnosis lane that
-  checks how solid a sparse voxel is drawn and the voxel size in pixels
-  across the range, before any tuning.
+- Voxel-look fixes merged 2026-11-25 (`--voxel-lod near` reference
+  flag; voxels take the sun from the cascades at every distance; solid
+  parts of a voxelizing model take its finest voxel; `--shadows rt` voxels
+  trace from themselves). Findings: decisions.md "Voxel-look" entries;
+  backlog rows for the crown sun-diffuse design, the far-crown cascade
+  offset and small-model solid parts. The walk across a hornbeam's switch
+  (instance 1621093) is no worse than main b6c1b3b in any segment.
+- Next, in order: (1) the trunk close-up fix (pale trunk at 1 m: streaks,
+  shards, patches, gloss; diagnosis in the voxel-look lane's round 5);
+  (2) a small exposure and sky-light lane; (3) the crown
+  opacity/density/sun-diffuse design, with the far-crown cascade offset
+  under it and the walk flicker split (still vs moving, sun visibility
+  forced to 1).
 
 ## State of main (2026-11-24)
 

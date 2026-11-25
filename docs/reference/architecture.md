@@ -302,7 +302,10 @@ workgroup, each a camera-facing quad of the cube's projected area,
 voxel_instance.frag shades it flat as the leaves it stands in for (mean
 reflected and transmitted colour, roughness, normal lobe: its aligned
 share through the leaf lighting, the rest through the spherical-leaf
-phase; self-shadow from its optical depth out of the model; no discard,
+phase; sun visibility at the voxel, one voxel toward the sun, at every
+distance: from the cascades, where cascades 0-3 hold voxel casters and
+cascade 4 the far cells' bricks (with `--shadows rt`, the ray meeting the
+model's triangles); no discard,
 so early depth holds); then
 the far field pass: voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5

@@ -727,7 +727,7 @@ struct Options {
   bool voxelFarShadows = true;
   bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
-  bool voxelLod = true;
+  meridian::VoxelLod voxelLod = meridian::VoxelLod::On;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -961,10 +961,12 @@ Options parseOptions(int argc, char **argv) {
       options.gi = mode == "probes";
     } else if (arg == "--voxel-lod" && i + 1 < argc) {
       const std::string mode = argv[++i];
-      if (mode != "on" && mode != "off") {
-        throw std::runtime_error("--voxel-lod takes on or off");
+      if (mode != "on" && mode != "off" && mode != "near") {
+        throw std::runtime_error("--voxel-lod takes on, off or near");
       }
-      options.voxelLod = mode == "on";
+      options.voxelLod = mode == "on"    ? meridian::VoxelLod::On
+                         : mode == "off" ? meridian::VoxelLod::Off
+                                         : meridian::VoxelLod::Near;
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -990,7 +992,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "

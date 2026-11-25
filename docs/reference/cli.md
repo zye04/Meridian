@@ -288,12 +288,17 @@ before and after compaction, cell margin, then VMA's blocks on the
 device-local heaps and, in brackets, on all heaps including system
 memory, now and at the peak while models loaded); the far field's line gives the same pair at its peak. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
-`--voxel-lod on|off` (default on): the voxel levels of tree models' cluster
+`--voxel-lod on|off|near` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
 mesh over 4 m tall) replace their triangles where the LOD cut picks them,
 rasterized as ~1 px quads (architecture.md, Frame); off keeps the triangles
-at every distance, the voxels' target (A/B; slower: the traversal visits
-every level).
+at every distance in every view, cascades included (A/B; slower: the
+traversal visits every level, and the cull lists overflow at most views, so
+off drops entries: not a clean reference). near is the reference for the
+voxels' look: the main view keeps the triangles of instances within 150 m
+(`kVoxelLodNearDistance`, common.glsl), the cascades keep their voxel
+casters, so the light is the default's and only the main view's geometry
+changes (0 dropped at the voxel-look stops).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
