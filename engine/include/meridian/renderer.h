@@ -369,6 +369,10 @@ public:
   // maps of the placed and hand-placed geometry; Rt traces them in the TLAS
   // (for A/B comparisons).
   void setShadowMode(ShadowMode mode);
+  // Builds the TLAS and every BLAS, which ShadowMode::Rt and the reference
+  // path tracer trace (default off: the raster path traces nothing, and at a
+  // full forest they hold ~1.9 GB). Call before addInstance and setPlacement.
+  void setRayTracing(bool enabled);
   // Reference path tracer: from the next draw on, every frame adds one path
   // traced sample per pixel to an accumulation that replaces the upscaler's
   // output (so captures save it); exposure stops adapting and bloom is

@@ -869,7 +869,7 @@ InstanceId Renderer::addInstance(MeshId mesh, const Mat4 &transform) {
     throw std::runtime_error("instance table is full");
   }
   GpuMesh &gpuMesh = impl_->meshes.at(mesh.index);
-  if (gpuMesh.blas.handle == VK_NULL_HANDLE) {
+  if (impl_->rayTracing && gpuMesh.blas.handle == VK_NULL_HANDLE) {
     gpuMesh.blas = impl_->buildBlas(std::span(&mesh.index, 1));
   }
   InstanceData instance;

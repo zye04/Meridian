@@ -56,6 +56,9 @@ void Renderer::Impl::destroyReference() {
 }
 
 void Renderer::beginReference(ReferenceMode mode) {
+  if (!impl_->rayTracing) {
+    throw std::runtime_error("beginReference needs setRayTracing(true)");
+  }
   impl_->referenceMode = mode;
   impl_->resetReference();
   impl_->referencing = true;

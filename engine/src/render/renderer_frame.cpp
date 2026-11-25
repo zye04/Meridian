@@ -736,6 +736,13 @@ void Renderer::drainStatistics() {
 void Renderer::draw(const Camera &camera, const Lighting &lighting,
                     float deltaSeconds) {
   VkDevice dev = impl_->device.device;
+  if (!impl_->loadPrinted) {
+    // The VRAM gate's resident figure: everything loaded, far field included.
+    impl_->loadPrinted = true;
+    const Impl::MemoryUse use = impl_->memoryUse();
+    std::printf("Loaded: resident %.0f MiB device memory allocated (all heaps %.0f MiB)\n",
+                use.deviceLocal / double(1 << 20), use.all / double(1 << 20));
+  }
 
   int width = 0;
   int height = 0;
@@ -1013,7 +1020,12 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   if (impl_->instancesDirty) {
     impl_->uploadInstances(cmd, frame);
-    impl_->buildTlas(cmd, frame);
+    if (impl_->rayTracing) {
+      if (impl_->tlas.handle == VK_NULL_HANDLE) {
+        impl_->createTlas(impl_->placedCount + kMaxInstances);
+      }
+      impl_->buildTlas(cmd, frame);
+    }
     impl_->instancesDirty = false;
   }
   endPass("upload + tlas");

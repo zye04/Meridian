@@ -4,7 +4,7 @@ C++20 / Vulkan 1.3 game engine (`engine/`, static library `meridian`) plus
 the game built on it (`game/`). Goal: photorealistic, first-person, open
 world, grand scale. Sun shadows are raster (cached cascaded shadow maps);
 hardware ray tracing is still required (`--shadows rt` A/B,
-`--far-shadows tlas`). The setting is open,
+`--reference`; the TLAS and BLAS are built only for those). The setting is open,
 so systems stay parametric (e.g. the atmosphere supports other planets).
 
 Docs, read on demand:
@@ -126,7 +126,9 @@ the trees back (hidden by default). Capture runs print validation errors,
 - Gates (decisions.md "Performance gate restated", "VRAM budget"): route
   average <= 8.3 ms, heaviest segment <= 11.1 ms, 1% low >= 60 fps per
   segment (hop frames excluded) at 2560x1440 DLAA with GI on; VRAM
-  resident <= 12 GB and transient peak <= 14 GB at the showcase views.
+  resident <= 12 GB (the `Loaded: resident` line, printed at the first
+  draw after everything loaded) and transient peak <= 14 GB (the `TLAS:`
+  and `Far field:` lines' peaks) at the showcase views.
   Every spec states its VRAM delta; a branch may not merge above main's
   peak. Proof of technique, not a merge gate for frame time.
 

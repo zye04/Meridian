@@ -1162,6 +1162,8 @@ int main(int argc, char **argv) {
   window.setCursorCaptured(interactive);
   renderer.setOcclusionCulling(options.occlusion);
   renderer.setShadowMode(options.shadows);
+  renderer.setRayTracing(options.shadows == meridian::ShadowMode::Rt ||
+                         options.referenceSamples > 0);
   renderer.setShadowRefresh(options.shadowRefresh);
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));

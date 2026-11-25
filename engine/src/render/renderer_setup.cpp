@@ -436,7 +436,6 @@ void Renderer::Impl::createFrames() {
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
   }
-  createTlas(kMaxInstances);
 
   check(vkCreateCommandPool(dev, &poolInfo, nullptr, &uploadPool),
         "vkCreateCommandPool");
