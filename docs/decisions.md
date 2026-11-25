@@ -5038,3 +5038,39 @@ gate protects).
   distance (cascades everywhere: 0.219, box exit everywhere: 0.154). A
   visible seam ring at ~1.1 km; backlog.
 
+
+## Voxels take the sun from the cascades at every distance (voxel-look seam fix, 2026-11-25)
+
+- **Problem**: fix 1 gave voxels the cascades inside cascade 3's blend
+  start (~1088 m) and kept, beyond it, the model's optical depth toward
+  the sun times a trace from the mesh box's exit. The two disagree: crowns
+  stepped darker and bluer at ~1.1 km, a ring seen from above (round 3:
+  Y/sky 0.2165 -> 0.1543).
+- **Premise**: past cascade 3 the cascades still cover the voxel:
+  cascade 3 blends into cascade 4 up to 1280 m, and cascade 4 (5120 m)
+  casts every cell's far cell, the bricks marched along the sun to opacity
+  0.5, its own tree's included. So the voxel's own model shades it there
+  too, coarsely (5 m texels): the self-shadow keeps the cascade path's
+  level, not the box exit's. Beyond kFarShadowDistance (4000 m)
+  traceSunVisibility takes its far path either way.
+- **Checked against `--shadows rt`** (valid since 295d8ed), two views from
+  1700 m spanning the seam (`1119 1700 -431` yaw 0 and 1.55, pitch
+  -0.25), linear captures normalised by clear sky, voxel pixels by
+  distance (OKLab of the normalised linear): step of crown L from
+  950-1088 m to 1088-1180 m, view yaw 0 / yaw 1.55: ray traced +0.014 /
+  +0.029; box exit (before) -0.034 / +0.015; cascades everywhere +0.017 /
+  +0.039; the variant, box exit with selfDepth x 0.19 (matched to the
+  cascades in 1088-1180 m in both views), +0.018 / +0.040. Hue across the
+  step (yaw 0): ray traced 184 -> 189, before 153 -> 201, cascades
+  153 -> 153, variant 153 -> 152; p10/p90 follow the ray-traced step with
+  the cascades (p90 +0.014 against +0.014), the variant compresses them
+  (p10 +0.038, p90 -0.000). Images: `.superpowers/voxel-look/cap/r4/seam_{n,e}/sheet.jpg`.
+- **Chosen**: cascades everywhere; the box-exit branch, `voxelBoxExit` and
+  the voxel's mesh-space centre varying go. No tuned constant; the
+  variant matched the mean but not the spread.
+- **Still off, not the seam**: inside 1088 m the cascade path is already
+  brighter and greener than the ray-traced one at ~1 km (view yaw 0:
+  +0.034 L, hue 153 against 184; backlog), and stays so beyond.
+- **Cost**: overview (`700 1450 -400 -1.55 -0.5`), two runs each: GPU
+  22.57 / 22.41 -> 22.10 / 22.07 ms, voxel trees 7.75 / 7.66 -> 7.30 /
+  7.28 ms; 0 dropped, cascades included.

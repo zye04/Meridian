@@ -14,15 +14,14 @@
 // instance's tint, as mesh.frag), roughness and normal lobe. The aligned
 // part of the lobe shades as one two-sided leaf through the same lighting
 // as the triangles; the rest as leaves facing every way (the spherical-leaf
-// phase, gi.glsl). The model shades itself through the voxel's optical
-// depth out of it toward the sun (sunlit tops, dark undersides) and the sky;
-// the sun ray then traces the scene from where it leaves the mesh's box;
-// the terrain's sun visibility comes per brick from voxel_bricks.comp.
+// phase, gi.glsl). The sun reaches it as it reaches a leaf, from one voxel
+// toward the sun, its own model among the casters; the model shades itself
+// toward the sky through the voxel's optical depth out of it; the terrain's
+// sun visibility comes per brick from voxel_bricks.comp.
 
 layout(location = 0) flat in vec3 inRelative;
 layout(location = 1) flat in uvec4 inVoxel;
 layout(location = 2) flat in uvec4 inInfo;
-layout(location = 3) flat in vec3 inLocal;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outMotion;
@@ -33,14 +32,10 @@ layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
-// Where the sun ray leaves the box, so it doesn't start inside the crown.
-const float kExitBias = 0.1;
-
 void main() {
     SceneBuffer scene = pc.scene;
     LoadedInstance instance = loadInstance(scene, inInfo.x);
     ClusterInfo cluster = scene.clusters.clusters[inInfo.w];
-    MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
 
     mat3 linear = mat3(instance.transform);
     float scale = instance.scale;
@@ -97,30 +92,12 @@ void main() {
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
     vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
     if (rayDirection.y > -sin(scene.sunAngularRadius)) {
-        vec3 sunLocal = normalize(toLocal * rayDirection);
-        // Cascades 0-3 hold the voxels as casters (the coarsest one, far
-        // cells): there the voxel takes the sun as a leaf does, from just
-        // past its own caster. Beyond (and in the blend into the far cells,
-        // which hold its model too) it shades itself through its depth out
-        // of the model and traces from where the sun ray leaves the box.
-        // Ray-traced shadows take the first path at every distance: the
-        // ray meets the model's own triangles as a leaf's would.
-        float casterRadius = scene.sunShadows.cascades[kShadowCascades - 2u].radius *
-                             (1.0 - kCascadeBlendFraction);
-        float visibility;
-        if (scene.shadowMode != 0u || length(relative) < casterRadius) {
-            vec3 origin = world + rayDirection * (cluster.voxelEdge * scale);
-            visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
-                                            origin - scene.cameraPosition, rayDirection);
-        } else {
-            vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
-            vec3 lo = mesh.boundsCenter - halfExtent, hi = mesh.boundsCenter + halfExtent;
-            vec3 exitPoint =
-                world + rayDirection * (voxelBoxExit(lo, hi, inLocal, sunLocal) * scale + kExitBias);
-            visibility = exp(-voxelBoxDepth(axisWord, sunLocal)) *
-                         traceSunVisibility(exitPoint, exitPoint, rayDirection, 0.0, false,
-                                            exitPoint - scene.cameraPosition, s.normal);
-        }
+        // The cascades hold the voxels as casters up to cascade 3 and the far
+        // cells (the model's bricks) in cascade 4, ray-traced shadows the
+        // model's triangles: either way the model shades itself.
+        vec3 origin = world + rayDirection * (cluster.voxelEdge * scale);
+        float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
+                                              origin - scene.cameraPosition, rayDirection);
         visibility *= float(inInfo.y);
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);

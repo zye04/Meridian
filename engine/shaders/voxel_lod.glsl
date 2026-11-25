@@ -132,11 +132,4 @@ float voxelBoxDepth(uint axisWord, vec3 d) {
     return dot(d * d, depth);
 }
 
-// Where a ray from inside a box leaves it.
-float voxelBoxExit(vec3 lo, vec3 hi, vec3 origin, vec3 direction) {
-    vec3 inverse = 1.0 / mix(vec3(1e-12), direction, greaterThan(abs(direction), vec3(1e-12)));
-    vec3 t = max((lo - origin) * inverse, (hi - origin) * inverse);
-    return max(min(min(t.x, t.y), t.z), 0.0);
-}
-
 #endif
