@@ -303,8 +303,9 @@ voxel_instance.frag shades it flat as the leaves it stands in for (mean
 reflected and transmitted colour, roughness, normal lobe: its aligned
 share through the leaf lighting, the rest through the spherical-leaf
 phase; sun visibility from the cascades at the voxel, one voxel toward
-the sun, where cascades 0-3 hold voxel casters, beyond that its optical
-depth out of the model times a trace from the box exit; no discard,
+the sun, where cascades 0-3 hold voxel casters (with `--shadows rt` at
+every distance, the ray meeting the model's triangles), beyond that its
+optical depth out of the model times a trace from the box exit; no discard,
 so early depth holds); then
 the far field pass: voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5

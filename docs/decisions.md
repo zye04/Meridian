@@ -4994,3 +4994,22 @@ gate protects).
 - **Still open**: a solid part voxelizes beyond its model's switch with
   the same thin-shell coverage, so a far trunk can still show holes.
 
+## Ray-traced shadows: voxels trace from themselves (voxel-look item 4, 2026-11-25)
+
+- **Problem**: fix 1 gave voxels the sun from the cascades at the voxel
+  only inside cascade 3's radius; `--shadows rt` fills no cascade radii,
+  so under it voxels kept the box-exit sample (exp(-selfDepth) times a
+  ray from where the sun leaves the mesh box), and the ray-traced A/B no
+  longer took the same path as the raster default.
+- **Chosen**: under `--shadows rt` the voxel takes the first branch at
+  every distance: one voxel toward the sun, then traceSunVisibility, whose
+  ray meets the model's own triangles in the TLAS as a leaf's ray does
+  (one condition, voxel_instance.frag). Beyond kFarShadowDistance the far
+  branch is the same one the triangles take.
+- **Measured, 1440p, voxel mask, against `--voxel-lod near` under the
+  same shadow mode**: RT 30 m -0.047 -> -0.026 (raster -0.025), 12 m
+  -0.048 -> -0.021 (raster -0.019): the RT gap now mirrors the raster one.
+  Overview from above (700 1450 -400): RT voxel-tree pass 19.05 -> 21.46 ms
+  (one run; debug path only), L 0.577 -> 0.578. Raster default unchanged
+  (the condition is false there). 0 dropped, 0 validation errors.
+

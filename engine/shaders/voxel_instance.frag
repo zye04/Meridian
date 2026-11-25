@@ -103,10 +103,12 @@ void main() {
         // past its own caster. Beyond (and in the blend into the far cells,
         // which hold its model too) it shades itself through its depth out
         // of the model and traces from where the sun ray leaves the box.
+        // Ray-traced shadows take the first path at every distance: the
+        // ray meets the model's own triangles as a leaf's would.
         float casterRadius = scene.sunShadows.cascades[kShadowCascades - 2u].radius *
                              (1.0 - kCascadeBlendFraction);
         float visibility;
-        if (length(relative) < casterRadius) {
+        if (scene.shadowMode != 0u || length(relative) < casterRadius) {
             vec3 origin = world + rayDirection * (cluster.voxelEdge * scale);
             visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
                                             origin - scene.cameraPosition, rayDirection);
