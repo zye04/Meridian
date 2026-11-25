@@ -138,7 +138,7 @@ void main() {
     float threshold = cull.scene.lodErrorPixels;
     // With voxel LOD off, voxel clusters never draw and the triangles they
     // replace never give way (terminal).
-    bool voxelLod = cull.scene.voxelLod != 0u;
+    bool voxelLod = voxelLodAt(cull.scene, transform[3].xyz);
     if (!voxelLod && cluster.voxelEdge > 0.0) {
         return;
     }

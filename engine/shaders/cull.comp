@@ -42,7 +42,7 @@ void seedTraversal(uint id, LoadedInstance instance, MeshInfo mesh) {
         // (cluster_cull.comp), so no level is too coarse to seed.
         // Voxel levels switch at kVoxelPixels times the threshold.
         if (finest <= scene.lodErrorPixels * kVoxelPixels &&
-            (scene.voxelLod == 0u ||
+            (!voxelLodAt(scene, instance.transform[3].xyz) ||
              projectedError(center, root.lodRadius * instance.scale,
                             level.maxError * instance.scale) > scene.lodErrorPixels)) {
             if (!pushNode(cull.phase, 0u, uvec2(id, level.rootNode))) {

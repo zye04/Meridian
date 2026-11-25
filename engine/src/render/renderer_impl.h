@@ -390,7 +390,7 @@ struct Renderer::Impl {
   VkPipeline farShadowCasterPipeline = VK_NULL_HANDLE;
   // Voxel clusters' quads into a cascade (voxel_instance.mesh, depth only).
   VkPipeline voxelShadowCasterPipeline = VK_NULL_HANDLE;
-  bool voxelLod = true;
+  VoxelLod voxelLod = VoxelLod::On;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;

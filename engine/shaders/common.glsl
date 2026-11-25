@@ -648,7 +648,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The voxel pools, the voxel lists (per phase, entries (instance, voxel
     // cluster), then bricks, then voxels) and the DrawCounters
     // (voxel_instance.mesh's counts); voxelLod: voxel clusters replace
-    // triangles (0: triangles everywhere).
+    // triangles (0: triangles everywhere, 1: on, 2: near; voxelLodAt).
     VoxelPoolBuffer voxelPools;
     VoxelInstanceBuffer voxelInstances;
     VoxelCounterBuffer drawCounters;
@@ -737,6 +737,17 @@ LoadedInstance loadInstance(SceneBuffer scene, uint id) {
     loaded.placed = false;
     loaded.fade = 1.0;
     return loaded;
+}
+
+// Whether voxel clusters may replace an instance's triangles in this view.
+// --voxel-lod near (a debug reference): the main view keeps the triangles of
+// instances within kVoxelLodNearDistance, the cascades keep voxel casters.
+const float kVoxelLodNearDistance = 150.0;
+bool voxelLodAt(SceneBuffer scene, vec3 instanceOrigin) {
+    return scene.voxelLod == 1u ||
+           (scene.voxelLod == 2u &&
+            (scene.shadowView != 0u ||
+             distance(instanceOrigin, scene.cameraPosition) > kVoxelLodNearDistance));
 }
 
 // The mesh of an instance's BLAS geometry (a ray hit's geometry index):
