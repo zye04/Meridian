@@ -5151,3 +5151,35 @@ build the TLAS, so no shader executes a query on a null TLAS address.
   above run-to-run noise.
 - `--shadows rt` (forest edge) and `--reference 16` (start view) still run
   with 0 validation errors.
+
+## Trace only cards that transmit (trunk-fix round 6, 2026-11-25)
+
+- **Problem:** the tree cook traced every alpha-tested, double-sided
+  material into opaque geometry (`isLeafMaterial` && alpha &&
+  !OPAQUE), so the Megascans "Decoration" cards (lichen, knots on the
+  bark) became opaque shells. On the lone alder at 1.2-3.7 m they were
+  the pale patch, the white shards and the dark shell; hiding the
+  Decoration material removed all three (round-6 premise captures).
+- **Practice:** glTF MASK is the standard for alpha-tested cards; the
+  case for tracing (decisions.md "Tree leaves as opaque geometry") is leaf
+  shimmer in a crown seen through thousands of cards. Decoration sits
+  flat on the bark: few cards, no see-through crown.
+- **Choice:** a generic rule by glTF material property, not by name:
+  trace a leaf material only when it transmits light
+  (KHR_materials_diffuse_transmission with factor > 0, or no extension,
+  which the cook already reads as the default leaf transmission). Every
+  other masked material whose base colour has alpha is written as glTF
+  MASK with its source cutoff (0.5 in the Unreal export). The engine
+  already draws MASK through the masked pipeline and the voxelizer
+  already tests base alpha against the cutoff for MASK materials
+  (voxelize.cpp `surfaceAt`), so no engine change.
+- **Leaf safety:** the leaf rule is unchanged, not the leaf bytes: leaves
+  and decoration share one triangle budget per tree, so the traced
+  decoration's triangles (e.g. alder Field_04: 117k of 1.29M) no longer
+  push the leaves' simplify ratio down (0.931 -> 1.0). Proven: leaf
+  textures and leaf material JSON byte-identical in all 30 cooked trees,
+  the 10 trees without decoration byte-identical end to end, and the
+  1112aa1 cook reproduces the shared cooked trees byte for byte.
+- **Cost:** decoration cards are alpha-tested again, so their edges can
+  shimmer in motion the way traced leaves no longer do (few cards, on the
+  bark; not measured with the motion gates).
