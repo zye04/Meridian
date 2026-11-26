@@ -5261,3 +5261,17 @@ clock with a free camera.
   4f01f72) / after: `Loaded: resident 11998 MiB` both; GPU 24.43 / 24.25
   ms, scene early 11.03 / 10.89 (single runs, noise); images differ by
   0.2451/255 (the `--trees` floor, backlog).
+- First use, the user's alder bundle (`~/meridian-reports/2026-11-25_23-26-21`,
+  its repro line + `--report-at 120`): the centre pixel is the
+  `Decoration` material (a masked, double-sided shell over the bark), in
+  shade: sun 0; ambient diffuse (118.3, 106.3, 91.5) cd/m^2, ambient
+  specular (143.5, 161.5, 192.9), 55% of the pixel and sky-blue. Hiding
+  the material (`--debug-filter hide-material 60`) shows the `Tileable`
+  bark 5.8 cm under it with ambient specular (26.6, 31.4, 35.2), 19%.
+  Its ORM roughness mean is 0.154 against the bark's 0.367
+  (`meridian-cook --stats`). Over all shaded bark in the frame (from the
+  views, the neutral tonemap inverted) specular is 29% of luminance and
+  the ambient diffuse over the albedo leans green (G/R 1.07, B/R 1.01).
+  So the wet gloss is the Decoration shell's low roughness reflecting the
+  sky, and the tint is that blue reflection plus a slightly green
+  ambient over a brown albedo; no sun involved. Fix deferred (backlog).
