@@ -5551,4 +5551,9 @@ cached shadow pages are invalidated.
   (0.3737 vs 0.3736 of the frame).
 - Not done: wood-only cubes still read pale (the rest of the 0.149); a
   leaf and a wood mesh whose LOD cuts differ at a distance can show a cell
-  twice or not at all (the axis depth bake assumes the same).
+  twice or not at all (the axis depth bake assumes the same). Measured on
+  the CPU cut up to 33% of wood voxel coverage misplaced at a level
+  transition (backlog "Leaf and wood meshes of one model choose voxel
+  levels independently"); lone beech and hornbeam captures at 40-170 m
+  (2560x1440, main 8793aa7 vs the fold) show no wood blinking or lost
+  beyond main's own.
