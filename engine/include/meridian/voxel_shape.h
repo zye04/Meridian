@@ -6,6 +6,7 @@
 #include <meridian/math/vec3.h>
 
 #include <cmath>
+#include <cstdint>
 
 namespace meridian {
 
@@ -33,6 +34,69 @@ inline float voxelViewOpacity(const float depth[3], Vec3 d) {
 constexpr float kOpaqueVoxelFloor = 0.5f;
 inline bool voxelDraws(float opacity, bool opaque, float noise) {
   return noise < opacity || (opaque && opacity >= kOpaqueVoxelFloor);
+}
+
+// Development rules for a voxel of coverage f in the main view
+// (--voxel-coverage; spec 2026-11-26-voxel-leaf-coverage-design.md): the
+// quad drawn at area fraction a with chance p, a p = f. Hash: a = 1, p = f
+// (voxelDraws, the floor included). Area: a = f, p = 1. AreaOffset: as Area,
+// the quad moved inside the full quad by the voxel's hash. Mixed: a = p =
+// sqrt(f). Phase: as Hash, but a quad under one pixel draws on round(P f) of
+// the P jitter phases, spread evenly. Cascades keep Hash. Must match
+// voxel_lod.glsl.
+enum class VoxelCoverage : uint32_t { Hash, Area, AreaOffset, Mixed, Phase };
+
+inline float voxelAreaFraction(VoxelCoverage rule, float f) {
+  switch (rule) {
+  case VoxelCoverage::Area:
+  case VoxelCoverage::AreaOffset:
+    return f;
+  case VoxelCoverage::Mixed:
+    return std::sqrt(f);
+  default:
+    return 1.0f;
+  }
+}
+
+// Whether the phase sequence draws on jitter phase `phase` of `phases` a
+// voxel of coverage f, its sequence shifted by `offset` (its hash): round(P
+// f) draws per cycle, at most one phase apart from even.
+inline bool voxelPhaseDraws(float f, uint32_t phase, uint32_t phases, uint32_t offset) {
+  const uint32_t draws = static_cast<uint32_t>(std::lround(static_cast<float>(phases) * f));
+  const uint32_t j = (phase + offset) % phases;
+  return (j + 1) * draws / phases > j * draws / phases;
+}
+
+// A quad under this many pixels of area takes Phase's sequence: one pixel,
+// where the jitter moves the quad across pixel centres.
+constexpr float kPhaseVoxelPixels = 1.0f;
+
+// Whether a voxel of coverage f draws: noise uniform in [0, 1) from its
+// stable hash, pixels its full quad's area on screen.
+inline bool voxelCoverageDraws(VoxelCoverage rule, float f, bool opaque, float noise, float pixels,
+                               uint32_t phase, uint32_t phases, uint32_t offset) {
+  switch (rule) {
+  case VoxelCoverage::Hash:
+    return voxelDraws(f, opaque, noise);
+  case VoxelCoverage::Area:
+  case VoxelCoverage::AreaOffset:
+    return f > 0.0f;
+  case VoxelCoverage::Mixed:
+    return noise < std::sqrt(f);
+  case VoxelCoverage::Phase:
+    return pixels < kPhaseVoxelPixels ? voxelPhaseDraws(f, phase, phases, offset) : noise < f;
+  }
+  return false;
+}
+
+// AreaOffset: the scaled quad's centre along one screen axis, in half sizes
+// of the full quad, from u uniform in [0, 1): anywhere that keeps the quad
+// inside the full one. 0 for the other rules.
+inline float voxelQuadOffset(VoxelCoverage rule, float f, float u) {
+  if (rule != VoxelCoverage::AreaOffset) {
+    return 0.0f;
+  }
+  return (2.0f * u - 1.0f) * (1.0f - std::sqrt(f));
 }
 
 } // namespace meridian

@@ -13,7 +13,8 @@
 // cube seen along unit direction d (mesh space) covers v^2 (|dx| + |dy| +
 // |dz|) on screen and its mean chord is v / (|dx| + |dy| + |dz|):
 // voxel_bricks.comp drew it with the opacity of that chord, and the quad
-// gets that area, so over many voxels the coverage matches the voxels'.
+// gets that area, so over many voxels the coverage matches the voxels'
+// (with --voxel-coverage, voxel_lod.glsl: a fraction of it).
 
 layout(local_size_x = 64) in;
 layout(triangles, max_vertices = 256, max_primitives = 128) out;
@@ -60,6 +61,16 @@ void main() {
                             : abs(scene.projectionScale);
     vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * perMetre;
     uvec4 packed = pools.voxels.voxels[voxel];
+    // The view's coverage rule (voxel_bricks.comp drew it with its chance):
+    // the quad at area fraction a, moved inside the full quad for
+    // AreaOffset.
+    uint rule = voxelCoverageRule(scene.voxelCoverage, cascade);
+    if (rule != kVoxelCoverageHash) {
+        float f = voxelViewOpacity(voxelDepths(packed), view);
+        vec2 offset = voxelQuadOffset(rule, f, voxelHash(clusterEntry.x, brick, v, cluster.firstVertex, i));
+        center.xy += offset * halfSize;
+        halfSize *= sqrt(voxelAreaFraction(rule, f));
+    }
     uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {
         uint vertex = slot * 4u + corner;
