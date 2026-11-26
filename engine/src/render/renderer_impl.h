@@ -110,6 +110,9 @@ struct Renderer::Impl {
 
   std::array<FrameData, kFramesInFlight> frames;
   uint64_t frameNumber = 0;
+  // frameNumber at the last cut: the jitter phase and the noise frame index
+  // count from it, so a cut's frames repeat a fresh start's.
+  uint64_t cutFrame = 0;
 
   // Per frame in flight: a start timestamp, then one after each named pass.
   VkQueryPool timestampPool = VK_NULL_HANDLE;
@@ -732,6 +735,8 @@ struct Renderer::Impl {
   void drawTerrain(VkCommandBuffer cmd);
   void buildDepthPyramid(VkCommandBuffer cmd);
   void createDepthPyramid();
+
+  void resetExposure();
 
   template <typename Record> void submitNow(Record &&record);
 };

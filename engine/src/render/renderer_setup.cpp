@@ -779,7 +779,10 @@ void Renderer::Impl::createExposureBuffers() {
   histogramBuffer =
       createBuffer(kHistogramBins * sizeof(uint32_t), kUsage, 0);
   exposureBuffer = createBuffer(sizeof(ExposureState), kUsage, 0);
+  resetExposure();
+}
 
+void Renderer::Impl::resetExposure() {
   ExposureState initial;
   initial.ev100 = kInitialEv100;
   initial.exposure = 1.0f / (1.2f * std::exp2(kInitialEv100));

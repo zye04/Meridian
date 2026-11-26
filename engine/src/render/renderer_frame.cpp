@@ -726,6 +726,45 @@ void Renderer::Impl::readCounters(FrameData &frame) {
   frame.countersPending = false;
 }
 
+void Renderer::cut() {
+  Impl &r = *impl_;
+  check(vkDeviceWaitIdle(r.device.device), "vkDeviceWaitIdle");
+  r.historyValid = false;
+  r.pyramidValid = false;
+  r.cloudWindLocalValid = false;
+  r.cloudWindTravel[0] = r.cloudWindTravel[1] = 0.0;
+  r.previousCameraPosition = {};
+  r.giReset = true;
+  // The reset flag re-traces the probes, but the ground cache keeps the
+  // albedo it has seen: clear all of it, as loading does.
+  if (r.giBuffer.buffer != VK_NULL_HANDLE) {
+    r.submitNow([&](VkCommandBuffer cmd) {
+      for (const Buffer *buffer : {&r.giBuffer, &r.giGroundBuffer, &r.giVolumeBuffer}) {
+        vkCmdFillBuffer(cmd, buffer->buffer, 0, VK_WHOLE_SIZE, 0);
+      }
+      memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    });
+  }
+  r.shadowStale = true;
+  r.terrainShadowValid = false;
+  r.farShadowState = {};
+  r.cutFrame = r.frameNumber;
+  r.resetExposure();
+}
+
+void Renderer::resetStatistics() {
+  Impl &r = *impl_;
+  r.droppedEntries = 0;
+  r.droppedByList = {};
+  r.mainNeed = {};
+  r.cascadeNeed = {};
+  r.cascadeNeeds = {};
+  r.shadowRenderCount = 0;
+  r.shadowMaxMs = 0.0f;
+}
+
 void Renderer::drainStatistics() {
   for (uint32_t k = 0; k < kFramesInFlight; ++k) {
     FrameData &frame = impl_->frames[(impl_->frameNumber + k) % kFramesInFlight];
@@ -843,7 +882,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // Sub-pixel jitter in render pixels, cycling through Halton(2,3). The
   // temporal resolve turns it into anti-aliasing (and DLSS will need it too).
   const uint32_t phase =
-      static_cast<uint32_t>(impl_->frameNumber %
+      static_cast<uint32_t>((impl_->frameNumber - impl_->cutFrame) %
                             jitterPhaseCount(render, display,
                                              impl_->aaSettings.rayReconstruction)) +
       1;
@@ -873,7 +912,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->previousViewProjection = scene.currentViewProjection;
   impl_->previousView = view;
   impl_->previousCameraPosition = camera.position;
-  scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber);
+  scene.frameIndex = static_cast<uint32_t>(impl_->frameNumber - impl_->cutFrame);
   // Ray Reconstruction wants uncorrelated noise (its integration guide).
   scene.whiteNoise = impl_->aaSettings.rayReconstruction ? 1 : 0;
   scene.sunDirection = lighting.sunDirection;

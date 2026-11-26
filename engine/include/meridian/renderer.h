@@ -345,6 +345,15 @@ public:
   // Waits for the frames still in flight and reads their counters, so the
   // statistics above cover every frame drawn (call before reporting).
   void drainStatistics();
+  // Starts the run's most-in-a-frame statistics (drops, need, cascade
+  // renders) over; call after drainStatistics.
+  void resetStatistics();
+  // The camera jumps (a new view of a multi-view capture): waits for the
+  // GPU and drops everything carried from earlier frames, so the next frame
+  // starts as the first one after loading does: temporal histories (the
+  // upscaler, clouds, motion), the GI caches, every shadow map, the depth
+  // pyramid, the exposure, and the jitter and noise sequence.
+  void cut();
   // Placement cells found visible in a recent frame.
   uint32_t drawnCellCount() const;
   // Far cells drawn as voxels in a recent frame.

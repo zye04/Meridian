@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <optional>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -779,6 +780,10 @@ struct Options {
   // this frame (0: never), as F8 does.
   int filterStep = 0;
   int filterAt = 0;
+  // --capture-views FILE DIR: one launch renders every view of FILE to
+  // DIR/<name>.png (loadCaptureViews).
+  std::optional<std::filesystem::path> captureViewsPath;
+  std::filesystem::path captureViewsDir;
 };
 
 // F8's cycle after off; --debug-filter's names.
@@ -879,6 +884,9 @@ Options parseOptions(int argc, char **argv) {
       options.albedoCapturePath = argv[++i];
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
+    } else if (arg == "--capture-views" && i + 2 < argc) {
+      options.captureViewsPath = argv[++i];
+      options.captureViewsDir = argv[++i];
     } else if (arg == "--windowed") {
       options.fullscreen = false;
     } else if (arg == "--haze" && i + 1 < argc) {
@@ -1083,13 +1091,20 @@ Options parseOptions(int argc, char **argv) {
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
                                "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-sequence n, "
+                               "--capture-views file dir, "
                                "--frames n)");
     }
   }
   // Enough frames for temporal accumulation and exposure to settle.
-  if ((options.capturePath || options.weatherMapPath) && options.frames == 0 &&
-      options.benchmarkSeconds == 0.0f) {
+  if ((options.capturePath || options.weatherMapPath || options.captureViewsPath) &&
+      options.frames == 0 && options.benchmarkSeconds == 0.0f) {
     options.frames = 120;
+  }
+  if (options.captureViewsPath &&
+      (options.capturePath || options.benchmarkSeconds > 0.0f || options.referenceSamples > 0 ||
+       options.cameraVelocity || options.cameraAngularVelocity)) {
+    throw std::runtime_error("--capture-views can't be combined with --capture, --benchmark, "
+                             "--reference or camera velocities");
   }
   if ((options.cameraVelocity || options.cameraAngularVelocity) &&
       options.frames == 0) {
@@ -1127,6 +1142,80 @@ Options parseOptions(int argc, char **argv) {
     throw std::runtime_error("--reference needs native rendering (DLAA or --render-scale 1)");
   }
   return options;
+}
+
+// The options a --capture-views line may set: everything that changes
+// between frames without a reload. The launch's own flags are every view's
+// defaults; a line overrides them.
+constexpr std::string_view kViewOptions[] = {
+    "--camera",     "--sun",           "--grade",      "--haze",         "--fov",
+    "--bloom",      "--effects",       "--game-time",  "--freeze-time",  "--time-scale",
+    "--weather",    "--weather-front", "--debug-view", "--debug-filter", "--frames"};
+
+struct CaptureView {
+  std::string name;
+  Options options;
+};
+
+// One view per line: a name, then view options. Blank lines, # comments and
+// the command lines of report bundles' repro.txt (flock ...) are skipped, so
+// bundles concatenate straight into a list.
+std::vector<CaptureView> loadCaptureViews(const Options &launch, int argc, char **argv) {
+  std::ifstream file(*launch.captureViewsPath);
+  if (!file) {
+    throw std::runtime_error("can't read " + launch.captureViewsPath->string());
+  }
+  std::vector<std::string> base;
+  for (int i = 0; i < argc; ++i) {
+    if (std::string_view(argv[i]) == "--capture-views") {
+      i += 2;
+    } else {
+      base.emplace_back(argv[i]);
+    }
+  }
+  std::vector<CaptureView> views;
+  std::string line;
+  for (int number = 1; std::getline(file, line); ++number) {
+    std::istringstream words(line);
+    std::string name;
+    if (!(words >> name) || name[0] == '#' || name == "flock") {
+      continue;
+    }
+    const std::string where =
+        launch.captureViewsPath->string() + ":" + std::to_string(number) + ": ";
+    if (name.find('/') != std::string::npos || name.starts_with("-")) {
+      throw std::runtime_error(where + "a line starts with the view's name (no '/')");
+    }
+    for (const CaptureView &view : views) {
+      if (view.name == name) {
+        throw std::runtime_error(where + "view " + name + " is listed twice");
+      }
+    }
+    std::vector<std::string> args = base;
+    for (std::string word; words >> word;) {
+      if (word.starts_with("--") && std::find(std::begin(kViewOptions), std::end(kViewOptions),
+                                              word) == std::end(kViewOptions)) {
+        throw std::runtime_error(where + word +
+                                 " needs a reload: give it to the launch, not to a view");
+      }
+      args.push_back(word);
+    }
+    std::vector<char *> pointers;
+    for (std::string &arg : args) {
+      pointers.push_back(arg.data());
+    }
+    try {
+      views.push_back({name, parseOptions(static_cast<int>(pointers.size()), pointers.data())});
+      views.back().options.frames = views.back().options.frames > 0 ? views.back().options.frames
+                                                                    : launch.frames;
+    } catch (const std::exception &error) {
+      throw std::runtime_error(where + error.what());
+    }
+  }
+  if (views.empty()) {
+    throw std::runtime_error(launch.captureViewsPath->string() + " lists no views");
+  }
+  return views;
 }
 
 } // namespace
@@ -1209,6 +1298,11 @@ int main(int argc, char **argv) {
   if (options.scoreForestPath) {
     return scoreForest(options);
   }
+  const std::vector<CaptureView> views =
+      options.captureViewsPath ? loadCaptureViews(options, argc, argv) : std::vector<CaptureView>{};
+  if (!views.empty()) {
+    std::filesystem::create_directories(options.captureViewsDir);
+  }
   // Scripted runs ignore the mouse and keyboard so results are repeatable.
   const bool benchmark = options.benchmarkSeconds > 0.0f;
   const bool interactive = options.frames == 0 && !benchmark;
@@ -1247,8 +1341,6 @@ int main(int argc, char **argv) {
   renderer.setRayTracing(options.shadows == meridian::ShadowMode::Rt ||
                          options.referenceSamples > 0);
   renderer.setShadowRefresh(options.shadowRefresh);
-  renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
-  renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
   renderer.setDebugView(options.debugView);
   Report report(argc, argv);
@@ -1258,7 +1350,6 @@ int main(int argc, char **argv) {
   }
   renderer.setVoxelLod(options.voxelLod);
   renderer.setLodErrorPixels(options.lodError);
-  renderer.setGrade(kStartingGrade);
   renderer.setCloudsEnabled(options.clouds);
 
   // Real elevation (swisstopo swissALTI3D, the Napf), or procedural hills.
@@ -1372,59 +1463,72 @@ int main(int argc, char **argv) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);
   }
 
-  meridian::Weather weather(1, meridian::weatherPreset(options.weather));
-  if (options.weatherFront) {
-    weather.setTarget(meridian::weatherPreset("overcast"), *options.weatherFront);
-  }
+  const auto makeWeather = [](const Options &o) {
+    meridian::Weather weather(1, meridian::weatherPreset(o.weather));
+    if (o.weatherFront) {
+      weather.setTarget(meridian::weatherPreset("overcast"), *o.weatherFront);
+    }
+    return weather;
+  };
+  meridian::Weather weather = makeWeather(options);
   double gameSeconds = options.gameTime;
 
   meridian::Lighting lighting;
-  lighting.atmosphere = atmosphereFor(options.haze.value_or(Haze::Summer), floorKm);
-  if (options.sunDirection) {
-    lighting.sunDirection = *options.sunDirection;
-  }
-  // CLI and defaults are the built-in look; the grade file (interactive runs
-  // and --grade) overrides it except for an explicit --sun, --haze or --bloom.
-  Look builtIn = lookWithSun(lighting.sunDirection, options.haze.value_or(Haze::Summer));
-  builtIn.grade = kStartingGrade;
-  builtIn.fovDegrees = options.fovDegrees.value_or(builtIn.fovDegrees);
-  builtIn.bloom = options.bloom.value_or(meridian::Bloom{});
-  builtIn.effects = options.effects.value_or(meridian::Effects{});
-  Look look = builtIn;
-  const std::filesystem::path gradePath = options.gradePath.value_or(defaultLookPath());
-  if (options.gradePath || interactive) {
-    if (auto loaded = loadLook(gradePath, builtIn)) {
-      look = *loaded;
-      if (options.sunDirection) {
-        look.sunAzimuthDegrees = builtIn.sunAzimuthDegrees;
-        look.sunElevationDegrees = builtIn.sunElevationDegrees;
-      } else {
-        lighting.sunDirection = sunDirection(look.sunAzimuthDegrees, look.sunElevationDegrees);
-      }
-      if (options.haze) {
-        look.haze = *options.haze;
-      } else {
-        lighting.atmosphere = atmosphereFor(look.haze, floorKm);
-      }
-      if (options.fovDegrees) {
-        look.fovDegrees = *options.fovDegrees;
-      }
-      if (options.bloom) {
-        look.bloom = *options.bloom;
-      } else {
-        renderer.setBloom(look.bloom);
-      }
-      if (options.effects) {
-        look.effects = *options.effects;
-      } else {
-        renderer.setEffects(look.effects);
-      }
-      renderer.setGrade(look.grade);
-    } else if (options.gradePath) {
-      throw std::runtime_error("cannot read grade file " + options.gradePath->string());
+  // The sun, haze and look of the run, or of a --capture-views view.
+  const auto setLook = [&](const Options &o) {
+    lighting = {};
+    lighting.atmosphere = atmosphereFor(o.haze.value_or(Haze::Summer), floorKm);
+    if (o.sunDirection) {
+      lighting.sunDirection = *o.sunDirection;
     }
-  }
-  GradePanel gradePanel(builtIn, look, gradePath);
+    renderer.setBloom(o.bloom.value_or(meridian::Bloom{}));
+    renderer.setEffects(o.effects.value_or(meridian::Effects{}));
+    renderer.setGrade(kStartingGrade);
+    // CLI and defaults are the built-in look; the grade file (interactive
+    // runs and --grade) overrides it except for an explicit --sun, --haze or
+    // --bloom.
+    Look builtIn = lookWithSun(lighting.sunDirection, o.haze.value_or(Haze::Summer));
+    builtIn.grade = kStartingGrade;
+    builtIn.fovDegrees = o.fovDegrees.value_or(builtIn.fovDegrees);
+    builtIn.bloom = o.bloom.value_or(meridian::Bloom{});
+    builtIn.effects = o.effects.value_or(meridian::Effects{});
+    Look look = builtIn;
+    const std::filesystem::path gradePath = o.gradePath.value_or(defaultLookPath());
+    if (o.gradePath || interactive) {
+      if (auto loaded = loadLook(gradePath, builtIn)) {
+        look = *loaded;
+        if (o.sunDirection) {
+          look.sunAzimuthDegrees = builtIn.sunAzimuthDegrees;
+          look.sunElevationDegrees = builtIn.sunElevationDegrees;
+        } else {
+          lighting.sunDirection = sunDirection(look.sunAzimuthDegrees, look.sunElevationDegrees);
+        }
+        if (o.haze) {
+          look.haze = *o.haze;
+        } else {
+          lighting.atmosphere = atmosphereFor(look.haze, floorKm);
+        }
+        if (o.fovDegrees) {
+          look.fovDegrees = *o.fovDegrees;
+        }
+        if (o.bloom) {
+          look.bloom = *o.bloom;
+        } else {
+          renderer.setBloom(look.bloom);
+        }
+        if (o.effects) {
+          look.effects = *o.effects;
+        } else {
+          renderer.setEffects(look.effects);
+        }
+        renderer.setGrade(look.grade);
+      } else if (o.gradePath) {
+        throw std::runtime_error("cannot read grade file " + o.gradePath->string());
+      }
+    }
+    return GradePanel(builtIn, look, gradePath);
+  };
+  GradePanel gradePanel = setLook(options);
   if (options.overlayGrade) {
     gradePanel.setVisible(window, true);
   }
@@ -1435,6 +1539,7 @@ int main(int argc, char **argv) {
   if (options.camera) {
     camera = *options.camera;
   }
+  const meridian::Camera startCamera = camera;
   // Scripted runs (motion and exposure) use a fixed step so they repeat
   // exactly.
   constexpr int kBenchmarkWarmupFrames = 60;
@@ -1491,10 +1596,118 @@ int main(int argc, char **argv) {
   bool benchmarkWritten = true;
   Clock::time_point benchmarkStart;
 
+  // The run's per-view settings: the launch's, or the --capture-views view
+  // being rendered (which started after frame viewStart).
+  const Options *run = &options;
+  size_t viewIndex = 0;
+  bool viewPending = !views.empty();
+  int viewStart = 0;
+  uint32_t viewValidationStart = 0;
+  // Each view starts the way a fresh launch's first frame does.
+  auto startView = [&] {
+    const CaptureView &view = views[viewIndex];
+    run = &view.options;
+    renderer.cut();
+    gradePanel = setLook(*run);
+    camera = run->camera.value_or(startCamera);
+    weather = makeWeather(*run);
+    gameSeconds = run->gameTime;
+    timeFrozen = run->freezeTime;
+    renderer.setDebugView(run->debugView);
+    if (filterPickPending) {
+      renderer.keepDebugTargets(false);
+    }
+    filterStep = 0;
+    filterPickPending = false;
+    filterPick.reset();
+    renderer.setDebugFilter({});
+    viewStart = totalFrames;
+    std::printf("View %zu/%zu: %s\n", viewIndex + 1, views.size(), view.name.c_str());
+    std::fflush(stdout);
+  };
+
+  // What a capture run prints at its end (and a --capture-views run per view).
+  auto printStats = [&](int frameCount, uint32_t validationErrors) {
+    renderer.drainStatistics();
+    renderer.printAmbient();
+    std::printf("sun shadows: %u cascade renders, max %.2f ms\n", renderer.sunShadowRenderCount(),
+                renderer.sunShadowMaxMs());
+    const meridian::CullDrops drops = renderer.droppedCullEntries();
+    std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
+                "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "
+                "%u dropped by full "
+                "cull lists (most in a frame, cascades included: chunks %u, work items %u, "
+                "clusters %u, terrain nodes %u, bvh nodes %u), placed %u, %u validation errors\n",
+                frameCount, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
+                renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
+                renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
+                renderer.drawnFarCellCount(), renderer.drawnVoxelTreeCount(),
+                renderer.drawnVoxelBrickCount(), renderer.drawnVoxelQuadCount(),
+                renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
+                drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
+                renderer.placedInstanceCount(),
+                validationErrors);
+    if (renderer.drawnVoxelQuadCount() > 0) {
+      std::printf("voxel quads %u: area %.0f px = %.2f x the render's pixels, %.1f%% under 1 px\n",
+                  renderer.drawnVoxelQuadCount(), renderer.drawnVoxelQuadArea(),
+                  renderer.drawnVoxelQuadComplexity(),
+                  100.0 * renderer.drawnSubpixelVoxelQuads() / renderer.drawnVoxelQuadCount());
+    }
+    const meridian::Renderer::StreamStats stream = renderer.streamStats();
+    std::printf("streamed: %u layers, window %ux%u, ring %u slots, %u live\n", stream.layers,
+                stream.window, stream.window, stream.ringInstances, stream.live);
+    std::printf("GPU passes:");
+    const char *separator = " ";
+    for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {
+      std::printf("%s%s %.2f", separator, pass.name, pass.ms);
+      separator = ", ";
+    }
+    std::printf("\n");
+    // Wind as reported in meteorology: where it comes from, clockwise from
+    // north (-z).
+    const meridian::WeatherState here = weather.stateAt(camera.position);
+    const meridian::Vec3 toward = here.wind.direction;
+    const float from = std::fmod(
+        std::atan2(-toward.x, toward.z) * 180.0f / 3.14159265f + 360.0f, 360.0f);
+    std::printf("Weather at the camera: coverage %.2f, type %.2f, wind %.1f m/s from "
+                "%.0f deg, gustiness %.2f (game time %.0f s)\n",
+                here.coverage, here.type, here.wind.speed10m, from, here.wind.gustiness,
+                gameSeconds);
+    for (const bool cascades : {false, true}) {
+      const meridian::CullNeed need = renderer.cullNeed(cascades);
+      std::printf("cull list need, %s, most in a frame: chunks %u, work items %u, bvh nodes %u, "
+                  "drawn clusters %u, voxel clusters %u, voxel quads %u, terrain nodes %u, "
+                  "retest clusters %u; %u dropped\n",
+                  cascades ? "sun shadow cascades" : "main view", need.chunks, need.workItems,
+                  need.traversalNodes, need.drawnClusters, need.voxelClusters, need.voxelQuads,
+                  need.terrainNodes, need.retestClusters, need.dropped);
+    }
+    for (uint32_t i = 0; i < meridian::kShadowCascades; ++i) {
+      const meridian::CullNeed need = renderer.cascadeCullNeed(i);
+      std::printf("cull list need, cascade %u: chunks %u, work items %u, bvh nodes %u, drawn "
+                  "clusters %u, voxel clusters %u, voxel quads %u; %u dropped\n",
+                  i, need.chunks, need.workItems, need.traversalNodes, need.drawnClusters,
+                  need.voxelClusters, need.voxelQuads, need.dropped);
+    }
+    std::fflush(stdout);
+    if (renderer.droppedCullEntryCount() > 0) {
+      std::fprintf(stderr,
+                   "WARNING: up to %u entries dropped by full cull lists in a frame (main view "
+                   "and sun shadow cascades): the image is incomplete\n",
+                   renderer.droppedCullEntryCount());
+    }
+  };
+
   while (!window.shouldClose() &&
-         (interactive || (benchmark ? !benchmarkDone
-                                   : totalFrames < options.frames + static_cast<int>(
-                                                                     options.referenceSamples)))) {
+         (interactive ||
+          (benchmark         ? !benchmarkDone
+           : !views.empty() ? viewIndex < views.size()
+                            : totalFrames < options.frames +
+                                                static_cast<int>(options.referenceSamples)))) {
+    if (viewPending) {
+      startView();
+      viewPending = false;
+    }
     auto now = Clock::now();
     const float frameMs = std::chrono::duration<float, std::milli>(now - lastFrame).count();
     // Clamped so a long stall (loading, dragging the window) doesn't
@@ -1565,6 +1778,7 @@ int main(int argc, char **argv) {
       camera.pitch = pose.pitch;
     }
     ++totalFrames;
+    const int runFrame = totalFrames - viewStart;
     scriptAngles(options.frames - totalFrames);
     if (options.cameraVelocity) {
       camera.position = meridian::scriptedPosition(
@@ -1587,9 +1801,11 @@ int main(int argc, char **argv) {
                     totalFrames / options.captureSequence - 1);
       std::filesystem::path path = *options.capturePath;
       renderer.requestCapture(path.replace_filename(path.stem().string() + suffix));
+    } else if (!views.empty() && runFrame == run->frames) {
+      renderer.requestCapture(options.captureViewsDir / (views[viewIndex].name + ".png"));
     }
-    if (options.filterAt > 0 && totalFrames == options.filterAt) {
-      startFilter(options.filterStep);
+    if (run->filterAt > 0 && runFrame == run->filterAt) {
+      startFilter(run->filterStep);
     }
     const bool reporting =
         reportRequested || (options.reportAt > 0 && totalFrames == options.reportAt);
@@ -1633,10 +1849,10 @@ int main(int argc, char **argv) {
     }
     // Game time (wind, clouds, weather) stands still while the reference accumulates.
     const float frameSeconds = interactive || benchmark ? deltaSeconds
-                               : totalFrames > options.frames ? 0.0f
-                                                              : kScriptedStep;
+                               : runFrame > run->frames ? 0.0f
+                                                        : kScriptedStep;
     if (!timeFrozen) {
-      gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
+      gameSeconds += static_cast<double>(frameSeconds) * run->timeScale;
     }
     weather.update(gameSeconds);
     renderer.setWeather(weather);
@@ -1650,7 +1866,7 @@ int main(int argc, char **argv) {
     renderer.draw(camera, lighting, frameSeconds);
     if (report.pending()) {
       report.finish(renderer, {camera, lighting.sunDirection, gradePanel.look(), gameSeconds,
-                               interactive ? 120 : totalFrames, options.timeScale, timeFrozen,
+                               interactive ? 120 : runFrame, run->timeScale, timeFrozen,
                                renderer.debugFilter()});
     }
     if (filterPickPending) {
@@ -1658,6 +1874,12 @@ int main(int argc, char **argv) {
       renderer.keepDebugTargets(false);
       filterPickPending = false;
       applyFilter(renderer, filterStep, filterPick);
+    }
+    if (!views.empty() && runFrame == run->frames) {
+      printStats(runFrame, renderer.validationErrorCount() - viewValidationStart);
+      renderer.resetStatistics();
+      viewValidationStart = renderer.validationErrorCount();
+      viewPending = ++viewIndex < views.size();
     }
 
     ++frames;
@@ -1686,75 +1908,8 @@ int main(int argc, char **argv) {
                 std::chrono::duration<double>(Clock::now() - referenceStart).count(),
                 100.0 * renderer.referenceNoise());
   }
-  if (!interactive) {
-    renderer.drainStatistics();
-    renderer.printAmbient();
-    std::printf("sun shadows: %u cascade renders, max %.2f ms\n", renderer.sunShadowRenderCount(),
-                renderer.sunShadowMaxMs());
-    const meridian::CullDrops drops = renderer.droppedCullEntries();
-    std::printf("Rendered %d frames, GPU %.2f ms, %u drawn instances, %u clusters, "
-                "%u triangles, %u terrain nodes, cells %u, far cells %u, voxel trees %u (bricks %u, voxels %u), bvh nodes %u, "
-                "%u dropped by full "
-                "cull lists (most in a frame, cascades included: chunks %u, work items %u, "
-                "clusters %u, terrain nodes %u, bvh nodes %u), placed %u, %u validation errors\n",
-                totalFrames, renderer.gpuFrameMs(), renderer.drawnInstanceCount(),
-                renderer.drawnClusterCount(), renderer.drawnTriangleCount(),
-                renderer.drawnTerrainNodeCount(), renderer.drawnCellCount(),
-                renderer.drawnFarCellCount(), renderer.drawnVoxelTreeCount(),
-                renderer.drawnVoxelBrickCount(), renderer.drawnVoxelQuadCount(),
-                renderer.visitedBvhNodeCount(), renderer.droppedCullEntryCount(), drops.chunks,
-                drops.workItems, drops.clusters, drops.terrainNodes, drops.traversalNodes,
-                renderer.placedInstanceCount(),
-                renderer.validationErrorCount());
-    if (renderer.drawnVoxelQuadCount() > 0) {
-      std::printf("voxel quads %u: area %.0f px = %.2f x the render's pixels, %.1f%% under 1 px\n",
-                  renderer.drawnVoxelQuadCount(), renderer.drawnVoxelQuadArea(),
-                  renderer.drawnVoxelQuadComplexity(),
-                  100.0 * renderer.drawnSubpixelVoxelQuads() / renderer.drawnVoxelQuadCount());
-    }
-    const meridian::Renderer::StreamStats stream = renderer.streamStats();
-    std::printf("streamed: %u layers, window %ux%u, ring %u slots, %u live\n", stream.layers,
-                stream.window, stream.window, stream.ringInstances, stream.live);
-    std::printf("GPU passes:");
-    const char *separator = " ";
-    for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {
-      std::printf("%s%s %.2f", separator, pass.name, pass.ms);
-      separator = ", ";
-    }
-    std::printf("\n");
-    // Wind as reported in meteorology: where it comes from, clockwise from
-    // north (-z).
-    const meridian::WeatherState here = weather.stateAt(camera.position);
-    const meridian::Vec3 toward = here.wind.direction;
-    const float from = std::fmod(
-        std::atan2(-toward.x, toward.z) * 180.0f / 3.14159265f + 360.0f, 360.0f);
-    std::printf("Weather at the camera: coverage %.2f, type %.2f, wind %.1f m/s from "
-                "%.0f deg, gustiness %.2f (game time %.0f s)\n",
-                here.coverage, here.type, here.wind.speed10m, from, here.wind.gustiness,
-                gameSeconds);
-    for (const bool cascades : {false, true}) {
-      const meridian::CullNeed need = renderer.cullNeed(cascades);
-      std::printf("cull list need, %s, most in a frame: chunks %u, work items %u, bvh nodes %u, "
-                  "drawn clusters %u, voxel clusters %u, voxel quads %u, terrain nodes %u, "
-                  "retest clusters %u; %u dropped\n",
-                  cascades ? "sun shadow cascades" : "main view", need.chunks, need.workItems,
-                  need.traversalNodes, need.drawnClusters, need.voxelClusters, need.voxelQuads,
-                  need.terrainNodes, need.retestClusters, need.dropped);
-    }
-    for (uint32_t i = 0; i < meridian::kShadowCascades; ++i) {
-      const meridian::CullNeed need = renderer.cascadeCullNeed(i);
-      std::printf("cull list need, cascade %u: chunks %u, work items %u, bvh nodes %u, drawn "
-                  "clusters %u, voxel clusters %u, voxel quads %u; %u dropped\n",
-                  i, need.chunks, need.workItems, need.traversalNodes, need.drawnClusters,
-                  need.voxelClusters, need.voxelQuads, need.dropped);
-    }
-    std::fflush(stdout);
-    if (renderer.droppedCullEntryCount() > 0) {
-      std::fprintf(stderr,
-                   "WARNING: up to %u entries dropped by full cull lists in a frame (main view "
-                   "and sun shadow cascades): the image is incomplete\n",
-                   renderer.droppedCullEntryCount());
-    }
+  if (!interactive && views.empty()) {
+    printStats(totalFrames, renderer.validationErrorCount());
   }
   return renderer.validationErrorCount() == 0 && benchmarkWritten ? 0 : 1;
 }

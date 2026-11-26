@@ -42,6 +42,8 @@ public:
 private:
   std::filesystem::path executable_;
   std::vector<std::string> keptArgs_;
+  // The kept options a --capture-views line can carry.
+  std::vector<std::string> viewArgs_;
   std::filesystem::path directory_;
   meridian::DebugView restoreView_ = meridian::DebugView::None;
 };
