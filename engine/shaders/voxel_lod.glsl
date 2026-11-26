@@ -160,6 +160,8 @@ const uint kVoxelCoverageArea = 1u;
 const uint kVoxelCoverageAreaOffset = 2u;
 const uint kVoxelCoverageMixed = 3u;
 const uint kVoxelCoveragePhase = 4u;
+const uint kVoxelCoverageAreaPixel = 5u;
+const uint kVoxelCoverageAreaPixelPhase = 6u;
 const float kPhaseVoxelPixels = 1.0;
 
 // The rule of a view: cascades keep the hash.
@@ -167,10 +169,30 @@ uint voxelCoverageRule(uint coverage, bool cascade) {
     return cascade ? kVoxelCoverageHash : coverage & 255u;
 }
 
-float voxelAreaFraction(uint rule, float f) {
+// `pixels`: the full quad's area on screen.
+float voxelAreaFraction(uint rule, float f, float pixels) {
+    if (rule == kVoxelCoverageAreaPixel || rule == kVoxelCoverageAreaPixelPhase) {
+        return pixels > 0.0 ? min(max(f, 1.0 / pixels), 1.0) : 1.0;
+    }
     return rule == kVoxelCoverageArea || rule == kVoxelCoverageAreaOffset ? f
            : rule == kVoxelCoverageMixed                                  ? sqrt(f)
                                                                           : 1.0;
+}
+
+// The full quad voxel_instance.mesh draws for a voxel of edge `edge`
+// (metres) at `relative`, seen along unit `view` (mesh space), in pixels.
+float voxelQuadPixels(SceneBuffer scene, vec3 relative, vec3 view, float edge) {
+    vec4 center = scene.viewProjection * displayedPosition(scene, relative);
+    float spread = abs(view.x) + abs(view.y) + abs(view.z);
+    vec2 halfSize = 0.5 * edge * sqrt(spread) * abs(scene.projectionScale);
+    return center.w > 0.0 ? halfSize.x * halfSize.y /
+                                (center.w * center.w * scene.inverseResolution.x * scene.inverseResolution.y)
+                          : 0.0;
+}
+
+bool voxelUsesPixels(uint rule) {
+    return rule == kVoxelCoveragePhase || rule == kVoxelCoverageAreaPixel ||
+           rule == kVoxelCoverageAreaPixelPhase;
 }
 
 bool voxelPhaseDraws(float f, uint phase, uint phases, uint offset) {
@@ -191,6 +213,13 @@ bool voxelCoverageDraws(uint rule, uint coverage, uvec4 voxel, float f, uvec3 ha
         return pixels < kPhaseVoxelPixels
                    ? voxelPhaseDraws(f, (coverage >> 8) & 255u, coverage >> 16, hash.z)
                    : noise < f;
+    }
+    if (rule == kVoxelCoverageAreaPixel) {
+        return noise < f / voxelAreaFraction(rule, f, pixels);
+    }
+    if (rule == kVoxelCoverageAreaPixelPhase) {
+        return voxelPhaseDraws(f / voxelAreaFraction(rule, f, pixels), (coverage >> 8) & 255u,
+                               coverage >> 16, hash.z);
     }
     return voxelDraws(voxel, f, noise);
 }

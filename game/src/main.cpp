@@ -1040,10 +1040,10 @@ Options parseOptions(int argc, char **argv) {
       }
     } else if (arg == "--voxel-coverage" && i + 1 < argc) {
       const std::string rule = argv[++i];
-      const char *names[] = {"hash", "area", "area-offset", "mixed", "phase"};
+      const char *names[] = {"hash", "area", "area-offset", "mixed", "phase", "area-pixel", "area-pixel-phase"};
       const auto it = std::find(std::begin(names), std::end(names), rule);
       if (it == std::end(names)) {
-        throw std::runtime_error("--voxel-coverage takes hash, area, area-offset, mixed or phase");
+        throw std::runtime_error("--voxel-coverage takes hash, area, area-offset, mixed, phase, area-pixel or area-pixel-phase");
       }
       options.voxelCoverage = static_cast<meridian::VoxelCoverage>(it - std::begin(names));
     } else if (arg == "--frames") {
@@ -1098,7 +1098,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
-                               "--voxel-coverage hash|area|area-offset|mixed|phase, "
+                               "--voxel-coverage hash|area|area-offset|mixed|phase|area-pixel|area-pixel-phase, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
