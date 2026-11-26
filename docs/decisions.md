@@ -5768,6 +5768,23 @@ cached shadow pages are invalidated.
   repeat noise (0.3464 vs 0.3469/255, 0.3724 vs 0.3725/255); `hash` vs
   main 99266f0 at beech08_116m: quad need 4730674 both, 0.5114 vs repeat
   0.5115/255.
+- Draw count fix re-measured (ab04c93 against 44ce2b3, same 14 views and
+  the fly-toward, same settings): list need moves -2.3% to +0.2% (Part B
+  31841226 -> 31831375, overview 26764300 -> 26766167, fly-toward
+  37245138 -> 37047773), 0 dropped, resident 11370 MiB and peak 11782 MiB
+  unchanged; crown streak ratio 1.192 -> 1.188; far canopy crops
+  unchanged in mean and noise (overview 113.99 / 12.33 -> 114.07 / 12.33,
+  Part B 119.72 / 5.79 -> 119.61 / 5.79; `.superpowers/leaf/canopy.py`).
+  A leaf voxel has p < 1 only where f < 1/q (its quad held at one pixel);
+  how many voxels that is at these views was not measured.
+- Motion (`tools/motion-clarity.sh`, ab04c93 against main 99266f0's code,
+  run twice for the forest rows): frame 120/121 jitter at the forest edge
+  moving sideways 5 m/s 4.3114 / 4.3120 against 4.2896 / 4.2874, 30 m/s
+  5.1393 / 5.1395 against 5.0985 / 5.0990 (+0.6%, +0.8%, repeats within
+  0.003); still and turning forest rows and all ground and sky rows within
+  0.008. Near crown (beech_130m pose, crown rect, 5 m/s sideways) 7.10
+  against 8.54, still 1.14 against 1.86. Which of the rule and the
+  offset adds the forest-edge jitter is not measured.
 - Not done: the 150 m grain is leaf shading (triangles show it too);
   voxel crowns pass more terrain than the path tracer under every rule
   (0.33 vs 0.23); stages 3 to 5 of the spec; thin voxel trunks have no
