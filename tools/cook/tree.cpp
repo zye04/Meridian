@@ -77,6 +77,10 @@ constexpr float kNormalWeight = 0.5f;
 // same length on the surface, so the texture slides no further across the
 // surface than the outline moves.
 constexpr float kUvWeight = 1.0f;
+// And COLOR_0 alpha (a trunk base's fade): a change of 1 costs as much as this
+// position error, about the alder's fade height, so the cut line moves no
+// further than the outline.
+constexpr float kAlphaLength = 0.3f;
 // Thin leaves transmit about as much light as they reflect diffusely; kept
 // below that so reflectance + transmittance stays under 1.
 constexpr float kLeafDiffuseTransmission = 0.35f;
@@ -201,6 +205,15 @@ void splitLeafPieces(Prototype &p) {
 
 } // namespace
 
+// A single-sided masked material whose base colour has no alpha can only be
+// cut by COLOR_0 alpha: a fade on wood (a trunk base into the tiling bark),
+// not a leaf. It keeps COLOR_0 alpha; everything else drops it (on leaves it
+// is wind data, docs/assets.md).
+bool isFadeMaterial(const fastgltf::Material &material, const basisu::image *color) {
+  return material.alphaMode == fastgltf::AlphaMode::Mask && !material.doubleSided && color &&
+         !color->has_alpha();
+}
+
 bool isLeafMaterial(const fastgltf::Material &material) {
   if (material.doubleSided || material.alphaMode == fastgltf::AlphaMode::Mask) {
     return true;
@@ -221,7 +234,7 @@ namespace {
 // With `atlas`, the primitive's triangles are alpha-tested cards, replaced by
 // the atlas's traced leaves clipped onto them.
 Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive &primitive,
-                        const AtlasMesh *atlas) {
+                        const AtlasMesh *atlas, const std::vector<bool> &fadeMaterials) {
   const auto position = primitive.findAttribute("POSITION");
   if (position == primitive.attributes.cend()) {
     throw std::runtime_error("tree primitive without positions");
@@ -231,7 +244,8 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
   if (p.material >= asset.materials.size()) {
     throw std::runtime_error("tree primitive without a material");
   }
-  p.leaf = isLeafMaterial(asset.materials[p.material]);
+  const bool fade = fadeMaterials[p.material];
+  p.leaf = !fade && isLeafMaterial(asset.materials[p.material]);
   p.textured = asset.materials[p.material].pbrData.baseColorTexture.has_value();
   const auto &positions = asset.accessors[position->accessorIndex];
   p.vertices.resize(positions.count, Vertex{});
@@ -258,6 +272,13 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
           p.vertices[i].uv[0] = v.x();
           p.vertices[i].uv[1] = v.y();
         });
+  }
+  if (const auto color = primitive.findAttribute("COLOR_0");
+      fade && color != primitive.attributes.cend() &&
+      asset.accessors[color->accessorIndex].type == fastgltf::AccessorType::Vec4) {
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(
+        asset, asset.accessors[color->accessorIndex],
+        [&](fastgltf::math::fvec4 c, size_t i) { p.vertices[i].alpha = c.w(); });
   }
   if (primitive.indicesAccessor) {
     const auto &indices = asset.accessors[*primitive.indicesAccessor];
@@ -294,8 +315,7 @@ Prototype loadPrototype(const fastgltf::Asset &asset, const fastgltf::Primitive 
 void simplify(Prototype &p, double ratio, float leafError) {
   p.cooked.clear();
   p.cookedPieces.clear();
-  float weights[5] = {kNormalWeight, kNormalWeight, kNormalWeight, 0.0f, 0.0f};
-  const size_t attributes = p.textured ? 5 : 3;
+  float weights[6] = {kNormalWeight, kNormalWeight, kNormalWeight, 0.0f, 0.0f, 0.0f};
   std::vector<uint32_t> local(p.vertices.size(), UINT32_MAX), global, indices, out;
   std::vector<Vertex> vertices;
   std::vector<uint8_t> locked;
@@ -325,16 +345,17 @@ void simplify(Prototype &p, double ratio, float leafError) {
     for (auto it = begin; it != end; ++it) {
       indices.push_back(local[*it]);
     }
-    if (p.textured) {
-      // meshoptimizer normalizes positions by the buffer's largest extent.
-      Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
-      for (const Vertex &v : vertices) {
-        for (int c = 0; c < 3; ++c) {
-          low[c] = std::min(low[c], v.position[c]);
-          high[c] = std::max(high[c], v.position[c]);
-        }
+    // meshoptimizer normalizes positions by the buffer's largest extent.
+    Vec3 low{INFINITY, INFINITY, INFINITY}, high{-INFINITY, -INFINITY, -INFINITY};
+    for (const Vertex &v : vertices) {
+      for (int c = 0; c < 3; ++c) {
+        low[c] = std::min(low[c], v.position[c]);
+        high[c] = std::max(high[c], v.position[c]);
       }
-      const float extent = std::max({high[0] - low[0], high[1] - low[1], high[2] - low[2]});
+    }
+    const float extent = std::max({high[0] - low[0], high[1] - low[1], high[2] - low[2]});
+    weights[5] = extent > 0.0f ? kAlphaLength / extent : 0.0f;
+    if (p.textured) {
       double area = 0.0, uvArea = 0.0;
       for (size_t t = 0; t < count; t += 3) {
         const Vertex &a = vertices[indices[t]], &b = vertices[indices[t + 1]],
@@ -349,11 +370,13 @@ void simplify(Prototype &p, double ratio, float leafError) {
           mapped ? kUvWeight * static_cast<float>(std::sqrt(area / uvArea)) / extent : 0.0f;
     }
     out.resize(count);
-    // Normal and UV are adjacent in Vertex, so one attribute stream holds both.
+    // Normal, UV and alpha are adjacent in Vertex, so one attribute stream
+    // holds them.
     static_assert(offsetof(Vertex, uv) == offsetof(Vertex, normal) + sizeof(Vec3));
+    static_assert(offsetof(Vertex, alpha) == offsetof(Vertex, uv) + 2 * sizeof(float));
     const size_t kept = meshopt_simplifyWithAttributes(
         out.data(), indices.data(), count, vertices[0].position.data(), vertices.size(),
-        sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, attributes,
+        sizeof(Vertex), vertices[0].normal.data(), sizeof(Vertex), weights, 6,
         locked.data(), target, p.leaf ? leafError : kWoodSimplifyError,
         meshopt_SimplifyErrorAbsolute, nullptr);
     // A piece is never simplified away; pruning decides which go.
@@ -702,6 +725,12 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   };
 
   // Alpha-tested leaf materials: their atlas traced once, for every card.
+  std::vector<bool> fadeMaterials(source.materials.size());
+  for (size_t m = 0; m < source.materials.size(); ++m) {
+    const auto &texture = source.materials[m].pbrData.baseColorTexture;
+    fadeMaterials[m] = isFadeMaterial(source.materials[m],
+                                      texture ? &sourceImage(texture->textureIndex) : nullptr);
+  }
   std::map<size_t, AtlasMesh> atlases;
   for (size_t m = 0; m < source.materials.size(); ++m) {
     const fastgltf::Material &material = source.materials[m];
@@ -733,7 +762,8 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
       meshPrototypes[m].push_back(prototypes.size());
       const auto atlas = atlases.find(primitive.materialIndex.value_or(0));
       prototypes.push_back(
-          loadPrototype(source, primitive, atlas == atlases.end() ? nullptr : &atlas->second));
+          loadPrototype(source, primitive, atlas == atlases.end() ? nullptr : &atlas->second,
+                        fadeMaterials));
     }
   }
   std::vector<Instance> instances;
@@ -1002,7 +1032,7 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
   std::vector<bool> leafMaterials(source.materials.size());
   bool untexturedWood = false;
   for (size_t m = 0; m < source.materials.size(); ++m) {
-    leafMaterials[m] = isLeafMaterial(source.materials[m]);
+    leafMaterials[m] = !fadeMaterials[m] && isLeafMaterial(source.materials[m]);
     untexturedWood |= !leafMaterials[m] && !source.materials[m].pbrData.baseColorTexture;
   }
   std::optional<size_t> barkColor, barkNormal, barkArm;
@@ -1076,12 +1106,19 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     fastgltf::Material material;
     material.name = from.name;
     material.doubleSided = leaf;
+    // A fade material whose vertices all keep alpha 1 (the source has no
+    // fade on this tree) is plain opaque wood.
+    const bool fades =
+        fadeMaterials[m] && std::any_of(outputs[m].vertices.begin(), outputs[m].vertices.end(),
+                                        [](const Vertex &v) { return v.alpha < 1.0f; });
     if (from.alphaMode == fastgltf::AlphaMode::Mask && !atlases.contains(m) &&
-        (!from.pbrData.baseColorTexture ||
+        (!from.pbrData.baseColorTexture || fades ||
          sourceImage(from.pbrData.baseColorTexture->textureIndex).has_alpha())) {
       material.alphaMode = fastgltf::AlphaMode::Mask;
       material.alphaCutoff = from.alphaCutoff;
     }
+    // A fade is a hard cut at the cutoff (no dither): glTF applies COLOR_0
+    // alpha to masked materials.
     material.pbrData.baseColorFactor = from.pbrData.baseColorFactor;
     material.pbrData.metallicFactor = from.pbrData.metallicFactor;
     material.pbrData.roughnessFactor = from.pbrData.roughnessFactor;
@@ -1125,11 +1162,12 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
       continue;
     }
     result.triangles += out.indices.size() / 3;
-    std::vector<float> positions, normals, uvs;
+    std::vector<float> positions, normals, uvs, colors;
     for (const Vertex &v : out.vertices) {
       positions.insert(positions.end(), v.position.begin(), v.position.end());
       normals.insert(normals.end(), v.normal.begin(), v.normal.end());
       uvs.insert(uvs.end(), {v.uv[0], v.uv[1]});
+      colors.insert(colors.end(), {1.0f, 1.0f, 1.0f, v.alpha});
     }
     const size_t count = out.vertices.size();
     fastgltf::Primitive primitive;
@@ -1160,6 +1198,13 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
                                           fastgltf::AccessorType::Vec2,
                                           fastgltf::ComponentType::Float,
                                           fastgltf::BufferTarget::ArrayBuffer)});
+    if (fades) {
+      primitive.attributes.push_back(
+          {"COLOR_0", writer.addAccessor(colors.data(), colors.size() * 4, count,
+                                         fastgltf::AccessorType::Vec4,
+                                         fastgltf::ComponentType::Float,
+                                         fastgltf::BufferTarget::ArrayBuffer)});
+    }
     primitive.indicesAccessor = writer.addAccessor(
         out.indices.data(), out.indices.size() * 4, out.indices.size(),
         fastgltf::AccessorType::Scalar, fastgltf::ComponentType::UnsignedInt,

@@ -47,7 +47,8 @@ layout(location = 12) in float inCrownVisibility;
 // terrain is marched here per fragment.
 layout(location = 11) flat in float inTerrainSun;
 #endif
-#ifdef ALPHA_MASK
+#if defined(ALPHA_MASK) && defined(DEPTH_ONLY)
+layout(location = 14) in float inVertexAlpha;
 #endif
 
 #ifdef ALPHA_MASK
@@ -131,7 +132,7 @@ float sunVisibility(vec3 position, vec3 normal) {
 void main() {
 #ifdef DEPTH_ONLY
     Material cutoutMaterial = pc.scene.materials.materials[inMaterialIndex];
-    float cutoutAlpha = cutoutMaterial.baseColorFactor.a;
+    float cutoutAlpha = cutoutMaterial.baseColorFactor.a * inVertexAlpha;
     if (cutoutMaterial.baseColorTexture != kNoTexture) {
         cutoutAlpha *= texture(textures[nonuniformEXT(cutoutMaterial.baseColorTexture)], inUv,
                                pc.scene.mipBias + pc.scene.cutoutMipBias).a;

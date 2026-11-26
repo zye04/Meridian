@@ -42,6 +42,8 @@ struct VoxelTriangle {
   Vec3 p[3];
   Vec3 n[3];
   float uv[3][2];
+  // COLOR_0 alpha: multiplies the base colour alpha of a masked material.
+  float alpha[3] = {1.0f, 1.0f, 1.0f};
   uint32_t material = 0;
 };
 

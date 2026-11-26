@@ -4,6 +4,7 @@
 #include <fastgltf/tools.hpp>
 #include <mikktspace.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -169,6 +170,16 @@ MeshData loadPrimitive(const fastgltf::Asset &asset,
           mesh.vertices[i].uvY = uv.y();
         });
     applyUvTransform(mesh, uvTransform);
+  }
+
+  // Only COLOR_0's alpha is kept (a masked material's alpha test multiplies
+  // it in); a VEC3 COLOR_0 has none.
+  if (const auto it = primitive.findAttribute("COLOR_0");
+      it != primitive.attributes.cend() &&
+      asset.accessors[it->accessorIndex].type == fastgltf::AccessorType::Vec4) {
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(
+        asset, asset.accessors[it->accessorIndex],
+        [&](fastgltf::math::fvec4 c, size_t i) { mesh.vertices[i].alpha = c.w(); });
   }
 
   const auto &indices = asset.accessors[*primitive.indicesAccessor];
@@ -474,9 +485,14 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
       for (const fastgltf::Primitive &primitive : mesh.primitives) {
         const fastgltf::Material *m =
             primitive.materialIndex ? &asset.materials[*primitive.materialIndex] : nullptr;
+        // A mask cut by vertex alpha is a fade on a solid part (a trunk
+        // base), not foliage.
+        const std::vector<Vertex> &vertices = primitives[foliage.size()].vertices;
+        const bool fades = std::any_of(vertices.begin(), vertices.end(),
+                                       [](const Vertex &v) { return v.alpha < 1.0f; });
         foliage.push_back(m && ((m->diffuseTransmission &&
                                  m->diffuseTransmission->diffuseTransmissionFactor > 0.0f) ||
-                                m->alphaMode == fastgltf::AlphaMode::Mask));
+                                (m->alphaMode == fastgltf::AlphaMode::Mask && !fades)));
         voxels.primitiveMaterial.push_back(
             primitive.materialIndex ? uint32_t(*primitive.materialIndex)
                                     : uint32_t(asset.materials.size()));

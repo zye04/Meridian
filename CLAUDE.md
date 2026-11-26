@@ -255,8 +255,8 @@ the trees back (hidden by default). Capture runs print validation errors,
   branches with different versions sharing `assets/` keep separate files),
   keyed by a hash of the loaded geometry (and, for a
   voxelizing model, its voxel materials and their texture bytes) and versioned
-  with meshoptimizer (`kCacheVersion`, cluster.cpp, 8 since the far-field
-  voxels; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
+  with meshoptimizer (`kCacheVersion`, cluster.cpp, 9 since vertex
+  compression; `clusterlod.h` is vendored in `engine/third_party/clusterlod/`);
   the first load after a change prints "Building clusters" and rewrites it
   (an unwritable cache only warns). The cache also stores each mesh's
   per-DAG-level group BVH (`nodes`, `levels`), uploaded to a shared node

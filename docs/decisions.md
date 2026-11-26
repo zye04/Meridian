@@ -5398,3 +5398,66 @@ cached shadow pages are invalidated.
   150 m of that camera.
 - Default stays 0 (the pixel rule alone) until the user picks 60 or 100 m by
   eye on a walk; 150 is ruled out (3x triangles, +6.6 ms).
+
+## Vertex compression (2026-11-26)
+
+- **Problem:** cluster vertices were 48 B (float position, normal,
+  tangent, uv) in the shared vertex pool, the BLAS and every vertex read
+  in the mesh, shadow and ray hit shaders. The trees dominate the pool,
+  and the trunk-base fade needs one more channel (COLOR_0 alpha).
+- **Choice:** a 20 B GPU vertex (`PackedVertex`, vertex_pack.h, five
+  uint, std430 stride 20), packed at upload only; the CPU `Vertex` stays
+  float (plus a float alpha). Layout: position 3 x snorm16 over the
+  mesh's bounds (`MeshInfo` center and half extent; mesh-local, so no
+  world-scale precision loss), COLOR_0 alpha unorm16, normal octahedral
+  2 x snorm16, tangent octahedral 2 x 15 bit with the bitangent sign in
+  bit 31, UV 2 x unorm16 over the mesh's UV range (`MeshInfo` uvOffset,
+  uvScale: 64 -> 80 B). One GLSL decode, common.glsl `loadVertex`, read
+  by mesh.vert, mesh.mesh, shadow.mesh, lighting.glsl
+  `alphaTestCandidate` and ray_hit.glsl; it takes `SceneBuffer` rather
+  than a vertex buffer parameter, since glslang refuses to pass a member
+  of a readonly block ("cannot drop memory qualifier").
+- **Calls accepted by the user:**
+  1. The BLAS reads the first 8 bytes as R16G16B16A16_SNORM (stride 20,
+     w ignored), with the dequantization in each geometry's
+     `transformData` (a BLAS holds several meshes, one geometry each,
+     so the TLAS instance transform cannot carry it). The transforms
+     live in a host-visible buffer freed after the build.
+  2. UV unorm16, not fp16: the fp16 ulp at |uv| = 1 is ~1e-3, 2-4 texels
+     on 2k-4k bark. Max |UV| across the cooked trees is 39.5 (beech
+     Field_01 Tileable, range 40.52 on a 2048 texture): unorm16 steps
+     1.27 texels there (error <= 0.63), fp16 would step 0.031 UV = 64
+     texels. Hornbeam Field_03 steps 1.26; the rest less.
+  3. Trunk-base fade is a hard cut: base alpha x COLOR_0 alpha against
+     the cutoff, no dither (stability over sharpness). Vertex alpha is a
+     varying only where a cutout runs: the masked depth prepass
+     (mesh.frag ALPHA_MASK && DEPTH_ONLY; the main masked pass uses
+     early tests), shadow_masked.frag, `alphaTestCandidate`, and the
+     voxelizer's `surfaceAt` (same coverage). mesh.vert (blended) has
+     no alpha output.
+- **COLOR_0 rules:** the loader reads COLOR_0 alpha (model.cpp). The
+  tree cook keeps it only on a fade material (`isFadeMaterial`: MASK,
+  single-sided, base colour without alpha; cook_ready.py marks Trunk
+  MASK); the Megascans plant import drops COLOR_0 (its wind data would
+  cut fronds). A MASK mesh counts as foliage for the voxel switch only
+  without vertex alpha < 1, so a faded trunk keeps the wood switch
+  height. Of every cooked asset only common_fern_rhdso (MI_rhDso, 2955
+  of 3480 vertices under the cutoff) carried MASK + COLOR_0 alpha < 1;
+  it is recooked with the 30 trees. A fade material only fades when a
+  cooked vertex has alpha < 1: the beech and hornbeam Trunk slots carry
+  COLOR_0 alpha 1 everywhere, so they are written opaque without COLOR_0
+  (the first recook marked them MASK, which paid the masked pipeline
+  and, with no vertex alpha < 1, counted them as foliage). Fading
+  Trunks: alder Field_01, Field_04, Forest_03, Forest_04.
+- **Measured** (forest edge `--trees`, 2560x1440 DLAA, Release, warm
+  caches; main 9146661 with the same cooks except the 9 non-fading
+  Trunks still MASK): resident 12124 -> 10959 MiB (-1165), models-loaded
+  peak 12860 -> 10644 MiB, far-field peak 12537 -> 11372 MiB; GPU
+  24.56 -> 23.96 ms. Trunk MASK against forced OPAQUE (the 4 fading
+  alder Trunks, one launch each): 23.96 against 24.17 ms, noise, so the
+  base clusters stay in the Trunk material (no split). With `--shadows
+  rt` resident is 12730 MiB, GPU 32.34 ms. Validation build (-O3,
+  assertions and validation on): 0 errors in both runs, 0 dropped.
+- **Look:** the alder fork at 1 m (mesh junctions, decoration over bark)
+  shows no hairline seams; the trunk-base cut at 2-6 m is judged by the
+  user. kCacheVersion 8 -> 9.

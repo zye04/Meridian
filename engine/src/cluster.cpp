@@ -27,13 +27,13 @@ constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
-constexpr uint32_t kCacheVersion = (8u << 16) | MESHOPTIMIZER_VERSION;
+constexpr uint32_t kCacheVersion = (9u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 11;
+constexpr uint32_t kVoxelizerVersion = 12;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -430,6 +430,7 @@ struct VoxelLevels {
         v.n[k] = vertex.normal;
         v.uv[k][0] = vertex.uvX;
         v.uv[k][1] = vertex.uvY;
+        v.alpha[k] = vertex.alpha;
       }
       v.material = source.material;
     }

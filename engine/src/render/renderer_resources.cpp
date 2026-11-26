@@ -1,6 +1,7 @@
 #include "renderer_impl.h"
 
 #include <meridian/placement.h>
+#include <meridian/vertex_pack.h>
 
 #include <algorithm>
 #include <cstring>
@@ -84,7 +85,7 @@ void Renderer::Impl::trimPools() {
     VkBufferUsageFlags usage;
   };
   Trim trims[] = {
-      {vertexPool, VkDeviceSize{vertexCount} * sizeof(Vertex), kVertexPoolUsage},
+      {vertexPool, VkDeviceSize{vertexCount} * sizeof(PackedVertex), kVertexPoolUsage},
       {indexPool, VkDeviceSize{indexCount} * sizeof(uint32_t), kIndexPoolUsage},
       {clusterPool, VkDeviceSize{clusterCount} * sizeof(ClusterInfo), kPoolUsage},
       {clusterVertexPool, VkDeviceSize{clusterVertexCount} * sizeof(uint32_t), kPoolUsage},
@@ -166,6 +167,16 @@ AccelerationStructure Renderer::Impl::buildBlas(std::span<const uint32_t> meshIn
   std::vector<VkAccelerationStructureGeometryKHR> geometries;
   std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
   std::vector<uint32_t> triangleCounts;
+  // Each geometry's transform dequantizes its mesh's snorm16 positions
+  // (vertex_pack.h); a BLAS holds several meshes, so the TLAS instance
+  // transform can't.
+  Buffer transforms = createBuffer(
+      meshIndices.size() * sizeof(VkTransformMatrixKHR),
+      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+      16);
+  auto *transformData = static_cast<VkTransformMatrixKHR *>(transforms.mapped);
   for (uint32_t index : meshIndices) {
     const GpuMesh &mesh = meshes.at(index);
     VkAccelerationStructureGeometryKHR geometry{};
@@ -175,10 +186,15 @@ AccelerationStructure Renderer::Impl::buildBlas(std::span<const uint32_t> meshIn
     geometry.flags = mesh.alphaMode == AlphaMode::Mask ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
     auto &triangles = geometry.geometry.triangles;
     triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexFormat = VK_FORMAT_R16G16B16A16_SNORM;
     triangles.vertexData.deviceAddress =
-        vertexPool.address + VkDeviceSize(mesh.vertexOffset) * sizeof(Vertex);
-    triangles.vertexStride = sizeof(Vertex);
+        vertexPool.address + VkDeviceSize(mesh.vertexOffset) * sizeof(PackedVertex);
+    triangles.vertexStride = sizeof(PackedVertex);
+    const size_t g = geometries.size();
+    transformData[g] = {{{mesh.halfExtent.x, 0.0f, 0.0f, mesh.boundsCenter.x},
+                         {0.0f, mesh.halfExtent.y, 0.0f, mesh.boundsCenter.y},
+                         {0.0f, 0.0f, mesh.halfExtent.z, mesh.boundsCenter.z}}};
+    triangles.transformData.deviceAddress = transforms.address + g * sizeof(VkTransformMatrixKHR);
     triangles.maxVertex = mesh.vertexCount - 1;
     triangles.indexType = VK_INDEX_TYPE_UINT32;
     triangles.indexData.deviceAddress =
@@ -187,6 +203,8 @@ AccelerationStructure Renderer::Impl::buildBlas(std::span<const uint32_t> meshIn
     triangleCounts.push_back(mesh.indexCount / 3);
     ranges.push_back({mesh.indexCount / 3, 0, 0, 0});
   }
+  check(vmaFlushAllocation(allocator, transforms.allocation, 0, VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
 
   VkAccelerationStructureBuildGeometryInfoKHR build{};
   build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -248,6 +266,7 @@ AccelerationStructure Renderer::Impl::buildBlas(std::span<const uint32_t> meshIn
         "vkGetQueryPoolResults");
   vkDestroyQueryPool(device.device, query, nullptr);
   destroyBuffer(scratch);
+  destroyBuffer(transforms);
 
   AccelerationStructure compacted =
       createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, compactedBytes);
@@ -602,7 +621,7 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   if (impl_->meshes.size() == kMaxMeshes) {
     throw std::runtime_error("mesh table is full (kMaxMeshes)");
   }
-  if (std::max({total(impl_->vertexCount, vertexCount) * sizeof(Vertex),
+  if (std::max({total(impl_->vertexCount, vertexCount) * sizeof(PackedVertex),
                 total(impl_->indexCount, indexCount) * sizeof(uint32_t),
                 total(impl_->clusterCount, clusterCount) * sizeof(ClusterInfo),
                 total(impl_->clusterVertexCount, clusterVertexCount) * sizeof(uint32_t),
@@ -673,24 +692,22 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   impl_->traversalDepths = std::max(impl_->traversalDepths, traversalDepths);
 
   // Bounding sphere around the bounding box: cheap and good enough for
-  // culling.
-  Vec3 lo = data.vertices.front().position;
-  Vec3 hi = lo;
-  for (const Vertex &v : data.vertices) {
-    lo = {std::min(lo.x, v.position.x), std::min(lo.y, v.position.y),
-          std::min(lo.z, v.position.z)};
-    hi = {std::max(hi.x, v.position.x), std::max(hi.y, v.position.y),
-          std::max(hi.z, v.position.z)};
-  }
+  // culling. The box also quantizes the vertices.
+  const VertexQuantization quantization = vertexQuantization(data.vertices);
   MeshInfo info;
-  info.boundsCenter = (lo + hi) * 0.5f;
-  info.halfExtent = (hi - lo) * 0.5f;
+  info.boundsCenter = quantization.center;
+  info.halfExtent = quantization.halfExtent;
+  for (int k = 0; k < 2; ++k) {
+    info.uvOffset[k] = quantization.uvOffset[k];
+    info.uvScale[k] = quantization.uvScale[k];
+  }
   for (const Vertex &v : data.vertices) {
     info.boundsRadius =
         std::max(info.boundsRadius, length(v.position - info.boundsCenter));
   }
   mesh.boundsCenter = info.boundsCenter;
   mesh.boundsRadius = info.boundsRadius;
+  mesh.halfExtent = info.halfExtent;
   info.firstIndex = mesh.firstIndex;
   info.indexCount = mesh.indexCount;
   info.vertexOffset = mesh.vertexOffset;
@@ -701,10 +718,10 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   info.firstLevel = firstLevel;
   info.levelCount = levelCount;
 
-  const VkDeviceSize vertexBytes = VkDeviceSize{vertexCount} * sizeof(Vertex);
+  const VkDeviceSize vertexBytes = VkDeviceSize{vertexCount} * sizeof(PackedVertex);
   const VkDeviceSize indexBytes = VkDeviceSize{indexCount} * sizeof(uint32_t);
   const VkDeviceSize vertexPoolOffset =
-      VkDeviceSize(mesh.vertexOffset) * sizeof(Vertex);
+      VkDeviceSize(mesh.vertexOffset) * sizeof(PackedVertex);
   const VkDeviceSize indexPoolOffset =
       VkDeviceSize{mesh.firstIndex} * sizeof(uint32_t);
 
@@ -742,7 +759,10 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
           VMA_ALLOCATION_CREATE_MAPPED_BIT);
   auto *stagingBytes = static_cast<char *>(staging.mapped);
-  std::memcpy(stagingBytes, data.vertices.data(), vertexBytes);
+  auto *packed = reinterpret_cast<PackedVertex *>(stagingBytes);
+  for (size_t i = 0; i < data.vertices.size(); ++i) {
+    packed[i] = packVertex(data.vertices[i], quantization);
+  }
   std::memcpy(stagingBytes + stagingOffsets[1], data.indices.data(), indexBytes);
   if (clusterCount > 0) {
     std::memcpy(stagingBytes + stagingOffsets[2], clusterInfos.data(), clusterBytes);

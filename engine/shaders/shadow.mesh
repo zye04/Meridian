@@ -11,6 +11,7 @@ layout(triangles, max_vertices = 128, max_primitives = 128) out;
 
 layout(location = 0) out vec2 outUv[];
 layout(location = 1) flat out uint outMaterialIndex[];
+layout(location = 2) out float outVertexAlpha[];
 
 void main() {
     if (gl_WorkGroupID.x >= kMaxDrawnClusters) {
@@ -28,11 +29,12 @@ void main() {
     for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
         uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
                      uint(mesh.vertexOffset);
-        Vertex vertex = scene.vertices.vertices[index];
+        Vertex vertex = loadVertex(scene, mesh, index);
         vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
         gl_MeshVerticesEXT[i].gl_Position =
             scene.viewProjection * vec4(world - scene.cameraPosition, 1.0);
         outUv[i] = vec2(vertex.uvX, vertex.uvY);
+        outVertexAlpha[i] = vertex.alpha;
         outMaterialIndex[i] = mesh.materialIndex;
     }
     for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {

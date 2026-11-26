@@ -34,6 +34,8 @@ layout(location = 10) flat out float outStreamFade[];
 // -1 where mesh.frag marches the terrain per fragment.
 layout(location = 11) flat out float outTerrainSun[];
 layout(location = 12) out float outCrownVisibility[];
+// COLOR_0 alpha, for the masked depth prepass's alpha test.
+layout(location = 14) out float outVertexAlpha[];
 #ifdef DEBUG_ID
 // (instance id, cluster index) for the debug id (debug_id.glsl).
 layout(location = 13) flat out uvec2 outDebugId[];
@@ -127,7 +129,7 @@ void main() {
     for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
         uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
                      uint(mesh.vertexOffset);
-        Vertex vertex = scene.vertices.vertices[index];
+        Vertex vertex = loadVertex(scene, mesh, index);
         vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
         vec3 relative = world - scene.cameraPosition;
         vec4 displayed = displayedPosition(scene, relative);
@@ -137,6 +139,7 @@ void main() {
         outTangent[i] = vec4(mat3(instance.transform) * vertex.tangent.xyz,
                              vertex.tangent.w);
         outUv[i] = vec2(vertex.uvX, vertex.uvY);
+        outVertexAlpha[i] = vertex.alpha;
         outMaterialIndex[i] = mesh.materialIndex;
         outLodError[i] = lodError;
         outTint[i] = tint;

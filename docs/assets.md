@@ -215,9 +215,15 @@ What the export holds (verified on Black Alder and European Beech):
   `cook_ready.py` applies (in linear HSV, as Unreal does). The alder's
   are identity.
 - `COLOR_0` is wind and blend data (leaves: R phase, G, A per-leaf; trunk
-  base: A ~225 drives `MA_Foliage`'s dithered trunk-to-bark blend over
-  the 1.0-1.5 m overlap), not AO; the cook drops it, so the trunk base
-  shows its own texture up to 1.5 m. `TEXCOORD_1` is constant per
+  base: A drives `MA_Foliage`'s dithered trunk-to-bark blend), not AO.
+  `cook_ready.py` writes the Trunk slot MASK (cutoff 0.5), and the tree
+  cook keeps COLOR_0 alpha only on a masked single-sided material whose
+  base colour has no alpha (`isFadeMaterial`, tree.cpp): the trunk base
+  is cut where base alpha x vertex alpha < 0.5 (a hard edge, no dither).
+  Leaves, decoration and the tiling bark drop it (the alder Tileable
+  carries alpha < 1 on 4-7% of its vertices: blend data, not a fade).
+  The plant cook drops a Megascans plant's COLOR_0 too (wind data).
+  `TEXCOORD_1` is constant per
   primitive (dropped too).
 - MI parameters (`inventory.json`) not reproduced: Albedo Tint with
   "Tint BaseColor" (identity with "Split Albedo Controls", whose leaf and

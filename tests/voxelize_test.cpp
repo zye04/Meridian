@@ -140,6 +140,51 @@ TEST_CASE("an alpha-masked quad covers its alpha fraction") {
   CHECK(blocked == doctest::Approx(0.5f).epsilon(0.07));
 }
 
+TEST_CASE("vertex alpha multiplies the mask: a quad fading across u covers half") {
+  VoxelMaterial material{};
+  material.alphaMask = true;
+  material.alphaCutoff = 0.5f;
+  std::vector<VoxelTriangle> tris;
+  quad(tris, {0.0f, 0.0f, 0.0f}, 1.0f, 2);
+  // Alpha 1 - u at each corner (quad's corners: u = 0, 1, 1 and 0, 1, 0).
+  const float alphas[2][3] = {{1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}};
+  for (int t = 0; t < 2; ++t) {
+    for (int k = 0; k < 3; ++k) {
+      tris[t].alpha[k] = alphas[t][k];
+    }
+  }
+  const VoxelGrid grid = voxelize(tris, {&material, 1}, 1.0f);
+  const VoxelPayload *v = voxelAt(grid, 0, 0, 0);
+  REQUIRE(v != nullptr);
+  const float blocked = 1.0f - std::exp(-v->depth[2]);
+  CHECK(blocked == doctest::Approx(0.5f).epsilon(0.07));
+}
+
+TEST_CASE("vertex alpha of 1 everywhere leaves the mask to the texture alone") {
+  // Barycentric interpolation of three 1s can round below 1; at a cutoff of
+  // exactly 1 that would cut voxels the material alone keeps.
+  VoxelMaterial material{};
+  material.alphaMask = true;
+  material.alphaCutoff = 1.0f;
+  std::vector<VoxelTriangle> tris = leafSoup(200, 2.0f, 3);
+  const VoxelGrid masked = voxelize(tris, {&material, 1}, 0.25f);
+  material.alphaMask = false;
+  const VoxelGrid opaque = voxelize(tris, {&material, 1}, 0.25f);
+  const auto depthSum = [](const VoxelGrid &grid) {
+    double sum = 0.0;
+    for (const VoxelBrick &brick : grid.bricks) {
+      for (int i = 0; i < 64; ++i) {
+        if ((brick.occupied >> i) & 1u) {
+          sum += brick.voxels[i].depth[0] + brick.voxels[i].depth[1] + brick.voxels[i].depth[2];
+        }
+      }
+    }
+    return sum;
+  };
+  REQUIRE(masked.bricks.size() == opaque.bricks.size());
+  CHECK(depthSum(masked) == depthSum(opaque));
+}
+
 TEST_CASE("albedo and transmission are hit means") {
   VoxelMaterial red{}, blue{};
   red.baseColorFactor = {1.0f, 0.0f, 0.0f};

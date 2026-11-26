@@ -7,6 +7,7 @@
 // per channel so hue is kept.
 const float kMaxExposedLuminance = 60000.0;
 
+// A vertex as loadVertex decodes it (the pool holds 20 B PackedVertex).
 struct Vertex {
     vec3 position;
     float uvX;
@@ -14,6 +15,8 @@ struct Vertex {
     float uvY;
     // xyz: tangent direction; w: bitangent sign (glTF/MikkTSpace convention).
     vec4 tangent;
+    // COLOR_0 alpha: multiplies the base colour alpha of a masked material.
+    float alpha;
 };
 
 // glTF metallic-roughness material. Must match GpuMaterial in C++.
@@ -48,8 +51,9 @@ layout(buffer_reference, std430) readonly buffer MaterialBuffer {
     Material materials[];
 };
 
+// PackedVertex (vertex_pack.h), five words per vertex; read with loadVertex.
 layout(buffer_reference, std430) readonly buffer VertexBuffer {
-    Vertex vertices[];
+    uint words[];
 };
 
 layout(buffer_reference, std430) readonly buffer IndexBuffer {
@@ -82,7 +86,19 @@ struct MeshInfo {
     float halfExtentX;
     float halfExtentY;
     float halfExtentZ;
+    // uv = uvOffset + uvScale * the vertex's unorm16 pair.
+    vec2 uvOffset;
+    vec2 uvScale;
 };
+
+vec3 fromOctahedral(vec2 e) {
+    float z = 1.0 - abs(e.x) - abs(e.y);
+    if (z < 0.0) {
+        e = (1.0 - abs(e.yx)) * vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(vec3(e, z));
+}
+
 
 layout(buffer_reference, std430) readonly buffer MeshBuffer {
     MeshInfo meshes[];
@@ -711,6 +727,27 @@ struct LoadedInstance {
 // terrain: the raster terrain adds detail noise near the camera, which
 // short plants would sink under. Every user of loadInstance sees the same
 // scale and position, so culling, drawing and motion vectors agree.
+// The GPU side of vertex_pack.h's unpackVertex; index includes the mesh's
+// vertexOffset.
+Vertex loadVertex(SceneBuffer scene, MeshInfo mesh, uint index) {
+    uint base = index * 5u;
+    VertexBuffer pool = scene.vertices;
+    uint w0 = pool.words[base], w1 = pool.words[base + 1u], w2 = pool.words[base + 2u],
+         w3 = pool.words[base + 3u], w4 = pool.words[base + 4u];
+    Vertex v;
+    vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
+    v.position = mesh.boundsCenter +
+                 halfExtent * vec3(unpackSnorm2x16(w0), unpackSnorm2x16(w1).x);
+    v.alpha = unpackUnorm2x16(w1).y;
+    v.normal = fromOctahedral(unpackSnorm2x16(w2));
+    vec2 t = vec2(uvec2(w3, w3 >> 15) & 0x7FFFu) / 32767.0 * 2.0 - 1.0;
+    v.tangent = vec4(fromOctahedral(t), (w3 >> 31) != 0u ? -1.0 : 1.0);
+    vec2 uv = mesh.uvOffset + mesh.uvScale * unpackUnorm2x16(w4);
+    v.uvX = uv.x;
+    v.uvY = uv.y;
+    return v;
+}
+
 void applyStreaming(SceneBuffer scene, uint ring, inout LoadedInstance loaded) {
     uint tag = scene.streamThresholds.thresholds[ring];
     vec2 layer = scene.streamLayers.layers[tag >> 16u];

@@ -7,6 +7,7 @@
 
 #include <basisu_enc.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -47,7 +48,8 @@ Matrix placement(float yaw, float scale, float x, float y, float z) {
 }
 
 struct Mesh {
-  std::vector<float> positions, normals, uvs;
+  // colors: COLOR_0 (RGBA), written when not empty.
+  std::vector<float> positions, normals, uvs, colors;
   std::vector<uint32_t> indices;
 };
 
@@ -127,10 +129,11 @@ std::string floatList(const float *values, size_t count) {
 // Writes the two prototypes as an unflattened glTF like usd2gltf's: one mesh
 // each, one node per instance.
 // With `leafTexture`, the leaf material samples that image (beside the glTF),
-// alpha-masked at 0.3.
+// alpha-masked at 0.3. With `barkTexture`, the bark samples that image,
+// masked at 0.5 (a COLOR_0 fade when the image has no alpha).
 void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
                  const std::vector<std::pair<int, Matrix>> &nodes,
-                 const std::string &leafTexture = {}) {
+                 const std::string &leafTexture = {}, const std::string &barkTexture = {}) {
   std::vector<char> bin;
   std::string views, accessors, meshJson;
   int view = 0;
@@ -160,10 +163,15 @@ void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
     const int normal = add(mesh.normals.data(), mesh.normals.size() * 4, vertices, "VEC3",
                            5126, "");
     const int uv = add(mesh.uvs.data(), mesh.uvs.size() * 4, vertices, "VEC2", 5126, "");
+    const std::string color =
+        mesh.colors.empty()
+            ? ""
+            : ",\"COLOR_0\":" + std::to_string(add(mesh.colors.data(), mesh.colors.size() * 4,
+                                                   vertices, "VEC4", 5126, ""));
     const int index = add(mesh.indices.data(), mesh.indices.size() * 4,
                           mesh.indices.size(), "SCALAR", 5125, "");
     meshJson += std::string(m ? "," : "") + "{\"primitives\":[{\"attributes\":{" +
-                "\"POSITION\":" + std::to_string(position) +
+                "\"POSITION\":" + std::to_string(position) + color +
                 ",\"NORMAL\":" + std::to_string(normal) +
                 ",\"TEXCOORD_0\":" + std::to_string(uv) + "},\"indices\":" +
                 std::to_string(index) + ",\"material\":" + std::to_string(m) + "}]}";
@@ -182,7 +190,12 @@ void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
       << "]}],\"nodes\":[" << nodeJson << "],\"meshes\":[" << meshJson
       << "],\"materials\":["
          "{\"name\":\"Bark\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.142,0.066,"
-         "0.031,1],\"metallicFactor\":0,\"roughnessFactor\":0.5}},"
+         "0.031,1],\"metallicFactor\":0,\"roughnessFactor\":0.5"
+      << (barkTexture.empty() ? "}"
+                              : ",\"baseColorTexture\":{\"index\":" +
+                                    std::to_string(leafTexture.empty() ? 0 : 1) +
+                                    "}},\"alphaMode\":\"MASK\",\"alphaCutoff\":0.5")
+      << "},"
          "{\"name\":\"Leaves\",\"doubleSided\":true,\"pbrMetallicRoughness\":{"
          "\"baseColorFactor\":[0.087,0.153,0.021,1],\"metallicFactor\":0,"
          "\"roughnessFactor\":0.5"
@@ -190,9 +203,18 @@ void writeSource(const std::filesystem::path &path, const Mesh meshes[2],
                               : ",\"baseColorTexture\":{\"index\":0}},\"alphaMode\":\"MASK\","
                                 "\"alphaCutoff\":0.3")
       << "}],"
-      << (leafTexture.empty() ? ""
-                              : "\"images\":[{\"uri\":\"" + leafTexture +
-                                    "\"}],\"textures\":[{\"source\":0}],")
+      << [&] {
+           std::string images, textures;
+           for (const std::string &uri : {leafTexture, barkTexture}) {
+             if (!uri.empty()) {
+               textures += std::string(images.empty() ? "" : ",") + "{\"source\":" +
+                           std::to_string(textures.empty() ? 0 : 1) + "}";
+               images += std::string(images.empty() ? "" : ",") + "{\"uri\":\"" + uri + "\"}";
+             }
+           }
+           return images.empty() ? std::string()
+                                 : "\"images\":[" + images + "],\"textures\":[" + textures + "],";
+         }()
       << "\"accessors\":["
       << accessors << "],\"bufferViews\":[" << views << "],\"buffers\":[{\"uri\":\""
       << binName << "\",\"byteLength\":" << bin.size() << "}]}";
@@ -402,6 +424,118 @@ TEST_CASE("cookTree reaches the budget and keeps leaf area and bounds") {
     CHECK(std::abs(cookedBounds.min[c] - sourceBounds.min[c]) <= 1e-3f);
     CHECK(std::abs(cookedBounds.max[c] - sourceBounds.max[c]) <= 1e-3f);
   }
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree keeps a COLOR_0 alpha fade and masks its material") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_fade_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  // The tube (masked bark, base colour without alpha) fades out between 1
+  // and 1.5 m, like a trunk base into the tiling bark. The leaves' COLOR_0
+  // alpha is wind data and goes.
+  Mesh meshes[2] = {tube(), leaves(1)};
+  const auto fade = [](float y) { return std::clamp((1.5f - y) / 0.5f, 0.0f, 1.0f); };
+  for (size_t i = 0; i < meshes[0].positions.size(); i += 3) {
+    meshes[0].colors.insert(meshes[0].colors.end(),
+                            {1.0f, 1.0f, 1.0f, fade(meshes[0].positions[i + 1])});
+  }
+  for (size_t i = 0; i < meshes[1].positions.size(); i += 3) {
+    meshes[1].colors.insert(meshes[1].colors.end(), {1.0f, 1.0f, 1.0f, 0.1f});
+  }
+  const std::vector<std::pair<int, Matrix>> nodes = {{0, placement(0.0f, 1.0f, 0, 0, 0)},
+                                                      {1, placement(0.0f, 1.0f, 0, 0, 0)}};
+  basisu::image bark(16, 16);
+  for (uint32_t y = 0; y < 16; ++y) {
+    for (uint32_t x = 0; x < 16; ++x) {
+      bark(x, y).set(90, 60, 40, 255);
+    }
+  }
+  REQUIRE(basisu::save_png((dir / "bark.png").string(), bark));
+  writeSource(dir / "tree.gltf", meshes, nodes, {}, "bark.png");
+  meridian::cook::cookTree(dir / "tree.gltf", dir / "out", 1000000, {});
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+  bool sawBark = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+    const auto color = primitive.findAttribute("COLOR_0");
+    if (material.doubleSided) {
+      CHECK(color == primitive.attributes.cend());
+      continue;
+    }
+    sawBark = true;
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Mask);
+    CHECK(material.alphaCutoff == 0.5f);
+    REQUIRE(color != primitive.attributes.cend());
+    const auto &positionAccessor =
+        asset.accessors[primitive.findAttribute("POSITION")->accessorIndex];
+    std::vector<float> heights(positionAccessor.count);
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(
+        asset, positionAccessor, [&](fastgltf::math::fvec3 p, size_t i) { heights[i] = p.y(); });
+    float worst = 0.0f;
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(
+        asset, asset.accessors[color->accessorIndex], [&](fastgltf::math::fvec4 c, size_t i) {
+          worst = std::max(worst, std::abs(c.w() - fade(heights[i])));
+        });
+    CHECK(worst < 1e-5f);
+  }
+  CHECK(sawBark);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree writes a fade material without a fade as opaque wood") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_nofade_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  // Masked bark whose COLOR_0 alpha is 1 everywhere (a tree whose trunk
+  // base does not fade): nothing to cut, so no mask and no COLOR_0.
+  Mesh meshes[2] = {tube(), leaves(1)};
+  for (size_t i = 0; i < meshes[0].positions.size(); i += 3) {
+    meshes[0].colors.insert(meshes[0].colors.end(), {1.0f, 1.0f, 1.0f, 1.0f});
+  }
+  const std::vector<std::pair<int, Matrix>> nodes = {{0, placement(0.0f, 1.0f, 0, 0, 0)},
+                                                      {1, placement(0.0f, 1.0f, 0, 0, 0)}};
+  basisu::image bark(16, 16);
+  for (uint32_t y = 0; y < 16; ++y) {
+    for (uint32_t x = 0; x < 16; ++x) {
+      bark(x, y).set(90, 60, 40, 255);
+    }
+  }
+  REQUIRE(basisu::save_png((dir / "bark.png").string(), bark));
+  writeSource(dir / "tree.gltf", meshes, nodes, {}, "bark.png");
+  meridian::cook::cookTree(dir / "tree.gltf", dir / "out", 1000000, {});
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+  bool sawBark = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+    if (material.doubleSided) {
+      continue;
+    }
+    sawBark = true;
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Opaque);
+    CHECK(primitive.findAttribute("COLOR_0") == primitive.attributes.cend());
+  }
+  CHECK(sawBark);
   std::filesystem::remove_all(dir);
 }
 
