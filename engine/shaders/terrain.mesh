@@ -3,6 +3,9 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "terrain.glsl"
+#define DEBUG_ID_CONSTANTS_ONLY
+#include "debug_id.glsl"
+#undef DEBUG_ID_CONSTANTS_ONLY
 
 // Draws the nodes terrain_select.comp chose: 16 workgroups per node, each a
 // block of 8x8 of its 32x32 quads. Vertices sample the heightfield and
@@ -50,6 +53,13 @@ vec3 terrainVertex(Terrain terrain, vec2 grid, uvec2 local, uint level, float qu
 void main() {
     SceneBuffer scene = pc.scene;
     Terrain terrain = scene.terrain;
+#ifdef DEBUG_ID
+    // Solo: no terrain (it has no instance or material to match).
+    if (debugFilterRejects(scene.debugFilter, ~0u, ~0u)) {
+        SetMeshOutputsEXT(0, 0);
+        return;
+    }
+#endif
     // Selection lists coarse (far) levels first; drawing the list backwards
     // goes near to far, so early-Z rejects hidden terrain before shading.
     uint task = gl_NumWorkGroups.x - 1u - gl_WorkGroupID.x;

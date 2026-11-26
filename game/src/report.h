@@ -20,6 +20,10 @@ struct ReportState {
   // game time can be matched.
   int reproFrames = 0;
   float timeScale = 1.0f;
+  // F7's freeze: the repro line keeps the clock at gameSeconds.
+  bool timeFrozen = false;
+  // F8's solo/hide in effect (in the shot; repro.txt doesn't redo it).
+  meridian::DebugFilter filter;
 };
 
 class Report {

@@ -3,6 +3,9 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "farfield.glsl"
+#define DEBUG_ID_CONSTANTS_ONLY
+#include "debug_id.glsl"
+#undef DEBUG_ID_CONSTANTS_ONLY
 
 // One workgroup per culled cluster (see cluster_cull.comp): its vertices
 // and triangles, with the same outputs as mesh.vert.
@@ -90,6 +93,13 @@ void main() {
     float terrainSun = terrainSunCode == kTerrainSunPerFragment ? -1.0 : float(terrainSunCode);
     ClusterInfo cluster = scene.clusters.clusters[entry.y];
     MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
+#ifdef DEBUG_ID
+    // Solo/hide: the cluster goes from every pass this mesh shader feeds.
+    if (debugFilterRejects(scene.debugFilter, entry.x, mesh.materialIndex)) {
+        SetMeshOutputsEXT(0, 0);
+        return;
+    }
+#endif
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
 
     // The crown: a leaf mesh's own bounds; the rest of a placed tree (bark)

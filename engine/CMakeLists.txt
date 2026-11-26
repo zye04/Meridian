@@ -116,6 +116,8 @@ add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
 # Debug id variants (debug_id.glsl), for the scene pipelines made while a
 # debug view or the report is on.
 add_shader(mesh.mesh mesh_debug.mesh DEBUG_ID)
+add_shader(terrain.mesh terrain_debug.mesh DEBUG_ID)
+add_shader(voxel_instance.mesh voxel_instance_debug.mesh DEBUG_ID)
 add_shader(mesh.frag mesh_debug.frag DEBUG_ID ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked_debug.frag ALPHA_MASK DEBUG_ID ${MARCH_DEFINES})
 add_shader(mesh.frag terrain_debug.frag TERRAIN DEBUG_ID ${MARCH_DEFINES})

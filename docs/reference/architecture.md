@@ -87,8 +87,10 @@ engine/src/render/         renderer internals:
   renderer_debug.cpp       debug views and pick: the debug targets and
                            pipeline set (made and freed with
                            updateDebugTargets), debug_view.frag in place
-                           of the tonemap, pick (one id + albedo texel),
-                           saveDebugView; debug_view.h is the public part
+                           of the tonemap, pick (id, albedo, light split
+                           and HDR texels, exposure), saveDebugView,
+                           solo/hide (setDebugFilter); debug_view.h is
+                           the public part
 engine/src/                model.cpp (glTF), texture.cpp (KTX2),
                            cluster.cpp + clusterlod.cpp (meshoptimizer),
                            terrain.cpp, placement.cpp, grade.cpp,
@@ -376,8 +378,8 @@ and after `setGrade`, timed with the tonemap; Debug prints `grade LUT
 check: max diff` against `bakeGradeLut`, which must stay <= 2e-3) ->
 tonemap (one trilinear LUT fetch, indexed by the log2 shaper of the
 AgX-inset colour) + +-1 LSB dither into the sRGB swapchain; with a debug
-view, debug_view.frag instead, reading scene attachments 3 and 7 at the
-nearest render pixel -> overlay
+view, debug_view.frag instead, reading scene attachments 0, 3 and 7 or
+the debug light buffer at the nearest render pixel -> overlay
 (only after `Renderer::beginOverlay()`: ImGui drawn onto the swapchain in a
 second rendering pass, style colours linearized because the target
 encodes sRGB; no pass otherwise, so a hidden overlay costs nothing;
@@ -412,7 +414,19 @@ the layouts behind them.
   shader variants, eight attachments; the blended one writes none), and
   attachment 3 falls back to a debug albedo image when neither GI nor the
   upscaler made one; off, the pass has seven attachments and main's
-  shaders. Sky writes 0.5 / 0 / 0; the blended pipeline masks 3-5 off. The guide images (plus a render-sized R16F specular hit
+  shaders. The debug set also has the debug light buffer
+  (`SceneData.debugLight`, 32 B per render pixel, cleared before the scene
+  pass, `debugLightStride` = render width, null off): mesh, voxel and
+  far-cell debug shaders store the pixel's light split (sun and ambient,
+  each diffuse and specular, exposed halves) and texture stretch inside a
+  `pixel_interlock_unordered` section (VK_EXT_fragment_shader_interlock)
+  that keeps the nearest depth by hand; attachments couldn't hold it (all
+  eight, NVIDIA's maxColorAttachments, are taken). `SceneData.debugFilter`
+  (mode << 30 | material bit | target) is solo/hide, in the debug mesh
+  shaders (mesh: main pass and masked depth pre-pass; terrain; voxel
+  quads, gl_CullPrimitiveEXT) so their fragment shaders keep early depth
+  tests despite the stores (declared: a side effect would otherwise move
+  the test after shading); far cells (voxel.frag, written depth) discard. Sky writes 0.5 / 0 / 0; the blended pipeline masks 3-5 off. The guide images (plus a render-sized R16F specular hit
   distance cleared to 65504, the guide's sky value: no ray-traced
   reflections) exist only when the upscaler `wantsGuides()` (Ray
   Reconstruction); otherwise those views are null and the writes are

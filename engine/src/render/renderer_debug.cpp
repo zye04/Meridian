@@ -6,12 +6,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 namespace meridian {
 
 namespace {
 
-constexpr const char *kViewNames[] = {"none", "base-color", "lod"};
+constexpr const char *kViewNames[] = {"none",     "base-color", "lod",      "stretch",
+                                       "sun",      "ambient",    "specular", "luminance"};
 static_assert(std::size(kViewNames) == size_t(DebugView::Count));
 
 constexpr VkImageUsageFlags kDebugTargetUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
@@ -21,12 +23,19 @@ constexpr VkImageUsageFlags kDebugTargetUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_
 // Must match Push in debug_view.frag.
 struct DebugViewPush {
   VkDeviceAddress clusterLevels = 0;
+  VkDeviceAddress debugLight = 0;
   uint32_t view = 0;
   uint32_t pad = 0;
   uint32_t renderSize[2] = {};
   uint32_t targetSize[2] = {};
 };
-static_assert(sizeof(DebugViewPush) == 32);
+static_assert(sizeof(DebugViewPush) == 40);
+
+// The luminance view's colour per EV from -5 to +5 (sRGB); must match
+// kEvColors in debug_view.frag.
+constexpr uint32_t kEvColors[] = {0x2a0050, 0x3a20b0, 0x2060e0, 0x20a8c8, 0x30a040, 0x808080,
+                                  0xc8c830, 0xf0d000, 0xf08800, 0xe02010, 0xffffff};
+constexpr uint32_t kDebugLightBytes = 32; // two uvec4 per render pixel
 
 // debug_view.frag's hsv, then the sRGB encoding the swapchain applies.
 std::string srgbHex(float h, float s, float v) {
@@ -65,6 +74,25 @@ std::string lodViewLegend() {
   }
   text += "terrain: " + srgbHex(0.0f, 0.0f, 0.25f) + "\nsky: #000000\n";
   return text;
+}
+
+std::string luminanceViewLegend() {
+  std::string text = "luminance view: EV relative to 18% grey after exposure, rounded -> sRGB\n";
+  for (int ev = -5; ev <= 5; ++ev) {
+    char line[48];
+    std::snprintf(line, sizeof(line), "%s%+d EV: #%06x\n",
+                  ev == -5 ? "<= " : ev == 5 ? ">= " : "", ev, kEvColors[ev + 5]);
+    text += line;
+  }
+  return text;
+}
+
+uint32_t encodeDebugFilter(const DebugFilter &filter) {
+  if (filter.mode == DebugFilterMode::None) {
+    return 0;
+  }
+  return uint32_t(filter.mode) << 30 | (filter.material ? 1u << 29 : 0u) |
+         (filter.target & ((1u << 29) - 1));
 }
 
 const char *debugViewName(DebugView view) {
@@ -111,6 +139,11 @@ void Renderer::Impl::updateDebugTargets() {
   if (diffuseAlbedo.image == VK_NULL_HANDLE) {
     debugAlbedo = createRenderImage(kAlbedoFormat, kDebugTargetUsage, VK_IMAGE_ASPECT_COLOR_BIT);
   }
+  debugLight = createBuffer(VkDeviceSize{renderExtent.width} * renderExtent.height * kDebugLightBytes,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            0);
   debugClusterLevels = createBuffer(levelBytes, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                                         VMA_ALLOCATION_CREATE_MAPPED_BIT);
@@ -119,8 +152,9 @@ void Renderer::Impl::updateDebugTargets() {
   check(vmaFlushAllocation(allocator, debugClusterLevels.allocation, 0, VK_WHOLE_SIZE),
         "vmaFlushAllocation");
 
-  VkDescriptorSetLayoutBinding bindings[2]{};
-  for (uint32_t b = 0; b < 2; ++b) {
+  constexpr uint32_t kBindings = 3;
+  VkDescriptorSetLayoutBinding bindings[kBindings]{};
+  for (uint32_t b = 0; b < kBindings; ++b) {
     bindings[b].binding = b;
     bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[b].descriptorCount = 1;
@@ -128,11 +162,11 @@ void Renderer::Impl::updateDebugTargets() {
   }
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = 2;
+  layoutInfo.bindingCount = kBindings;
   layoutInfo.pBindings = bindings;
   check(vkCreateDescriptorSetLayout(dev, &layoutInfo, nullptr, &debugSetLayout),
         "vkCreateDescriptorSetLayout");
-  const VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+  const VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kBindings};
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.maxSets = 1;
@@ -147,11 +181,12 @@ void Renderer::Impl::updateDebugTargets() {
   check(vkAllocateDescriptorSets(dev, &alloc, &debugSet), "vkAllocateDescriptorSets");
   const VkImageView albedoView =
       diffuseAlbedo.image != VK_NULL_HANDLE ? diffuseAlbedo.view : debugAlbedo.view;
-  const VkDescriptorImageInfo infos[2] = {
+  const VkDescriptorImageInfo infos[kBindings] = {
       {nearestSampler, debugId.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-      {nearestSampler, albedoView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-  VkWriteDescriptorSet writes[2]{};
-  for (uint32_t b = 0; b < 2; ++b) {
+      {nearestSampler, albedoView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {nearestSampler, hdr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+  VkWriteDescriptorSet writes[kBindings]{};
+  for (uint32_t b = 0; b < kBindings; ++b) {
     writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[b].dstSet = debugSet;
     writes[b].dstBinding = b;
@@ -159,7 +194,7 @@ void Renderer::Impl::updateDebugTargets() {
     writes[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[b].pImageInfo = &infos[b];
   }
-  vkUpdateDescriptorSets(dev, 2, writes, 0, nullptr);
+  vkUpdateDescriptorSets(dev, kBindings, writes, 0, nullptr);
 
   const VkPushConstantRange pushRange{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DebugViewPush)};
   VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
@@ -198,6 +233,10 @@ void Renderer::Impl::destroyDebugTargets() {
     destroyBuffer(debugClusterLevels);
   }
   debugClusterLevels = {};
+  if (debugLight.buffer != VK_NULL_HANDLE) {
+    destroyBuffer(debugLight);
+  }
+  debugLight = {};
   destroyImage(debugAlbedo);
   destroyImage(debugId);
 }
@@ -212,6 +251,7 @@ void Renderer::Impl::drawDebugView(VkCommandBuffer cmd, DebugView view, VkExtent
   vkCmdSetScissor(cmd, 0, 1, &scissor);
   DebugViewPush push;
   push.clusterLevels = debugClusterLevels.address;
+  push.debugLight = debugLight.address;
   push.view = uint32_t(view);
   push.renderSize[0] = renderExtent.width;
   push.renderSize[1] = renderExtent.height;
@@ -226,6 +266,10 @@ void Renderer::setDebugView(DebugView view) { impl_->debugView = view; }
 DebugView Renderer::debugView() const { return impl_->debugView; }
 
 void Renderer::keepDebugTargets(bool keep) { impl_->debugTargetsKept = keep; }
+
+void Renderer::setDebugFilter(const DebugFilter &filter) { impl_->debugFilter = filter; }
+
+DebugFilter Renderer::debugFilter() const { return impl_->debugFilter; }
 
 uint32_t Renderer::renderWidth() const { return impl_->renderExtent.width; }
 
@@ -253,12 +297,21 @@ std::optional<PixelPick> Renderer::pick(uint32_t x, uint32_t y) {
   }
   check(vkDeviceWaitIdle(r.device.device), "vkDeviceWaitIdle");
   const Image &albedo = r.diffuseAlbedo.image != VK_NULL_HANDLE ? r.diffuseAlbedo : r.debugAlbedo;
-  Buffer readback = r.createBuffer(32, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+  // id 0, albedo 16, light split 32, HDR 64, exposure state 80.
+  Buffer readback = r.createBuffer(96, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
                                        VMA_ALLOCATION_CREATE_MAPPED_BIT);
   r.submitNow([&](VkCommandBuffer cmd) {
-    VkDeviceSize offset = 0;
-    for (VkImage image : {r.debugId.image, albedo.image}) {
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    const VkBufferCopy light{(VkDeviceSize{y} * r.renderExtent.width + x) * kDebugLightBytes, 32,
+                             kDebugLightBytes};
+    vkCmdCopyBuffer(cmd, r.debugLight.buffer, readback.buffer, 1, &light);
+    const VkBufferCopy exposure{0, 80, sizeof(ExposureState)};
+    vkCmdCopyBuffer(cmd, r.exposureBuffer.buffer, readback.buffer, 1, &exposure);
+    const std::pair<VkImage, VkDeviceSize> images[] = {
+        {r.debugId.image, 0}, {albedo.image, 16}, {r.hdr.image, 64}};
+    for (auto [image, offset] : images) {
       transitionImage(cmd, {image, VK_IMAGE_ASPECT_COLOR_BIT,
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -276,17 +329,23 @@ std::optional<PixelPick> Renderer::pick(uint32_t x, uint32_t y) {
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             VK_PIPELINE_STAGE_2_COPY_BIT, 0,
                             VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0});
-      offset += 16;
     }
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
   });
   check(vmaInvalidateAllocation(r.allocator, readback.allocation, 0, VK_WHOLE_SIZE),
         "vmaInvalidateAllocation");
+  const auto *bytes = static_cast<const uint8_t *>(readback.mapped);
   uint32_t id[4];
   uint8_t rgba[4];
-  std::memcpy(id, readback.mapped, sizeof(id));
-  std::memcpy(rgba, static_cast<const uint8_t *>(readback.mapped) + 16, sizeof(rgba));
+  uint32_t light[8];
+  uint16_t hdrHalves[4];
+  ExposureState exposure;
+  std::memcpy(id, bytes, sizeof(id));
+  std::memcpy(rgba, bytes + 16, sizeof(rgba));
+  std::memcpy(light, bytes + 32, sizeof(light));
+  std::memcpy(hdrHalves, bytes + 64, sizeof(hdrHalves));
+  std::memcpy(&exposure, bytes + 80, sizeof(exposure));
   r.destroyBuffer(readback);
 
   PixelPick pick;
@@ -299,6 +358,27 @@ std::optional<PixelPick> Renderer::pick(uint32_t x, uint32_t y) {
   for (int c = 0; c < 3; ++c) {
     pick.baseColor[c] = rgba[c] / 255.0f;
   }
+  // The frame shaded with the exposure its exposure pass then kept as previous.
+  pick.exposure = exposure.previousExposure;
+  const float toPhysical = pick.exposure > 0.0f ? 1.0f / pick.exposure : 0.0f;
+  float halves[16];
+  for (int i = 0; i < 7; ++i) {
+    halves[i * 2] = halfToFloat(uint16_t(light[1 + i] & 0xFFFFu));
+    halves[i * 2 + 1] = halfToFloat(uint16_t(light[1 + i] >> 16));
+  }
+  pick.lit = light[0] != 0;
+  for (int c = 0; c < 3; ++c) {
+    pick.sunDiffuse[c] = halves[c] * toPhysical;
+    pick.sunSpecular[c] = halves[3 + c] * toPhysical;
+    pick.ambientDiffuse[c] = halves[6 + c] * toPhysical;
+    pick.ambientSpecular[c] = halves[9 + c] * toPhysical;
+    pick.hdr[c] = halfToFloat(hdrHalves[c]) * toPhysical;
+  }
+  pick.texelsPerMeter = std::abs(halves[12]);
+  pick.stretch = halves[13];
+  const float exposedLuminance = (0.2126f * pick.hdr[0] + 0.7152f * pick.hdr[1] +
+                                  0.0722f * pick.hdr[2]) * pick.exposure;
+  pick.ev = std::log2(std::max(exposedLuminance, 1e-9f) / 0.18f);
   if (pick.kind == PickKind::Triangles || pick.kind == PickKind::Voxels) {
     pick.cluster = id[1];
     if (id[1] < r.clusterLevels.size()) {
@@ -337,6 +417,8 @@ bool Renderer::saveDebugView(DebugView view, const std::filesystem::path &path) 
                                    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
                                        VMA_ALLOCATION_CREATE_MAPPED_BIT);
   r.submitNow([&](VkCommandBuffer cmd) {
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     transitionImage(cmd, {target.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_PIPELINE_STAGE_2_NONE, 0,

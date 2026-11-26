@@ -20,7 +20,8 @@ const std::map<std::string_view, int> kDroppedOptions = {
     {"--capture", 1},         {"--capture-sequence", 1}, {"--capture-albedo", 1},
     {"--frames", 1},          {"--dump-weather-map", 1}, {"--score-forest", 1},
     {"--reference", 1},       {"--reference-mode", 1}, {"--debug-view", 1},
-    {"--report-at", 1},       {"--game-time", 1}};
+    {"--report-at", 1},       {"--game-time", 1},     {"--freeze-time", 0},
+    {"--debug-filter", 2}};
 
 std::string quoted(const std::string &text) {
   if (text.find_first_of(" \t'\"\\$`*?") == std::string::npos && !text.empty()) {
@@ -57,6 +58,10 @@ std::string number(double value) {
   char text[32];
   std::snprintf(text, sizeof(text), "%.9g", value);
   return text;
+}
+
+std::string triple(const float (&v)[3]) {
+  return "[" + number(v[0]) + ", " + number(v[1]) + ", " + number(v[2]) + "]";
 }
 
 std::filesystem::path reportsRoot() {
@@ -128,15 +133,34 @@ void Report::finish(meridian::Renderer &renderer, const ReportState &state) {
     json << "    \"base-color\": [" << number(pick->baseColor[0]) << ", "
          << number(pick->baseColor[1]) << ", " << number(pick->baseColor[2]) << "],\n";
     json << "    \"lod\": {\"kind\": " << jsonString(meridian::pickKindName(pick->kind))
-         << ", \"level\": " << optional(pick->lodLevel) << "}\n";
-    json << "  }\n";
+         << ", \"level\": " << optional(pick->lodLevel) << "},\n";
+    if (pick->lit) {
+      json << "    \"stretch\": {\"texels_per_m\": " << number(pick->texelsPerMeter)
+           << ", \"ratio\": " << number(pick->stretch) << "},\n";
+      json << "    \"light_cd_m2\": {\"sun_diffuse\": " << triple(pick->sunDiffuse)
+           << ", \"sun_specular\": " << triple(pick->sunSpecular)
+           << ", \"ambient_diffuse\": " << triple(pick->ambientDiffuse)
+           << ", \"ambient_specular\": " << triple(pick->ambientSpecular) << "},\n";
+    } else {
+      json << "    \"stretch\": null,\n    \"light_cd_m2\": null,\n";
+    }
+    json << "    \"luminance\": {\"hdr_cd_m2\": " << triple(pick->hdr)
+         << ", \"ev_from_grey\": " << number(pick->ev)
+         << ", \"exposure\": " << number(pick->exposure) << "}\n";
+    json << "  },\n";
+    const char *modes[] = {"none", "solo", "hide"};
+    json << "  \"filter\": {\"mode\": \"" << modes[uint32_t(state.filter.mode)]
+         << "\", \"target\": \"" << (state.filter.material ? "material" : "instance")
+         << "\", \"id\": " << state.filter.target << "},\n";
+    json << "  \"time_frozen\": " << (state.timeFrozen ? "true" : "false") << "\n";
   } else {
     json << "  \"error\": \"no debug targets\"\n";
   }
   json << "}\n";
 
   std::ofstream(directory_ / "look.json") << lookToJson(state.look);
-  std::ofstream(directory_ / "legend.txt") << meridian::lodViewLegend();
+  std::ofstream(directory_ / "legend.txt")
+      << meridian::lodViewLegend() << "\n" << meridian::luminanceViewLegend();
 
   // A --capture run steps game time by 1/60 s per frame; start it so its
   // last frame lands on this one's game time.
@@ -151,7 +175,9 @@ void Report::finish(meridian::Renderer &renderer, const ReportState &state) {
   line += " --sun " + number(state.sunDirection.x) + " " + number(state.sunDirection.y) + " " +
           number(state.sunDirection.z);
   line += " --grade " + quoted((directory_ / "look.json").string());
-  if (std::abs(state.gameSeconds - reproSeconds) > 1e-6) {
+  if (state.timeFrozen) {
+    line += " --freeze-time --game-time " + number(state.gameSeconds);
+  } else if (std::abs(state.gameSeconds - reproSeconds) > 1e-6) {
     line += " --game-time " + number(state.gameSeconds - reproSeconds);
   }
   line += " --frames " + std::to_string(state.reproFrames);

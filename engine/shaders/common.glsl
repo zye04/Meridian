@@ -39,6 +39,11 @@ struct Material {
     vec3 diffuseTransmissionColor;
 };
 
+// Per render pixel, two uvec4 (debug_id.glsl writeDebugLight).
+layout(buffer_reference, std430) buffer DebugLightBuffer {
+    uvec4 pixels[];
+};
+
 layout(buffer_reference, std430) readonly buffer MaterialBuffer {
     Material materials[];
 };
@@ -667,6 +672,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     float terrainShadowPenumbra;
     // 1 in the coarsest cascade's copy: trees cast as far cells.
     uint shadowFarCells;
+    // Debug only (debug_id.glsl): solo/hide (mode << 30 | target id) and
+    // the per-pixel light split; 0 and null unless a debug view, the report
+    // or a filter is on.
+    uint debugFilter;
+    uint debugLightStride;
+    DebugLightBuffer debugLight;
 };
 
 // Largest axis scale of a transform: a conservative bound under

@@ -591,6 +591,12 @@ struct SceneData {
   // 1 in the coarsest cascade's copy: its trees cast as their far cells'
   // voxels (cell_cull.comp, voxel_shadow.frag).
   uint32_t shadowFarCells = 0;
+  // Debug only (debug_id.glsl): solo/hide (mode << 30 | target id) and the
+  // per-pixel light split buffer; 0 unless a debug view, the report or a
+  // filter is on.
+  uint32_t debugFilter = 0;
+  uint32_t debugLightStride = 0;
+  VkDeviceAddress debugLight = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -612,7 +618,8 @@ static_assert(offsetof(SceneData, terrainShadowTexels) == 2656);
 static_assert(offsetof(SceneData, terrainShadowOrigin) == 2664);
 static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
 static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
-static_assert(sizeof(SceneData) == 2704);
+static_assert(offsetof(SceneData, debugLight) == 2712);
+static_assert(sizeof(SceneData) == 2720);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

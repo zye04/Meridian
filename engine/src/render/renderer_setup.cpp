@@ -70,10 +70,11 @@ void Renderer::Impl::createSwapchain() {
                                 VK_IMAGE_USAGE_SAMPLED_BIT,
                             VK_IMAGE_ASPECT_DEPTH_BIT);
   createDepthPyramid();
+  // Transfer source: the debug pick reads a texel.
   hdr = createRenderImage(kHdrFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                         VK_IMAGE_USAGE_SAMPLED_BIT |
-                        VK_IMAGE_USAGE_STORAGE_BIT,
+                        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT);
   motion = createRenderImage(kMotionFormat,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
@@ -1013,7 +1014,8 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
   // Alpha testing (discard) disables early depth testing, so masked
   // materials are shaded after a depth-only alpha-test prepass and shade
   // only the fragments whose depth equals the prepass's.
-  meshDesc.meshShader = "mesh.mesh";
+  // The debug mesh shader applies solo/hide to the depth pre-pass too.
+  meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
   meshDesc.fragmentShader = "mesh_masked_depth.frag";
   meshDesc.noColorWrites = true;
   maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
@@ -1031,7 +1033,7 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
 
   // The CDLOD terrain: opaque, back faces culled.
   meshDesc.vertexShader = nullptr;
-  meshDesc.meshShader = "terrain.mesh";
+  meshDesc.meshShader = debugId ? "terrain_debug.mesh" : "terrain.mesh";
   meshDesc.fragmentShader = debugId ? "terrain_debug.frag" : "terrain.frag";
   meshDesc.alphaBlend = false;
   terrainPipeline = createGraphicsPipeline(dev, meshDesc);
@@ -1042,7 +1044,7 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
   meshDesc.fragmentShader = debugId ? "voxel_debug.frag" : "voxel.frag";
   voxelPipeline = createGraphicsPipeline(dev, meshDesc);
   // Voxel clusters: one camera-facing quad per voxel.
-  meshDesc.meshShader = "voxel_instance.mesh";
+  meshDesc.meshShader = debugId ? "voxel_instance_debug.mesh" : "voxel_instance.mesh";
   meshDesc.fragmentShader = debugId ? "voxel_instance_debug.frag" : "voxel_instance.frag";
   voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
   skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "sky.vert",
@@ -1235,6 +1237,8 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
   features.independentBlend = VK_TRUE;
   // The terrain normal map (RG16_SNORM) is written from a compute shader.
   features.shaderStorageImageExtendedFormats = VK_TRUE;
+  // The debug shader variants' light split is a fragment shader store.
+  features.fragmentStoresAndAtomics = VK_TRUE;
 
   VkPhysicalDeviceVulkan12Features features12{};
   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -1275,6 +1279,13 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
 
   // The scene pass binds null views for the guide attachments when the
   // upscaler wants no guides; their writes are discarded.
+  // The debug shader variants order their light split writes per pixel
+  // (debug_id.glsl); the main shaders don't use it.
+  VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT interlockFeatures{};
+  interlockFeatures.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT;
+  interlockFeatures.fragmentShaderPixelInterlock = VK_TRUE;
+
   VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT unusedFeatures{};
   unusedFeatures.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT;
@@ -1295,6 +1306,8 @@ Renderer::Renderer(Window &window, UpscalerProvider *provider,
           .add_required_extension(
               VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)
           .add_required_extension_features(unusedFeatures)
+          .add_required_extension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME)
+          .add_required_extension_features(interlockFeatures)
           .add_required_extension(VK_EXT_MESH_SHADER_EXTENSION_NAME)
           .add_required_extension_features(meshShaderFeatures)
           .set_surface(impl_->surface)
