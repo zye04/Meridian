@@ -74,6 +74,18 @@ TEST_CASE("the hash rule keeps the opaque floor, the others do not") {
   CHECK_FALSE(voxelCoverageDraws(VoxelCoverage::Phase, 0.6f, true, 0.9f, 4.0f, 0, 8, 0));
 }
 
+TEST_CASE("the wood rules split leaves and wood") {
+  for (VoxelCoverage rule : {VoxelCoverage::WoodArea, VoxelCoverage::WoodFloor}) {
+    CHECK(voxelRuleFor(rule, false, 0.3f) == VoxelCoverage::AreaPixelPhase);
+    CHECK(voxelRuleFor(rule, false, 0.8f) == VoxelCoverage::AreaPixelPhase);
+  }
+  CHECK(voxelRuleFor(VoxelCoverage::WoodArea, true, 0.3f) == VoxelCoverage::Area);
+  CHECK(voxelRuleFor(VoxelCoverage::WoodArea, true, 0.8f) == VoxelCoverage::Area);
+  CHECK(voxelRuleFor(VoxelCoverage::WoodFloor, true, 0.3f) == VoxelCoverage::AreaPixelPhase);
+  CHECK(voxelRuleFor(VoxelCoverage::WoodFloor, true, kOpaqueVoxelFloor) == VoxelCoverage::Hash);
+  CHECK(voxelRuleFor(VoxelCoverage::AreaPixelPhase, true, 0.3f) == VoxelCoverage::AreaPixelPhase);
+}
+
 TEST_CASE("a sub-pixel voxel draws on round(P f) evenly spread jitter phases") {
   constexpr uint32_t kCycle = 8;
   for (float f : {0.0f, 0.05f, 0.1f, 0.3f, 0.5f, 0.62f, 0.9f, 1.0f}) {

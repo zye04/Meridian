@@ -65,8 +65,9 @@ void main() {
     // the quad at area fraction a, moved inside the full quad for
     // AreaOffset.
     uint rule = voxelCoverageRule(scene.voxelCoverage, cascade);
+    float f = voxelViewOpacity(voxelDepths(packed), view);
+    rule = voxelRuleFor(rule, packed, f);
     if (rule != kVoxelCoverageHash) {
-        float f = voxelViewOpacity(voxelDepths(packed), view);
         vec2 offset = voxelQuadOffset(rule, f, voxelHash(clusterEntry.x, brick, v, cluster.firstVertex, i));
         center.xy += offset * halfSize;
         float pixels = voxelUsesPixels(rule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;

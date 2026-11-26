@@ -47,7 +47,22 @@ inline bool voxelDraws(float opacity, bool opaque, float noise) {
 // pixel (a = 1 / q for a full quad of q pixels, at most 1), p = f / a by the
 // hash. AreaPixelPhase: as AreaPixel, p from the jitter-phase sequence.
 // Cascades keep Hash. Must match voxel_lod.glsl.
-enum class VoxelCoverage : uint32_t { Hash, Area, AreaOffset, Mixed, Phase, AreaPixel, AreaPixelPhase };
+enum class VoxelCoverage : uint32_t { Hash, Area, AreaOffset, Mixed, Phase, AreaPixel, AreaPixelPhase, WoodArea, WoodFloor };
+
+// The rule one voxel takes: WoodArea and WoodFloor are AreaPixelPhase for
+// leaves; an opaque (wood) voxel takes Area (a = f, always drawn) or, at or
+// over kOpaqueVoxelFloor, Hash (drawn whole). Must match voxel_lod.glsl.
+inline VoxelCoverage voxelRuleFor(VoxelCoverage rule, bool opaque, float f) {
+  if (rule != VoxelCoverage::WoodArea && rule != VoxelCoverage::WoodFloor) {
+    return rule;
+  }
+  if (!opaque) {
+    return VoxelCoverage::AreaPixelPhase;
+  }
+  return rule == VoxelCoverage::WoodArea ? VoxelCoverage::Area
+         : f >= kOpaqueVoxelFloor        ? VoxelCoverage::Hash
+                                         : VoxelCoverage::AreaPixelPhase;
+}
 
 // `pixels`: the full quad's area on screen (q).
 inline float voxelAreaFraction(VoxelCoverage rule, float f, float pixels) {
@@ -96,6 +111,9 @@ inline bool voxelCoverageDraws(VoxelCoverage rule, float f, bool opaque, float n
     return noise < f / voxelAreaFraction(rule, f, pixels);
   case VoxelCoverage::AreaPixelPhase:
     return voxelPhaseDraws(f / voxelAreaFraction(rule, f, pixels), phase, phases, offset);
+  case VoxelCoverage::WoodArea:
+  case VoxelCoverage::WoodFloor:
+    return voxelCoverageDraws(voxelRuleFor(rule, opaque, f), f, opaque, noise, pixels, phase, phases, offset);
   }
   return false;
 }

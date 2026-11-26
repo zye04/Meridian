@@ -131,16 +131,17 @@ void main() {
             uvec4 packedVoxel = pools.voxels.voxels[slot];
             float opacity = voxelViewOpacity(voxelDepths(packedVoxel), view);
             uvec3 hash = voxelHash(entry.x, brick, v, cluster.firstVertex, i);
+            uint voxelRule = voxelRuleFor(rule, packedVoxel, opacity);
             vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
-            float pixels = voxelUsesPixels(rule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;
-            if (voxelCoverageDraws(rule, scene.voxelCoverage, packedVoxel, opacity, hash, pixels) &&
+            float pixels = voxelUsesPixels(voxelRule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;
+            if (voxelCoverageDraws(voxelRule, scene.voxelCoverage, packedVoxel, opacity, hash, pixels) &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {
                 drawnMask[k >> 5] |= 1u << (k & 31u);
                 // voxel_instance.mesh's quad, in pixels.
-                if (!voxelUsesPixels(rule)) {
+                if (!voxelUsesPixels(voxelRule)) {
                     pixels = voxelQuadPixels(scene, relative, view, v * instance.scale);
                 }
-                pixels *= voxelAreaFraction(rule, opacity, pixels);
+                pixels *= voxelAreaFraction(voxelRule, opacity, pixels);
                 area += uint(min(pixels, 65536.0) * 16.0 + 0.5);
                 subpixel += pixels < 1.0 ? 1u : 0u;
             }

@@ -162,11 +162,28 @@ const uint kVoxelCoverageMixed = 3u;
 const uint kVoxelCoveragePhase = 4u;
 const uint kVoxelCoverageAreaPixel = 5u;
 const uint kVoxelCoverageAreaPixelPhase = 6u;
+const uint kVoxelCoverageWoodArea = 7u;
+const uint kVoxelCoverageWoodFloor = 8u;
 const float kPhaseVoxelPixels = 1.0;
 
 // The rule of a view: cascades keep the hash.
 uint voxelCoverageRule(uint coverage, bool cascade) {
     return cascade ? kVoxelCoverageHash : coverage & 255u;
+}
+
+// The rule one voxel takes (voxel_shape.h voxelRuleFor): WoodArea and
+// WoodFloor are AreaPixelPhase for leaves; an opaque (wood) voxel takes Area
+// (a = f, always drawn) or, at or over kOpaqueVoxelFloor, Hash (drawn whole).
+uint voxelRuleFor(uint rule, uvec4 voxel, float f) {
+    if (rule != kVoxelCoverageWoodArea && rule != kVoxelCoverageWoodFloor) {
+        return rule;
+    }
+    if ((voxel.z & 0xFFFFFFu) != 0u) {
+        return kVoxelCoverageAreaPixelPhase;
+    }
+    return rule == kVoxelCoverageWoodArea ? kVoxelCoverageArea
+           : f >= kOpaqueVoxelFloor       ? kVoxelCoverageHash
+                                          : kVoxelCoverageAreaPixelPhase;
 }
 
 // `pixels`: the full quad's area on screen.

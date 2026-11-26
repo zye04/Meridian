@@ -419,7 +419,7 @@ triangles of every instance whose origin is within M meters of the camera
 (`Renderer::setVoxelNear`, common.glsl `voxelLodAt`; CPU reference
 `voxelsAt` and `selectClustersBvh(..., voxels)`); beyond M the LOD cut picks
 voxels by projected size as before; the cascades keep their voxel casters.
-`--voxel-coverage hash|area|area-offset|mixed|phase|area-pixel|area-pixel-phase` (default hash;
+`--voxel-coverage hash|area|area-offset|mixed|phase|area-pixel|area-pixel-phase|wood-area|wood-floor` (default hash;
 development, spec `2026-11-26-voxel-leaf-coverage-design.md` stage 1):
 how the main view draws a voxel of coverage f (voxel_shape.h
 `VoxelCoverage`, voxel_lod.glsl): hash draws the whole quad with chance f
@@ -429,8 +429,10 @@ draws a quad of area sqrt(f) with chance sqrt(f); phase is hash, except a
 quad under one pixel draws on round(P f) of the P jitter phases;
 area-pixel draws area f but never under one pixel (a = 1 / q for a full
 quad of q pixels, at most 1) with chance f / a by the hash;
-area-pixel-phase takes that chance from the jitter-phase sequence. The
-cascades keep hash. area needs about 9x hash's quads (stage 0).
+area-pixel-phase takes that chance from the jitter-phase sequence;
+wood-area and wood-floor are area-pixel-phase for leaves, while an opaque
+(wood) voxel draws always at area f (wood-area) or, at f >= 0.5, whole
+(wood-floor). The cascades keep hash. area needs about 9x hash's quads (stage 0).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
