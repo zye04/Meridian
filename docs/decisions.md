@@ -5477,3 +5477,30 @@ cached shadow pages are invalidated.
   or voxelizer versions or the Vertex layout. A format change keeps the
   look; models still differ. Tested (cluster_test.cpp "voxel seeds follow
   positions and indices only"). This change re-rolls the pattern once.
+
+## Voxel colour prefilter: tried, no effect (crown lane round 2, 2026-11-26)
+
+- Tried: `voxelize` summed each voxel's material (albedo, transmission,
+  normal moment, roughness) over its 26 neighbours, a Gaussian of variance
+  4/12 voxels^2 weighted by hits, occupancy untouched. Dropped: it does not
+  move the far-crown speckle. Don't retry it for that.
+- Measured at the Part B pose (Release, `Render 2560x1440, display
+  2560x1440`, main b40f1f6 vs the try, the same 256 spp reference):
+
+  | metric | before | after | reference |
+  |---|---|---|---|
+  | albedo residual (log) | 0.244 | 0.249 | 0.149 |
+  | crown contrast | 0.183 | 0.179 | 0.174 |
+  | tree mean logL - frame median | -0.713 | -0.706 | -0.638 |
+  | GPU ms | 29.48 | 29.39 | |
+
+  The sheets matched by eye.
+- Why: the per-voxel colour premise was wrong (it came from the branch
+  mesh, misread as leaves). In the cached levels of beech and hornbeam
+  Forest_01, mesh 0 (leaves, the only one with transmission) is smooth:
+  beech log-albedo residual against the 26-neighbour mean 0.092 / 0.072 at
+  0.5 / 1 m, neighbour lobe axes |dot| 0.875 (hornbeam 0.68-0.72; 0.5 is
+  random). Mesh 1 (branches, no transmission) is two-toned (log-albedo
+  1st/99th percentile -3.0 / -2.0, residual 0.22 at 1 m), and its levels
+  above 0.25 m come from mergeVoxelGrid, which a voxelize filter never
+  reaches. The far-crown speckle's source is still open (backlog).
