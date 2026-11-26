@@ -8,6 +8,7 @@
 #include <meridian/terrain.h>
 #include <meridian/texture.h>
 #include <meridian/upscaler.h>
+#include <meridian/voxel_shape.h>
 
 #include <array>
 #include <cstdint>
@@ -419,6 +420,9 @@ public:
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
   void setVoxelNear(float meters);
+  // Development: the main view's voxel coverage rule (voxel_shape.h); the
+  // cascades keep the hash.
+  void setVoxelCoverage(VoxelCoverage rule);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

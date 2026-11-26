@@ -602,6 +602,9 @@ struct SceneData {
   // The main view keeps the triangles of instances within this many meters
   // (Renderer::setVoxelNear).
   float voxelNear = 0.0f;
+  // Development: the main view's voxel coverage rule (VoxelCoverage) | jitter
+  // phase << 8 | phases per cycle << 16 (voxel_lod.glsl).
+  uint32_t voxelCoverage = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -625,6 +628,7 @@ static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
 static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
 static_assert(offsetof(SceneData, debugLight) == 2712);
 static_assert(offsetof(SceneData, voxelNear) == 2720);
+static_assert(offsetof(SceneData, voxelCoverage) == 2724);
 static_assert(sizeof(SceneData) == 2736);
 
 // Must match MeshInfo in common.glsl.

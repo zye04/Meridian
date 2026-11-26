@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <meridian/voxel_shape.h>
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 
@@ -44,5 +45,62 @@ TEST_CASE("an opaque voxel at or over the coverage floor always draws") {
     CHECK(voxelDraws(0.9f, true, noise));
     CHECK(voxelDraws(0.4f, true, noise) == (noise < 0.4f));
     CHECK(voxelDraws(0.9f, false, noise) == (noise < 0.9f));
+  }
+}
+
+TEST_CASE("every coverage rule keeps a voxel's expected covered area") {
+  // Expected covered area = a x the share of noise values that draw, over a
+  // fine noise grid; Phase above a pixel and Mixed, Area are checked alike.
+  constexpr int kSamples = 100000;
+  for (VoxelCoverage rule : {VoxelCoverage::Hash, VoxelCoverage::Area, VoxelCoverage::AreaOffset,
+                             VoxelCoverage::Mixed, VoxelCoverage::Phase}) {
+    for (float f : {0.0f, 0.01f, 0.1f, 0.25f, 0.49f, 0.75f, 1.0f}) {
+      int drawn = 0;
+      for (int s = 0; s < kSamples; ++s) {
+        const float noise = (static_cast<float>(s) + 0.5f) / kSamples;
+        drawn += voxelCoverageDraws(rule, f, false, noise, 4.0f, 0, 8, 0);
+      }
+      const float covered = voxelAreaFraction(rule, f) * static_cast<float>(drawn) / kSamples;
+      CHECK(covered == doctest::Approx(f).epsilon(0.001));
+    }
+  }
+}
+
+TEST_CASE("the hash rule keeps the opaque floor, the others do not") {
+  CHECK(voxelCoverageDraws(VoxelCoverage::Hash, 0.6f, true, 0.9f, 4.0f, 0, 8, 0));
+  CHECK_FALSE(voxelCoverageDraws(VoxelCoverage::Mixed, 0.6f, true, 0.9f, 4.0f, 0, 8, 0));
+  CHECK_FALSE(voxelCoverageDraws(VoxelCoverage::Phase, 0.6f, true, 0.9f, 4.0f, 0, 8, 0));
+}
+
+TEST_CASE("a sub-pixel voxel draws on round(P f) evenly spread jitter phases") {
+  constexpr uint32_t kCycle = 8;
+  for (float f : {0.0f, 0.05f, 0.1f, 0.3f, 0.5f, 0.62f, 0.9f, 1.0f}) {
+    const uint32_t expected = static_cast<uint32_t>(std::lround(kCycle * f));
+    for (uint32_t offset : {0u, 3u, 7u, 12345u}) {
+      uint32_t drawn = 0, longestGap = 0, gap = 0;
+      // Two cycles, so a gap across the cycle's end counts whole.
+      for (uint32_t phase = 0; phase < 2 * kCycle; ++phase) {
+        const bool draws = voxelCoverageDraws(VoxelCoverage::Phase, f, false, 0.99f, 0.5f, phase % kCycle, kCycle, offset);
+        drawn += phase < kCycle && draws;
+        gap = draws ? 0 : gap + 1;
+        longestGap = std::max(longestGap, gap);
+      }
+      CHECK(drawn == expected);
+      if (expected > 0) {
+        // Even: no gap longer than the cycle over the draws, rounded up.
+        CHECK(longestGap <= (kCycle + expected - 1) / expected);
+      }
+    }
+  }
+}
+
+TEST_CASE("an offset quad stays inside the voxel's full quad") {
+  for (float f : {0.0f, 0.04f, 0.3f, 0.81f, 1.0f}) {
+    const float half = std::sqrt(voxelAreaFraction(VoxelCoverage::AreaOffset, f));
+    for (float u : {0.0f, 0.25f, 0.5f, 0.999999f}) {
+      const float offset = voxelQuadOffset(VoxelCoverage::AreaOffset, f, u);
+      CHECK(std::abs(offset) + half <= 1.0f + 1e-6f);
+    }
+    CHECK(voxelQuadOffset(VoxelCoverage::Area, f, 0.9f) == 0.0f);
   }
 }
