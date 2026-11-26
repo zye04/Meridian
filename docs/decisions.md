@@ -5275,3 +5275,43 @@ clock with a free camera.
   So the wet gloss is the Decoration shell's low roughness reflecting the
   sky, and the tint is that blue reflection plus a slightly green
   ambient over a brown albedo; no sun involved. Fix deferred (backlog).
+
+## Trace only cards that transmit (trunk-fix round 6, 2026-11-25)
+
+- **Problem:** the tree cook traced every alpha-tested, double-sided
+  material into opaque geometry (`isLeafMaterial` && alpha &&
+  !OPAQUE), so the Megascans "Decoration" cards (lichen, knots on the
+  bark) became opaque shells. On the lone alder at 1.2-3.7 m they were
+  the pale patch, the white shards and the dark shell; hiding the
+  Decoration material removed all three (round-6 premise captures).
+- **Practice:** glTF MASK is the standard for alpha-tested cards; the
+  case for tracing (decisions.md "Tree leaves as opaque geometry") is leaf
+  shimmer in a crown seen through thousands of cards. Decoration sits
+  flat on the bark: few cards, no see-through crown.
+- **Choice:** a generic rule by glTF material property, not by name:
+  trace a leaf material only when it transmits light
+  (KHR_materials_diffuse_transmission with factor > 0, or no extension,
+  which the cook already reads as the default leaf transmission). Every
+  other masked material whose base colour has alpha is written as glTF
+  MASK with its source cutoff (0.5 in the Unreal export). The engine
+  already draws MASK through the masked pipeline and the voxelizer
+  already tests base alpha against the cutoff for MASK materials
+  (voxelize.cpp `surfaceAt`), so no engine change.
+- **Leaf safety:** the leaf rule is unchanged, not the leaf bytes: leaves
+  and decoration share one triangle budget per tree, so the traced
+  decoration's triangles (e.g. alder Field_04: 117k of 1.29M) no longer
+  push the leaves' simplify ratio down (0.931 -> 1.0). Proven: leaf
+  textures and leaf material JSON byte-identical in all 30 cooked trees,
+  the 10 trees without decoration byte-identical end to end, and the
+  1112aa1 cook reproduces the shared cooked trees byte for byte.
+- **Cost:** decoration cards are alpha-tested again, so their edges can
+  shimmer in motion the way traced leaves no longer do (few cards, on the
+  bark). Leaves keep their full budget, so the trees carry more
+  triangles; accepted by the user. Measured at the forest edge with
+  `--trees` (2560x1440, DLAA, on main 0724245): resident 11998 ->
+  12061 MiB (+63), models-loaded peak 13167 MiB, 18605468 -> 18725035
+  drawn triangles, GPU 24.37/24.48 -> 24.77/23.95 ms (noise). Motion on
+  the lone alder at 6 m (`tools/motion-clarity.sh` forest cases moved
+  there, the 1112aa1 cook before): jitter still 0.81 -> 0.81, side 5 m/s
+  6.29 -> 6.29, side 30 m/s 6.74 -> 6.75, turn 1 rad/s 3.40 -> 3.40;
+  the decoration shimmer does not show at frame scale.

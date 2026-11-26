@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <numeric>
 #include <random>
@@ -608,6 +609,71 @@ TEST_CASE("cookTree traces alpha-tested cards into opaque leaves") {
     CHECK(roots.size() == 200);
   }
   CHECK(sawLeaves);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("cookTree keeps alpha-tested cards that transmit nothing alpha-tested") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("meridian_tree_cook_decoration_test_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  // The traced-leaf atlas, on cards that transmit no light (bark lichen,
+  // knots): they stay cards, masked at the source's cutoff.
+  const Mesh meshes[2] = {tube(), leaves()};
+  const std::vector<std::pair<int, Matrix>> nodes = {{0, placement(0.0f, 1.0f, 0, 0, 0)},
+                                                     {1, placement(0.0f, 1.0f, 0, 0, 0)}};
+  basisu::image texture(256, 256);
+  for (uint32_t y = 0; y < 256; ++y) {
+    for (uint32_t x = 0; x < 256; ++x) {
+      const float cx = x % 16 + 0.5f - 7.2f, cy = y % 16 + 0.5f - 7.2f;
+      texture(x, y).set(60, 140, 30, std::hypot(cx, cy) < 5.0f ? 255 : 0);
+    }
+  }
+  REQUIRE(basisu::save_png((dir / "leaf.png").string(), texture));
+  writeSource(dir / "tree.gltf", meshes, nodes, "leaf.png");
+  std::string json;
+  {
+    std::ifstream file(dir / "tree.gltf");
+    json.assign(std::istreambuf_iterator<char>(file), {});
+  }
+  const auto replace = [&](const std::string &from, const std::string &to) {
+    const size_t at = json.find(from);
+    REQUIRE(at != std::string::npos);
+    json.replace(at, from.size(), to);
+  };
+  replace("\"alphaCutoff\":0.3", "\"alphaCutoff\":0.3,\"extensions\":{"
+                                 "\"KHR_materials_diffuse_transmission\":{"
+                                 "\"diffuseTransmissionFactor\":0}}");
+  replace("{\"asset\":", "{\"extensionsUsed\":[\"KHR_materials_diffuse_transmission\"],"
+                         "\"asset\":");
+  std::ofstream(dir / "tree.gltf") << json;
+
+  const meridian::cook::TreeCookResult result =
+      meridian::cook::cookTree(dir / "tree.gltf", dir / "out", 1000000, {});
+
+  fastgltf::Parser parser(fastgltf::Extensions::KHR_texture_basisu |
+                          fastgltf::Extensions::KHR_materials_diffuse_transmission);
+  auto data = fastgltf::GltfDataBuffer::FromPath(dir / "out" / "tree.gltf");
+  REQUIRE(data.error() == fastgltf::Error::None);
+  auto loaded = parser.loadGltf(data.get(), dir / "out", fastgltf::Options::LoadExternalBuffers);
+  REQUIRE(loaded.error() == fastgltf::Error::None);
+  const fastgltf::Asset &asset = loaded.get();
+
+  bool sawCards = false;
+  for (const fastgltf::Mesh &mesh : asset.meshes) {
+    const fastgltf::Primitive &primitive = mesh.primitives[0];
+    const fastgltf::Material &material = asset.materials[*primitive.materialIndex];
+    if (!material.doubleSided) {
+      continue;
+    }
+    sawCards = true;
+    CHECK(material.alphaMode == fastgltf::AlphaMode::Mask);
+    CHECK(material.alphaCutoff == doctest::Approx(0.3f));
+    CHECK(asset.accessors[*primitive.indicesAccessor].count == 200 * 2 * 3);
+  }
+  CHECK(sawCards);
+  CHECK(result.triangles == result.sourceTriangles);
   std::filesystem::remove_all(dir);
 }
 

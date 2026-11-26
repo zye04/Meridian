@@ -529,11 +529,17 @@ private:
   std::vector<std::byte> bytes_;
 };
 
-// A textured leaf whose base color alpha is an alpha-test mask: its cards are
-// traced into opaque leaves. An opaque source's alpha may hold something else
-// (gloss, a packed mask).
+// A textured leaf whose base color alpha is an alpha-test mask and that
+// transmits light: its cards are traced into opaque leaves. An opaque source's
+// alpha may hold something else (gloss, a packed mask). Cards that transmit
+// nothing (lichen, knots) stay alpha-tested: traced, they turn into opaque
+// shells and patches on the bark. A source without the extension counts as
+// transmitting, as sourceLeafTransmission gives it kLeafDiffuseTransmission.
 bool tracedMaterial(const fastgltf::Material &material, bool leaf, const basisu::image &color) {
-  return leaf && color.has_alpha() && material.alphaMode != fastgltf::AlphaMode::Opaque;
+  const bool transmits = !material.diffuseTransmission ||
+                         material.diffuseTransmission->diffuseTransmissionFactor > 0.0f;
+  return leaf && transmits && color.has_alpha() &&
+         material.alphaMode != fastgltf::AlphaMode::Opaque;
 }
 
 float alphaCutoff(const fastgltf::Material &material) {
@@ -1070,6 +1076,12 @@ TreeCookResult cookTree(const std::filesystem::path &in, const std::filesystem::
     fastgltf::Material material;
     material.name = from.name;
     material.doubleSided = leaf;
+    if (from.alphaMode == fastgltf::AlphaMode::Mask && !atlases.contains(m) &&
+        (!from.pbrData.baseColorTexture ||
+         sourceImage(from.pbrData.baseColorTexture->textureIndex).has_alpha())) {
+      material.alphaMode = fastgltf::AlphaMode::Mask;
+      material.alphaCutoff = from.alphaCutoff;
+    }
     material.pbrData.baseColorFactor = from.pbrData.baseColorFactor;
     material.pbrData.metallicFactor = from.pbrData.metallicFactor;
     material.pbrData.roughnessFactor = from.pbrData.roughnessFactor;

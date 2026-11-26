@@ -171,9 +171,11 @@ these; `PivotPainter/*_PP` are the same meshes with wind pivots),
    ```
 
    (one cook per kept variant; seedlings are skipped). The cook traces
-   the leaf and decoration cards' alpha into opaque leaf geometry
-   (`Traced leaf material` lines; decisions.md "Tree leaves as opaque
-   geometry"). Kept variants and budgets (`--triangles`), 30 trees, 28.7M
+   the leaf cards' alpha into opaque leaf geometry (`Traced leaf
+   material` lines; decisions.md "Tree leaves as opaque geometry"); the
+   decoration cards transmit nothing and stay alpha-tested cards (glTF
+   MASK at the source cutoff; decisions.md "Trace only cards that
+   transmit"). Kept variants and budgets (`--triangles`), 30 trees, 28.7M
    triangles: Forest 1.2M (beech 1.5M), Field 1.2M (beech Field_01 4M,
    alder Field_02 2M), Sapling 0.3M; alder Forest 01 03 04 06 08, Field
    01 02 04, Sapling 02 05 06; beech Forest 01 03 05 06 08, Field 01,
