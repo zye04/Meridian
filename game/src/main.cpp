@@ -1473,26 +1473,6 @@ int main(int argc, char **argv) {
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
-  // MEASURE-ONLY (scene lane, not for commit): load broadleaf mesh groups.
-  if (const char *groups = std::getenv("SCENE_MEASURE")) {
-    const auto dir = std::filesystem::path(MERIDIAN_ASSET_DIR) / "source/megascans/broadleaf";
-    int count = 0;
-    for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-      const std::string name = entry.path().filename().string();
-      const bool small = name.find("_s_") != std::string::npos || name.ends_with("_s");
-      if (std::string_view(groups).find(small ? "small" : "large") == std::string_view::npos) {
-        continue;
-      }
-      for (const auto &file : std::filesystem::directory_iterator(entry.path())) {
-        const std::string relative =
-            "source/megascans/broadleaf/" + name + "/" + file.path().filename().string();
-        if (file.path().extension() == ".gltf" && loadModel(renderer, relative.c_str())) {
-          ++count;
-        }
-      }
-    }
-    std::printf("SCENE_MEASURE %s: %d models\n", groups, count);
-  }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);
   }
