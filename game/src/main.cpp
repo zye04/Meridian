@@ -253,6 +253,62 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
 constexpr uint32_t kPlacementSeed = 1;
 constexpr uint32_t kForestLayerId = 1;
 
+// The "Forest European Broadleaf" pack's small and medium pieces
+// (--scenery broadleaf; tools/fetch-sample-assets.sh cooks them into
+// assets/source/megascans/broadleaf/<name>/). Cliffs, ledges, embankments
+// and the large rocks are not placed by rule.
+constexpr const char *kBroadleafDirectory = "source/megascans/broadleaf";
+// Stones and roots on the forest floor, under the closed canopy.
+struct ForestFloorScatter {
+  static constexpr uint32_t kLayerId = 14;
+  static constexpr float kFootprint = 3.0f; // m between pieces at full density
+  static constexpr float kSlopeMaxDeg = 40.0f;
+  static constexpr float kFade = 0.3f;
+  static constexpr float kClusterFrequency = 1.0f / 25.0f;
+  static constexpr float kClusterAmount = 0.3f;
+  static constexpr float kScaleMin = 0.7f, kScaleMax = 1.2f;
+  static constexpr float kSinkDepth = 0.1f; // m
+  static constexpr float kDrawDistance = 200.0f;
+  // Forest density over which the floor fills (rising: under the canopy).
+  static constexpr float kForestLo = 0.2f, kForestHi = 0.5f;
+  static constexpr float kRootWeight = 0.5f; // per root piece, against 1 per stone
+};
+// With the broadleaf scenery the forest is made of the open-crowned
+// variants only (broad, dense, round crowns: the closed canopy seen from
+// above), spaced so neighbouring crowns touch.
+struct BroadleafForest {
+  // Crown-weighted mean width of the picks below is ~17 m at scale 1, but
+  // the forest rule's density stays under 1 over most of the forest, so the
+  // dither spacing has to be about half that for the crowns to meet.
+  static constexpr float kFootprint = 9.0f; // m
+  struct Pick {
+    const char *species, *pack;
+    std::initializer_list<const char *> variants;
+  };
+  static constexpr std::array<Pick, 3> kPicks{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01", "Forest_03"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01", "Forest_02"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
+  }};
+};
+// Flat ground rocks breaking through the turf where the soil is thin: on
+// convex ground (ridges, knolls) in the open the forest leaves.
+struct ClearingStones {
+  static constexpr uint32_t kLayerId = 15;
+  static constexpr float kFootprint = 15.0f; // m
+  static constexpr float kSlopeMaxDeg = 30.0f;
+  static constexpr float kFade = 0.3f;
+  static constexpr float kClusterFrequency = 1.0f / 40.0f;
+  static constexpr float kClusterAmount = 0.7f;
+  static constexpr float kScaleMin = 0.6f, kScaleMax = 1.1f;
+  static constexpr float kSinkDepth = 0.05f; // m: slabs lie in the turf
+  static constexpr float kDrawDistance = 300.0f;
+  // Height over the ~40 m mean (m) over which they appear: knolls and ridges.
+  static constexpr float kRidgeLo = 0.5f, kRidgeHi = 3.0f;
+  // Forest density over which they fade (falling: the open ground).
+  static constexpr float kForestLo = 0.6f, kForestHi = 0.2f;
+};
+
 // The forest layer's rule, shared by placeScenery and --score-forest. On
 // the Napf the forest is what farming left: slopes too steep to mow or
 // graze (from ~14 degrees, closed by ~34) stay wooded, and the sunniest
@@ -271,7 +327,7 @@ meridian::DensityRule forestRule() {
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
 void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed,
-                  bool geoChannels) {
+                  bool geoChannels, const std::string &treePalette, bool broadleaf) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -293,8 +349,10 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
     for (int variant = 1; variant <= 20; ++variant) {
       char name[96];
       std::snprintf(name, sizeof(name), "SM_%s_%s_%02d", pack, kind, variant);
+      const std::string directory =
+          treePalette.empty() ? std::string(species) : species + ("-" + treePalette);
       const std::string path =
-          std::string("source/megascans/") + species + "/" + name + "/" + name + ".gltf";
+          "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
       if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
         const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
         ids.insert(ids.end(), added.begin(), added.end());
@@ -304,10 +362,33 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       into.emplace_back(id, weight / static_cast<float>(ids.size()));
     }
   };
+  // The species' forest shares, also for the broadleaf picks.
+  constexpr float kBeechShare = 0.6f, kHornbeamShare = 0.25f, kAlderShare = 0.15f;
+  if (trees && broadleaf) {
+    const std::array<float, 3> shares{kBeechShare, kHornbeamShare, kAlderShare};
+    for (size_t s = 0; s < BroadleafForest::kPicks.size(); ++s) {
+      const auto &pick = BroadleafForest::kPicks[s];
+      std::vector<uint32_t> ids;
+      for (const char *variant : pick.variants) {
+        const std::string directory =
+            treePalette.empty() ? std::string(pick.species) : pick.species + ("-" + treePalette);
+        const std::string name = std::string("SM_") + pick.pack + "_" + variant;
+        const std::string path = "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
+        if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
+          const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
+          ids.insert(ids.end(), added.begin(), added.end());
+        }
+      }
+      for (uint32_t id : ids) {
+        forest.emplace_back(id, shares[s] / static_cast<float>(ids.size()));
+      }
+    }
+  } else if (trees) {
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", kBeechShare, forest);
+    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", kHornbeamShare, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Forest", kAlderShare, forest);
+  }
   if (trees) {
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.6f, forest);
-    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", 0.25f, forest);
-    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.15f, forest);
     addUnrealTrees("blackalder", "BlackAlder", "Field", 0.5f, lone);
     addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Field", 0.3f, lone);
     addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.2f, lone);
@@ -355,17 +436,63 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
     }
     treeScale = 4.4f;
   }
-  std::vector<std::pair<uint32_t, float>> rocks;
-  for (const auto &[path, perItem, weight] :
-       {std::tuple{"source/megascans/massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf",
-                   false, 0.5f},
-        {"boulder_01/boulder_01_2k.gltf", false, 1.0f},
-        {"namaqualand_boulder_04/namaqualand_boulder_04_2k.gltf", false, 1.0f},
-        {"rock_moss_set_01/rock_moss_set_01_2k.gltf", true, 0.3f},
-        {"rock_moss_set_02/rock_moss_set_02_2k.gltf", true, 0.3f}}) {
-    for (uint32_t id : addPrototypes(renderer, prototypes, path, perItem)) {
-      rocks.emplace_back(id, weight);
+  // Every cooked broadleaf piece whose directory name starts with one of
+  // `prefixes`, each one prototype of the given weight.
+  const auto broadleafPieces = [&](std::initializer_list<const char *> prefixes, float weight) {
+    std::vector<std::pair<uint32_t, float>> pieces;
+    const auto dir = std::filesystem::path(MERIDIAN_ASSET_DIR) / kBroadleafDirectory;
+    if (!broadleaf || !std::filesystem::is_directory(dir)) {
+      return pieces;
     }
+    std::vector<std::filesystem::path> gltfs;
+    for (const auto &piece : std::filesystem::directory_iterator(dir)) {
+      const std::string name = piece.path().filename().string();
+      if (std::none_of(prefixes.begin(), prefixes.end(),
+                       [&](const char *prefix) { return name.starts_with(prefix); })) {
+        continue;
+      }
+      for (const auto &file : std::filesystem::directory_iterator(piece.path())) {
+        if (file.path().extension() == ".gltf") {
+          gltfs.push_back(std::filesystem::relative(file.path(), MERIDIAN_ASSET_DIR));
+        }
+      }
+    }
+    std::sort(gltfs.begin(), gltfs.end());
+    for (const auto &gltf : gltfs) {
+      for (uint32_t id : addPrototypes(renderer, prototypes, gltf.string(), false)) {
+        pieces.emplace_back(id, weight);
+      }
+    }
+    return pieces;
+  };
+  std::vector<std::pair<uint32_t, float>> forestFloor =
+      broadleafPieces({"rock_s_", "ground_rock_s_"}, 1.0f);
+  for (const auto &root : broadleafPieces({"ground_root_", "scatter_root_"},
+                                          ForestFloorScatter::kRootWeight)) {
+    forestFloor.push_back(root);
+  }
+
+  // With the broadleaf pack, its medium rocks stand on the steep ground and
+  // its small and clustered rocks make the scree (no cliff piece).
+  std::vector<std::pair<uint32_t, float>> rocks = broadleafPieces({"rock_m_", "cluster_rock_m"}, 1.0f);
+  std::vector<std::pair<uint32_t, float>> screeRocks =
+      broadleafPieces({"rock_s_", "cluster_rock_s_"}, 1.0f);
+  const auto clearingStones = broadleafPieces({"ground_rock_m_"}, 1.0f);
+  if (rocks.empty()) {
+    for (const auto &[path, perItem, weight] :
+         {std::tuple{"source/megascans/massive_sandstone_cliff_vmmdcj2/vmmdcj2_tier_1.gltf",
+                     false, 0.5f},
+          {"boulder_01/boulder_01_2k.gltf", false, 1.0f},
+          {"namaqualand_boulder_04/namaqualand_boulder_04_2k.gltf", false, 1.0f},
+          {"rock_moss_set_01/rock_moss_set_01_2k.gltf", true, 0.3f},
+          {"rock_moss_set_02/rock_moss_set_02_2k.gltf", true, 0.3f}}) {
+      for (uint32_t id : addPrototypes(renderer, prototypes, path, perItem)) {
+        rocks.emplace_back(id, weight);
+      }
+    }
+  }
+  if (screeRocks.empty()) {
+    screeRocks = rocks;
   }
 
   // Meadow accents: every variant of a Megascans plant is one prototype
@@ -433,7 +560,8 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   std::vector<PlacementLayer> layers;
   std::optional<PlacementLayer> forestLayer; // a copy: layers grows
   if (!forest.empty()) {
-    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(), 0.8f * treeScale,
+    layers.push_back({kForestLayerId, forest, broadleaf ? BroadleafForest::kFootprint : 6.0f,
+                      forestRule(), 0.8f * treeScale,
                       1.2f * treeScale, Rotation::Yaw, 0.3f});
     layers.back().farField = farField;
     // Field trees stand on the open pasture the forest leaves.
@@ -459,6 +587,27 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
                  1.2f, Rotation::Yaw, 0.1f, 150.0f},
                 0.4f, 0.8f);
   }
+  if (!clearingStones.empty() && forestLayer) {
+    using C = ClearingStones;
+    PlacementLayer stones{C::kLayerId, clearingStones, C::kFootprint,
+                          {0.0f, C::kSlopeMaxDeg, -1e9f, 1e9f, C::kFade, 0.0f, 0.0f, 0.0f,
+                           C::kClusterFrequency, C::kClusterAmount},
+                          C::kScaleMin, C::kScaleMax, Rotation::Yaw, C::kSinkDepth,
+                          C::kDrawDistance};
+    stones.rule.channels[0] =
+        geo::ramp(geo::kLandformPosition, geo::encodeLandformPosition(C::kRidgeLo),
+                  geo::encodeLandformPosition(C::kRidgeHi));
+    stones.parent = meridian::parentRamp(*forestLayer, C::kForestLo, C::kForestHi);
+    layers.push_back(stones);
+  }
+  if (!forestFloor.empty()) {
+    using F = ForestFloorScatter;
+    underForest({F::kLayerId, forestFloor, F::kFootprint,
+                 {0.0f, F::kSlopeMaxDeg, -1e9f, 1e9f, F::kFade, 0.0f, 0.0f, 0.0f,
+                  F::kClusterFrequency, F::kClusterAmount},
+                 F::kScaleMin, F::kScaleMax, Rotation::Full, F::kSinkDepth, F::kDrawDistance},
+                F::kForestLo, F::kForestHi);
+  }
   // Rocks where the ground material turns to rock: the density ramps up
   // over the same slopes as the material's blend (kRockNormalY).
   const float rockStart = std::acos(meridian::kRockNormalY[1]) * kDegrees;
@@ -470,7 +619,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
                       0.5f, 1.5f, Rotation::Full, 0.3f, 1500.0f});
     // Scree: smaller rocks that fell from the steep ground above, densest at
     // its foot and thinning out along the runout.
-    PlacementLayer scree{13, rocks, 8.0f,
+    PlacementLayer scree{13, screeRocks, 8.0f,
                          {0.0f, 45.0f, -1e9f, 1e9f, 0.2f, 0.0f, 0.0f, 0.0f, 1.0f / 30.0f, 0.5f},
                          0.25f, 0.7f, Rotation::Full, 0.15f, 600.0f};
     scree.rule.channels[0] = geo::ramp(geo::kTalus, geo::encodeTalus(0.15f), geo::encodeTalus(0.6f));
@@ -696,6 +845,11 @@ struct Options {
   std::optional<std::filesystem::path> gradePath;
   // --terrain FILE: the heightfield (default assets/terrain/napf.height).
   std::optional<std::filesystem::path> terrainPath;
+  // --tree-palette NAME: the Megascans Trees cooked with that leaf palette
+  // (assets/source/megascans/<species>-NAME, tools/unreal/cook_palette.sh).
+  std::string treePalette;
+  // --scenery broadleaf: place the broadleaf pack's small and medium pieces.
+  bool broadleafScenery = false;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -973,6 +1127,14 @@ Options parseOptions(int argc, char **argv) {
       options.rayReconstruction = rr == "on";
     } else if (arg == "--terrain" && i + 1 < argc) {
       options.terrainPath = argv[++i];
+    } else if (arg == "--scenery" && i + 1 < argc) {
+      const std::string scenery = argv[++i];
+      if (scenery != "broadleaf") {
+        throw std::runtime_error("--scenery takes broadleaf");
+      }
+      options.broadleafScenery = true;
+    } else if (arg == "--tree-palette" && i + 1 < argc) {
+      options.treePalette = argv[++i];
     } else if (arg == "--score-forest" && i + 1 < argc) {
       options.scoreForestPath = argv[++i];
     } else if (arg == "--trees") {
@@ -1095,7 +1257,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name, --scenery broadleaf, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, "
@@ -1428,16 +1590,21 @@ int main(int argc, char **argv) {
       {TerrainRole::Mud, {0.07f, 0.046f, 0.021f}, {{"soil_mud_olsetpp0", 0.88f, 0.0251f}}},
       {TerrainRole::Soil,
        {0.13f, 0.095f, 0.05f},
-       {{"soil_dirt_pjusf0", 1.0f, 0.0391f}, {"soil_dirt_peioh0", 1.0f, 0.0572f}}},
+       {{"forest_european_broadleaf_ground_dirt_fine_01_xlpnffacc", 2.0f, 0.0624f},
+        {"forest_european_broadleaf_ground_dirt_rough_xlpiabx", 2.0f, 0.1f}}},
       {TerrainRole::ForestPath, {0.08f, 0.06f, 0.035f}, {{"forest_path_ugsnfawlw", 2.0f, 0.0355f}}},
       {TerrainRole::ForestFloor,
        {0.05f, 0.05f, 0.016f},
-       {{"forest_floor_sfjmafua", 2.0f, 0.0292f}, {"forest_floor_xdfddec", 2.0f, 0.0372f}}},
-      {TerrainRole::Gravel, {0.13f, 0.1f, 0.07f}, {{"gravel_on_soil_rmsigwp0", 0.39f, 0.0149f}}},
+       {{"forest_european_broadleaf_ground_dirt_fine_02_xlnmej1", 2.0f, 0.0357f},
+        {"forest_european_broadleaf_ground_dirt_coarse_xlnsfet", 1.0f, 0.0316f}}},
+      {TerrainRole::Gravel,
+       {0.13f, 0.1f, 0.07f},
+       {{"forest_european_broadleaf_ground_gravel_coarse_xlqsfc1", 1.0f, 0.0521f}}},
       {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f, 0.0156f}}},
       {TerrainRole::Rock,
        {0.13f, 0.108f, 0.085f},
-       {{"rock_cliff_tg1mcgbl", 2.0f, 0.0891f}, {"layered_rock_vl0fdhdo", 3.0f, 0.1495f}}},
+       {{"forest_european_broadleaf_rock_coarse_xlnjefr", 2.0f, 0.0876f},
+        {"forest_european_broadleaf_rock_moss_xlpmei3", 2.0f, 0.1433f}}},
   };
   meridian::TerrainMaterial material;
   if (options.trees) {
@@ -1480,7 +1647,8 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);
+    placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
+                 options.treePalette, options.broadleafScenery);
   }
 
   const auto makeWeather = [](const Options &o) {
