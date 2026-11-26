@@ -156,7 +156,7 @@ float voxelUnit(uint bits) {
 // byte, the jitter phase in bits 8-15, the phases per cycle from bit 16).
 // AreaPixelPhase: a leaf voxel's quad at area fraction a = f, never under
 // one pixel, drawn on floor(P f / a) of the P jitter phases plus one with
-// the fractional part's chance by its hash (x: unused by a shrunk quad);
+// the fractional part's chance by its hash's x;
 // wood, the cascades and the Hash A/B draw whole quads by voxelDraws. Must
 // match voxel_shape.h (VoxelCoverage).
 const uint kVoxelCoverageHash = 0u;
