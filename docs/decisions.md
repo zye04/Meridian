@@ -5826,3 +5826,28 @@ cached shadow pages are invalidated.
   dominates the region mean. That blue is a lighting item, not the
   palette. Resident VRAM unchanged (9850 MiB); first load rebuilds the 30
   trees' cluster caches (launch 6:36 against ~2:30 warm).
+
+## Broadleaf pack placement by the causal layers (scene lane round 2a, 2026-11-26)
+
+- Choice: `--scenery broadleaf` (opt-in, so the Napf scene, its views and
+  placement hash stay as they are until the scene flip) feeds the pack's
+  small and medium pieces through the existing causal layers: the
+  steep-ground rock layer (3) takes the medium rocks and the scree layer
+  (13) the small and clustered rocks, both with their rules unchanged and
+  without the sandstone cliff; two new layers read the forest density and
+  the .geo channels: forest-floor stones and roots (14) rising with the
+  forest's density, flat ground rocks (15) on knolls in the open
+  (landform position 0.5-3 m above the ~40 m mean, forest density
+  falling). Parameters are named in `ForestFloorScatter` and
+  `ClearingStones` (main.cpp). Cliffs, ledges, embankments and the large
+  rocks are not placed by rule (they must merge with the terrain).
+- Premise (forest floor, c1 and v3): footprint 6 m, cluster 0.6, forest
+  0.3-0.7 placed 61484 pieces and none showed in either view; footprint
+  3 m, cluster 0.3, forest 0.2-0.5 placed 368859 and shows stones and
+  roots under the canopy at c1 while the v3 clearing stays clear. Kept.
+- The pack's Fab glTFs needed their node chain baked at import (pieces
+  came out 100x too large as placement prototypes).
+- Measured (Release, `Render 2560x1440`, retinted trees, the 1d look):
+  resident 10598 MiB with the layers (10327 without), placed 721909
+  (layer 14: 368859, 15: 5101, 3: 4831, 13: 20303), 0 dropped in every
+  cull list of every view.
