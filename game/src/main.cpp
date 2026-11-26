@@ -290,7 +290,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       char name[96];
       std::snprintf(name, sizeof(name), "SM_%s_%s_%02d", pack, kind, variant);
       const std::string path =
-          std::string("source/megascans/") + species + "-r6/" + name + "/" + name + ".gltf";
+          std::string("source/megascans/") + species + "/" + name + "/" + name + ".gltf";
       if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
         const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
         ids.insert(ids.end(), added.begin(), added.end());
