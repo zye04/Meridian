@@ -61,8 +61,8 @@ void main() {
     // face along its axis, the rest every way.
     float aligned = clamp((3.0 * voxelAlignment(voxel) - 1.0) * 0.5, 0.0, 1.0);
     // Sky visibility out of the model (up, and the four sides), as the
-    // clusters' crownOcclusion (surface.glsl): only without GI, whose probes
-    // already trace the canopy.
+    // clusters' crownOcclusion (surface.glsl). With GI it applies only to the
+    // share outside the probes' clipmap: inside, the probes trace the canopy.
     float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
     vec3 east = normalize(toLocal * vec3(1.0, 0.0, 0.0));
     vec3 south = normalize(toLocal * vec3(0.0, 0.0, 1.0));
@@ -115,6 +115,7 @@ void main() {
     vec3 debugSunSpecular = sh.specularLight;
 #endif
     vec3 specularBeforeAmbient = sh.specularLight;
+    vec3 diffuseBeforeAmbient = sh.diffuseLight;
     addAmbientLight(sh, s.occlusion);
     // With GI the probes stand for the crown in the diffuse term, but the sky
     // reflected along R still passes through the model: occlude it by the
@@ -126,6 +127,11 @@ void main() {
                                                        mix(1.0, crownR, scene.microShadowStrength);
     }
     addTransmittedAmbient(sh, transmitted, s.occlusion);
+    if (scene.giMode != 0u) {
+        sh.diffuseLight = diffuseBeforeAmbient +
+                          (sh.diffuseLight - diffuseBeforeAmbient) *
+                              mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
+    }
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);
