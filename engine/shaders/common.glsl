@@ -697,8 +697,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The main view keeps the triangles of instances within this many
     // meters (voxelLodAt; 0: voxels wherever the LOD cut picks them).
     float voxelNear;
-    // Development: the main view's voxel coverage rule, jitter phase and
-    // phases per cycle (voxel_lod.glsl voxelCoverageRule).
+    // The main view's voxel coverage rule, jitter phase and phases per
+    // cycle (voxel_lod.glsl voxelDrawsWhole).
     uint voxelCoverage;
 };
 

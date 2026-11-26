@@ -275,6 +275,9 @@ cluster record.
   resolves it spatially, and (b) a hash that also cycles with the jitter
   phase (a fixed sequence, so a still camera converges and never boils).
   Blending is not an option (order-dependent, no depth for DLSS).
+  Superseded by `2026-11-26-voxel-leaf-coverage-design.md`: leaf voxels
+  draw a shrunk quad (area f, never under one pixel) on their share of the
+  jitter phases (`area-pixel-phase`); wood keeps (a).
 - Shading goes through the same `lighting.glsl` path as leaf triangles:
   front diffuse and transmission by the voxel's normal distribution
   against the sun (an aggregate of leaves facing many ways: the lit

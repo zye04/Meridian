@@ -9,12 +9,14 @@
 // One workgroup per voxel cluster cluster_cull.comp listed in this phase:
 // its voxels that draw are listed for voxel_instance.mesh (cluster entry |
 // terrain sun << 31, pool brick << 6 | voxel), 64 per workgroup, one
-// reservation per 64 bricks. Bricks outside the frustum are skipped; a voxel
-// draws where a stable hash of instance, brick and voxel is below its
-// opacity along the view (coverage; stable, so a still view never boils;
+// reservation per 64 bricks. Bricks outside the frustum are skipped. A
+// voxel of opacity f along the view (coverage) draws, unless the model
+// hides it from the camera (kVoxelHiddenDepth), by the main view's rule
+// (voxel_lod.glsl): a leaf voxel's shrunk quad on its share of the jitter
+// phases; a whole quad (wood, cascades, the hash A/B) where a stable hash of
+// instance, brick and voxel is below f (stable, so a still view never boils;
 // keyed on the brick's lattice place, edge and the cluster's seed, not its
-// pool index) or, of an opaque part, the opacity reaches kOpaqueVoxelFloor,
-// unless the model hides it from the camera (kVoxelHiddenDepth). The
+// pool index) or, of an opaque part, f reaches kOpaqueVoxelFloor. The
 // terrain's sun visibility is marched once from the cluster's centre (as
 // cluster_cull.comp does per small cluster; a voxel cluster spans one
 // region). Foliage bricks are sparse (about one drawn voxel each at the
@@ -77,7 +79,6 @@ void main() {
     float radius = 0.8660254 * 4.0 * v * instance.scale;
     mat3 toLocal = transpose(mat3(instance.transform));
     uint list = phase * 2u;
-    uint rule = voxelCoverageRule(scene.voxelCoverage, scene.shadowView != 0u);
     uint quadBase = voxelQuadListStart(list);
     uint i = gl_LocalInvocationIndex;
     if (i == 0u) {
@@ -131,17 +132,17 @@ void main() {
             uvec4 packedVoxel = pools.voxels.voxels[slot];
             float opacity = voxelViewOpacity(voxelDepths(packedVoxel), view);
             uvec3 hash = voxelHash(entry.x, brick, v, cluster.firstVertex, i);
-            uint voxelRule = voxelRuleFor(rule, packedVoxel, opacity);
             vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
-            float pixels = voxelUsesPixels(voxelRule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;
-            if (voxelCoverageDraws(voxelRule, scene.voxelCoverage, packedVoxel, opacity, hash, pixels) &&
+            // voxel_instance.mesh's full quad, in pixels.
+            float pixels = voxelQuadPixels(scene, relative, view, v * instance.scale);
+            bool whole = voxelDrawsWhole(scene.voxelCoverage, scene.shadowView != 0u, packedVoxel);
+            if ((whole ? voxelDraws(packedVoxel, opacity, voxelUnit(hash.x))
+                       : voxelShrunkDraws(scene.voxelCoverage, opacity, pixels, hash.z)) &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {
                 drawnMask[k >> 5] |= 1u << (k & 31u);
-                // voxel_instance.mesh's quad, in pixels.
-                if (!voxelUsesPixels(voxelRule)) {
-                    pixels = voxelQuadPixels(scene, relative, view, v * instance.scale);
+                if (!whole) {
+                    pixels *= voxelAreaFraction(opacity, pixels);
                 }
-                pixels *= voxelAreaFraction(voxelRule, opacity, pixels);
                 area += uint(min(pixels, 65536.0) * 16.0 + 0.5);
                 subpixel += pixels < 1.0 ? 1u : 0u;
             }

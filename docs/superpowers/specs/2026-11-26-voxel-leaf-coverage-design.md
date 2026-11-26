@@ -1,8 +1,8 @@
 # Voxel leaf coverage and look — design
 
-Status: draft. Stage 0 and stage 1 (premises and switchable variants) are
-decided and can start; the coverage rule itself is chosen by the user's eye
-on stage 1's sheets and is then written into this file.
+Status: in progress. Stages 0 and 1 done; stage 2 built (leaves take
+`area-pixel-phase`, wood keeps the hash with its floor); stages 3 to 5 not
+started.
 
 Covers the backlog rows "G1 Distant forests read as grey speckle", "Terrain
 shows through crowns more than in the reference", "Trunk holes below half
@@ -88,6 +88,18 @@ a guideline, look outranks it; no bare tuning literals.
   90M). The pick does not close the look: the 150 m grain is leaf shading
   present on triangles too, and voxel crowns pass more terrain than the
   path tracer (0.33 against 0.23) under every rule.
+- Stage 2 wood (chat, 2026-11-26, after the trunk sheet): wood keeps
+  `hash` with `kOpaqueVoxelFloor`, identical to main; only leaf voxels take
+  `area-pixel-phase`. Why: on the rule A trunk (beech08, 116 and 140 m)
+  every area rule shrinks a voxel's quad about its centre, so a trunk 1.2
+  to 2.3 voxels wide becomes a two-column lattice of 1 px dots that DLAA
+  greys into a ladder. Trunk contrast at 116 m: triangles 0.623, hash
+  0.572, area-pixel-phase 0.468, wood always drawn at a = f 0.466, wood
+  whole at f >= 0.5 else area-pixel-phase 0.463 (final-frame gap rows 3/40
+  for all but hash 5/40; `.superpowers/leaf/look/sheet-trunk-wood.png`).
+  The goal "one rule for leaves and wood" is therefore not met; rule A
+  stays parked and no anisotropic wood rule is designed now. `hash` stays
+  selectable for A/B (`--voxel-coverage hash`).
 - Every look sheet carries a Chlorophyll reference crop at a comparable
   distance; the target is the kind of image, not a pixel match.
 
@@ -99,6 +111,7 @@ a guideline, look outranks it; no bare tuning literals.
   no boiling on a still camera that the user can see.
 - One rule for leaves and wood, so trunks need no special case if the rule
   allows it (the dashed small-beech trunk of crown round 9b is a test view).
+  Not met: wood keeps the hash (User decisions, stage 2 wood).
 - Inputs for DLSS stay valid: opaque depth, motion vectors, guides.
 
 ## Non-goals
