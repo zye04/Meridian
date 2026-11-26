@@ -5689,3 +5689,14 @@ cached shadow pages are invalidated.
   2545, hornbeam 1817, alder 1332 triangles, no voxels). Alder's Tileable
   mesh now ends in a 113-triangle final cluster drawn at every distance.
   Beech cook 47.3-47.8 s (v15) vs 47.4-47.9 s, same machine state.
+- GPU (Release, `Render 2560x1440, display 2560x1440`, main de21d6d vs
+  7bda3ff, round 7's poses, `.superpowers/crown8/` in meridian-crown):
+  Part B forest 30.94 / 30.98 -> 29.74 / 29.63 ms (two runs each),
+  triangles 15912939 -> 10310916; forest edge 25.27 -> 24.84 ms; overview
+  23.29 -> 22.61 / 22.54 ms (voxelizer 13: 27.88, 23.33, 21.01); 0
+  dropped by any cull list, pass or cascade; resident 10890 -> 10893 MiB;
+  trunk background at the 60 m poses unchanged (beech 0.0602, hornbeam
+  0.0665, alder 0.2091). The overview's mean colour is unchanged (sRGB
+  111.83/121.77/104.09 vs 111.93/121.72/104.10); its 4.2/255 mean
+  difference is per-pixel voxel coverage speckle, 1.9/255 over 8x8 blocks.
+- Open: forests still cost 1.0-1.8 ms over voxelizer 13 (backlog).
