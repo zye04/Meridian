@@ -5461,3 +5461,19 @@ cached shadow pages are invalidated.
 - **Look:** the alder fork at 1 m (mesh junctions, decoration over bark)
   shows no hairline seams; the trunk-base cut at 2-6 m is judged by the
   user. kCacheVersion 8 -> 9.
+
+## Voxel coverage seed from geometry only (2026-11-26)
+
+- **Problem:** each voxel cluster's coverage hash (voxel_bricks.comp) was
+  seeded from the cluster cache key, which hashes the raw `Vertex` bytes
+  and `kVoxelizerVersion`. Vertex compression (52 B CPU vertex,
+  voxelizer 11 -> 12) therefore re-rolled every tree's stable voxel
+  dither: byte-identical voxel caches, a different pattern, so every
+  dappled voxel shadow moved (alder meadow at 2 m: 15.4/255 against main,
+  sun light 20.8; with main's seed forced: 1.09 and 0.29, the rest the
+  alder fade).
+- **Rule:** the seed (`seedVoxels`, cluster.cpp) hashes the model's
+  positions and indices only, mixed with the mesh's index; never cache
+  or voxelizer versions or the Vertex layout. A format change keeps the
+  look; models still differ. Tested (cluster_test.cpp "voxel seeds follow
+  positions and indices only"). This change re-rolls the pattern once.

@@ -262,7 +262,7 @@ cluster cull, which lists its bricks in the frustum (with the terrain's
 sun visibility marched once per brick) and, compacted, the voxels that
 draw: coverage by a stable hash of instance, the brick's lattice place and
 edge, the cluster's seed (a voxel cluster's ClusterInfo.firstVertex: the
-mesh's seed from its cluster cache key XOR the cluster's index in its
+mesh's seed from its model's positions and indices (`seedVoxels`) XOR the cluster's index in its
 ClusterLod) and voxel, against the voxel's opacity along the view, skipping voxels whose optical depth out
 of the model toward the camera exceeds 3.5; a masked cluster of radius <= 1 m also marches the
 terrain toward the sun once and packs the result into its entry's top 8

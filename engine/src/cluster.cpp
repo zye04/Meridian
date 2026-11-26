@@ -1157,6 +1157,29 @@ bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> f
   return false;
 }
 
+void seedVoxels(std::span<MeshData> meshes) {
+  uint64_t hash = 14695981039346656037ull;
+  const auto mix = [&](const void *data, size_t bytes) {
+    const auto *p = static_cast<const unsigned char *>(data);
+    for (size_t i = 0; i < bytes; ++i) {
+      hash = (hash ^ p[i]) * 1099511628211ull;
+    }
+  };
+  for (const MeshData &mesh : meshes) {
+    for (const Vertex &v : mesh.vertices) {
+      const float position[] = {v.position.x, v.position.y, v.position.z};
+      mix(position, sizeof(position));
+    }
+    mix(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
+  }
+  for (size_t i = 0; i < meshes.size(); ++i) {
+    uint64_t z = hash + (i + 1) * 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    meshes[i].voxelSeed = uint32_t((z ^ (z >> 31)) >> 32);
+  }
+}
+
 uint64_t clusterSourceKey(std::span<const MeshData> meshes,
                           std::span<const std::vector<uint8_t>> voxelTextures,
                           std::span<const VoxelMaterial> voxelMaterials,
