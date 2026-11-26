@@ -5182,4 +5182,12 @@ build the TLAS, so no shader executes a query on a null TLAS address.
   1112aa1 cook reproduces the shared cooked trees byte for byte.
 - **Cost:** decoration cards are alpha-tested again, so their edges can
   shimmer in motion the way traced leaves no longer do (few cards, on the
-  bark; not measured with the motion gates).
+  bark). Leaves keep their full budget, so the trees carry more
+  triangles; accepted by the user. Measured at the forest edge with
+  `--trees` (2560x1440, DLAA, on main 0724245): resident 11998 ->
+  12061 MiB (+63), models-loaded peak 13167 MiB, 18605468 -> 18725035
+  drawn triangles, GPU 24.37/24.48 -> 24.77/23.95 ms (noise). Motion on
+  the lone alder at 6 m (`tools/motion-clarity.sh` forest cases moved
+  there, the 1112aa1 cook before): jitter still 0.81 -> 0.81, side 5 m/s
+  6.29 -> 6.29, side 30 m/s 6.74 -> 6.75, turn 1 rad/s 3.40 -> 3.40;
+  the decoration shimmer does not show at frame scale.
