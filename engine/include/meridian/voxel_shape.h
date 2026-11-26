@@ -23,4 +23,16 @@ inline float voxelViewOpacity(const float depth[3], Vec3 d) {
   return 1.0f - std::exp(-(d.x * d.x * depth[0] + d.y * d.y * depth[1] + d.z * d.z * depth[2]) / s);
 }
 
+// Whether the coverage hash (uniform `noise` in [0, 1)) draws a voxel of
+// that opacity along the view; `opaque`: no transmission (wood). Drawn or
+// dropped whole, a voxel of coverage f errs by 2 f (1 - f) of its quad on
+// average through the hash and by 1 - f drawn always, less from f = 1/2: an
+// opaque part's partly covered cells (silhouette, base) then draw instead of
+// opening holes a pixel or two wide (voxels draw at that size). Must match
+// voxel_lod.glsl.
+constexpr float kOpaqueVoxelFloor = 0.5f;
+inline bool voxelDraws(float opacity, bool opaque, float noise) {
+  return noise < opacity || (opaque && opacity >= kOpaqueVoxelFloor);
+}
+
 } // namespace meridian

@@ -34,3 +34,15 @@ TEST_CASE("a voxel's covered area along a diagonal matches its uniform medium") 
   const float across = voxelQuadArea(diagonal, 1.0f) * voxelViewOpacity(depth, diagonal);
   CHECK(across == doctest::Approx(along).epsilon(0.01));
 }
+
+TEST_CASE("an opaque voxel at or over the coverage floor always draws") {
+  // Drawn or dropped whole, coverage f errs by 2 f (1 - f) through the hash
+  // and by 1 - f drawn always: equal at f = 1/2.
+  CHECK(2.0f * kOpaqueVoxelFloor * (1.0f - kOpaqueVoxelFloor) == doctest::Approx(1.0f - kOpaqueVoxelFloor));
+  for (float noise : {0.0f, 0.3f, 0.6f, 0.99f}) {
+    CHECK(voxelDraws(0.5f, true, noise));
+    CHECK(voxelDraws(0.9f, true, noise));
+    CHECK(voxelDraws(0.4f, true, noise) == (noise < 0.4f));
+    CHECK(voxelDraws(0.9f, false, noise) == (noise < 0.9f));
+  }
+}

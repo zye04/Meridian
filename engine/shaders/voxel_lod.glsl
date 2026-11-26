@@ -122,6 +122,17 @@ float voxelViewOpacity(vec3 depths, vec3 d) {
     return 1.0 - exp(-dot(d * d, depths) / s);
 }
 
+// Whether the coverage hash draws a voxel of that opacity along the view:
+// a voxel of an opaque part (no transmission: wood) at or over the floor
+// always draws. Drawn or dropped whole, coverage f errs by 2 f (1 - f) of
+// the quad on average through the hash and by 1 - f drawn always, less from
+// f = 1/2. Must match voxel_shape.h.
+const float kOpaqueVoxelFloor = 0.5;
+bool voxelDraws(uvec4 voxel, float opacity, float noise) {
+    bool opaque = (voxel.z & 0xFFFFFFu) == 0u;
+    return noise < opacity || (opaque && opacity >= kOpaqueVoxelFloor);
+}
+
 // The optical depth from a voxel's centre out of its model along unit d
 // (mesh space), from its axis word (ClusterLod::voxelAxis: 4 bits per
 // direction +x, -x, +y, -y, +z, -z), weighted by d^2 like an ambient cube.

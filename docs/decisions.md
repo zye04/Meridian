@@ -5557,3 +5557,44 @@ cached shadow pages are invalidated.
   levels independently"); lone beech and hornbeam captures at 40-170 m
   (2560x1440, main 8793aa7 vs the fold) show no wood blinking or lost
   beyond main's own.
+
+## Opaque wood voxels at half coverage always draw (crown lane round 6, 2026-11-26)
+
+- Problem: at 60-110 m lone-tree trunks show holes with the background
+  through them at the base and a ragged silhouette (user, the 60 m band
+  capture). The trunk base there is voxels only: on the CPU cut at 60 m no
+  wood triangle cluster of beech Field_01 reaches its lowest metre (edge
+  0.0625 m), and the `--report-at` pixels on the three trunks are voxels
+  (beech Field_01 trunk mesh at 61 m, hornbeam Field_01 at 90 m, black
+  alder Field_02 at 107 m).
+- Cause: the coverage hash draws a voxel with probability equal to its
+  opacity along the view. At 1-2 px per voxel (voxels switch at
+  kVoxelPixels) a dropped voxel is a hole the size of a pixel or two, and
+  nothing averages it. Partly covered wood cells sit at the base and the
+  silhouette: chance that no cube draws in a trunk column (CPU, views along
+  +-x and +-z, `.superpowers/crown6/trunk/trunk.txt` in meridian-crown):
+  base (lowest 0.5 m) 0.22-0.25 beech, 0.44-0.46 hornbeam, 0.34-0.36
+  alder; silhouette 0.30-0.36 / 0.07-0.56 / 0.29-0.57; interior 0.006-0.025.
+- Choice: a voxel without transmission (wood) whose opacity along the view
+  is at least `kOpaqueVoxelFloor` = 0.5 always draws; below it, and for
+  every leaf voxel, the hash stays. Derived, not tuned: drawn or dropped
+  whole, coverage f errs by 2 f (1 - f) of the quad on average through the
+  hash and by 1 - f drawn always, and the second is smaller from f = 1/2.
+  Voxels are a pixel or more at every drawn level (and cascades draw a
+  one-texel caster LOD), so the per-voxel error is what shows. Leaves keep
+  the hash in this try: their gaps are partly real, and the fold put wood
+  in leaf cells into the leaf voxel.
+- Measured (Release, `Render 2560x1440, display 2560x1440`, main 68f54bb
+  vs this change; `.superpowers/crown6/trunk/`): non-tree pixels inside
+  each row's trunk span in the lod view at the 60 m pose (`--camera 5203.38
+  752.23 5950.74 0 0 --trees`): beech 0.0975 -> 0.0722, alder 0.1310 ->
+  0.1037, hornbeam 0.1256 -> 0.1006; frame tree pixels 929004 -> 929889,
+  thin tree pixels (<= 2 of 4 neighbours) 101936 -> 101529; Part B forest
+  view wood-coloured crown px (crown3/classify.py) 0.1487 -> 0.1511
+  (reference 0.0647); GPU 14.95 -> 15.01 ms (60 m view), 27.71 -> 27.99 ms
+  (forest view, voxel trees 5.41 -> 5.48).
+- Not done: about three quarters of the trunk holes remain (cells under
+  half coverage, which a column of several such cells still leaves open,
+  and on the hornbeam trunk holes where triangle and voxel clusters of the
+  same mesh interleave, which the CPU cut at 90 m does not reproduce);
+  backlog.
