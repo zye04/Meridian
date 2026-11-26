@@ -5791,3 +5791,35 @@ cached shadow pages are invalidated.
   voxel crowns pass more terrain than the path tracer under every rule
   (0.33 vs 0.23); stages 3 to 5 of the spec; thin voxel trunks have no
   rule that reads solid (backlog).
+
+## Voxel crowns occlude their ambient by the crown with GI on (leaf lane, 2026-11-26)
+
+- Problem: under GI a voxel skipped its crown occlusion (the probes stand
+  for the canopy), so the only occlusion of its ambient light was the
+  probes': the sharp sky along R by `skyOcclusion`, the diffuse by the
+  probe irradiance. Outside the probes' clipmap (5 levels of 48 columns
+  from 2 m: about 768 m around the camera) `giIrradiance` falls back to the
+  open sky and ground, so a voxel there had no ambient occlusion at all.
+  Scene lane pick (relief patch, `--haze clean --sun 0.672 0.309 -0.672`,
+  voxel beech at 2157 m, original trees): ambient diffuse Y 86.3, ambient
+  specular 82.0 (b/g 1.76), haze 55% of the pixel; with `--gi off` the
+  crown occlusion scales both by 0.60.
+- Choice: with GI on, the ambient specular passes through the model's
+  optical depth along R (`voxelBoxDepth`, as the sun and sky use it), and
+  the crown occlusion of the GI-off path (up and four sides) scales the
+  ambient diffuse by the share outside the clipmap (`gi.remaining`);
+  inside, the probes keep the diffuse, so it is not occluded twice. Both
+  follow `microShadowStrength` like the GI-off path. Tried first: the
+  specular alone (slope L 0.297, lit / shadow 1.36).
+- Measured (Release, `Render 2560x1440, display 2560x1440`, view
+  `--camera 1300 1350 1300 -0.785 -0.25` on the relief patch, `--sun 0.707
+  0.325 -0.707 --haze clean`, original trees, regions
+  `canopy/regions.json` a1 of the scene lane, reference 1.jpg): shadowed
+  slope OKLCh L 0.327 -> 0.266 (ref 0.257), C 0.053 -> 0.059 (ref 0.031:
+  the haze is a larger share of the darker pixel), lit crowns L 0.423 ->
+  0.378 (ref 0.403), lit / shadow L 1.29 -> 1.42 (ref 1.57). Pick: ambient
+  diffuse 86.3 -> 52.0, specular 82.0 -> 28.7. GPU 26.22 -> 26.03 ms; the
+  lone beech at 150 m as voxels against triangles 0.995 -> 1.004 of the
+  crown crop's luminance (no step at the switch).
+- Not done: triangle leaves have the same fault (backlog); haze and
+  palette are the scene lane's.

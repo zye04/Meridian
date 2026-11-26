@@ -451,7 +451,10 @@ the layouts behind them.
   and rough-specular irradiance from `giSample`/`giIrradiance` when giMode
   is 1, blending to the analytic sky + ground term outside the clipmap, and
   occludes the sharp sky reflection by the probes' rough irradiance over
-  the open sky's (under a canopy the sky is not reflected at full strength).
+  the open sky's (under a canopy the sky is not reflected at full strength);
+  voxels also pass their ambient specular through their crown along R and
+  take the crown occlusion on the diffuse share outside the clipmap
+  (voxel_instance.frag).
 - GPU-driven scene: all meshes live in shared vertex/index pools (vertices
   as `PackedVertex`, 20 B, quantized per mesh over `MeshInfo` (80 B)
   bounds and UV range, decoded by common.glsl `loadVertex`; bump
