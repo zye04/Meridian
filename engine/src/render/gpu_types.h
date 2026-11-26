@@ -570,7 +570,7 @@ struct SceneData {
   // kMaxVoxelQuads entries (cluster entry | terrain sun << 31, pool brick
   // << 6 | voxel)) and the DrawCounters (voxel_instance.mesh reads its
   // counts). voxelLod: voxel clusters replace triangles (VoxelLod: 0
-  // triangles everywhere, 1 on, 2 near; voxelLodAt in common.glsl).
+  // triangles everywhere, 1 on; voxelLodAt in common.glsl).
   VkDeviceAddress voxelPools = 0;
   VkDeviceAddress voxelInstances = 0;
   VkDeviceAddress drawCounters = 0;
@@ -597,6 +597,9 @@ struct SceneData {
   uint32_t debugFilter = 0;
   uint32_t debugLightStride = 0;
   VkDeviceAddress debugLight = 0;
+  // The main view keeps the triangles of instances within this many meters
+  // (Renderer::setVoxelNear).
+  float voxelNear = 0.0f;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -619,7 +622,8 @@ static_assert(offsetof(SceneData, terrainShadowOrigin) == 2664);
 static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
 static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
 static_assert(offsetof(SceneData, debugLight) == 2712);
-static_assert(sizeof(SceneData) == 2720);
+static_assert(offsetof(SceneData, voxelNear) == 2720);
+static_assert(sizeof(SceneData) == 2736);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

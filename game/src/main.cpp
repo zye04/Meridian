@@ -732,6 +732,8 @@ struct Options {
   bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
   meridian::VoxelLod voxelLod = meridian::VoxelLod::On;
+  // Instances nearer than this keep their triangles in the main view.
+  float voxelNear = 0.0f;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -1026,9 +1028,15 @@ Options parseOptions(int argc, char **argv) {
       if (mode != "on" && mode != "off" && mode != "near") {
         throw std::runtime_error("--voxel-lod takes on, off or near");
       }
-      options.voxelLod = mode == "on"    ? meridian::VoxelLod::On
-                         : mode == "off" ? meridian::VoxelLod::Off
-                                         : meridian::VoxelLod::Near;
+      options.voxelLod = mode == "off" ? meridian::VoxelLod::Off : meridian::VoxelLod::On;
+      if (mode == "near") {
+        options.voxelNear = 150.0f;
+      }
+    } else if (arg == "--voxel-near" && i + 1 < argc) {
+      options.voxelNear = std::stof(argv[++i]);
+      if (!(options.voxelNear >= 0.0f)) {
+        throw std::runtime_error("--voxel-near takes meters >= 0");
+      }
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -1080,7 +1088,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1349,6 +1357,7 @@ int main(int argc, char **argv) {
     renderer.enableAlbedoCapture();
   }
   renderer.setVoxelLod(options.voxelLod);
+  renderer.setVoxelNear(options.voxelNear);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);
 

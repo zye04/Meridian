@@ -694,6 +694,49 @@ TEST_CASE("selectClustersBvh equals lodVisible over mixed levels") {
   checkTraversal(cachedCrown(), {0.0f, 5.0f, 0.0f});
 }
 
+TEST_CASE("selectClustersBvh without voxels draws the triangles voxels would replace") {
+  // cluster_cull.comp with voxelLodAt false: voxel clusters never draw, and
+  // triangle clusters whose group voxels replace are terminal.
+  const ClusterLod &lod = cachedCrown();
+  std::set<uint32_t> replaced;
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c) && c.refinedGroup >= 0) {
+      replaced.insert(uint32_t(c.refinedGroup));
+    }
+  }
+  REQUIRE(!replaced.empty());
+  const Vec3 center{0.0f, 5.0f, 0.0f};
+  for (const Vec3 direction : {Vec3{0, 0, 1}, normalize(Vec3{1, 0.5f, -0.3f})}) {
+    for (float distance : {10.0f, 60.0f, 150.0f, 1000.0f}) {
+      for (float threshold : {0.5f, 1.0f, 4.0f}) {
+        const Vec3 camera = center + direction * distance;
+        std::vector<uint32_t> flat;
+        for (uint32_t i = 0; i < lod.clusters.size(); ++i) {
+          const Cluster &c = lod.clusters[i];
+          if (isVoxel(c)) {
+            continue;
+          }
+          const LodThresholds t{replaced.count(c.group) ? -1.0f : threshold, threshold};
+          if (lodVisible(c, camera, 1.0f, 1.2f, 0.1f, 1440.0f, t)) {
+            flat.push_back(i);
+          }
+        }
+        std::vector<uint32_t> bvh =
+            selectClustersBvh(lod, camera, 1.0f, 1.2f, 0.1f, 1440.0f, threshold, 0.0f, false);
+        std::sort(bvh.begin(), bvh.end());
+        CHECK(!flat.empty());
+        CHECK(bvh == flat);
+      }
+    }
+  }
+}
+
+TEST_CASE("voxelsAt keeps the triangles within voxelNear") {
+  CHECK(voxelsAt({0, 0, 0}, {0, 2, 100}, 0.0f));
+  CHECK(!voxelsAt({0, 0, 0}, {0, 2, 100}, 150.0f));
+  CHECK(voxelsAt({0, 0, 0}, {0, 2, 200}, 150.0f));
+}
+
 TEST_CASE("a voxel cluster's error scales with instance scale like a triangle cluster's") {
   const ClusterLod &lod = cachedCrown();
   const auto voxel = std::find_if(lod.clusters.begin(), lod.clusters.end(), isVoxel);

@@ -1073,7 +1073,7 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,
                                         float thresholdPixels,
-                                        float orthoPixelsPerMeter) {
+                                        float orthoPixelsPerMeter, bool voxels) {
   const auto project = [&](const LodBounds &b) {
     return projectedErrorPixels(b, camera, scale, projY, nearPlane, screenHeight,
                                 orthoPixelsPerMeter);
@@ -1093,27 +1093,49 @@ std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                   screenHeight;
     // Voxel levels switch at up to kVoxelPixels times the threshold.
     if (finest <= thresholdPixels * kVoxelPixels &&
-        project({root.lod.center, root.lod.radius, level.maxError}) > thresholdPixels) {
+        (!voxels ||
+         project({root.lod.center, root.lod.radius, level.maxError}) > thresholdPixels)) {
       queue.push_back(level.rootNode);
     }
   }
-  const std::vector<LodThresholds> thresholds = clusterThresholds(lod, thresholdPixels);
+  std::vector<LodThresholds> thresholds = clusterThresholds(lod, thresholdPixels);
+  if (!voxels) {
+    // The upload's voxelEdge -1: triangle groups voxel clusters replace.
+    std::vector<uint8_t> voxelGroup;
+    for (const Cluster &c : lod.clusters) {
+      if (c.brickCount > 0 && c.refinedGroup >= 0) {
+        voxelGroup.resize(std::max<size_t>(voxelGroup.size(), size_t(c.refinedGroup) + 1), 0);
+        voxelGroup[size_t(c.refinedGroup)] = 1;
+      }
+    }
+    for (size_t i = 0; i < lod.clusters.size(); ++i) {
+      const Cluster &c = lod.clusters[i];
+      if (c.brickCount == 0 && c.group < voxelGroup.size() && voxelGroup[c.group]) {
+        thresholds[i].self = -1.0f;
+      }
+    }
+  }
   std::vector<uint32_t> cut;
   for (size_t q = 0; q < queue.size(); ++q) {
     const ClusterBvhNode &node = lod.nodes[queue[q]];
-    if (project(node.lod) <= thresholdPixels) {
+    if (voxels && project(node.lod) <= thresholdPixels) {
       continue;
     }
     for (uint32_t i = node.firstChild; i < node.firstChild + node.childCount; ++i) {
       if (!node.leaf) {
         queue.push_back(i);
-      } else if (lodVisible(lod.clusters[i], camera, scale, projY, nearPlane, screenHeight,
+      } else if ((voxels || lod.clusters[i].brickCount == 0) &&
+                 lodVisible(lod.clusters[i], camera, scale, projY, nearPlane, screenHeight,
                             thresholds[i], orthoPixelsPerMeter)) {
         cut.push_back(i);
       }
     }
   }
   return cut;
+}
+
+bool voxelsAt(Vec3 instanceOrigin, Vec3 camera, float voxelNear) {
+  return length(instanceOrigin - camera) > voxelNear;
 }
 
 bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> foliage) {

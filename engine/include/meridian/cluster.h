@@ -173,12 +173,18 @@ bool lodVisible(const Cluster &cluster, Vec3 camera, float scale, float projY,
 // then their BVHs breadth-first, skipping nodes whose bounds rule every
 // cluster below out, then lodVisible per cluster of the reached leaves
 // (clusterThresholds). Returns exactly the clusters lodVisible accepts, in
-// traversal order.
+// traversal order. Without voxels (voxelsAt false) no voxel cluster draws
+// and the triangles they replace never give way, as on the GPU.
 std::vector<uint32_t> selectClustersBvh(const ClusterLod &lod, Vec3 camera,
                                         float scale, float projY,
                                         float nearPlane, float screenHeight,
                                         float thresholdPixels,
-                                        float orthoPixelsPerMeter = 0.0f);
+                                        float orthoPixelsPerMeter = 0.0f,
+                                        bool voxels = true);
+
+// Whether voxel clusters may replace an instance's triangles in the main
+// view: beyond voxelNear meters of the camera (common.glsl voxelLodAt).
+bool voxelsAt(Vec3 instanceOrigin, Vec3 camera, float voxelNear);
 
 // Derived-data cache of every primitive's hierarchy in one file. sourceKey
 // identifies the source it was built from; any other key, version or a

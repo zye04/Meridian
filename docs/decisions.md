@@ -5361,3 +5361,40 @@ cached shadow pages are invalidated.
 - Speed (Release, `--trees`, 2560x1440): 18 views in one launch held the
   GPU lock 169.7 s, against the usual ~20-30 s a single launch holds it
   (estimate, not measured: the 18-launch timing was skipped).
+
+## Voxel switch distance floor (crown lane, 2026-11-26)
+
+- Problem: the voxel switch is per cluster by projected size
+  (`kVoxelPixels` 2), so trunks voxelize at ~33 m and crowns at 45-55 m
+  (user bundles 2026-11-25 23-25-29, 23-28-08, 23-25-19), and the user sees
+  trees twitch as they cross it. `kVoxelPixels` 1 moved the switch hardly at
+  all, made voxels finer and overflowed the cull lists (round 5, rejected).
+- Choice: a distance floor per instance. `Renderer::setVoxelNear(M)` /
+  `--voxel-near M`: in the main view, an instance whose origin is within M
+  m of the camera keeps its triangles (the voxel-LOD-off path of
+  cluster_cull.comp, cluster_traverse.comp and cull.comp: no voxel cluster
+  draws, the triangles voxels replace are terminal); beyond M the pixel
+  rule applies unchanged. One mechanism, `voxelLodAt` (common.glsl) reading
+  `SceneData::voxelNear`; the CPU reference is `voxelsAt` plus
+  `selectClustersBvh(..., voxels)`, tested against a flat cut
+  (cluster_test.cpp). The cascades keep their voxel casters, so the light
+  is the default's and only the main view's geometry changes (as the old
+  near mode did). `--voxel-lod near` is now `--voxel-near 150`: the old
+  `kVoxelLodNearDistance` was 150 m, so its meaning is unchanged.
+- Measured (Release, 2560x1440, `Render 2560x1440, display 2560x1440`,
+  `--trees`, two runs each, `GPU N ms` of the `Rendered 120 frames` line):
+
+  | forest edge `600 1205.6 -400 -1.55 0.02` | M 0 | 60 | 100 | 150 |
+  |---|---|---|---|---|
+  | GPU ms | 24.47, 24.63 | 24.25, 24.30 | 25.60, 26.46 | 31.25, 31.00 |
+  | triangles | 18.6M | 18.9M | 26.6M | 57.8M |
+  | scene early ms | 10.9 | 10.9 | 13.0 | 19.7 |
+  | main view drawn clusters (cap 2^21) | 281995 | 282175 | 310903 | 542319 |
+
+  `Loaded: resident 11998 MiB` and the peaks (13086 MiB while models load,
+  12411 MiB at the far field) are the same at every M; 0 dropped by full
+  cull lists, cascades included, 0 validation errors. The forest overview
+  `700 1450 -400 -1.55 -0.5` is 22.1-22.6 ms at every M: no tree is within
+  150 m of that camera.
+- Default stays 0 (the pixel rule alone) until the user picks 60 or 100 m by
+  eye on a walk; 150 is ruled out (3x triangles, +6.6 ms).
