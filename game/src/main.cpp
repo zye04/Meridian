@@ -1417,16 +1417,21 @@ int main(int argc, char **argv) {
       {TerrainRole::Mud, {0.07f, 0.046f, 0.021f}, {{"soil_mud_olsetpp0", 0.88f, 0.0251f}}},
       {TerrainRole::Soil,
        {0.13f, 0.095f, 0.05f},
-       {{"soil_dirt_pjusf0", 1.0f, 0.0391f}, {"soil_dirt_peioh0", 1.0f, 0.0572f}}},
+       {{"forest_european_broadleaf_ground_dirt_fine_01_xlpnffacc", 2.0f, 0.0624f},
+        {"forest_european_broadleaf_ground_dirt_rough_xlpiabx", 2.0f, 0.1f}}},
       {TerrainRole::ForestPath, {0.08f, 0.06f, 0.035f}, {{"forest_path_ugsnfawlw", 2.0f, 0.0355f}}},
       {TerrainRole::ForestFloor,
        {0.05f, 0.05f, 0.016f},
-       {{"forest_floor_sfjmafua", 2.0f, 0.0292f}, {"forest_floor_xdfddec", 2.0f, 0.0372f}}},
-      {TerrainRole::Gravel, {0.13f, 0.1f, 0.07f}, {{"gravel_on_soil_rmsigwp0", 0.39f, 0.0149f}}},
+       {{"forest_european_broadleaf_ground_dirt_fine_02_xlnmej1", 2.0f, 0.0357f},
+        {"forest_european_broadleaf_ground_dirt_coarse_xlnsfet", 1.0f, 0.0316f}}},
+      {TerrainRole::Gravel,
+       {0.13f, 0.1f, 0.07f},
+       {{"forest_european_broadleaf_ground_gravel_coarse_xlqsfc1", 1.0f, 0.0521f}}},
       {TerrainRole::Scree, {0.1f, 0.065f, 0.04f}, {{"gravel_on_soil_rmrk3sp0", 0.39f, 0.0156f}}},
       {TerrainRole::Rock,
        {0.13f, 0.108f, 0.085f},
-       {{"rock_cliff_tg1mcgbl", 2.0f, 0.0891f}, {"layered_rock_vl0fdhdo", 3.0f, 0.1495f}}},
+       {{"forest_european_broadleaf_rock_coarse_xlnjefr", 2.0f, 0.0876f},
+        {"forest_european_broadleaf_rock_moss_xlpmei3", 2.0f, 0.1433f}}},
   };
   meridian::TerrainMaterial material;
   if (options.trees) {
@@ -1467,6 +1472,26 @@ int main(int argc, char **argv) {
   }
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
+  }
+  // MEASURE-ONLY (scene lane, not for commit): load broadleaf mesh groups.
+  if (const char *groups = std::getenv("SCENE_MEASURE")) {
+    const auto dir = std::filesystem::path(MERIDIAN_ASSET_DIR) / "source/megascans/broadleaf";
+    int count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator(dir)) {
+      const std::string name = entry.path().filename().string();
+      const bool small = name.find("_s_") != std::string::npos || name.ends_with("_s");
+      if (std::string_view(groups).find(small ? "small" : "large") == std::string_view::npos) {
+        continue;
+      }
+      for (const auto &file : std::filesystem::directory_iterator(entry.path())) {
+        const std::string relative =
+            "source/megascans/broadleaf/" + name + "/" + file.path().filename().string();
+        if (file.path().extension() == ".gltf" && loadModel(renderer, relative.c_str())) {
+          ++count;
+        }
+      }
+    }
+    std::printf("SCENE_MEASURE %s: %d models\n", groups, count);
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);

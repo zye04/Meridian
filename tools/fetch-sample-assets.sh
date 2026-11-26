@@ -19,7 +19,9 @@
 # The same directory may hold Megascans rock downloads (*_ue_high.zip, Fab):
 # the massive sandstone cliff is cooked for placement; and the ground
 # surfaces (*_4k_ue_high.zip) for the terrain material; and the grass and
-# flower plants (*_ue_high.zip, *_2k.zip atlases).
+# flower plants (*_ue_high.zip, *_2k.zip atlases); and the "Forest European
+# Broadleaf" pack (forest_european_broadleaf_*: *_gltf_high.zip meshes,
+# *_4k_ue_high.zip surfaces).
 # Once the project is built, everything is also cooked to KTX2.
 set -euo pipefail
 megaplants="${1:-}"
@@ -238,6 +240,12 @@ else
     mv "$out.part" "$out"
   done
 
+  # The "Forest European Broadleaf" pack's surfaces (ground, rock and the
+  # detail_rock_* close-up maps) are cooked the same way.
+  broadleaf_surfaces=()
+  for zip in "$megaplants"/forest_european_broadleaf_*_4k_ue_high.zip; do
+    [[ -f "$zip" ]] && broadleaf_surfaces+=("$(basename "$zip" _4k_ue_high.zip)")
+  done
   # Megascans ground surfaces for the terrain material (Fab *_4k_ue_high.zip,
   # same directory; docs/assets.md has the roles and the ones left out):
   # base color and normal at the full 4K, ARM and height downscaled to 2K
@@ -249,7 +257,7 @@ else
   for id in uncut_grass_oilpt20 wild_grass_pjwgw0 lawn_grass_sbykrmp0 clover_vlzlbjon \
       forest_floor_sfjmafua forest_floor_xdfddec forest_path_ugsnfawlw soil_dirt_pjusf0 \
       soil_dirt_peioh0 soil_mud_olsetpp0 gravel_on_soil_rmrk3sp0 gravel_on_soil_rmsigwp0 \
-      rock_cliff_tg1mcgbl layered_rock_vl0fdhdo; do
+      rock_cliff_tg1mcgbl layered_rock_vl0fdhdo "${broadleaf_surfaces[@]}"; do
     zip="$megaplants/${id}_4k_ue_high.zip"
     dest="$root/assets/terrain/$id"
     [[ -f "$zip" && ! -f "$dest/albedo.txt" ]] || continue
@@ -277,6 +285,55 @@ else
     magick "$staging/base_color.png" -colorspace RGB -scale 1x1\! \
       -format '%[fx:r] %[fx:g] %[fx:b]\n' info: > "$dest/albedo.txt"
   done
+  # The "Forest European Broadleaf" pack's meshes (Fab *_gltf_high.zip):
+  # Fab's converter glTF, centimeters under a parent node chain the loader
+  # applies, 4K albedo, normal and ORM. Texture size by texel density: the
+  # smallest power of two that gives the mesh's largest extent
+  # broadleaf_texels_per_meter, clamped to [min, max] (512 per meter is one
+  # texel per pixel at ~3.6 m at 2560 px and 70 degrees; closer, mip 0 is
+  # magnified). The size goes into <out>/texture-size, so changing a value
+  # and re-running recooks only what it changes; the zips are not touched.
+  broadleaf_texels_per_meter=512
+  broadleaf_min_texture=1024
+  broadleaf_max_texture=4096
+  fab_units_per_meter=100
+  for zip in "$megaplants"/forest_european_broadleaf_*_gltf_high.zip; do
+    [[ -f "$zip" ]] || continue
+    name="$(basename "$zip" _gltf_high.zip)"
+    name="${name#forest_european_broadleaf_}"
+    out="$megascans/broadleaf/$name"
+    extract="$megascans/_extract/$(basename "$zip" .zip)"
+    if [[ ! -d "$extract" ]]; then
+      rm -rf "$extract.part"
+      mkdir -p "$extract.part"
+      unzip -q "$zip" -d "$extract.part"
+      mv "$extract.part" "$extract"
+    fi
+    gltf="$(find "$extract" -maxdepth 1 -name '*.gltf' | head -n 1)"
+    extent="$(jq '[.meshes[].primitives[].attributes.POSITION as $p | .accessors[$p] |
+      [range(3) as $i | .max[$i] - .min[$i]] | max] | max' "$gltf")"
+    size="$(awk -v e="$extent" -v u="$fab_units_per_meter" -v d="$broadleaf_texels_per_meter" \
+      -v lo="$broadleaf_min_texture" -v hi="$broadleaf_max_texture" \
+      'BEGIN { s = lo; while (s < e / u * d && s < hi) s *= 2; print s }')"
+    [[ "$(cat "$out/texture-size" 2>/dev/null)" != "$size" ]] || continue
+    staging="$megascans/_broadleaf/$name"
+    rm -rf "$staging"
+    mkdir -p "$staging/textures"
+    cp "$gltf" "$extract"/*.bin "$staging/"
+    for texture in "$extract"/textures/*; do
+      if [[ "$(magick identify -format '%w' "$texture")" -le "$size" ]]; then
+        cp "$texture" "$staging/textures/"
+      else
+        magick "$texture" -resize "${size}x${size}" "$staging/textures/$(basename "$texture")"
+      fi
+    done
+    rm -rf "$out.part"
+    "$cook" "$staging/$(basename "$gltf")" "$out.part"
+    echo "$size" > "$out.part/texture-size"
+    rm -rf "$out"
+    mv "$out.part" "$out"
+  done
+
   # Megascans 3D plants for the grass and flower layers (Fab *_ue_high.zip,
   # same directory): the nonUE glTF when the zip has one (the fern has only
   # the UE one), LOD 0 of every variant in a row, cooked into assets/<id>/
