@@ -1,6 +1,12 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
+#ifdef DEBUG_ID
+#extension GL_ARB_fragment_shader_interlock : require
+layout(pixel_interlock_unordered) in;
+// The debug stores would otherwise move the depth test after shading.
+layout(early_fragment_tests) in;
+#endif
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "material.glsl"
@@ -109,6 +115,10 @@ void main() {
                            leafPhase(-dot(sh.L, sh.V), albedo, transmitted);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }
+#ifdef DEBUG_ID
+    vec3 debugSunDiffuse = sh.diffuseLight;
+    vec3 debugSunSpecular = sh.specularLight;
+#endif
     addAmbientLight(sh, s.occlusion);
     addTransmittedAmbient(sh, transmitted, s.occlusion);
     float hazeTransmittance;
@@ -122,6 +132,14 @@ void main() {
     outSunLight =
         vec4(min(sunRadiance * hazeTransmittance * exposure, vec3(kMaxExposedLuminance)), 1.0);
     writeDebugId(kDebugVoxels, inInfo.x, inInfo.w, relative, ~0u);
+#ifdef DEBUG_ID
+    vec3 debugScale = exposure * hazeTransmittance;
+    beginInvocationInterlockARB();
+    writeDebugLight(gl_FragCoord.z, debugSunDiffuse * debugScale, debugSunSpecular * debugScale,
+                    (sh.diffuseLight - debugSunDiffuse) * debugScale,
+                    (sh.specularLight - debugSunSpecular) * debugScale, vec2(0.0));
+    endInvocationInterlockARB();
+#endif
 
     // Motion of the flat point, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).

@@ -27,6 +27,8 @@ float wrapAround(float x, double period) {
   return static_cast<float>(x - period * std::round(x / period));
 }
 
+} // namespace
+
 float halfToFloat(uint16_t h) {
   const uint32_t sign = uint32_t{h & 0x8000u} << 16;
   const uint32_t exponent = (h >> 10) & 0x1f;
@@ -40,6 +42,8 @@ float halfToFloat(uint16_t h) {
                      : sign | ((exponent + 112) << 23) | (mantissa << 13);
   return std::bit_cast<float>(bits);
 }
+
+namespace {
 
 // Portable Float Map: RGB float, rows bottom to top; a negative scale means
 // little-endian, which the host is.
@@ -951,6 +955,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
   scene.giMode = impl_->giMode == GiMode::Off ? 0 : 1;
   scene.gi = impl_->giBuffer.address;
+  if (impl_->debugLight.buffer != VK_NULL_HANDLE) {
+    scene.debugLight = impl_->debugLight.address;
+    scene.debugLightStride = impl_->renderExtent.width;
+  }
+  scene.debugFilter = encodeDebugFilter(impl_->debugFilter);
   impl_->updateFarShadow(lighting.sunDirection, scene);
   impl_->updateTerrainShadow(lighting.sunDirection, camera.position, frame.sceneBuffer.address,
                              scene);
@@ -1163,6 +1172,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     if (debug->image != VK_NULL_HANDLE) {
       colorTargets.push_back(debug->image);
     }
+  }
+  if (impl_->debugLight.buffer != VK_NULL_HANDLE) {
+    // Last frame's debug view may still read it.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                  VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    vkCmdFillBuffer(cmd, impl_->debugLight.buffer, 0, VK_WHOLE_SIZE, 0);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
   }
   for (VkImage target : colorTargets) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1684,6 +1702,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     // The scene targets went to SHADER_READ_ONLY for compute readers.
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
   }
   vkCmdBeginRendering(cmd, &tonemapRendering);
   if (impl_->debugView != DebugView::None) {

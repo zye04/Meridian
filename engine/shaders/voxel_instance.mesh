@@ -3,6 +3,9 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "voxel_lod.glsl"
+#define DEBUG_ID_CONSTANTS_ONLY
+#include "debug_id.glsl"
+#undef DEBUG_ID_CONSTANTS_ONLY
 
 // 64 voxels of a phase's voxel list (voxel_bricks.comp; phase * 2 in
 // pc.drawList) per workgroup, a thread each: the voxel is a camera-facing
@@ -68,4 +71,11 @@ void main() {
     }
     gl_PrimitiveTriangleIndicesEXT[slot * 2u] = uvec3(0u, 1u, 3u) + slot * 4u;
     gl_PrimitiveTriangleIndicesEXT[slot * 2u + 1u] = uvec3(0u, 3u, 2u) + slot * 4u;
+#ifdef DEBUG_ID
+    // Solo/hide in the mesh shader keeps the fragment shader free of
+    // discard, so it keeps early depth tests despite its debug stores.
+    bool rejected = debugFilterRejects(scene.debugFilter, clusterEntry.x, ~0u);
+    gl_MeshPrimitivesEXT[slot * 2u].gl_CullPrimitiveEXT = rejected;
+    gl_MeshPrimitivesEXT[slot * 2u + 1u].gl_CullPrimitiveEXT = rejected;
+#endif
 }

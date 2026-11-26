@@ -450,6 +450,9 @@ public:
   void setDebugView(DebugView view);
   DebugView debugView() const;
   void keepDebugTargets(bool keep);
+  // Solo/hide (debug_view.h); on, it needs the debug targets like a view.
+  void setDebugFilter(const DebugFilter &filter);
+  DebugFilter debugFilter() const;
   // Wait for the GPU, then: what render pixel (x, y) of the last frame shows
   // (needs the debug targets during that frame), or a view of that frame
   // saved as a display-sized PNG.

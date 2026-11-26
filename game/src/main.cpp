@@ -773,7 +773,53 @@ struct Options {
   int reportAt = 0;
   // Game seconds before the first frame (a report's repro line sets it).
   double gameTime = 0.0;
+  // The game clock stands still (F7 toggles it).
+  bool freezeTime = false;
+  // Solo/hide step (1-4, kFilterSteps) applied to the crosshair's pick after
+  // this frame (0: never), as F8 does.
+  int filterStep = 0;
+  int filterAt = 0;
 };
+
+// F8's cycle after off; --debug-filter's names.
+struct FilterStep {
+  const char *name;
+  meridian::DebugFilterMode mode;
+  bool material;
+};
+constexpr FilterStep kFilterSteps[] = {
+    {"off", meridian::DebugFilterMode::None, false},
+    {"solo-instance", meridian::DebugFilterMode::Solo, false},
+    {"solo-material", meridian::DebugFilterMode::Solo, true},
+    {"hide-instance", meridian::DebugFilterMode::Hide, false},
+    {"hide-material", meridian::DebugFilterMode::Hide, true}};
+
+// Applies a filter step to a pick (nothing to apply: off, with a message).
+void applyFilter(meridian::Renderer &renderer, int step,
+                 const std::optional<meridian::PixelPick> &pick) {
+  const FilterStep &f = kFilterSteps[step];
+  meridian::DebugFilter filter;
+  if (step != 0 && pick) {
+    if (f.material && pick->material) {
+      filter = {f.mode, true, *pick->material};
+    } else if (!f.material && (pick->kind == meridian::PickKind::Triangles ||
+                               pick->kind == meridian::PickKind::Voxels)) {
+      filter = {f.mode, false, pick->instance};
+    }
+  }
+  renderer.setDebugFilter(filter);
+  if (step == 0) {
+    std::printf("Filter: off\n");
+  } else if (filter.mode == meridian::DebugFilterMode::None) {
+    std::printf("Filter: %s: no %s at the crosshair\n", f.name,
+                f.material ? "material" : "instance");
+  } else if (f.material) {
+    std::printf("Filter: %s %u (%s)\n", f.name, filter.target, pick->materialName.c_str());
+  } else {
+    std::printf("Filter: %s %u (%s)\n", f.name, filter.target, pick->meshName.c_str());
+  }
+  std::fflush(stdout);
+}
 
 Options parseOptions(int argc, char **argv) {
   Options options;
@@ -997,13 +1043,28 @@ Options parseOptions(int argc, char **argv) {
       const std::string name = text(i);
       const auto view = meridian::parseDebugView(name);
       if (!view) {
-        throw std::runtime_error("--debug-view takes none, base-color or lod");
+        throw std::runtime_error(
+            "--debug-view takes none, base-color, lod, stretch, sun, ambient, specular or luminance");
       }
       options.debugView = *view;
     } else if (arg == "--report-at") {
       options.reportAt = static_cast<int>(number(i));
     } else if (arg == "--game-time") {
       options.gameTime = number(i);
+    } else if (arg == "--freeze-time") {
+      options.freezeTime = true;
+    } else if (arg == "--debug-filter") {
+      const std::string name = text(i);
+      for (int step = 1; step < int(std::size(kFilterSteps)); ++step) {
+        if (name == kFilterSteps[step].name) {
+          options.filterStep = step;
+        }
+      }
+      if (options.filterStep == 0) {
+        throw std::runtime_error(
+            "--debug-filter takes solo-instance|solo-material|hide-instance|hide-material and a frame");
+      }
+      options.filterAt = static_cast<int>(number(i));
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
@@ -1016,7 +1077,9 @@ Options parseOptions(int argc, char **argv) {
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
-                               "--windowed, --debug-view none|base-color|lod, --report-at frame, --game-time s, "
+                               "--windowed, --debug-view none|base-color|lod|stretch|sun|ambient|specular|luminance, "
+                               "--report-at frame, --game-time s, --freeze-time, "
+                               "--debug-filter solo-instance|solo-material|hide-instance|hide-material frame, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
                                "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-sequence n, "
@@ -1405,6 +1468,23 @@ int main(int argc, char **argv) {
   bool fWasDown = false;
   bool f5WasDown = false;
   bool f6WasDown = false;
+  bool f7WasDown = false;
+  bool f8WasDown = false;
+  bool timeFrozen = options.freezeTime;
+  // The solo/hide step (kFilterSteps) and its pick, made after the draw
+  // that F8 (or --debug-filter) kept the id target for.
+  int filterStep = 0;
+  bool filterPickPending = false;
+  std::optional<meridian::PixelPick> filterPick;
+  auto startFilter = [&](int step) {
+    filterStep = step;
+    if (step == 1 || !filterPick) {
+      renderer.keepDebugTargets(true);
+      filterPickPending = true;
+    } else {
+      applyFilter(renderer, step, filterPick);
+    }
+  };
   bool reportRequested = false;
   bool benchmarkDone = false;
   Clock::time_point referenceStart;
@@ -1459,6 +1539,17 @@ int main(int argc, char **argv) {
       const bool f6Down = window.isKeyDown(meridian::Key::F6);
       reportRequested = f6Down && !f6WasDown;
       f6WasDown = f6Down;
+      const bool f7Down = window.isKeyDown(meridian::Key::F7);
+      if (f7Down && !f7WasDown) {
+        timeFrozen = !timeFrozen;
+        std::printf("Time: %s\n", timeFrozen ? "frozen" : "running");
+      }
+      f7WasDown = f7Down;
+      const bool f8Down = window.isKeyDown(meridian::Key::F8);
+      if (f8Down && !f8WasDown) {
+        startFilter((filterStep + 1) % int(std::size(kFilterSteps)));
+      }
+      f8WasDown = f8Down;
       if (!gradePanel.visible()) {
         updateFlyCamera(camera, window, deltaSeconds,
                         walking ? &terrain : nullptr);
@@ -1496,6 +1587,9 @@ int main(int argc, char **argv) {
                     totalFrames / options.captureSequence - 1);
       std::filesystem::path path = *options.capturePath;
       renderer.requestCapture(path.replace_filename(path.stem().string() + suffix));
+    }
+    if (options.filterAt > 0 && totalFrames == options.filterAt) {
+      startFilter(options.filterStep);
     }
     const bool reporting =
         reportRequested || (options.reportAt > 0 && totalFrames == options.reportAt);
@@ -1541,7 +1635,9 @@ int main(int argc, char **argv) {
     const float frameSeconds = interactive || benchmark ? deltaSeconds
                                : totalFrames > options.frames ? 0.0f
                                                               : kScriptedStep;
-    gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
+    if (!timeFrozen) {
+      gameSeconds += static_cast<double>(frameSeconds) * options.timeScale;
+    }
     weather.update(gameSeconds);
     renderer.setWeather(weather);
     {
@@ -1554,7 +1650,14 @@ int main(int argc, char **argv) {
     renderer.draw(camera, lighting, frameSeconds);
     if (report.pending()) {
       report.finish(renderer, {camera, lighting.sunDirection, gradePanel.look(), gameSeconds,
-                               interactive ? 120 : totalFrames, options.timeScale});
+                               interactive ? 120 : totalFrames, options.timeScale, timeFrozen,
+                               renderer.debugFilter()});
+    }
+    if (filterPickPending) {
+      filterPick = renderer.pick(renderer.renderWidth() / 2, renderer.renderHeight() / 2);
+      renderer.keepDebugTargets(false);
+      filterPickPending = false;
+      applyFilter(renderer, filterStep, filterPick);
     }
 
     ++frames;

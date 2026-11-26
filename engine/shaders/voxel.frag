@@ -1,6 +1,10 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
+#ifdef DEBUG_ID
+#extension GL_ARB_fragment_shader_interlock : require
+layout(pixel_interlock_unordered) in;
+#endif
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "material.glsl"
@@ -42,6 +46,11 @@ const float kVoxelPerceptualRoughness = 0.8;
 
 void main() {
     SceneBuffer scene = pc.scene;
+#ifdef DEBUG_ID
+    if (debugFilterRejects(scene.debugFilter, ~0u, ~0u)) {
+        discard;
+    }
+#endif
     FarFieldBuffer farField = scene.farField;
     FarField field = farField.field;
     uint index = inEntry & 0x3FFFFFFFu;
@@ -129,6 +138,10 @@ void main() {
         }
         addTransmittedSun(sh, transmitted, backNoL, visibility);
     }
+#ifdef DEBUG_ID
+    vec3 debugSunDiffuse = sh.diffuseLight;
+    vec3 debugSunSpecular = sh.specularLight;
+#endif
     addAmbientLight(sh, s.occlusion);
     addTransmittedAmbient(sh, transmitted, s.occlusion);
     float hazeTransmittance;
@@ -141,6 +154,14 @@ void main() {
     outNormalRoughness = vec4(sh.N, sh.perceptualRoughness);
     outSunLight = vec4(sunRadiance * hazeTransmittance * exposure, 1.0);
     writeDebugId(kDebugFarCell, 0u, inEntry, relative, ~0u);
+#ifdef DEBUG_ID
+    vec3 debugScale = exposure * hazeTransmittance;
+    beginInvocationInterlockARB();
+    writeDebugLight(gl_FragDepth, debugSunDiffuse * debugScale, debugSunSpecular * debugScale,
+                    (sh.diffuseLight - debugSunDiffuse) * debugScale,
+                    (sh.specularLight - debugSunSpecular) * debugScale, vec2(0.0));
+    endInvocationInterlockARB();
+#endif
 
     // Motion of the flat hit, each frame displayed with its own camera and
     // drop (static, so a still camera gives zero).

@@ -704,6 +704,10 @@ struct Renderer::Impl {
   Image debugAlbedo;
   // Per global cluster index: its DAG level, 4 per uint (debug_view.frag).
   Buffer debugClusterLevels;
+  // Two uvec4 per render pixel: the light split (debug_id.glsl
+  // writeDebugLight), cleared to 0 before the scene pass.
+  Buffer debugLight;
+  DebugFilter debugFilter;
   VkDescriptorSetLayout debugSetLayout = VK_NULL_HANDLE;
   VkDescriptorPool debugPool = VK_NULL_HANDLE;
   VkDescriptorSet debugSet = VK_NULL_HANDLE;
@@ -714,7 +718,10 @@ struct Renderer::Impl {
   std::vector<uint32_t> clusterMeshes;
   std::vector<std::string> meshNames;
   std::vector<std::string> materialNames;
-  bool debugTargetsWanted() const { return debugView != DebugView::None || debugTargetsKept; }
+  bool debugTargetsWanted() const {
+    return debugView != DebugView::None || debugTargetsKept ||
+           debugFilter.mode != DebugFilterMode::None;
+  }
   void updateDebugTargets();
   void createScenePipelines(bool debugId);
   void destroyScenePipelines();
@@ -728,6 +735,12 @@ struct Renderer::Impl {
 
   template <typename Record> void submitNow(Record &&record);
 };
+
+// IEEE half (GPU readbacks) to float.
+float halfToFloat(uint16_t h);
+
+// SceneData.debugFilter (debug_id.glsl): mode << 30 | material bit | target.
+uint32_t encodeDebugFilter(const DebugFilter &filter);
 
 // FNV-1a over bytes, for the Debug hashes of load-time GPU tables.
 inline uint64_t fnv1a(uint64_t hash, const void *data, size_t bytes) {

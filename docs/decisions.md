@@ -5208,3 +5208,70 @@ minimum of that: an id target, a report key and two views.
   cover everything to ~8.6 km and far cells only show near the horizon.
   The lod legend (cli.md, legend.txt) is printed from the shader's
   formulas.
+
+## Debug tools round 2 (2026-11-26)
+
+Round 1 named what a pixel shows; round 2 says why it looks that way:
+which light it gets, how its texture sits, how bright it is, and what it
+looks like alone. Engines ship the same set: Unreal's view modes
+(Lighting Only, Reflections, Required Texture Resolution / texel density),
+its HDR luminance visualisation and camera-style false colour (EV bands
+around 18% grey), editor isolate/hide of the selection, and a paused game
+clock with a free camera.
+
+- Light split: the scene pass's eight colour attachments are all in use
+  in the debug set (NVIDIA's maxColorAttachments is 8), so the debug
+  fragment shaders store the split in a buffer instead: 32 B per render
+  pixel (depth; sun diffuse, sun specular, ambient diffuse, ambient
+  specular as exposed halves; stretch). Fragment stores have no raster
+  order and run before the late depth test (discard, written depth), so
+  the store sits in a `pixel_interlock_unordered` section
+  (VK_EXT_fragment_shader_interlock) that keeps the nearest depth by
+  hand. Sun = the light before `addAmbientLight` (leaf transmission
+  included), ambient = the rest; both after haze transmittance, before
+  contact shadows. Check: at the user's alder pixel the four parts sum to
+  the HDR value within 0.2% (R 261.8 vs 261.9 cd/m^2).
+- Stretch: the singular values of the base colour texture's texel map in
+  the surface plane (texels/m), from screen derivatives of UV and
+  position; the view colours their ratio over an 8 x 8 checker, the pick
+  reports the geometric mean and the ratio.
+- Luminance: the HDR attachment (pre-exposed, so 0.18 is grey) in EV,
+  eleven bands; the pick also reads HDR and the exposure the frame used.
+  HDR gains TRANSFER_SRC for that texel.
+- Solo/hide: `SceneData.debugFilter`, applied in the debug mesh shaders
+  (clusters, also in the masked depth pre-pass so a hidden surface leaves
+  no depth; terrain; voxel quads by gl_CullPrimitiveEXT); far cells
+  discard. Shadows, GI and blended surfaces are not filtered (a hidden
+  tree still shades its surroundings).
+- Cost on (forest edge `--trees`, Release, Render 2560x1440 DLSS, the sun
+  view): first try, filter by discard in the fragment shaders, GPU 62.02
+  ms, scene early 32.31 ms: the stores are side effects, so the opaque,
+  terrain and voxel-quad shaders lost early depth testing and shaded
+  every hidden fragment (ray-queried sun included). Kept (the variant):
+  filter in the mesh shaders, `early_fragment_tests` declared in those
+  debug fragment shaders: GPU 32.53 ms, scene early 16.45 ms (off 24.25 /
+  10.89). The remaining +5.6 ms in scene early (id target, stores,
+  interlock; not split apart) exists only while a view, the report or a
+  filter is on.
+- Time freeze: the game clock stops (wind, clouds, weather); the renderer
+  takes only exposure adaptation and upscaler timing from frame time.
+- Off: no buffer, no filter, main's shaders; SceneData +16 B, the
+  interlock and fragmentStoresAndAtomics features enabled at device
+  creation, HDR + TRANSFER_SRC. Forest edge `--trees` before (main
+  4f01f72) / after: `Loaded: resident 11998 MiB` both; GPU 24.43 / 24.25
+  ms, scene early 11.03 / 10.89 (single runs, noise); images differ by
+  0.2451/255 (the `--trees` floor, backlog).
+- First use, the user's alder bundle (`~/meridian-reports/2026-11-25_23-26-21`,
+  its repro line + `--report-at 120`): the centre pixel is the
+  `Decoration` material (a masked, double-sided shell over the bark), in
+  shade: sun 0; ambient diffuse (118.3, 106.3, 91.5) cd/m^2, ambient
+  specular (143.5, 161.5, 192.9), 55% of the pixel and sky-blue. Hiding
+  the material (`--debug-filter hide-material 60`) shows the `Tileable`
+  bark 5.8 cm under it with ambient specular (26.6, 31.4, 35.2), 19%.
+  Its ORM roughness mean is 0.154 against the bark's 0.367
+  (`meridian-cook --stats`). Over all shaded bark in the frame (from the
+  views, the neutral tonemap inverted) specular is 29% of luminance and
+  the ambient diffuse over the albedo leans green (G/R 1.07, B/R 1.01).
+  So the wet gloss is the Decoration shell's low roughness reflecting the
+  sky, and the tint is that blue reflection plus a slightly green
+  ambient over a brown albedo; no sun involved. Fix deferred (backlog).

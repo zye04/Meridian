@@ -50,8 +50,9 @@ grass, forest-edge, forest-interior, aerial.
 
 ## Debug views and the report
 
-`F5` cycles the debug views (none, base-color, lod); `--debug-view
-none|base-color|lod` starts with one (captures too). A view replaces the
+`F5` cycles the debug views (none, base-color, lod, stretch, sun,
+ambient, specular, luminance); `--debug-view <name>` starts with one
+(captures too). A view replaces the
 tonemapped frame with render-sized data read before the upscaler (no
 DLSS/TAA smear): `base-color` the diffuse albedo the shading used (base
 colour x (1 - metallic); voxels their mean leaf colour); `lod` triangle
@@ -69,24 +70,62 @@ formulas; every report also writes it as `legend.txt`):
 | far cells | #61cbcb | #69dada | #6fe7e7 | #76f3f3 | | | | |
 
 Terrain #898989, sky #000000. Voxel clusters reach DAG level 11 at
-~5-9 km (all drawn as 7+). A magenta crosshair
+~5-9 km (all drawn as 7+).
+
+`stretch`: the base colour texture on the surface, hue by the ratio of its
+texel density along its two principal directions (green 1:1, yellow 2:1,
+red 4:1 and over; per triangle, since UVs are linear on one) over an
+8 x 8 checker of the texture (dark squares 0.6); grey where there is no
+texture (terrain, voxels, untextured), black on the sky. `sun`,
+`ambient`, `specular`: one part of the light, exposed, before contact
+shadows, bloom and the grade, through a neutral tonemap (colour / (1 +
+luminance), so hue and the ratios between the three stay): sun = sun
+diffuse + specular (leaf transmission included), ambient = sky, ground
+and probes (diffuse + specular), specular = sun + ambient specular.
+Blended surfaces and the sky write none (black). `luminance`: the HDR
+frame (after contact shadows and clouds, before the grade) in EV from
+18% grey after exposure, rounded, one colour each (`luminanceViewLegend`,
+also in `legend.txt`):
+
+| EV | <=-5 | -4 | -3 | -2 | -1 | 0 | +1 | +2 | +3 | +4 | >=+5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| sRGB | #2a0050 | #3a20b0 | #2060e0 | #20a8c8 | #30a040 | #808080 | #c8c830 | #f0d000 | #f08800 | #e02010 | #ffffff |
+
+`F7` freezes the game clock (wind, clouds, weather; `--freeze-time` starts
+frozen); the camera, exposure and TAA keep running. `F8` cycles solo/hide
+of what the crosshair (the render's centre) shows: solo-instance,
+solo-material, hide-instance, hide-material, off; it picks on the first
+step (one hitch: the debug set) and keeps that target for the cycle, and
+prints `Filter: <step> <id> (<name>)`. `--debug-filter <step> N` does the
+same after frame N of a capture run. The debug mesh shaders drop the
+clusters (depth pre-pass too, so what is behind shows), the terrain (solo)
+and the voxel quads, far cells discard; shadows, GI probes and blended
+surfaces still see everything, and voxels have no material (solo-material
+removes them). With a view or a filter on, the forest edge `--trees`
+costs GPU 32.53 ms (scene early 16.45) against 24.25 (10.89) off. A magenta crosshair
 marks the render's centre pixel while a view is on (the mouse stays
 captured). `F6` (or `--report-at N`: at frame N of a capture run) writes a
 bundle to `~/meridian-reports/<YYYY-MM-DD_HH-MM-SS>/` and prints `Report:
 <dir>`: `shot.png` (that frame without the view or crosshair, lossless),
 `views/<view>.png` (every view of the same frame), `legend.txt` (the lod
-view's colours), `pixel.json` (the
+and luminance views' colours), `pixel.json` (the
 centre render pixel: kind sky/triangles/voxels/far cell/terrain, instance
 id and placed, mesh and material index and glTF names (`mesh_name` is
 `<file>/<glTF mesh name>#<primitive>`), cluster index and DAG level or
-far cell and level, distance in m, the views' values), `look.json` (the
+far cell and level, distance in m, the views' values: base colour, lod,
+stretch (`texels_per_m`, `ratio`), `light_cd_m2` (sun and ambient, each
+diffuse and specular, haze transmittance applied: their sum plus haze
+inscatter and emissive is the HDR value), `luminance` (`hdr_cd_m2`,
+`ev_from_grey`, the `exposure` it was shaded with); `filter` and
+`time_frozen` in effect), `look.json` (the
 look in effect, grade file format) and `repro.txt`: a command line that
 reproduces the view with `--capture <dir>/repro.png` (every original flag
 except pose, sun, look and run control, then `--camera`, `--sun`, `--grade
 <dir>/look.json`, `--frames` = the report frame in a capture run, 120
 interactive, and `--game-time S` when the game time differs from what
-those frames step to). `--game-time S` starts the game clock (wind,
-clouds, weather) at S seconds. While a view or the report is on, the
+those frames step to; `--freeze-time --game-time S` when frozen). The
+filter is in the shot but not in repro.txt. `--game-time S` starts the
+game clock (wind, clouds, weather) at S seconds. While a view or the report is on, the
 scene pipelines are swapped for their debug set (one hitch); off, nothing
 of it exists.
 

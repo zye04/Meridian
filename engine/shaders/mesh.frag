@@ -1,6 +1,15 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_ray_query : require
+#ifdef DEBUG_ID
+#extension GL_ARB_fragment_shader_interlock : require
+layout(pixel_interlock_unordered) in;
+#if !defined(ALPHA_MASK) && !defined(ALPHA_BLEND) && !defined(DEPTH_ONLY)
+// The debug stores would otherwise move the depth test after shading (the
+// masked variant declares it below); solo/hide is in the mesh shaders.
+layout(early_fragment_tests) in;
+#endif
+#endif
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "material.glsl"
@@ -166,6 +175,16 @@ void main() {
     }
 #endif
     Shading sh = beginShading(s, inRelativePosition);
+    vec2 debugStretch = vec2(0.0);
+#if defined(DEBUG_ID) && !defined(TERRAIN)
+    vec2 debugUvDx = dFdx(inUv);
+    vec2 debugUvDy = dFdy(inUv);
+    if (material.baseColorTexture != kNoTexture) {
+        debugStretch = textureStretch(
+            inUv, debugUvDx, debugUvDy, surfaceIn.dpdx, surfaceIn.dpdy,
+            vec2(textureSize(textures[nonuniformEXT(material.baseColorTexture)], 0)));
+    }
+#endif
 #ifndef TERRAIN
     bool leaf = material.diffuseTransmission > 0.0;
     vec3 transmitted = vec3(0.0);
@@ -238,6 +257,10 @@ void main() {
 #ifndef TERRAIN
     s.occlusion *= crownOcclusion();
 #endif
+#ifdef DEBUG_ID
+    vec3 debugSunDiffuse = sh.diffuseLight;
+    vec3 debugSunSpecular = sh.specularLight;
+#endif
     addAmbientLight(sh, s.occlusion);
 #ifndef TERRAIN
     if (leaf) {
@@ -266,6 +289,14 @@ void main() {
     vec2 previousUv = inPreviousClip.xy / inPreviousClip.w * 0.5;
     outMotion = previousUv - currentUv;
     writeMeshDebugId(inRelativePosition, inMaterialIndex);
+#if defined(DEBUG_ID) && !defined(ALPHA_BLEND)
+    vec3 debugScale = pc.scene.sunIlluminance * pc.scene.exposure.exposure * hazeTransmittance;
+    beginInvocationInterlockARB();
+    writeDebugLight(gl_FragCoord.z, debugSunDiffuse * debugScale, debugSunSpecular * debugScale,
+                    (sh.diffuseLight - debugSunDiffuse) * debugScale,
+                    (sh.specularLight - debugSunSpecular) * debugScale, debugStretch);
+    endInvocationInterlockARB();
+#endif
 #ifdef ALPHA_BLEND
     outTransparency = coverage;
     outSunLight = vec4(0.0, 0.0, 0.0, coverage);
