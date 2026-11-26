@@ -80,13 +80,13 @@ struct clodConfig
 
 	// Meridian: voxel levels. When voxel_edge is set, every group about to be simplified (or stuck) asks it for a voxel edge
 	// from the error its children have (min_error) and the error its simplified triangles would have (max_error, FLT_MAX when
-	// simplification is stuck): 0 keeps the triangles. The groups of one pass that go to voxels are pooled per edge and
+	// simplification is stuck), given its current triangles (vertex index triples): 0 keeps the triangles. The groups of one pass that go to voxels are pooled per edge and
 	// regrouped by cells of voxel_cell edges (clusters by their bound's centre), so a region of voxels comes from few groups;
 	// each cell is output as one group with error max(edge, its clusters' error), and voxel_emit receives its id and the
 	// original triangles it covers (vertex index triples). Its triangles are not simplified further: the voxel levels above
 	// are the caller's.
 	void* voxel_context;
-	float (*voxel_edge)(void* context, float min_error, float max_error);
+	float (*voxel_edge)(void* context, float min_error, float max_error, const unsigned int* indices, size_t index_count);
 	void (*voxel_emit)(void* context, const unsigned int* source_indices, size_t source_index_count, float edge, int group, clodBounds bounds, int depth);
 	float voxel_cell;
 };
@@ -934,7 +934,7 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 			const float children_error = bounds.error;
 			if (simplified.size() > merged.size() * config.simplify_threshold)
 			{
-				const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, FLT_MAX) : 0.f;
+				const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, FLT_MAX, merged.data(), merged.size()) : 0.f;
 				if (edge > 0.f)
 				{
 					poolVoxels(group, group_size, edge);
@@ -948,7 +948,7 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 			// enforce error monotonicity (with an optional hierarchical factor to separate transitions more)
 			bounds.error = std::max(bounds.error * config.simplify_error_merge_previous, error) + error * config.simplify_error_merge_additive;
 
-			const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, bounds.error) : 0.f;
+			const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, children_error, bounds.error, merged.data(), merged.size()) : 0.f;
 			if (edge > 0.f)
 			{
 				poolVoxels(group, group_size, edge);
@@ -995,7 +995,7 @@ void clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutpu
 		const Cluster& cluster = clusters[0];
 
 		clodBounds bounds = cluster.bounds;
-		const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, bounds.error, FLT_MAX) : 0.f;
+		const float edge = config.voxel_edge ? config.voxel_edge(config.voxel_context, bounds.error, FLT_MAX, &cluster_indices[cluster.index_offset], cluster.index_count) : 0.f;
 		if (edge > 0.f)
 		{
 			poolVoxels(clusters.data(), clusters.size(), edge);

@@ -5598,3 +5598,49 @@ cached shadow pages are invalidated.
   and on the hornbeam trunk holes where triangle and voxel clusters of the
   same mesh interleave, which the CPU cut at 90 m does not reproduce);
   backlog.
+
+## Opaque wood stays triangles until thinner than its voxel edge (crown lane round 7, 2026-11-26)
+
+- Problem: at 60 m the beech's lowest trunk metre was voxels while the
+  trunk above was triangles (user). Cause, from the v13 caches: the
+  voxel switch rule (`edgeFor`), not the simplifier (the triangle-only
+  DAGs end at 40-83 triangles) or the small-mesh final level. A group goes
+  to voxels at the largest power-of-two edge under its simplified error,
+  not under the model's height / 512 (1/32 m for the 23.7 m beech). The
+  trunk base is its own mesh (`Trunk`, 9577 triangles); its groups reach
+  1/32 m within the first passes, and an error of 1/32 m projects to 1 px
+  at 57 m (1828 px per metre at 1 m: 70 degrees horizontal at
+  2560x1440, fovY 0.7504; the round 5-6 tools assumed fovY 1.2, 1052).
+  Most branch groups also switch at 57 m, some at 114 m.
+- Practice: UE 5.7 Nanite Foliage has the same trunk holes when the whole
+  tree is voxelized; Epic's assembly example keeps trunk and large
+  branches as ordinary geometry and instances only the twigs.
+- Choice: a solid part (voxelModelHeight > 0, bark) goes to voxels at an
+  edge only once it is thinner than that edge: at least `kThinVoxelShare`
+  = 0.5 of the group's voxels there must cover under `kOpaqueVoxelFloor`
+  of a face along every axis. Cylinders voxelized in random orientations
+  show 0.37-0.41 thin from 1.25 edges across up, 0.45 at 1 edge, 0.51 at
+  0.75 (`.superpowers/crown7/cyl.txt` in meridian-crown), so wood goes to
+  voxels at about 0.8 edges across, under the pixel the edge projects to
+  at the switch. A literal; 0.45 would be the one-edge value (director's
+  ruling: keep 0.5). It also goes only at an edge its children's error
+  doesn't exceed: the first try (voxelizer 14) let a held-back group join
+  at a finer edge, its cell's error rose (1/32 m voxels with self error
+  0.123 instead of 0.0625) and the pooled neighbours' finer voxels drew
+  to twice the distance (beech wood voxels at 400 m 5509 -> 27595).
+  Voxelizer 15; clusterlod's voxel_edge hook now gets the group's
+  triangles. Leaves unchanged.
+- Measured (Release, `Render 2560x1440, display 2560x1440`, main 5b657d1
+  vs this change, `.superpowers/crown7/` in meridian-crown): CPU cut
+  (selectClustersBvh, 1 px) wood voxels per tree at 100/200/400 m beech
+  196547/36007/5656 -> 176030/32115/5188, hornbeam 27072/10401/2362 ->
+  12972/7234/2078, alder 12771/5204/1269 -> 0/3232/1130 (`cut15.txt`);
+  background inside the trunk spans at the round 6 60 m pose beech 0.0722
+  -> 0.0610, alder 0.1037 -> 0.0798, hornbeam 0.1006 -> 0.0800; forest view
+  wood share 0.1511 -> 0.1702 (reference 0.0647), triangles 94062 ->
+  15912939, GPU 27.88 -> 30.85 ms; forest edge 23.33 -> 25.05 ms; overview
+  21.01 -> 23.34 ms; resident 10930 -> 10890 MiB; 0 dropped by any cull
+  list; cluster caches 2245400242 -> 2202588085 bytes (30 models). No pop
+  above same-build repeat noise in walk-speed passes across 57 and 114 m.
+- Open: wood share moves away from the reference and forests cost 1.7-3
+  ms more (backlog); sub-pixel wood kept as triangles (backlog).

@@ -927,14 +927,123 @@ TEST_CASE("a short part of a tall model voxelizes no finer than the model's heig
   mesh.voxelModelHeight = 48.0f;
   const VoxelSource source{{&material, 1}};
   const ClusterLod lod = buildClusterLod(mesh, &source);
+  std::vector<uint8_t> triangleGroup;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c)) {
+      triangleGroup.resize(std::max<size_t>(triangleGroup.size(), c.group + 1), 0);
+      triangleGroup[c.group] = 1;
+    }
+  }
   bool voxels = false;
   for (const Cluster &c : lod.clusters) {
     if (isVoxel(c)) {
       voxels = true;
       CHECK(c.voxelEdge >= 48.0f / 512.0f / 2.0f);
+      // A solid part's voxels join at an edge its triangles' children error
+      // doesn't exceed, so the group they replace has the edge as its error.
+      if (c.refinedGroup >= 0 && size_t(c.refinedGroup) < triangleGroup.size() &&
+          triangleGroup[c.refinedGroup]) {
+        CHECK(c.refined.error == c.voxelEdge);
+      }
     }
   }
   CHECK(voxels);
+}
+
+TEST_CASE("a solid part thicker than the voxel edge keeps its triangles") {
+  // A 1 m wide, 6 m tall cylinder: as foliage its simplified triangles go to
+  // voxels; as a solid part (bark) it stays triangles, being thicker than
+  // every edge its DAG reaches.
+  static const VoxelMaterial material{};
+  MeshData mesh;
+  const uint32_t around = 64, rings = 96;
+  for (uint32_t y = 0; y <= rings; ++y) {
+    for (uint32_t x = 0; x < around; ++x) {
+      const float a = 6.2831853f * float(x) / around, h = 6.0f * float(y) / rings;
+      Vertex v;
+      // Wavy, as bark is: a smooth cylinder simplifies without error.
+      const float r = 0.5f + 0.02f * std::sin(7.0f * a + 3.0f * h);
+      v.position = {r * std::cos(a), h, r * std::sin(a)};
+      v.normal = {std::cos(a), 0.0f, std::sin(a)};
+      v.uvX = float(x) / around;
+      v.uvY = h;
+      mesh.vertices.push_back(v);
+    }
+  }
+  for (uint32_t y = 0; y < rings; ++y) {
+    for (uint32_t x = 0; x < around; ++x) {
+      const uint32_t i = y * around + x, j = y * around + (x + 1) % around;
+      mesh.indices.insert(mesh.indices.end(), {i, i + around, j, j, i + around, j + around});
+    }
+  }
+  mesh.voxelize = true;
+  const VoxelSource source{{&material, 1}};
+  const auto voxelClusters = [&](const MeshData &m) {
+    size_t n = 0;
+    for (const Cluster &c : buildClusterLod(m, &source).clusters) {
+      n += isVoxel(c);
+    }
+    return n;
+  };
+  CHECK(voxelClusters(mesh) > 0);
+  mesh.voxelModelHeight = 6.0f;
+  CHECK(voxelClusters(mesh) == 0);
+}
+
+TEST_CASE("a solid part's voxel groups keep the errors of their edges") {
+  // Wavy branches from 3 to 30 cm across on a 16 m model (finest edge 1/32
+  // m): thick ones stay triangles past edges, then join the voxels. A group
+  // joining below its children's error raised its cell's error, and its
+  // neighbours' finer voxels drew to twice the distance (voxelizer 14).
+  static const VoxelMaterial material{};
+  MeshData mesh;
+  const uint32_t around = 24, rings = 128;
+  for (int b = 0; b < 40; ++b) {
+    // 30 twigs 0.8-2 cm across, curved, then 10 limbs 20-30 cm, 2 m apart.
+    const float r = b < 30 ? 0.004f + 0.006f * float(b % 3) / 2.0f : 0.1f + 0.05f * float(b % 3) / 2.0f;
+    const float x0 = float(b % 8) * 2.0f, z0 = float(b / 8) * 2.0f;
+    const uint32_t base = uint32_t(mesh.vertices.size());
+    for (uint32_t y = 0; y <= rings; ++y) {
+      for (uint32_t x = 0; x < around; ++x) {
+        const float a = 6.2831853f * float(x) / around, h = 4.0f * float(y) / rings;
+        const float w = r * (1.0f + 0.15f * std::sin(5.0f * a + 4.0f * h + float(b)));
+        Vertex v;
+        v.position = {x0 + w * std::cos(a) + 0.3f * std::sin(2.0f * h + float(b)), h,
+                      z0 + w * std::sin(a) + 0.3f * std::cos(1.5f * h + float(b))};
+        v.normal = {std::cos(a), 0.0f, std::sin(a)};
+        v.uvX = float(x) / around;
+        v.uvY = h;
+        mesh.vertices.push_back(v);
+      }
+    }
+    for (uint32_t y = 0; y < rings; ++y) {
+      for (uint32_t x = 0; x < around; ++x) {
+        const uint32_t i = base + y * around + x, j = base + y * around + (x + 1) % around;
+        mesh.indices.insert(mesh.indices.end(), {i, i + around, j, j, i + around, j + around});
+      }
+    }
+  }
+  mesh.voxelize = true;
+  mesh.voxelModelHeight = 16.0f;
+  const VoxelSource source{{&material, 1}};
+  const ClusterLod lod = buildClusterLod(mesh, &source);
+  size_t voxels = 0, finest = 0;
+  for (const Cluster &c : lod.clusters) {
+    if (!isVoxel(c)) {
+      continue;
+    }
+    ++voxels;
+    CHECK(c.refined.error <= c.voxelEdge);
+    if (c.self.error != FLT_MAX) {
+      CHECK(c.self.error == 2.0f * c.voxelEdge);
+    }
+    if (c.voxelEdge == 1.0f / 32.0f) {
+      ++finest;
+      CHECK(c.self.error == 0.0625f);
+    }
+  }
+  CHECK(voxels > 0);
+  CHECK(finest > 0);
 }
 
 TEST_CASE("an opaque voxel sharing a cell with a transmissive one folds into it") {

@@ -1,6 +1,7 @@
 #include <meridian/cluster.h>
 #include <meridian/farfield.h>
 #include <meridian/mesh.h>
+#include <meridian/voxel_shape.h>
 
 #include <meshoptimizer.h>
 #include <clusterlod.h>
@@ -31,9 +32,17 @@ constexpr uint32_t kCacheVersion = (9u << 16) | MESHOPTIMIZER_VERSION;
 // Most a leaf piece is scaled up (linearly) to keep its group's area.
 constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
+// Share of a solid group's occupied voxels (0-1) that must be thin (under
+// kOpaqueVoxelFloor along every axis) at an edge for the group to go to voxels
+// at it. Voxelized cylinders (any orientation) show 0.37-0.41 thin from 1.25
+// edges across up, 0.45 at 1 edge, 0.51 at 0.75 and 1.0 at 0.25: a surface's
+// cells cut near a corner are thin whatever its thickness. 0.5 sends wood to
+// voxels once it is about 0.8 edges across, under the pixel the edge projects
+// to at the switch.
+constexpr float kThinVoxelShare = 0.5f;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 13;
+constexpr uint32_t kVoxelizerVersion = 15;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -392,8 +401,20 @@ struct VoxelLevels {
   // at 1440p, where its triangles are sub-pixel and many.
   float minEdge = 1e-4f;
 
-  static float edgeFor(void *context, float minError, float maxError) {
-    return static_cast<VoxelLevels *>(context)->edgeFor(minError, maxError);
+  static float edgeFor(void *context, float minError, float maxError, const unsigned int *indices,
+                       size_t indexCount) {
+    const VoxelLevels &levels = *static_cast<VoxelLevels *>(context);
+    const float edge = levels.edgeFor(minError, maxError);
+    if (edge <= 0.0f || levels.mesh.voxelModelHeight <= 0.0f) {
+      return edge;
+    }
+    // A solid group kept as triangles past an edge joins the voxels only at
+    // an edge its children's error doesn't exceed: the voxel group's error is
+    // the larger of the two, and a larger one, pooled into a cell and doubled
+    // above (finish), would keep the neighbours' finer voxels to twice the
+    // distance. The passes' error ranges chain, so a later one holds such an
+    // edge.
+    return edge < minError || levels.thick(indices, indexCount, edge) ? 0.0f : edge;
   }
   static void emit(void *context, const unsigned int *indices, size_t indexCount, float edge,
                    int group, clodBounds, int depth) {
@@ -415,6 +436,28 @@ struct VoxelLevels {
             ? std::max(floorEdge, std::exp2(std::ceil(std::log2(std::max(minError, minEdge)))))
             : std::max(floorEdge, std::exp2(std::floor(std::log2(maxError))));
     return edge <= maxError ? edge : 0.0f;
+  }
+
+  // Opaque wood (a solid part) stays triangles while it is thicker than the
+  // edge, about a pixel where the group would switch: simplification keeps a
+  // closed surface's silhouette, while voxels only partly cover the cells at
+  // its outline and open holes in it. A voxel is thin when it covers under
+  // kOpaqueVoxelFloor of a face along every axis (a cylinder of diameter t
+  // covers at most about t / edge of a cell's face); the group is thick
+  // unless at least kThinVoxelShare of its voxels are thin.
+  bool thick(const unsigned int *indices, size_t indexCount, float edge) const {
+    const VoxelGrid grid = voxelize(triangles(indices, indexCount), source.materials, edge);
+    size_t voxels = 0, covered = 0;
+    for (const VoxelBrick &brick : grid.bricks) {
+      for (int i = 0; i < 64; ++i) {
+        if ((brick.occupied >> i) & 1u) {
+          const float *depth = brick.voxels[i].depth;
+          ++voxels;
+          covered += 1.0f - std::exp(-std::max({depth[0], depth[1], depth[2]})) >= kOpaqueVoxelFloor;
+        }
+      }
+    }
+    return float(voxels - covered) < kThinVoxelShare * float(voxels);
   }
 
   // A group that went to voxels (clodBuild pools a pass's groups by cell):
