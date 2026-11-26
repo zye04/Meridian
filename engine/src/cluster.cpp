@@ -428,7 +428,10 @@ struct VoxelLevels {
   // (coverage, hidden voxels skipped), every triangle does. The group's
   // error is at least its children's (clodBuild; monotonic, the next
   // level's twice the edge is over it again). Stuck groups (maxError
-  // FLT_MAX) would draw forever: voxels at once.
+  // FLT_MAX) would draw forever: voxels at once, except a solid part's
+  // group that is still thick (edgeFor above returns 0): in the stuck path
+  // and clodBuild's final single-cluster path it stays a terminal triangle
+  // group (error FLT_MAX), drawn at every distance.
   float edgeFor(float minError, float maxError) const {
     const float floorEdge = std::exp2(std::floor(std::log2(minEdge)));
     const float edge =

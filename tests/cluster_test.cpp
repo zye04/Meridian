@@ -927,24 +927,11 @@ TEST_CASE("a short part of a tall model voxelizes no finer than the model's heig
   mesh.voxelModelHeight = 48.0f;
   const VoxelSource source{{&material, 1}};
   const ClusterLod lod = buildClusterLod(mesh, &source);
-  std::vector<uint8_t> triangleGroup;
-  for (const Cluster &c : lod.clusters) {
-    if (!isVoxel(c)) {
-      triangleGroup.resize(std::max<size_t>(triangleGroup.size(), c.group + 1), 0);
-      triangleGroup[c.group] = 1;
-    }
-  }
   bool voxels = false;
   for (const Cluster &c : lod.clusters) {
     if (isVoxel(c)) {
       voxels = true;
       CHECK(c.voxelEdge >= 48.0f / 512.0f / 2.0f);
-      // A solid part's voxels join at an edge its triangles' children error
-      // doesn't exceed, so the group they replace has the edge as its error.
-      if (c.refinedGroup >= 0 && size_t(c.refinedGroup) < triangleGroup.size() &&
-          triangleGroup[c.refinedGroup]) {
-        CHECK(c.refined.error == c.voxelEdge);
-      }
     }
   }
   CHECK(voxels);

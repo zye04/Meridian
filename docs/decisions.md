@@ -5629,7 +5629,14 @@ cached shadow pages are invalidated.
   0.123 instead of 0.0625) and the pooled neighbours' finer voxels drew
   to twice the distance (beech wood voxels at 400 m 5509 -> 27595).
   Voxelizer 15; clusterlod's voxel_edge hook now gets the group's
-  triangles. Leaves unchanged.
+  triangles. Leaves unchanged. Both tests are heuristics: thinness is
+  measured on the group's current simplified triangles, while the voxels
+  it would emit come from its source (original) triangles; and it takes
+  each voxel's largest per-axis opacity, while the runtime floor
+  (`kOpaqueVoxelFloor`, voxel_lod.glsl) applies to the opacity along the
+  view. A thick group in the stuck path or clodBuild's final
+  single-cluster path stays a terminal triangle group drawn at every
+  distance.
 - Measured (Release, `Render 2560x1440, display 2560x1440`, main 5b657d1
   vs this change, `.superpowers/crown7/` in meridian-crown): CPU cut
   (selectClustersBvh, 1 px) wood voxels per tree at 100/200/400 m beech
