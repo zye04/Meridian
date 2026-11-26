@@ -65,17 +65,6 @@ uint reserve(uint counter, uint capacity, uint count, out uint first) {
     return kept;
 }
 
-// The full quad voxel_instance.mesh draws for a voxel of edge `edge`
-// (metres) at `relative`, seen along unit `view` (mesh space), in pixels.
-float quadPixels(SceneBuffer scene, vec3 relative, vec3 view, float edge) {
-    vec4 center = scene.viewProjection * displayedPosition(scene, relative);
-    float spread = abs(view.x) + abs(view.y) + abs(view.z);
-    vec2 halfSize = 0.5 * edge * sqrt(spread) * abs(scene.projectionScale);
-    return center.w > 0.0 ? halfSize.x * halfSize.y /
-                                (center.w * center.w * scene.inverseResolution.x * scene.inverseResolution.y)
-                          : 0.0;
-}
-
 void main() {
     SceneBuffer scene = cull.scene;
     uint phase = cull.phase & 1u;
@@ -143,15 +132,15 @@ void main() {
             float opacity = voxelViewOpacity(voxelDepths(packedVoxel), view);
             uvec3 hash = voxelHash(entry.x, brick, v, cluster.firstVertex, i);
             vec3 relative = (instance.transform * vec4(local, 1.0)).xyz - scene.cameraPosition;
-            float pixels = rule == kVoxelCoveragePhase ? quadPixels(scene, relative, view, v * instance.scale) : 0.0;
+            float pixels = voxelUsesPixels(rule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;
             if (voxelCoverageDraws(rule, scene.voxelCoverage, packedVoxel, opacity, hash, pixels) &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {
                 drawnMask[k >> 5] |= 1u << (k & 31u);
                 // voxel_instance.mesh's quad, in pixels.
-                if (rule != kVoxelCoveragePhase) {
-                    pixels = quadPixels(scene, relative, view, v * instance.scale);
+                if (!voxelUsesPixels(rule)) {
+                    pixels = voxelQuadPixels(scene, relative, view, v * instance.scale);
                 }
-                pixels *= voxelAreaFraction(rule, opacity);
+                pixels *= voxelAreaFraction(rule, opacity, pixels);
                 area += uint(min(pixels, 65536.0) * 16.0 + 0.5);
                 subpixel += pixels < 1.0 ? 1u : 0u;
             }

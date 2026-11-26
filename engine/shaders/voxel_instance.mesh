@@ -69,7 +69,8 @@ void main() {
         float f = voxelViewOpacity(voxelDepths(packed), view);
         vec2 offset = voxelQuadOffset(rule, f, voxelHash(clusterEntry.x, brick, v, cluster.firstVertex, i));
         center.xy += offset * halfSize;
-        halfSize *= sqrt(voxelAreaFraction(rule, f));
+        float pixels = voxelUsesPixels(rule) ? voxelQuadPixels(scene, relative, view, v * instance.scale) : 0.0;
+        halfSize *= sqrt(voxelAreaFraction(rule, f, pixels));
     }
     uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {

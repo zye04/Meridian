@@ -53,15 +53,17 @@ TEST_CASE("every coverage rule keeps a voxel's expected covered area") {
   // fine noise grid; Phase above a pixel and Mixed, Area are checked alike.
   constexpr int kSamples = 100000;
   for (VoxelCoverage rule : {VoxelCoverage::Hash, VoxelCoverage::Area, VoxelCoverage::AreaOffset,
-                             VoxelCoverage::Mixed, VoxelCoverage::Phase}) {
-    for (float f : {0.0f, 0.01f, 0.1f, 0.25f, 0.49f, 0.75f, 1.0f}) {
-      int drawn = 0;
-      for (int s = 0; s < kSamples; ++s) {
-        const float noise = (static_cast<float>(s) + 0.5f) / kSamples;
-        drawn += voxelCoverageDraws(rule, f, false, noise, 4.0f, 0, 8, 0);
+                             VoxelCoverage::Mixed, VoxelCoverage::Phase, VoxelCoverage::AreaPixel}) {
+    for (float pixels : {0.5f, 2.0f, 4.0f, 30.0f}) {
+      for (float f : {0.0f, 0.01f, 0.1f, 0.25f, 0.49f, 0.75f, 1.0f}) {
+        int drawn = 0;
+        for (int s = 0; s < kSamples; ++s) {
+          const float noise = (static_cast<float>(s) + 0.5f) / kSamples;
+          drawn += voxelCoverageDraws(rule, f, false, noise, std::max(pixels, kPhaseVoxelPixels), 0, 8, 0);
+        }
+        const float covered = voxelAreaFraction(rule, f, pixels) * static_cast<float>(drawn) / kSamples;
+        CHECK(covered == doctest::Approx(f).epsilon(0.001));
       }
-      const float covered = voxelAreaFraction(rule, f) * static_cast<float>(drawn) / kSamples;
-      CHECK(covered == doctest::Approx(f).epsilon(0.001));
     }
   }
 }
@@ -96,11 +98,28 @@ TEST_CASE("a sub-pixel voxel draws on round(P f) evenly spread jitter phases") {
 
 TEST_CASE("an offset quad stays inside the voxel's full quad") {
   for (float f : {0.0f, 0.04f, 0.3f, 0.81f, 1.0f}) {
-    const float half = std::sqrt(voxelAreaFraction(VoxelCoverage::AreaOffset, f));
+    const float half = std::sqrt(voxelAreaFraction(VoxelCoverage::AreaOffset, f, 4.0f));
     for (float u : {0.0f, 0.25f, 0.5f, 0.999999f}) {
       const float offset = voxelQuadOffset(VoxelCoverage::AreaOffset, f, u);
       CHECK(std::abs(offset) + half <= 1.0f + 1e-6f);
     }
     CHECK(voxelQuadOffset(VoxelCoverage::Area, f, 0.9f) == 0.0f);
+  }
+}
+
+TEST_CASE("an area-pixel quad is never under one pixel, and its phase sequence keeps the coverage") {
+  constexpr uint32_t kCycle = 8;
+  for (float pixels : {0.5f, 1.0f, 2.5f, 12.0f}) {
+    for (float f : {0.02f, 0.1f, 0.3f, 0.7f, 1.0f}) {
+      const float a = voxelAreaFraction(VoxelCoverage::AreaPixelPhase, f, pixels);
+      CHECK(a * pixels >= std::min(pixels, 1.0f) - 1e-5f);
+      CHECK(a <= 1.0f);
+      CHECK(a >= f);
+      uint32_t drawn = 0;
+      for (uint32_t phase = 0; phase < kCycle; ++phase) {
+        drawn += voxelCoverageDraws(VoxelCoverage::AreaPixelPhase, f, false, 0.0f, pixels, phase, kCycle, 5);
+      }
+      CHECK(drawn == static_cast<uint32_t>(std::lround(kCycle * f / a)));
+    }
   }
 }

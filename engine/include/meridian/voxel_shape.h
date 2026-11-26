@@ -5,6 +5,7 @@
 
 #include <meridian/math/vec3.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -42,17 +43,23 @@ inline bool voxelDraws(float opacity, bool opaque, float noise) {
 // (voxelDraws, the floor included). Area: a = f, p = 1. AreaOffset: as Area,
 // the quad moved inside the full quad by the voxel's hash. Mixed: a = p =
 // sqrt(f). Phase: as Hash, but a quad under one pixel draws on round(P f) of
-// the P jitter phases, spread evenly. Cascades keep Hash. Must match
-// voxel_lod.glsl.
-enum class VoxelCoverage : uint32_t { Hash, Area, AreaOffset, Mixed, Phase };
+// the P jitter phases, spread evenly. AreaPixel: a = f, but never under one
+// pixel (a = 1 / q for a full quad of q pixels, at most 1), p = f / a by the
+// hash. AreaPixelPhase: as AreaPixel, p from the jitter-phase sequence.
+// Cascades keep Hash. Must match voxel_lod.glsl.
+enum class VoxelCoverage : uint32_t { Hash, Area, AreaOffset, Mixed, Phase, AreaPixel, AreaPixelPhase };
 
-inline float voxelAreaFraction(VoxelCoverage rule, float f) {
+// `pixels`: the full quad's area on screen (q).
+inline float voxelAreaFraction(VoxelCoverage rule, float f, float pixels) {
   switch (rule) {
   case VoxelCoverage::Area:
   case VoxelCoverage::AreaOffset:
     return f;
   case VoxelCoverage::Mixed:
     return std::sqrt(f);
+  case VoxelCoverage::AreaPixel:
+  case VoxelCoverage::AreaPixelPhase:
+    return pixels > 0.0f ? std::min(std::max(f, 1.0f / pixels), 1.0f) : 1.0f;
   default:
     return 1.0f;
   }
@@ -85,6 +92,10 @@ inline bool voxelCoverageDraws(VoxelCoverage rule, float f, bool opaque, float n
     return noise < std::sqrt(f);
   case VoxelCoverage::Phase:
     return pixels < kPhaseVoxelPixels ? voxelPhaseDraws(f, phase, phases, offset) : noise < f;
+  case VoxelCoverage::AreaPixel:
+    return noise < f / voxelAreaFraction(rule, f, pixels);
+  case VoxelCoverage::AreaPixelPhase:
+    return voxelPhaseDraws(f / voxelAreaFraction(rule, f, pixels), phase, phases, offset);
   }
   return false;
 }
