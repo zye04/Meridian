@@ -1,8 +1,11 @@
 #include "overlay.h"
 #include "perf_overlay.h"
+#include "report.h"
 
 #include <fstream>
 #include <numbers>
+
+#include <imgui.h>
 
 #include <meridian/camera_route.h>
 #include <meridian/model.h>
@@ -765,6 +768,11 @@ struct Options {
   bool clouds = true;
   // Saves the weather map after the last frame (debug).
   std::optional<std::filesystem::path> weatherMapPath;
+  meridian::DebugView debugView = meridian::DebugView::None;
+  // Writes a report bundle at this frame (0: never), as the report key does.
+  int reportAt = 0;
+  // Game seconds before the first frame (a report's repro line sets it).
+  double gameTime = 0.0;
 };
 
 Options parseOptions(int argc, char **argv) {
@@ -985,6 +993,17 @@ Options parseOptions(int argc, char **argv) {
       options.clouds = value == "on";
     } else if (arg == "--dump-weather-map") {
       options.weatherMapPath = text(i);
+    } else if (arg == "--debug-view") {
+      const std::string name = text(i);
+      const auto view = meridian::parseDebugView(name);
+      if (!view) {
+        throw std::runtime_error("--debug-view takes none, base-color or lod");
+      }
+      options.debugView = *view;
+    } else if (arg == "--report-at") {
+      options.reportAt = static_cast<int>(number(i));
+    } else if (arg == "--game-time") {
+      options.gameTime = number(i);
     } else {
       throw std::runtime_error("unknown option " + arg +
                                " (use --camera x y z yaw pitch, --sun x y z, "
@@ -997,7 +1016,7 @@ Options parseOptions(int argc, char **argv) {
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "
-                               "--windowed, "
+                               "--windowed, --debug-view none|base-color|lod, --report-at frame, --game-time s, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
                                "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-sequence n, "
@@ -1168,6 +1187,8 @@ int main(int argc, char **argv) {
   renderer.setBloom(options.bloom.value_or(meridian::Bloom{}));
   renderer.setEffects(options.effects.value_or(meridian::Effects{}));
   renderer.setVoxelFarShadows(options.voxelFarShadows);
+  renderer.setDebugView(options.debugView);
+  Report report(argc, argv);
   renderer.setGiMode(options.gi ? meridian::GiMode::Probes : meridian::GiMode::Off);
   if (options.albedoCapturePath) {
     renderer.enableAlbedoCapture();
@@ -1292,7 +1313,7 @@ int main(int argc, char **argv) {
   if (options.weatherFront) {
     weather.setTarget(meridian::weatherPreset("overcast"), *options.weatherFront);
   }
-  double gameSeconds = 0.0;
+  double gameSeconds = options.gameTime;
 
   meridian::Lighting lighting;
   lighting.atmosphere = atmosphereFor(options.haze.value_or(Haze::Summer), floorKm);
@@ -1382,6 +1403,9 @@ int main(int argc, char **argv) {
   int totalFrames = 0;
   bool walking = false;
   bool fWasDown = false;
+  bool f5WasDown = false;
+  bool f6WasDown = false;
+  bool reportRequested = false;
   bool benchmarkDone = false;
   Clock::time_point referenceStart;
   bool benchmarkWritten = true;
@@ -1425,6 +1449,16 @@ int main(int argc, char **argv) {
         walking = !walking;
       }
       fWasDown = fDown;
+      const bool f5Down = window.isKeyDown(meridian::Key::F5);
+      if (f5Down && !f5WasDown) {
+        const auto next = (uint32_t(renderer.debugView()) + 1) % uint32_t(meridian::DebugView::Count);
+        renderer.setDebugView(meridian::DebugView(next));
+        std::printf("Debug view: %s\n", meridian::debugViewName(meridian::DebugView(next)));
+      }
+      f5WasDown = f5Down;
+      const bool f6Down = window.isKeyDown(meridian::Key::F6);
+      reportRequested = f6Down && !f6WasDown;
+      f6WasDown = f6Down;
       if (!gradePanel.visible()) {
         updateFlyCamera(camera, window, deltaSeconds,
                         walking ? &terrain : nullptr);
@@ -1463,8 +1497,25 @@ int main(int argc, char **argv) {
       std::filesystem::path path = *options.capturePath;
       renderer.requestCapture(path.replace_filename(path.stem().string() + suffix));
     }
-    if (gradePanel.visible() || perf.visible()) {
+    const bool reporting =
+        reportRequested || (options.reportAt > 0 && totalFrames == options.reportAt);
+    if (reporting) {
+      report.begin(renderer);
+    }
+    const bool crosshair = renderer.debugView() != meridian::DebugView::None;
+    if (gradePanel.visible() || perf.visible() || crosshair) {
       renderer.beginOverlay();
+      if (crosshair) {
+        // The pixel the report picks: the render's centre.
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        const ImVec2 c(std::floor(size.x * 0.5f) + 0.5f, std::floor(size.y * 0.5f) + 0.5f);
+        ImDrawList *draw = ImGui::GetForegroundDrawList();
+        for (const auto [dx, dy] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+          draw->AddLine(ImVec2(c.x + dx * 4.0f, c.y + dy * 4.0f),
+                        ImVec2(c.x + dx * 14.0f, c.y + dy * 14.0f), IM_COL32(255, 0, 255, 255),
+                        1.0f);
+        }
+      }
       if (gradePanel.visible()) {
         const GradePanel::Changes changes = gradePanel.draw();
         if (changes.grade) {
@@ -1501,6 +1552,10 @@ int main(int argc, char **argv) {
                                           static_cast<float>(width) / static_cast<float>(height));
     }
     renderer.draw(camera, lighting, frameSeconds);
+    if (report.pending()) {
+      report.finish(renderer, {camera, lighting.sunDirection, gradePanel.look(), gameSeconds,
+                               interactive ? 120 : totalFrames, options.timeScale});
+    }
 
     ++frames;
     gpuMsSum += renderer.gpuFrameMs();

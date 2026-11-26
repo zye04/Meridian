@@ -1,4 +1,4 @@
-# Resume here (entry point; updated 2026-11-25)
+# Resume here (entry point; updated 2026-11-26)
 
 Read this file first, ask the open questions below, and update the file
 before ending the session. It holds current truth only: open questions,
@@ -35,6 +35,7 @@ buffer), the DAG voxel design is approved.
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
 | `voxel-look` | `../meridian-voxel-look` | merged into main 2026-11-25; its notes, tools and captures in `.superpowers/voxel-look/` (RESUME.md) |
+| `debug-tools` | `../meridian-debug` | round 1 merged into main 2026-11-26 (id target, F5 views base-color/lod, F6 report bundle; cli.md "Debug views and the report"); round 2 next, in a fresh window: texture stretch, sun only, false colour, solo/hide, time freeze (backlog "Debug tools round 2"); its first use: split the green tint and the gloss of the user's alder bundle `~/meridian-reports/2026-11-25_23-26-21` into sun / ambient / specular |
 
 Lane report shape (every lane ends its report with these five, numbers
 at 2560x1440): done, measured, look (image paths), needs from the user,

@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace meridian {
@@ -692,6 +693,34 @@ struct Renderer::Impl {
   void destroySunShadows();
   void planSunShadows(SceneData &scene, uint32_t frameSlot, Vec3 camera, Vec3 sunDirection);
   void recordSunShadows(VkCommandBuffer cmd, const FrameData &frame);
+  // Debug views and the pixel pick (renderer_debug.cpp). Everything here but
+  // the CPU tables exists only while debugTargetsWanted().
+  DebugView debugView = DebugView::None;
+  bool debugTargetsKept = false;
+  // The scene pipelines in use are the debug set (createScenePipelines).
+  bool debugPipelines = false;
+  Image debugId;
+  // Scene attachment 3 when no diffuse albedo target exists (GI off, no RR).
+  Image debugAlbedo;
+  // Per global cluster index: its DAG level, 4 per uint (debug_view.frag).
+  Buffer debugClusterLevels;
+  VkDescriptorSetLayout debugSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool debugPool = VK_NULL_HANDLE;
+  VkDescriptorSet debugSet = VK_NULL_HANDLE;
+  VkPipelineLayout debugLayout = VK_NULL_HANDLE;
+  VkPipeline debugPipeline = VK_NULL_HANDLE;
+  // CPU only, filled by uploadMesh / setMeshName / setMaterialName.
+  std::vector<uint8_t> clusterLevels;
+  std::vector<uint32_t> clusterMeshes;
+  std::vector<std::string> meshNames;
+  std::vector<std::string> materialNames;
+  bool debugTargetsWanted() const { return debugView != DebugView::None || debugTargetsKept; }
+  void updateDebugTargets();
+  void createScenePipelines(bool debugId);
+  void destroyScenePipelines();
+  void destroyDebugTargets();
+  // Inside a rendering pass onto a swapchain-format target of `extent`.
+  void drawDebugView(VkCommandBuffer cmd, DebugView view, VkExtent2D extent);
   void selectTerrain(VkCommandBuffer cmd, const FrameData &frame);
   void drawTerrain(VkCommandBuffer cmd);
   void buildDepthPyramid(VkCommandBuffer cmd);

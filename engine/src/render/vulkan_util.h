@@ -55,7 +55,7 @@ struct PipelineDesc {
   VkPipelineLayout layout = VK_NULL_HANDLE;
   // Scene pipelines: 0 HDR, 1 motion, 2 transparency mask (alphaBlend
   // writes it, see createGraphicsPipeline), 3-5 Ray Reconstruction guides,
-  // 6 sun light (opaque and masked only).
+  // 6 sun light (opaque and masked only), 7 debug id (debug_id.glsl).
   std::span<const VkFormat> colorFormats;
   VkFormat depthFormat = VK_FORMAT_UNDEFINED;
   // Cull mode is set per draw (double-sided materials).

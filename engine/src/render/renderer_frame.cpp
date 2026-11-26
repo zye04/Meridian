@@ -768,6 +768,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     impl_->destroySwapchain();
     impl_->createSwapchain();
   }
+  impl_->updateDebugTargets();
 
   const uint32_t frameSlot =
       static_cast<uint32_t>(impl_->frameNumber % kFramesInFlight);
@@ -1158,6 +1159,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     colorTargets.insert(colorTargets.end(),
                         {impl_->specularAlbedo.image, impl_->normalRoughness.image});
   }
+  for (const Image *debug : {&impl_->debugId, &impl_->debugAlbedo}) {
+    if (debug->image != VK_NULL_HANDLE) {
+      colorTargets.push_back(debug->image);
+    }
+  }
   for (VkImage target : colorTargets) {
     transitionImage(cmd, {target, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_UNDEFINED,
@@ -1233,15 +1239,22 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     return attachment;
   };
+  // Null unless a debug view or the report is on (debugTargetsWanted).
+  VkRenderingAttachmentInfo debugIdAttachment = guideAttachment(impl_->debugId);
+  debugIdAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   const VkRenderingAttachmentInfo sceneAttachments[] = {
       hdrAttachment,
       motionAttachment,
       maskAttachment,
-      guideAttachment(impl_->diffuseAlbedo),
+      guideAttachment(impl_->diffuseAlbedo.image != VK_NULL_HANDLE ? impl_->diffuseAlbedo
+                                                                   : impl_->debugAlbedo),
       guideAttachment(impl_->specularAlbedo),
       guideAttachment(impl_->normalRoughness),
-      sunLightAttachment};
-  sceneRendering.colorAttachmentCount = std::size(sceneAttachments);
+      sunLightAttachment,
+      debugIdAttachment};
+  // Attachment 7 only with the debug pipeline set.
+  sceneRendering.colorAttachmentCount =
+      impl_->debugPipelines ? std::size(sceneAttachments) : std::size(sceneAttachments) - 1;
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
@@ -1667,17 +1680,26 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   tonemapRendering.colorAttachmentCount = 1;
   tonemapRendering.pColorAttachments = &swapchainAttachment;
 
+  if (impl_->debugView != DebugView::None) {
+    // The scene targets went to SHADER_READ_ONLY for compute readers.
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  }
   vkCmdBeginRendering(cmd, &tonemapRendering);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    impl_->tonemapPipeline);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          impl_->postLayout, 0, 1, &postSet, 0, nullptr);
-  const VkViewport displayViewport{0.0f, 0.0f, static_cast<float>(extent.width),
-                                   static_cast<float>(extent.height), 0.0f, 1.0f};
-  const VkRect2D displayScissor{{0, 0}, extent};
-  vkCmdSetViewport(cmd, 0, 1, &displayViewport);
-  vkCmdSetScissor(cmd, 0, 1, &displayScissor);
-  vkCmdDraw(cmd, 3, 1, 0, 0);
+  if (impl_->debugView != DebugView::None) {
+    impl_->drawDebugView(cmd, impl_->debugView, extent);
+  } else {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      impl_->tonemapPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            impl_->postLayout, 0, 1, &postSet, 0, nullptr);
+    const VkViewport displayViewport{0.0f, 0.0f, static_cast<float>(extent.width),
+                                     static_cast<float>(extent.height), 0.0f, 1.0f};
+    const VkRect2D displayScissor{{0, 0}, extent};
+    vkCmdSetViewport(cmd, 0, 1, &displayViewport);
+    vkCmdSetScissor(cmd, 0, 1, &displayScissor);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+  }
   vkCmdEndRendering(cmd);
   endPass("tonemap");
 

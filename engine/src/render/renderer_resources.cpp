@@ -640,6 +640,26 @@ MeshId Renderer::uploadMesh(const MeshData &data, MaterialId material) {
   const uint32_t firstClusterVertex = impl_->clusterVertexCount;
   const uint32_t firstClusterTriangle = impl_->clusterTriangleCount;
   impl_->clusterCount += clusterCount;
+  // Each cluster's DAG level, from the level BVHs' leaves, for the debug views.
+  impl_->clusterMeshes.resize(impl_->clusterCount, meshIndex);
+  impl_->clusterLevels.resize(impl_->clusterCount, 0);
+  for (size_t level = 0; clustered && level < lod.levels.size(); ++level) {
+    if (lod.levels[level].rootNode >= lod.nodes.size()) {
+      continue;
+    }
+    std::vector<uint32_t> stack = {lod.levels[level].rootNode};
+    while (!stack.empty()) {
+      const ClusterBvhNode &node = lod.nodes[stack.back()];
+      stack.pop_back();
+      for (uint32_t i = 0; i < node.childCount; ++i) {
+        if (node.leaf) {
+          impl_->clusterLevels[firstCluster + node.firstChild + i] = uint8_t(level);
+        } else {
+          stack.push_back(node.firstChild + i);
+        }
+      }
+    }
+  }
   impl_->clusterVertexCount += clusterVertexCount;
   impl_->clusterTriangleCount += clusterTriangleCount;
   const uint32_t firstNode = impl_->clusterNodeCount;

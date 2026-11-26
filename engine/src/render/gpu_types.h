@@ -40,6 +40,8 @@ constexpr VkFormat kTransparencyMaskFormat = VK_FORMAT_R8_UNORM;
 // RGBA16F, not B10G11R11: rounding up in the packed format would remove
 // more sun than the pixel got and tint the contact shadow.
 constexpr VkFormat kSunLightFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+// Scene attachment 7, debug_id.glsl: kind | instance, cluster, distance, material.
+constexpr VkFormat kDebugIdFormat = VK_FORMAT_R32G32B32A32_UINT;
 // Ray Reconstruction guides: diffuse and specular albedo, world normal +
 // perceptual roughness.
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM;

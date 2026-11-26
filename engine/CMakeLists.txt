@@ -104,7 +104,8 @@ foreach(source
     terrain.mesh terrain_normals.comp scan.comp cell_cull.comp tlas_fill.comp
     grade_lut.comp sharpen.comp contact_shadows.comp cloud_noise.comp weather_map.comp
     clouds_march.comp clouds_resolve.comp clouds_composite.comp cloud_shadow.comp
-    cloud_shadow_blur.comp sky_capture.comp voxel.mesh voxel_instance.mesh reference.comp)
+    cloud_shadow_blur.comp sky_capture.comp voxel.mesh voxel_instance.mesh reference.comp
+    debug_view.frag)
   add_shader(${source} ${source})
 endforeach()
 add_shader(mesh.frag mesh.frag ${MARCH_DEFINES})
@@ -112,6 +113,15 @@ add_shader(mesh.frag mesh_masked.frag ALPHA_MASK ${MARCH_DEFINES})
 add_shader(mesh.frag mesh_masked_depth.frag ALPHA_MASK DEPTH_ONLY)
 add_shader(mesh.frag mesh_blended.frag ALPHA_BLEND ${MARCH_DEFINES})
 add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
+# Debug id variants (debug_id.glsl), for the scene pipelines made while a
+# debug view or the report is on.
+add_shader(mesh.mesh mesh_debug.mesh DEBUG_ID)
+add_shader(mesh.frag mesh_debug.frag DEBUG_ID ${MARCH_DEFINES})
+add_shader(mesh.frag mesh_masked_debug.frag ALPHA_MASK DEBUG_ID ${MARCH_DEFINES})
+add_shader(mesh.frag terrain_debug.frag TERRAIN DEBUG_ID ${MARCH_DEFINES})
+add_shader(voxel.frag voxel_debug.frag DEBUG_ID ${MARCH_DEFINES})
+add_shader(voxel_instance.frag voxel_instance_debug.frag DEBUG_ID ${MARCH_DEFINES})
+add_shader(sky.frag sky_debug.frag DEBUG_ID)
 add_shader(shadow.mesh shadow.mesh)
 add_shader(shadow_masked.frag shadow_masked.frag)
 add_shader(voxel.frag voxel.frag ${MARCH_DEFINES})
@@ -153,6 +163,7 @@ add_library(meridian STATIC
     src/shadow_cascades.cpp
     src/render/renderer_clouds.cpp
     src/render/renderer_reference.cpp
+    src/render/renderer_debug.cpp
     src/render/renderer_gi.cpp
     src/render/renderer_shadows.cpp
     src/render/renderer_farfield.cpp
