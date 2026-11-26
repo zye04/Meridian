@@ -1033,7 +1033,10 @@ static_assert(sizeof(FarCheckConstants) == 32);
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
 constexpr uint32_t kMaxVoxelInstances = 6650000;
-constexpr uint32_t kMaxVoxelQuads = 24660000;
+// Experiment only (voxel-coverage stage 1, not for merge): the most
+// --voxel-coverage area-pixel needs at the far set (Part B 33694296) plus
+// 50%, rounded up; main's value is 24660000.
+constexpr uint32_t kMaxVoxelQuads = 50550000;
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at
 // firstVoxel + the present voxels below it.

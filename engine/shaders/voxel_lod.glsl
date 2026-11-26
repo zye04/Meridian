@@ -24,7 +24,7 @@ const uint kCounterVoxelSubpixel = 178u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 6650000u;
-const uint kMaxVoxelQuads = 24660000u;
+const uint kMaxVoxelQuads = 50550000u;
 // Where the voxel lists start in SceneData.voxelInstances (uvec2 entries:
 // cluster entry | terrain sun << 31, pool brick << 6 | voxel), per phase
 // after the cluster lists.
