@@ -24,7 +24,7 @@ const uint kCounterVoxelSubpixel = 178u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 6650000u;
-const uint kMaxVoxelQuads = 24660000u;
+const uint kMaxVoxelQuads = 55870000u;
 // Where the voxel lists start in SceneData.voxelInstances (uvec2 entries:
 // cluster entry | terrain sun << 31, pool brick << 6 | voxel), per phase
 // after the cluster lists.
@@ -139,8 +139,7 @@ bool voxelDraws(uvec4 voxel, float opacity, float noise) {
 // rebuild or a new load order keeps the pattern, and two clusters sharing a
 // brick roll independently. The seed is hashed first: XORed raw into all
 // three axes, a brick at O in cluster i and one at O ^ (i ^ j) in cluster j
-// would hash alike. x: the draw noise; y, z: AreaOffset's place and Phase's
-// shift.
+// would hash alike. x: the hash rule's noise; z: the phase sequence's shift.
 uvec3 voxelHash(uint instance, VoxelBrick brick, float edge, uint clusterSeed, uint i) {
     uint place = pcg3d(uvec3(uint(brick.originX), uint(brick.originY),
                              uint(brick.originZ) ^ floatBitsToUint(edge)) ^
@@ -152,31 +151,24 @@ float voxelUnit(uint bits) {
     return float(bits) * (1.0 / 4294967296.0);
 }
 
-// Development coverage rules (--voxel-coverage, SceneData.voxelCoverage):
-// rule in the low byte, the jitter phase in bits 8-15, the phases per cycle
-// from bit 16. Must match voxel_shape.h (VoxelCoverage).
+// The main view's coverage rule (SceneData.voxelCoverage: rule in the low
+// byte, the jitter phase in bits 8-15, the phases per cycle from bit 16).
+// AreaPixelPhase: a leaf voxel's quad at area fraction a = f, never under
+// one pixel, drawn on round(P f / a) of the P jitter phases; wood, the
+// cascades and the Hash A/B draw whole quads by voxelDraws. Must match
+// voxel_shape.h (VoxelCoverage).
 const uint kVoxelCoverageHash = 0u;
-const uint kVoxelCoverageArea = 1u;
-const uint kVoxelCoverageAreaOffset = 2u;
-const uint kVoxelCoverageMixed = 3u;
-const uint kVoxelCoveragePhase = 4u;
-const uint kVoxelCoverageAreaPixel = 5u;
-const uint kVoxelCoverageAreaPixelPhase = 6u;
-const float kPhaseVoxelPixels = 1.0;
+const uint kVoxelCoverageAreaPixelPhase = 1u;
 
-// The rule of a view: cascades keep the hash.
-uint voxelCoverageRule(uint coverage, bool cascade) {
-    return cascade ? kVoxelCoverageHash : coverage & 255u;
+// Whether a voxel draws its whole quad by the hash: in a cascade, under the
+// Hash A/B, or of an opaque part (wood).
+bool voxelDrawsWhole(uint coverage, bool cascade, uvec4 voxel) {
+    return cascade || (coverage & 255u) == kVoxelCoverageHash || (voxel.z & 0xFFFFFFu) == 0u;
 }
 
 // `pixels`: the full quad's area on screen.
-float voxelAreaFraction(uint rule, float f, float pixels) {
-    if (rule == kVoxelCoverageAreaPixel || rule == kVoxelCoverageAreaPixelPhase) {
-        return pixels > 0.0 ? min(max(f, 1.0 / pixels), 1.0) : 1.0;
-    }
-    return rule == kVoxelCoverageArea || rule == kVoxelCoverageAreaOffset ? f
-           : rule == kVoxelCoverageMixed                                  ? sqrt(f)
-                                                                          : 1.0;
+float voxelAreaFraction(float f, float pixels) {
+    return pixels > 0.0 ? min(max(f, 1.0 / pixels), 1.0) : 1.0;
 }
 
 // The full quad voxel_instance.mesh draws for a voxel of edge `edge`
@@ -190,46 +182,15 @@ float voxelQuadPixels(SceneBuffer scene, vec3 relative, vec3 view, float edge) {
                           : 0.0;
 }
 
-bool voxelUsesPixels(uint rule) {
-    return rule == kVoxelCoveragePhase || rule == kVoxelCoverageAreaPixel ||
-           rule == kVoxelCoverageAreaPixelPhase;
-}
-
-bool voxelPhaseDraws(float f, uint phase, uint phases, uint offset) {
-    uint draws = uint(round(float(phases) * f));
+bool voxelPhaseDraws(float p, uint phase, uint phases, uint offset) {
+    uint draws = uint(round(float(phases) * p));
     uint j = (phase + offset) % phases;
     return (j + 1u) * draws / phases > j * draws / phases;
 }
 
-bool voxelCoverageDraws(uint rule, uint coverage, uvec4 voxel, float f, uvec3 hash, float pixels) {
-    float noise = voxelUnit(hash.x);
-    if (rule == kVoxelCoverageArea || rule == kVoxelCoverageAreaOffset) {
-        return f > 0.0;
-    }
-    if (rule == kVoxelCoverageMixed) {
-        return noise < sqrt(f);
-    }
-    if (rule == kVoxelCoveragePhase) {
-        return pixels < kPhaseVoxelPixels
-                   ? voxelPhaseDraws(f, (coverage >> 8) & 255u, coverage >> 16, hash.z)
-                   : noise < f;
-    }
-    if (rule == kVoxelCoverageAreaPixel) {
-        return noise < f / voxelAreaFraction(rule, f, pixels);
-    }
-    if (rule == kVoxelCoverageAreaPixelPhase) {
-        return voxelPhaseDraws(f / voxelAreaFraction(rule, f, pixels), (coverage >> 8) & 255u,
-                               coverage >> 16, hash.z);
-    }
-    return voxelDraws(voxel, f, noise);
-}
-
-// AreaOffset: the scaled quad's centre in half sizes of the full quad.
-vec2 voxelQuadOffset(uint rule, float f, uvec3 hash) {
-    if (rule != kVoxelCoverageAreaOffset) {
-        return vec2(0.0);
-    }
-    return (2.0 * vec2(voxelUnit(hash.y), voxelUnit(hash.z)) - 1.0) * (1.0 - sqrt(f));
+// A shrunk quad's draw on this frame's jitter phase.
+bool voxelShrunkDraws(uint coverage, float f, float pixels, uint offset) {
+    return voxelPhaseDraws(f / voxelAreaFraction(f, pixels), (coverage >> 8) & 255u, coverage >> 16, offset);
 }
 
 // The optical depth from a voxel's centre out of its model along unit d

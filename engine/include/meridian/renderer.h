@@ -420,8 +420,8 @@ public:
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
   void setVoxelNear(float meters);
-  // Development: the main view's voxel coverage rule (voxel_shape.h); the
-  // cascades keep the hash.
+  // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
+  // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
