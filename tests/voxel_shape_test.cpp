@@ -61,41 +61,62 @@ TEST_CASE("wood and the hash rule draw whole quads by the hash, floor included")
   CHECK_FALSE(voxelDrawsWhole(VoxelCoverage::AreaPixelPhase, false));
 }
 
-TEST_CASE("a draw chance p draws on round(P p) evenly spread jitter phases") {
+TEST_CASE("a draw chance p draws on floor(P p) evenly spread jitter phases, one more by its hash") {
   constexpr uint32_t kCycle = 8;
-  for (float p : {0.0f, 0.05f, 0.1f, 0.3f, 0.5f, 0.62f, 0.9f, 1.0f}) {
-    const uint32_t expected = static_cast<uint32_t>(std::lround(kCycle * p));
-    for (uint32_t offset : {0u, 3u, 7u, 12345u}) {
-      uint32_t drawn = 0, longestGap = 0, gap = 0;
-      // Two cycles, so a gap across the cycle's end counts whole.
-      for (uint32_t phase = 0; phase < 2 * kCycle; ++phase) {
-        const bool draws = voxelPhaseDraws(p, phase % kCycle, kCycle, offset);
-        drawn += phase < kCycle && draws;
-        gap = draws ? 0 : gap + 1;
-        longestGap = std::max(longestGap, gap);
-      }
-      CHECK(drawn == expected);
-      if (expected > 0) {
-        // Even: no gap longer than the cycle over the draws, rounded up.
-        CHECK(longestGap <= (kCycle + expected - 1) / expected);
+  for (float p : {0.0f, 0.03f, 0.05f, 0.1f, 0.3f, 0.5f, 0.62f, 0.9f, 1.0f}) {
+    const float t = kCycle * p;
+    const uint32_t whole = static_cast<uint32_t>(t);
+    const float fraction = t - static_cast<float>(whole);
+    for (float noise : {0.0f, 0.2f, 0.5f, 0.97f}) {
+      const uint32_t expected = std::min(whole + (noise < fraction ? 1u : 0u), kCycle);
+      for (uint32_t offset : {0u, 3u, 7u, 12345u}) {
+        uint32_t drawn = 0, longestGap = 0, gap = 0;
+        // Two cycles, so a gap across the cycle's end counts whole.
+        for (uint32_t phase = 0; phase < 2 * kCycle; ++phase) {
+          const bool draws = voxelPhaseDraws(p, phase % kCycle, kCycle, offset, noise);
+          drawn += phase < kCycle && draws;
+          gap = draws ? 0 : gap + 1;
+          longestGap = std::max(longestGap, gap);
+        }
+        CHECK(drawn == expected);
+        if (expected > 0) {
+          // Even: no gap longer than the cycle over the draws, rounded up.
+          CHECK(longestGap <= (kCycle + expected - 1) / expected);
+        }
       }
     }
   }
 }
 
 TEST_CASE("a leaf quad is never under one pixel, and its phase sequence keeps the coverage") {
-  constexpr uint32_t kCycle = 8;
-  for (float pixels : {0.5f, 1.0f, 2.5f, 12.0f}) {
-    for (float f : {0.02f, 0.1f, 0.3f, 0.7f, 1.0f}) {
-      const float a = voxelAreaFraction(f, pixels);
-      CHECK(a * pixels >= std::min(pixels, 1.0f) - 1e-5f);
-      CHECK(a <= 1.0f);
-      CHECK(a >= f);
-      uint32_t drawn = 0;
-      for (uint32_t phase = 0; phase < kCycle; ++phase) {
-        drawn += voxelCoverageDraws(VoxelCoverage::AreaPixelPhase, f, false, 0.0f, pixels, phase, kCycle, 5);
+  // The draws per cycle over the hash's noise, averaged over a uniform grid
+  // of noise values: a p must come out as f, also where P p < 1/2 (which a
+  // rounded count would never draw) and never above P draws.
+  constexpr uint32_t kNoiseSteps = 4096;
+  for (uint32_t cycle : {8u, 32u, 256u}) {
+    for (float pixels : {0.0f, 0.5f, 1.0f, 2.5f, 12.0f, 100.0f, 1000.0f}) {
+      for (float f : {0.0f, 0.001f, 0.01f, 0.02f, 0.05f, 0.1f, 0.3f, 0.5f, 0.7f, 0.99f, 1.0f}) {
+        const float a = voxelAreaFraction(f, pixels);
+        if (pixels > 0.0f) {
+          CHECK(a * pixels >= std::min(pixels, 1.0f) - 1e-5f);
+        }
+        CHECK(a <= 1.0f);
+        CHECK(a >= f);
+        double drawnSum = 0.0;
+        for (uint32_t k = 0; k < kNoiseSteps; ++k) {
+          const float noise = (static_cast<float>(k) + 0.5f) / kNoiseSteps;
+          uint32_t drawn = 0;
+          for (uint32_t phase = 0; phase < cycle; ++phase) {
+            drawn += voxelCoverageDraws(VoxelCoverage::AreaPixelPhase, f, false, noise, pixels, phase, cycle, 5);
+          }
+          CHECK(drawn <= cycle);
+          drawnSum += drawn;
+        }
+        const double coverage = a * drawnSum / (static_cast<double>(kNoiseSteps) * cycle);
+        // The noise grid resolves the fractional part to 1/kNoiseSteps of a
+        // draw; float t = P p adds a few ulps.
+        CHECK(std::abs(coverage - f) <= 1.0 / kNoiseSteps + 1e-5);
       }
-      CHECK(drawn == static_cast<uint32_t>(std::lround(kCycle * f / a)));
     }
   }
 }

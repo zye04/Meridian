@@ -137,7 +137,7 @@ void main() {
             float pixels = voxelQuadPixels(scene, relative, view, v * instance.scale);
             bool whole = voxelDrawsWhole(scene.voxelCoverage, scene.shadowView != 0u, packedVoxel);
             if ((whole ? voxelDraws(packedVoxel, opacity, voxelUnit(hash.x))
-                       : voxelShrunkDraws(scene.voxelCoverage, opacity, pixels, hash.z)) &&
+                       : voxelShrunkDraws(scene.voxelCoverage, opacity, pixels, hash.z, voxelUnit(hash.x))) &&
                 voxelBoxDepth(pools.axis.words[slot], -view) < kVoxelHiddenDepth) {
                 drawnMask[k >> 5] |= 1u << (k & 31u);
                 if (!whole) {

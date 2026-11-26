@@ -139,7 +139,8 @@ bool voxelDraws(uvec4 voxel, float opacity, float noise) {
 // rebuild or a new load order keeps the pattern, and two clusters sharing a
 // brick roll independently. The seed is hashed first: XORed raw into all
 // three axes, a brick at O in cluster i and one at O ^ (i ^ j) in cluster j
-// would hash alike. x: the hash rule's noise; z: the phase sequence's shift.
+// would hash alike. x: the hash rule's noise, or a shrunk quad's extra phase;
+// y: a shrunk quad's place in its full quad; z: the phase sequence's shift.
 uvec3 voxelHash(uint instance, VoxelBrick brick, float edge, uint clusterSeed, uint i) {
     uint place = pcg3d(uvec3(uint(brick.originX), uint(brick.originY),
                              uint(brick.originZ) ^ floatBitsToUint(edge)) ^
@@ -154,9 +155,10 @@ float voxelUnit(uint bits) {
 // The main view's coverage rule (SceneData.voxelCoverage: rule in the low
 // byte, the jitter phase in bits 8-15, the phases per cycle from bit 16).
 // AreaPixelPhase: a leaf voxel's quad at area fraction a = f, never under
-// one pixel, drawn on round(P f / a) of the P jitter phases; wood, the
-// cascades and the Hash A/B draw whole quads by voxelDraws. Must match
-// voxel_shape.h (VoxelCoverage).
+// one pixel, drawn on floor(P f / a) of the P jitter phases plus one with
+// the fractional part's chance by its hash (x: unused by a shrunk quad);
+// wood, the cascades and the Hash A/B draw whole quads by voxelDraws. Must
+// match voxel_shape.h (VoxelCoverage).
 const uint kVoxelCoverageHash = 0u;
 const uint kVoxelCoverageAreaPixelPhase = 1u;
 
@@ -182,15 +184,17 @@ float voxelQuadPixels(SceneBuffer scene, vec3 relative, vec3 view, float edge) {
                           : 0.0;
 }
 
-bool voxelPhaseDraws(float p, uint phase, uint phases, uint offset) {
-    uint draws = uint(round(float(phases) * p));
+bool voxelPhaseDraws(float p, uint phase, uint phases, uint offset, float noise) {
+    float t = float(phases) * p;
+    uint whole = uint(t);
+    uint draws = min(whole + (noise < t - float(whole) ? 1u : 0u), phases);
     uint j = (phase + offset) % phases;
     return (j + 1u) * draws / phases > j * draws / phases;
 }
 
 // A shrunk quad's draw on this frame's jitter phase.
-bool voxelShrunkDraws(uint coverage, float f, float pixels, uint offset) {
-    return voxelPhaseDraws(f / voxelAreaFraction(f, pixels), (coverage >> 8) & 255u, coverage >> 16, offset);
+bool voxelShrunkDraws(uint coverage, float f, float pixels, uint offset, float noise) {
+    return voxelPhaseDraws(f / voxelAreaFraction(f, pixels), (coverage >> 8) & 255u, coverage >> 16, offset, noise);
 }
 
 // The optical depth from a voxel's centre out of its model along unit d

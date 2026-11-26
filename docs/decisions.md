@@ -5718,11 +5718,18 @@ cached shadow pages are invalidated.
 - Choice (user, from stage 1's sheets and clips): `area-pixel-phase` for
   leaf voxels. The quad shrinks to area fraction a = min(max(f, 1/q), 1)
   (q the full quad's pixels, so no quad goes under one pixel) and draws on
-  round(P f / a) of the P jitter phases, spread evenly from a stable-hash
-  shift: expected coverage a p = f, and a still camera converges to f over
-  one cycle (covered-area error about 0.002 against 0.77 for the hash at
-  Part B). The shrunk quad sits at a stable-hash point inside the full
-  quad, not at its centre. Wood voxels and the cascades keep the hash with
+  floor(P p) of the P jitter phases (p = f / a), plus one more when its
+  stable hash is under the fractional part of P p, spread evenly from a
+  stable-hash shift: expected coverage a p = f for every voxel, and a
+  still camera converges over one cycle to a voxel's a draws / P, which is
+  f on average over voxels (stage 1 measured the covered-area error at
+  about 0.002 against 0.77 for the hash at Part B, with draws counted as
+  round(P p); that count never drew a voxel with P p < 1/2 and drew one
+  with 1/2 <= P p < 3/2 once per cycle, -33% to +100% of its p; found by
+  stage 2's fix check). The cycle P is the jitter cycle, at most
+  `kMaxVoxelCoveragePhases` (256: the phase's 8 bits in
+  `SceneData.voxelCoverage`). The shrunk quad sits at a stable-hash point
+  inside the full quad, not at its centre. Wood voxels and the cascades keep the hash with
   `kOpaqueVoxelFloor`, identical to main; `--voxel-coverage hash` keeps
   main's rule for leaves too (A/B). Rejected in stage 1: `area`,
   `area-offset` (need 72-90M list entries at the far views), `mixed`,
