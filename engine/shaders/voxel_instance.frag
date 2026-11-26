@@ -63,17 +63,12 @@ void main() {
     // Sky visibility out of the model (up, and the four sides), as the
     // clusters' crownOcclusion (surface.glsl): only without GI, whose probes
     // already trace the canopy.
-    float occlusion = 1.0;
-    if (scene.giMode == 0u) {
-        float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
-        vec3 east = normalize(toLocal * vec3(1.0, 0.0, 0.0));
-        vec3 south = normalize(toLocal * vec3(0.0, 0.0, 1.0));
-        float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, east)) +
-                              exp(-voxelBoxDepth(axisWord, -east)) +
-                              exp(-voxelBoxDepth(axisWord, south)) +
-                              exp(-voxelBoxDepth(axisWord, -south)));
-        occlusion = mix(1.0, 0.5 * (up + sides), scene.microShadowStrength);
-    }
+    float up = exp(-voxelBoxDepth(axisWord, normalize(toLocal * vec3(0.0, 1.0, 0.0))));
+    vec3 east = normalize(toLocal * vec3(1.0, 0.0, 0.0));
+    vec3 south = normalize(toLocal * vec3(0.0, 0.0, 1.0));
+    float sides = 0.25 * (exp(-voxelBoxDepth(axisWord, east)) + exp(-voxelBoxDepth(axisWord, -east)) +
+                          exp(-voxelBoxDepth(axisWord, south)) + exp(-voxelBoxDepth(axisWord, -south)));
+    float occlusion = mix(1.0, 0.5 * (up + sides), scene.microShadowStrength);
 
     Surface s;
     s.baseColor = albedo;
@@ -84,7 +79,7 @@ void main() {
     float alpha = voxelRoughness(voxel) * voxelRoughness(voxel);
     float spread = 2.0 * (1.0 - voxelAlignment(voxel));
     s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + spread, 1.0)));
-    s.occlusion = occlusion;
+    s.occlusion = scene.giMode == 0u ? occlusion : 1.0;
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;
     s.emissive = vec3(0.0);
@@ -119,7 +114,17 @@ void main() {
     vec3 debugSunDiffuse = sh.diffuseLight;
     vec3 debugSunSpecular = sh.specularLight;
 #endif
+    vec3 specularBeforeAmbient = sh.specularLight;
     addAmbientLight(sh, s.occlusion);
+    // With GI the probes stand for the crown in the diffuse term, but the sky
+    // reflected along R still passes through the model: occlude it by the
+    // model's optical depth along R.
+    if (scene.giMode != 0u) {
+        vec3 R = reflect(-sh.V, sh.N);
+        float crownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * R)));
+        sh.specularLight = specularBeforeAmbient + (sh.specularLight - specularBeforeAmbient) *
+                                                       mix(1.0, crownR, scene.microShadowStrength);
+    }
     addTransmittedAmbient(sh, transmitted, s.occlusion);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
