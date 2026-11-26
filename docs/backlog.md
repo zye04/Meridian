@@ -117,6 +117,10 @@ per gap so none is lost; remove a row when its gap is resolved.
 | Crown light optical depth from the prototype voxel grids | CE's per-asset voxel opacity volume gives the light's optical depth through each crown plus light scattered between leaves, for far forests (baseline F21). Ours has per-voxel optical depths out of the model along six axes (`ClusterLod::voxelAxis`, the DAG voxels) and a per-vertex crown sky visibility only | Chlorophyll baseline F21 | With G1/G3: bake or sample sun optical depth per voxel, compare with the crown visibility term |
 | Forest layout: ~2 m tree spacing, size gradient, full-canopy edge / sparse-bottom interior | CE's scattering uses ~2 m spacing (walkability), a size gradient from skirt to interior, full-canopy trees outside and sparse-bottom trees inside (baseline F8, F24); his placement is moving from Houdini to an in-engine library | Chlorophyll baseline F8, F24 | Compare the forest layers' footprints and scale ranges with these rules (placement.h `PlacementLayer`, main.cpp); phase 2 content |
 | Low-end far field (pure 2D canopy, Chlorophyll-style scaling) | Lower-end GPUs and VRAM; the voxel far field targets this machine | Far-field spec, user 2026-11-20 | Later; option B's 2.5D layer is the starting point |
+| Voxel crowns show half the thin structure of the reference | Raster vs `--reference 256` at the Part B pose: thin pixel share 0.091 vs 0.184, vertical runs of 3+ px 36,935 vs 87,122, share of thin pixels in runs 0.417 vs 0.530 (trunks and branches drop out and break up). Provisional: alder Trunk reads as foliage until vertex compression merges | Crown lane Part B, 2026-11-26 (`.superpowers/crown/b/metrics.json` in meridian-crown) | Redo per species (beech, hornbeam) after vertex compression; then voxel trunk/branch coverage |
+| Voxel crown speckle is colour, not shading | Albedo residual (log) 0.245 raster vs 0.149 reference, while total luminance residual is 0.186 vs 0.261: the raster noise comes from per-quad voxel albedo, the reference's from normals | Crown lane Part B, 2026-11-26 (`.superpowers/crown/b/metrics.json` in meridian-crown) | Prefiltered voxel albedo (with G1) |
+| Crowns glint half as often as the reference | Glint share (pixels 3x local level) 0.007 raster, 0.013 `--shadows rt`, 0.014 reference | Crown lane Part B, 2026-11-26 (`.superpowers/crown/b/metrics.json` in meridian-crown) | Voxel specular / normal distribution; compare after the albedo fix |
+| Terrain shows through crowns more than in the reference | Terrain-through-crowns share 0.287 raster vs 0.231 reference (+24%), tree mask IoU 0.634 | Crown lane Part B, 2026-11-26 (`.superpowers/crown/b/metrics.json` in meridian-crown) | Voxel coverage (with G1) |
 
 ## Terrain
 
@@ -130,6 +134,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | Shadow rays limited to 20 km | Very long sunset shadows cut off | M1 | M5 if visible |
 | CDLOD crack margin on very steep coarse nodes | Possible sub-meter cracks on cliffs | M1 Task 4 review | Watch |
 | Normal-map sign seam on the crop's mirror line | 7.5 km out, in haze | M1 Task 4 review | Watch |
+| POM texture slides on slopes | The parallax shift pivots on the top of the height map; grazing clamp `kParallaxMinNoV` (surface.glsl) | User, 2026-11-26 | Cheap fix: pivot at mid height; real fix: depth offset after the visibility buffer |
 
 ## Performance and workflow
 
