@@ -579,6 +579,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
+void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
@@ -1008,6 +1009,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.voxelLod = impl_->voxelInstanceList.buffer != VK_NULL_HANDLE
                        ? static_cast<uint32_t>(impl_->voxelLod)
                        : 0;
+  scene.voxelNear = impl_->voxelNear;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;

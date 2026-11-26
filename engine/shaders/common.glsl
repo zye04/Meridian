@@ -653,7 +653,7 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The voxel pools, the voxel lists (per phase, entries (instance, voxel
     // cluster), then bricks, then voxels) and the DrawCounters
     // (voxel_instance.mesh's counts); voxelLod: voxel clusters replace
-    // triangles (0: triangles everywhere, 1: on, 2: near; voxelLodAt).
+    // triangles (0: triangles everywhere, 1: on; voxelLodAt).
     VoxelPoolBuffer voxelPools;
     VoxelInstanceBuffer voxelInstances;
     VoxelCounterBuffer drawCounters;
@@ -678,6 +678,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint debugFilter;
     uint debugLightStride;
     DebugLightBuffer debugLight;
+    // The main view keeps the triangles of instances within this many
+    // meters (voxelLodAt; 0: voxels wherever the LOD cut picks them).
+    float voxelNear;
 };
 
 // Largest axis scale of a transform: a conservative bound under
@@ -750,15 +753,13 @@ LoadedInstance loadInstance(SceneBuffer scene, uint id) {
     return loaded;
 }
 
-// Whether voxel clusters may replace an instance's triangles in this view.
-// --voxel-lod near (a debug reference): the main view keeps the triangles of
-// instances within kVoxelLodNearDistance, the cascades keep voxel casters.
-const float kVoxelLodNearDistance = 150.0;
+// Whether voxel clusters may replace an instance's triangles in this view:
+// the main view keeps the triangles of instances within voxelNear, the
+// cascades keep their voxel casters (CPU reference: meridian::voxelsAt).
 bool voxelLodAt(SceneBuffer scene, vec3 instanceOrigin) {
-    return scene.voxelLod == 1u ||
-           (scene.voxelLod == 2u &&
-            (scene.shadowView != 0u ||
-             distance(instanceOrigin, scene.cameraPosition) > kVoxelLodNearDistance));
+    return scene.voxelLod != 0u &&
+           (scene.shadowView != 0u ||
+            distance(instanceOrigin, scene.cameraPosition) > scene.voxelNear);
 }
 
 // The mesh of an instance's BLAS geometry (a ray hit's geometry index):

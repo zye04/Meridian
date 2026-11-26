@@ -412,10 +412,13 @@ rasterized as ~1 px quads (architecture.md, Frame); off keeps the triangles
 at every distance in every view, cascades included (A/B; slower: the
 traversal visits every level, and the cull lists overflow at most views, so
 off drops entries: not a clean reference). near is the reference for the
-voxels' look: the main view keeps the triangles of instances within 150 m
-(`kVoxelLodNearDistance`, common.glsl), the cascades keep their voxel
-casters, so the light is the default's and only the main view's geometry
-changes (0 dropped at the voxel-look stops).
+voxels' look: `--voxel-near 150`, so the light is the default's and only
+the main view's geometry changes (0 dropped at the voxel-look stops).
+`--voxel-near M` (default 0): with voxel LOD on, the main view keeps the
+triangles of every instance whose origin is within M meters of the camera
+(`Renderer::setVoxelNear`, common.glsl `voxelLodAt`; CPU reference
+`voxelsAt` and `selectClustersBvh(..., voxels)`); beyond M the LOD cut picks
+voxels by projected size as before; the cascades keep their voxel casters.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
