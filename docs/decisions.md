@@ -5315,3 +5315,49 @@ clock with a free camera.
   there, the 1112aa1 cook before): jitter still 0.81 -> 0.81, side 5 m/s
   6.29 -> 6.29, side 30 m/s 6.74 -> 6.75, turn 1 rad/s 3.40 -> 3.40;
   the decoration shimmer does not show at frame scale.
+
+## Multi-view capture in one launch (debug-tools round 3, 2026-11-26)
+
+A capture with `--trees` spends ~18-20 s loading for a few seconds of
+rendering, and the lanes' look sheets were one launch per view, each
+waiting on the shared GPU lock. `--capture-views FILE DIR` loads once and
+renders every line of FILE. Engines handle a teleport the same way: a
+camera cut (Unreal's `bCameraCut`) resets the temporal upscaler (DLSS's
+reset flag, TAA/TSR history), eye adaptation and the GI history, and the
+cached shadow pages are invalidated.
+
+- `Renderer::cut()` waits for the GPU and puts back what a fresh launch's
+  first frame finds: `historyValid` off (the DLSS reset flag, TAA, cloud
+  temporal and sky capture, previous matrices and wind), the GI buffers
+  zero-filled as at load (the reset flag alone re-traces the probes but
+  the ground cache keeps every albedo it has seen: after the overview the
+  alder trunk at 1 m came out 1.26/255 darker, green-weighted, and 60
+  settle frames before the cut made it 3.16, since they only fed that
+  cache), `shadowStale` (every sun cascade re-rendered), the terrain shadow map
+  and the far shadow map rebuilt (both are sun-keyed caches, so a view
+  whose sun differs from the last by less than their rebuild threshold
+  would otherwise keep the old one), `pyramidValid` off, the cloud wind
+  displacement, the exposure state back to its initial EV100 15, and the
+  jitter phase and noise frame index counting from 0 again (`cutFrame`;
+  the frame-in-flight slots keep counting), the cloud shadow grid's
+  travel and the previous camera position. The streamed meadow ring
+  refills all its slots in the first frame after a jump without help.
+  Settle frames: 0 (none needed once the reset is complete).
+- Equivalence (Release, `--trees`, 120 frames; mean |difference|/255 of
+  the multi-view PNG vs a single launch of the same view, `image-gates.py
+  diff`), views in list order: overview (first) 0.607, its own
+  single-vs-single 0.608; alder trunk 1 m 0.365 (single-vs-single 0.216;
+  a residual mean +0.35 in G remains, below the noise); the same with
+  `--debug-view sun` 0.0002; forest edge 0.299 (backlog noise 0.25-0.49).
+- Exposure is reset, not settled: a fresh capture adapts from the initial
+  EV over its frames, and only a reset makes a view's frames repeat that.
+- Per-view options are the ones that change without a reload; each line
+  is parsed by the same parser as the command line, appended to the
+  launch's arguments, so the launch's flags are the defaults and a line
+  overrides them. Reload flags on a line are an error.
+- The report bundle's repro.txt carries the shot as a view line too
+  (named after the bundle), and the parser skips repro command lines, so
+  bundles concatenate into a list.
+- Speed (Release, `--trees`, 2560x1440): 18 views in one launch held the
+  GPU lock 169.7 s, against the usual ~20-30 s a single launch holds it
+  (estimate, not measured: the 18-launch timing was skipped).

@@ -83,6 +83,7 @@ python3 -I tools/region-luminance.py in.pfm X0 Y0 X1 Y1 [...]   # mean luminance
 python3 -I tools/reference-compare.py raster.pfm reference.pfm --ev EV_RASTER EV_REF [--regions FILE --view NAME] [X0 Y0 X1 Y1 ...]   # raster vs --reference: per-region luminance ratio + rgb/G (4x4 grid by default), exit 1 on NaN/Inf
 python3 -I tools/resemblance.py ours.png ref.png --regions docs/superpowers/research/matched-views/regions.json --view NAME   # OKLCh region stats, ours vs reference
 tools/cloud-compare.sh build-release out-dir     # cloud look views beside the reference photos + measured targets (tools/cloud-metrics.py)
+./build/game/game --trees --capture-views views.txt out-dir   # one launch, one PNG per view line (cli.md "Captures"); python3 -I tools/capture-sheet.py out-dir -> labelled sheet.jpg
 ```
 
 Every run of the game binary (interactive, capture, perf; Debug or

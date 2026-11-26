@@ -123,7 +123,11 @@ reproduces the view with `--capture <dir>/repro.png` (every original flag
 except pose, sun, look and run control, then `--camera`, `--sun`, `--grade
 <dir>/look.json`, `--frames` = the report frame in a capture run, 120
 interactive, and `--game-time S` when the game time differs from what
-those frames step to; `--freeze-time --game-time S` when frozen). The
+those frames step to; `--freeze-time --game-time S` when frozen). Its
+second line is the same shot as a `--capture-views` line named after the
+bundle (the launch's view options, e.g. `--weather`, move onto it rather
+than the first line's kept flags), so `cat ~/meridian-reports/*/repro.txt`
+is a view list. The
 filter is in the shot but not in repro.txt. `--game-time S` starts the
 game clock (wind, clouds, weather) at S seconds. While a view or the report is on, the
 scene pipelines are swapped for their debug set (one hitch); off, nothing
@@ -137,6 +141,32 @@ validation error):
 ```bash
 ./build/game/game --camera X Y Z YAW PITCH [--sun X Y Z] [--scatter N] [--trees] [--lod-error PX] --capture out.png [--frames N]
 ```
+
+`--capture-views FILE DIR` renders a list of views in one launch (one
+load, one `flock` for the whole list), each to `DIR/<name>.png`. A line of
+FILE is a view name, then view options; blank lines, `#` comments and lines
+starting with `flock` (a repro.txt's command line) are skipped. View
+options, which change without a reload: `--camera`, `--sun`, `--grade`,
+`--haze`, `--fov`, `--bloom`, `--effects`, `--game-time`,
+`--freeze-time`, `--time-scale`, `--weather`, `--weather-front`,
+`--debug-view`, `--debug-filter` (its frame counts from the view's
+start), `--frames`. Every other flag needs a reload and is the launch's
+only (`--trees`, `--placement`, `--voxel-lod`, `--far-field`, `--gi`,
+`--shadows`, `--aa`, `--lod-error`, `--clouds`, ...); a view line that
+gives one is an error. The launch's own view options are every view's
+defaults; a line overrides them. Words split on whitespace (no quoting).
+Not with `--capture`, `--benchmark`, `--reference` or camera velocities.
+Each view starts with `Renderer::cut()`, which leaves the renderer as a
+fresh launch's first frame finds it (temporal histories: the DLSS reset
+flag, TAA, clouds, motion; GI probes and ground cache, cleared; sun cascades, terrain and far shadow
+maps; depth pyramid; exposure back to its initial EV; jitter and noise
+frame index back to 0), then renders `--frames` (120) frames like a single
+capture and prints `View i/N: name` and the lines a single capture prints
+at its end (`Rendered ...` with that view's validation errors and drops,
+`GPU passes:`, cull list need), the run's most-in-a-frame figures restarted
+per view. `tools/capture-sheet.py DIR [OUT.jpg] [--columns N] [--width PX]`
+tiles the folder's PNGs in the order written into one labelled JPG
+(default `DIR/sheet.jpg`).
 
 ## Reference path tracer
 

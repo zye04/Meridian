@@ -23,6 +23,12 @@ const std::map<std::string_view, int> kDroppedOptions = {
     {"--report-at", 1},       {"--game-time", 1},     {"--freeze-time", 0},
     {"--debug-filter", 2}};
 
+// Kept options that a --capture-views line may also set (main.cpp
+// kViewOptions), with their value counts: they go on the view line.
+const std::map<std::string_view, int> kViewOptions = {
+    {"--haze", 1},       {"--fov", 1},     {"--bloom", 2},         {"--effects", 1},
+    {"--time-scale", 1}, {"--weather", 1}, {"--weather-front", 1}};
+
 std::string quoted(const std::string &text) {
   if (text.find_first_of(" \t'\"\\$`*?") == std::string::npos && !text.empty()) {
     return text;
@@ -78,6 +84,13 @@ Report::Report(int argc, char **argv) {
     const auto dropped = kDroppedOptions.find(argv[i]);
     if (dropped != kDroppedOptions.end()) {
       i += dropped->second;
+      continue;
+    }
+    if (const auto view = kViewOptions.find(argv[i]); view != kViewOptions.end()) {
+      for (int k = 0; k <= view->second && i + k < argc; ++k) {
+        viewArgs_.emplace_back(argv[i + k]);
+      }
+      i += view->second;
       continue;
     }
     keptArgs_.emplace_back(argv[i]);
@@ -165,24 +178,31 @@ void Report::finish(meridian::Renderer &renderer, const ReportState &state) {
   // A --capture run steps game time by 1/60 s per frame; start it so its
   // last frame lands on this one's game time.
   const double reproSeconds = state.reproFrames / 60.0 * state.timeScale;
+  const meridian::Camera &c = state.camera;
+  std::string view;
+  for (const std::string &arg : viewArgs_) {
+    view += " " + quoted(arg);
+  }
+  view += " --camera " + number(c.position.x) + " " + number(c.position.y) + " " +
+          number(c.position.z) + " " + number(c.yaw) + " " + number(c.pitch);
+  view += " --sun " + number(state.sunDirection.x) + " " + number(state.sunDirection.y) + " " +
+          number(state.sunDirection.z);
+  view += " --grade " + quoted((directory_ / "look.json").string());
+  if (state.timeFrozen) {
+    view += " --freeze-time --game-time " + number(state.gameSeconds);
+  } else if (std::abs(state.gameSeconds - reproSeconds) > 1e-6) {
+    view += " --game-time " + number(state.gameSeconds - reproSeconds);
+  }
+  view += " --frames " + std::to_string(state.reproFrames);
   std::string line = "flock /tmp/meridian-gpu.lock " + quoted(executable_.string());
   for (const std::string &arg : keptArgs_) {
     line += " " + quoted(arg);
   }
-  const meridian::Camera &c = state.camera;
-  line += " --camera " + number(c.position.x) + " " + number(c.position.y) + " " +
-          number(c.position.z) + " " + number(c.yaw) + " " + number(c.pitch);
-  line += " --sun " + number(state.sunDirection.x) + " " + number(state.sunDirection.y) + " " +
-          number(state.sunDirection.z);
-  line += " --grade " + quoted((directory_ / "look.json").string());
-  if (state.timeFrozen) {
-    line += " --freeze-time --game-time " + number(state.gameSeconds);
-  } else if (std::abs(state.gameSeconds - reproSeconds) > 1e-6) {
-    line += " --game-time " + number(state.gameSeconds - reproSeconds);
-  }
-  line += " --frames " + std::to_string(state.reproFrames);
-  line += " --capture " + quoted((directory_ / "repro.png").string());
-  std::ofstream(directory_ / "repro.txt") << line << "\n";
+  // The second line is the same shot as a --capture-views line (which skips
+  // the first), so bundles concatenate into a view list.
+  std::ofstream(directory_ / "repro.txt")
+      << line << view << " --capture " << quoted((directory_ / "repro.png").string()) << "\n"
+      << directory_.filename().string() << view << "\n";
 
   std::printf("Report: %s\n", directory_.c_str());
   std::fflush(stdout);
