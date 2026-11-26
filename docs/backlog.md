@@ -182,6 +182,7 @@ per gap so none is lost; remove a row when its gap is resolved.
 | Item | Why it matters | Source | Target |
 |---|---|---|---|
 | "Rough sandstone rock" download is a flat surface scan | Not usable as a rock | M2a Task 4 | Use as a terrain rock material (M3) |
+| Relief patch is not the default scene | The broadleaf scene runs only on flags (`--terrain assets/terrain/relief-0.5.height --streamed off`). A flip touches: game/src/main.cpp's default `--terrain` and `--streamed` (off also drops hawkbit and clover, not only grass); the 11 `--camera` views in cli.md (Napf coordinates); tools/bench-route.py and the route gates; tools/motion-gates.sh, motion-clarity.sh, cloud-compare.sh, g1-evidence.sh; the placement hash in cli.md "Captures". Outside the 4 km patch the mirrored terrain has no placement | Scene lane round 1, 2026-11-26 | Its own change once the scene's look is settled; no spec unless the views and gates move to new coordinates |
 
 ## Weather and world (out of current milestones)
 
