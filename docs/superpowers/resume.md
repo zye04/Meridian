@@ -32,7 +32,9 @@ Lane report shape (every lane ends its report with these five, numbers
 at 2560x1440): done, measured, look (image paths), needs from the user,
 next. The user relays between windows by pasting them.
 
-## Ordered next steps (updated 2026-11-26; steps 4 on from the Fable assessment of 2026-11-24)
+## Ordered next steps (updated 2026-11-26)
+
+Steps 4 onward come from the assessment of 2026-11-24.
 
 The assessment is `.superpowers/fable-review/architecture-assessment.md`
 in the main checkout (git-ignored); decisions.md holds the three entries
@@ -81,6 +83,8 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   gate at the forest edge (`--trees`): resident 11998 MiB (`Loaded:`),
   peak 13086 MiB (models loading; far field 12411), 290 MiB of resident
   headroom.
+- VRAM figures predate vertex compression; the next GPU lane updates them
+  from its `Loaded: resident` line.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.
@@ -143,8 +147,10 @@ placement").
     `ground2-cliffs` (non-repeating cliffs WIP); both wait for the forest
     floor work to decide them.
 - Archive tags `archive/trunk-fix`, `archive/voxel-crown`, `-2`, `-4`, `-6`,
-  `-6-trunk`, `-7-wood`, `-8-wait`: branches fully merged into main,
-  deleted locally 2026-11-26 (none existed on origin); tags pushed.
+  `-6-trunk`, `-7-wood`, `-8-wait` (none existed on origin), and
+  `archive/voxel-look`, `archive/debug-tools`, `archive/debug-tools-2`,
+  `archive/step4-rt-memory` (deleted locally and on origin): branches fully
+  merged into main, deleted 2026-11-26; tags pushed.
 - Archive tags for the five branches deleted on 2026-11-24 (locally and on
   origin); `git checkout archive/<name>` to read one:
   - `archive/far-c`: far-cell raster with two-phase Hi-Z, slower than main
