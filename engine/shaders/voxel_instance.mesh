@@ -66,7 +66,13 @@ void main() {
     // drew it with the matching chance).
     if (!voxelDrawsWhole(scene.voxelCoverage, cascade, packed)) {
         float f = voxelViewOpacity(voxelDepths(packed), view);
+        vec2 fullHalf = halfSize;
         halfSize *= sqrt(voxelAreaFraction(f, voxelQuadPixels(scene, relative, view, v * instance.scale)));
+        // Placed inside the full quad by the stable hash, so shrunk quads of
+        // one lattice row don't share screen rows.
+        uint place = voxelHash(clusterEntry.x, brick, v, cluster.firstVertex, i).y;
+        vec2 u = vec2(place & 0xFFFFu, place >> 16) * (2.0 / 65535.0) - 1.0;
+        center.xy += u * (fullHalf - halfSize);
     }
     uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {
