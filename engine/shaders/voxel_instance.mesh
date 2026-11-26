@@ -13,7 +13,9 @@
 // cube seen along unit direction d (mesh space) covers v^2 (|dx| + |dy| +
 // |dz|) on screen and its mean chord is v / (|dx| + |dy| + |dz|):
 // voxel_bricks.comp drew it with the opacity of that chord, and the quad
-// gets that area, so over many voxels the coverage matches the voxels'.
+// gets that area (a leaf voxel's main view quad: a fraction of it, drawn
+// more often, voxel_lod.glsl), so over many voxels the coverage matches the
+// voxels'.
 
 layout(local_size_x = 64) in;
 layout(triangles, max_vertices = 256, max_primitives = 128) out;
@@ -60,6 +62,18 @@ void main() {
                             : abs(scene.projectionScale);
     vec2 halfSize = 0.5 * v * instance.scale * sqrt(spread) * perMetre;
     uvec4 packed = pools.voxels.voxels[voxel];
+    // A leaf voxel's quad shrinks to its area fraction (voxel_bricks.comp
+    // drew it with the matching chance).
+    if (!voxelDrawsWhole(scene.voxelCoverage, cascade, packed)) {
+        float f = voxelViewOpacity(voxelDepths(packed), view);
+        vec2 fullHalf = halfSize;
+        halfSize *= sqrt(voxelAreaFraction(f, voxelQuadPixels(scene, relative, view, v * instance.scale)));
+        // Placed inside the full quad by the stable hash, so shrunk quads of
+        // one lattice row don't share screen rows.
+        uint place = voxelHash(clusterEntry.x, brick, v, cluster.firstVertex, i).y;
+        vec2 u = vec2(place & 0xFFFFu, place >> 16) * (2.0 / 65535.0) - 1.0;
+        center.xy += u * (fullHalf - halfSize);
+    }
     uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {
         uint vertex = slot * 4u + corner;

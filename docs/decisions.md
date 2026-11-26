@@ -5707,6 +5707,91 @@ cached shadow pages are invalidated.
   difference is per-pixel voxel coverage speckle, 1.9/255 over 8x8 blocks.
 - Open: forests still cost 1.0-1.8 ms over voxelizer 13 (backlog).
 
+## Leaf voxels draw shrunk quads on their jitter phases (leaf lane, stage 2, 2026-11-26)
+
+- Problem: trees drawn as voxels read as "pixels erased, low resolution"
+  (user). A voxel was one whole quad of 1 to 2.6 px drawn with chance f
+  (its opacity along the view) by a hash fixed for all time, so partial
+  coverage reached the screen as missing blocks that the jitter and DLAA
+  cannot average (per-voxel covered-area error 2 f (1 - f) of the quad).
+  Spec `docs/superpowers/specs/2026-11-26-voxel-leaf-coverage-design.md`.
+- Choice (user, from stage 1's sheets and clips): `area-pixel-phase` for
+  leaf voxels. The quad shrinks to area fraction a = min(max(f, 1/q), 1)
+  (q the full quad's pixels, so no quad goes under one pixel) and draws on
+  floor(P p) of the P jitter phases (p = f / a), plus one more when its
+  stable hash is under the fractional part of P p, spread evenly from a
+  stable-hash shift: expected coverage a p = f for every voxel, and a
+  still camera converges over one cycle to a voxel's a draws / P, which is
+  f on average over voxels (stage 1 measured the covered-area error at
+  about 0.002 against 0.77 for the hash at Part B, with draws counted as
+  round(P p); that count never drew a voxel with P p < 1/2 and drew one
+  with 1/2 <= P p < 3/2 once per cycle, -33% to +100% of its p; found by
+  stage 2's fix check). The cycle P is the jitter cycle, at most
+  `kMaxVoxelCoveragePhases` (256: the phase's 8 bits in
+  `SceneData.voxelCoverage`). The shrunk quad sits at a stable-hash point
+  inside the full quad, not at its centre. Wood voxels and the cascades keep the hash with
+  `kOpaqueVoxelFloor`, identical to main; `--voxel-coverage hash` keeps
+  main's rule for leaves too (A/B). Rejected in stage 1: `area`,
+  `area-offset` (need 72-90M list entries at the far views), `mixed`,
+  `phase` (looks like the hash), `area-pixel` (holes stay). Wood: every
+  area rule shrinks a voxel about its centre, so a trunk 1.2-2.3 voxels
+  wide becomes a two-column lattice of 1 px dots that DLAA greys into a
+  ladder (trunk contrast at 116 m: triangles 0.623, hash 0.572,
+  area-pixel-phase 0.468; wood at a = f 0.466).
+- Offset (stage 2): with every shrunk quad at its voxel's centre, voxels of
+  one lattice row project to one screen row and the about-1 px quads line
+  up in horizontal dashes with empty rows between (beech_130m: the voxel
+  crowns behind the lone beech; distance not measured). The raw
+  frame shows them, `--aa taa` averages them, DLAA keeps them; pitching
+  the camera by 0.12 rad does not remove them. Crown crop mean |dI/dy| /
+  mean |dI/dx| (`.superpowers/leaf/streak.py`, 400x240 crops of
+  `crops.json`): beech_130m centred 1.226, offset 1.136, triangles 1.139,
+  hash 1.062; beech_170m 1.205 / 1.137 / 1.129; hornbeam_160m 1.160 /
+  1.079 / 1.071; Part B 1.069 / 1.052 (hash 1.020). The offset is drawn
+  inside the full quad, so it moves no coverage out of the voxel; it is
+  fixed per voxel, so a still camera does not boil and motion vectors stay
+  the voxel centre's. A per-phase offset was not tried.
+- Measured (Release, `Render 2560x1440, display 2560x1440, jitter phases
+  8, mip bias 0, DLSS`, 0 validation errors, 0 dropped by any list, pass
+  or cascade in every run): list need, most in a frame, near views 8.2M to
+  11.2M quads, forest edge 25.7M (cascades 15.1M), overview 26.6M, Part B
+  31.8M, summit 29.0M, walk 9.9M, pan 30.5M, fly toward the forest 37.2M
+  (the maximum), so `kMaxVoxelQuads` 24.66M -> 55.87M (1.5x, rounded up).
+  Resident 10893 -> 11370 MiB (+477), peak 11782 MiB; the 12 GB gate
+  holds. GPU frame edge 29.16, overview 27.76, Part B 35.99 ms (hash at
+  stage 1: Part B voxel pass 5.05 -> 10.24 ms). Cascades: the ground
+  shadow under a crown keeps its shape and mean (109.54 vs 109.18) with
+  hash casters, so the cascades stay on the hash. Wood equals main: with
+  every leaf voxel dropped (throwaway patch), area-pixel-phase vs `hash`
+  draw the same quads (main view 470175 at beech_170m and 1391156 at the
+  forest edge; cascades 140325 and 1349383) and differ by the same-build
+  repeat noise (0.3464 vs 0.3469/255, 0.3724 vs 0.3725/255); `hash` vs
+  main 99266f0 at beech08_116m: quad need 4730674 both, 0.5114 vs repeat
+  0.5115/255.
+- Draw count fix re-measured (0502671 against 7a54e2e, same 14 views and
+  the fly-toward, same settings): list need moves -2.3% to +0.2% (Part B
+  31841226 -> 31831375, overview 26764300 -> 26766167, fly-toward
+  37245138 -> 37047773), 0 dropped, resident 11370 MiB and peak 11782 MiB
+  unchanged; crown streak ratio 1.192 -> 1.188; far canopy crops
+  unchanged in mean and noise (overview 113.99 / 12.33 -> 114.07 / 12.33,
+  Part B 119.72 / 5.79 -> 119.61 / 5.79; `.superpowers/leaf/canopy.py`).
+  A leaf voxel has p < 1 only where f < 1/q (its quad held at one pixel);
+  how many voxels that is at these views was not measured.
+- Motion (`tools/motion-clarity.sh`, 0502671 against main 99266f0's code,
+  run twice for the forest rows): frame 120/121 jitter at the forest edge
+  moving sideways 5 m/s 4.3114 / 4.3120 against 4.2896 / 4.2874, 30 m/s
+  5.1393 / 5.1395 against 5.0985 / 5.0990 (+0.6%, +0.8%, repeats within
+  0.003); still and turning forest rows and all ground and sky rows within
+  0.008. Near crown (beech_130m pose, crown rect, 5 m/s sideways) 7.10
+  against 8.54, still 1.14 against 1.86. Ruling (director, 2026-11-26):
+  the forest-edge jitter (+0.5% to +0.8%) is acceptable against the
+  near-crown gain; which of the rule and the offset adds it is not
+  measured and no separation test is planned.
+- Not done: the 150 m grain is leaf shading (triangles show it too);
+  voxel crowns pass more terrain than the path tracer under every rule
+  (0.33 vs 0.23); stages 3 to 5 of the spec; thin voxel trunks have no
+  rule that reads solid (backlog).
+
 ## Leaf palette at cook time, trees only (scene lane round 1d, 2026-11-26)
 
 - Choice: retint each species' leaf atlas toward one OKLCh target before

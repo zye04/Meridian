@@ -452,6 +452,11 @@ static_assert(sizeof(GpuClouds) == 160);
 static_assert(offsetof(GpuClouds, windDisplacement) == 88);
 static_assert(offsetof(GpuClouds, shadowRight) == 96);
 
+// SceneData.voxelCoverage holds the jitter phase in 8 bits: past this many
+// phases (render scale under about 0.177) the voxel phase sequence cycles
+// over this many frames instead of the jitter cycle.
+constexpr uint32_t kMaxVoxelCoveragePhases = 256;
+
 // Must match SceneBuffer in the shaders (std430: each vec3 takes 16 bytes).
 struct SceneData {
   Mat4 viewProjection;
@@ -602,6 +607,10 @@ struct SceneData {
   // The main view keeps the triangles of instances within this many meters
   // (Renderer::setVoxelNear).
   float voxelNear = 0.0f;
+  // The main view's voxel coverage rule (VoxelCoverage) | jitter phase << 8
+  // | phases per cycle << 16 (voxel_lod.glsl), the cycle at most
+  // kMaxVoxelCoveragePhases.
+  uint32_t voxelCoverage = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -625,6 +634,7 @@ static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
 static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
 static_assert(offsetof(SceneData, debugLight) == 2712);
 static_assert(offsetof(SceneData, voxelNear) == 2720);
+static_assert(offsetof(SceneData, voxelCoverage) == 2724);
 static_assert(sizeof(SceneData) == 2736);
 
 // Must match MeshInfo in common.glsl.
@@ -1029,7 +1039,10 @@ static_assert(sizeof(FarCheckConstants) == 32);
 // The voxel clusters' data (cluster.h), concatenated over the meshes. Must
 // match voxel_lod.glsl.
 constexpr uint32_t kMaxVoxelInstances = 6650000;
-constexpr uint32_t kMaxVoxelQuads = 24660000;
+// The most any evidence run needs per frame at 1440p plus 50%, rounded up
+// (decisions.md "Leaf voxels draw shrunk quads on their jitter phases"):
+// the fly-toward, 37245138 under area-pixel-phase.
+constexpr uint32_t kMaxVoxelQuads = 55870000;
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at
 // firstVoxel + the present voxels below it.
