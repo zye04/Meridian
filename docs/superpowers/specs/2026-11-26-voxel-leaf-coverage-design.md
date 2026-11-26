@@ -80,6 +80,17 @@ quads each rule below would draw.
 Standing: look is judged by the user's eye on images; a stability number is
 a guideline, look outranks it; no bare tuning literals.
 
+- Stage 1 pick (chat, 2026-11-26 evening): `area-pixel-phase`, seen on the
+  far and near sheets beside Chlorophyll crops and on the clips. Measured
+  at Part B: pixel-scale variance -47%, voxel pass 5.05 -> 10.24 ms, main
+  view need 33.7M entries (cap 24.66M today), resident +395 MiB (11288).
+  `area` and `area-offset` are not runnable at the far views (need 72M to
+  90M). The pick does not close the look: the 150 m grain is leaf shading
+  present on triangles too, and voxel crowns pass more terrain than the
+  path tracer (0.33 against 0.23) under every rule.
+- Every look sheet carries a Chlorophyll reference crop at a comparable
+  distance; the target is the kind of image, not a pixel match.
+
 ## Goals
 
 - Partial coverage reaches the screen as partial coverage, not as missing
@@ -109,6 +120,8 @@ area is `f (a - f)` quad areas: largest today (`a = 1`), zero at `a = f`.
 | `area-offset` | f | 1 | N quads | as `area`, the quad placed inside the voxel's footprint by the stable hash, which breaks the lattice | as above without the lattice |
 | `mixed` | sqrt(f) | sqrt(f) | sqrt(f) N quads | variance `f (sqrt(f) - f)`, about a third of today's at f = 0.25 | keeps some holes |
 | `phase` | 1 | f | f N quads | as `hash`, but voxels under one pixel take their draw decision from a fixed sequence over the jitter phases, so a still camera converges to f over one cycle (the 2026-11-24 spec's candidate b) | DLAA may not accumulate a toggling opaque quad cleanly; ghosting in motion |
+| `area-pixel` (added in stage 1) | max(f, 1/q) capped at 1, q the full quad's area in pixels | f / a | measured 2.78 x `hash` at Part B | no quad shrinks below one pixel, so the count stays runnable where `area` overflows; covered-area error 0.17 to 0.21 per frame against 0.77 | still holes for voxels under one pixel |
+| `area-pixel-phase` (added in stage 1, **chosen**) | as `area-pixel` | f / a, the draw decision from the jitter-phase sequence | as `area-pixel` | covered-area error about 0.002 over the 8-phase cycle; lowest frame-pair jitter measured | twice the voxel pass |
 
 The exponents are the family's two ends and its geometric midpoint, not
 tuned values. `N` counts present voxels in view that the hidden-depth test
