@@ -1033,6 +1033,68 @@ TEST_CASE("a solid part's voxel groups keep the errors of their edges") {
   CHECK(finest > 0);
 }
 
+TEST_CASE("a solid group with no power of two between its errors joins at the next one up") {
+  // Wavy limbs 3-5 cm across on a 16 m model (finest edge 1/32 m): thick at
+  // the finest edges, they keep their triangles past them, and a later pass
+  // can then add too little error to reach the next power of two. Such a
+  // group, thin at the next power of two above its children's error, joins
+  // the voxels there; voxelizer 15 kept it as triangles until a later pass
+  // reached one.
+  static const VoxelMaterial material{};
+  MeshData mesh;
+  const uint32_t around = 16, rings = 256;
+  for (int b = 0; b < 40; ++b) {
+    const float r = 0.015f + 0.01f * float(b % 3) / 2.0f;
+    const float x0 = float(b % 8) * 2.0f, z0 = float(b / 8) * 2.0f;
+    const uint32_t base = uint32_t(mesh.vertices.size());
+    for (uint32_t y = 0; y <= rings; ++y) {
+      for (uint32_t x = 0; x < around; ++x) {
+        const float a = 6.2831853f * float(x) / around, h = 4.0f * float(y) / rings;
+        const float w = r * (1.0f + 0.15f * std::sin(5.0f * a + 4.0f * h + float(b)));
+        Vertex v;
+        v.position = {x0 + w * std::cos(a) + 0.1f * std::sin(2.0f * h + float(b)), h,
+                      z0 + w * std::sin(a) + 0.1f * std::cos(1.5f * h + float(b))};
+        v.normal = {std::cos(a), 0.0f, std::sin(a)};
+        v.uvX = float(x) / around;
+        v.uvY = h;
+        mesh.vertices.push_back(v);
+      }
+    }
+    for (uint32_t y = 0; y < rings; ++y) {
+      for (uint32_t x = 0; x < around; ++x) {
+        const uint32_t i = base + y * around + x, j = base + y * around + (x + 1) % around;
+        mesh.indices.insert(mesh.indices.end(), {i, i + around, j, j, i + around, j + around});
+      }
+    }
+  }
+  mesh.voxelize = true;
+  mesh.voxelModelHeight = 16.0f;
+  const VoxelSource source{{&material, 1}};
+  const ClusterLod lod = buildClusterLod(mesh, &source);
+  // Per triangle group kept as triangles: its children's error and its own.
+  std::map<uint32_t, std::pair<float, float>> groups;
+  size_t voxels = 0;
+  for (const Cluster &c : lod.clusters) {
+    if (isVoxel(c)) {
+      ++voxels;
+      CHECK(c.refined.error <= c.voxelEdge);
+      if (c.self.error != FLT_MAX) {
+        CHECK(c.self.error == 2.0f * c.voxelEdge);
+      }
+    } else if (c.self.error != FLT_MAX) {
+      auto &g = groups.try_emplace(c.group, 0.0f, c.self.error).first->second;
+      g.first = std::max(g.first, c.refined.error);
+    }
+  }
+  size_t waiting = 0;
+  for (const auto &[group, errors] : groups) {
+    waiting += errors.second >= 1.0f / 32.0f &&
+               std::exp2(std::floor(std::log2(errors.second))) < errors.first;
+  }
+  CHECK(voxels > 0);
+  CHECK(waiting == 0);
+}
+
 TEST_CASE("an opaque voxel sharing a cell with a transmissive one folds into it") {
   // Two meshes on one lattice: leaves at voxels 0 and 1, wood at 0 and 2.
   const auto mesh = [](uint64_t occupied, const VoxelPayload &v) {

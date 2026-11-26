@@ -121,7 +121,9 @@ struct VoxelSource {
 // height / 512 of the mesh or its model (voxelModelHeight, the larger), and
 // their error at least the children's. A solid part (voxelModelHeight > 0,
 // bark) waits until it is thinner than that edge: most of the group's voxels
-// at it under kOpaqueVoxelFloor along every axis. Above, one voxel hierarchy
+// at it under kOpaqueVoxelFloor along every axis; with no power of two
+// between its children's error and its own, the edge is the next one above
+// its children's error. Above, one voxel hierarchy
 // per mesh: each level groups the clusters of a twice-as-large region,
 // whichever group they came from, and doubles the edge (combineVoxelGrids,
 // mergeVoxelGrid).

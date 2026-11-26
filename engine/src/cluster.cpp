@@ -42,7 +42,7 @@ constexpr size_t kBvhBranching = 8;
 constexpr float kThinVoxelShare = 0.5f;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 15;
+constexpr uint32_t kVoxelizerVersion = 16;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -404,17 +404,24 @@ struct VoxelLevels {
   static float edgeFor(void *context, float minError, float maxError, const unsigned int *indices,
                        size_t indexCount) {
     const VoxelLevels &levels = *static_cast<VoxelLevels *>(context);
-    const float edge = levels.edgeFor(minError, maxError);
+    float edge = levels.edgeFor(minError, maxError);
     if (edge <= 0.0f || levels.mesh.voxelModelHeight <= 0.0f) {
       return edge;
     }
-    // A solid group kept as triangles past an edge joins the voxels only at
-    // an edge its children's error doesn't exceed: the voxel group's error is
+    // A solid group kept as triangles past an edge joins the voxels at an
+    // edge its children's error doesn't exceed: the voxel group's error is
     // the larger of the two, and a larger one, pooled into a cell and doubled
     // above (finish), would keep the neighbours' finer voxels to twice the
-    // distance. The passes' error ranges chain, so a later one holds such an
-    // edge.
-    return edge < minError || levels.thick(indices, indexCount, edge) ? 0.0f : edge;
+    // distance. With no power of two between the children's error and the
+    // simplified one (often a pass that adds no error), it takes the next one
+    // up, as a stuck group does: its triangles then draw at most to twice the
+    // distance where the children's error is the threshold. Waiting for a
+    // later pass instead chained up to seven passes in the tested trees,
+    // and kept sub-pixel wood triangles out to 800 m.
+    if (edge < minError) {
+      edge = levels.edgeFor(minError, FLT_MAX);
+    }
+    return levels.thick(indices, indexCount, edge) ? 0.0f : edge;
   }
   static void emit(void *context, const unsigned int *indices, size_t indexCount, float edge,
                    int group, clodBounds, int depth) {

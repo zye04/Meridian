@@ -5651,3 +5651,41 @@ cached shadow pages are invalidated.
   above same-build repeat noise in walk-speed passes across 57 and 114 m.
 - Open: wood share moves away from the reference and forests cost 1.7-3
   ms more (backlog); sub-pixel wood kept as triangles (backlog).
+
+## A held-back wood group joins the voxels at the next power of two (crown lane round 8, 2026-11-26)
+
+- Problem: round 7 (voxelizer 15) kept sub-pixel wood as triangles far
+  past its 1 px distance: in the CPU cut (selectClustersBvh, 1 px,
+  2560x1440, 70 degrees horizontal) 3880 wood triangles of the three
+  Megascans field trees (beech 2328, hornbeam 335, alder 1217) sat at 400
+  m in clusters mostly thin at the 1 px edge (0 with voxelizer 13). A
+  solid group joined the voxels only at a power-of-two edge between its
+  children's error and its simplified error; with none between them it
+  waited for a later pass. Replayed from the v15 caches
+  (`.superpowers/crown8/dag.cpp`, REPLAY=1, in meridian-crown): waits hold
+  2689 of the 3880 at 400 m, 2324 of them in passes that added no error,
+  in chains of up to seven passes (beech: four and five). Waits only follow
+  a thick hold (a group's children's error above the finest edge). Not
+  the cause: stuck groups (none in the three trees) and the final single
+  cluster (one per trunk in beech and hornbeam, 68 and 65 triangles); the
+  alder Trunk's alpha mask (thick() voxelizes with the real materials; the
+  alder's thick-majority triangles are all in its unmasked Tileable mesh).
+- Choice: when the largest power of two under the simplified error is
+  under the children's error, the group takes the next power of two above
+  the children's error, as a stuck group already does, and goes to voxels
+  there if it is thin at it. Its voxel group's error is that edge, at or
+  above its children's; its triangles draw at most to twice the distance
+  where the children's error is 1 px. Voxelizer 16. Tried first (the
+  director's text): only passes that add no error take the next power of
+  two; worse at 400 m (4317 thin-cluster triangles: hornbeam 335 -> 1708).
+- Measured on the CPU (in-process build, identical to the game's cache for
+  v15): thin-cluster wood triangles at 400 m beech 2328 -> 1867, hornbeam
+  335 -> 0, alder 1217 -> 103 (3880 -> 1970); at 200 m 7384 -> 5534, 1740
+  -> 2882, 4996 -> 4805; all wood triangles in the cut at 100/200/400/800 m
+  105304/21125/5217/616 -> 102803/19713/3182/246. Wood voxels per tree at
+  100/200/400 m beech 177936/32560/5271, hornbeam 20621/9283/2270, alder
+  0/3292/1137 (voxelizer 13: 196547/36007/5656, 27072/10401/2362,
+  12771/5204/1269). The lowest trunk metre stays triangles at 60 m (beech
+  2545, hornbeam 1817, alder 1332 triangles, no voxels). Alder's Tileable
+  mesh now ends in a 113-triangle final cluster drawn at every distance.
+  Beech cook 47.3-47.8 s (v15) vs 47.4-47.9 s, same machine state.
