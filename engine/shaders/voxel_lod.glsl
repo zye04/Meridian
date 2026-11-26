@@ -24,7 +24,7 @@ const uint kCounterVoxelSubpixel = 178u;
 
 // Must match gpu_types.h.
 const uint kMaxVoxelInstances = 6650000u;
-const uint kMaxVoxelQuads = 24660000u;
+const uint kMaxVoxelQuads = 55870000u;
 // Where the voxel lists start in SceneData.voxelInstances (uvec2 entries:
 // cluster entry | terrain sun << 31, pool brick << 6 | voxel), per phase
 // after the cluster lists.
@@ -131,6 +131,70 @@ const float kOpaqueVoxelFloor = 0.5;
 bool voxelDraws(uvec4 voxel, float opacity, float noise) {
     bool opaque = (voxel.z & 0xFFFFFFu) == 0u;
     return noise < opacity || (opaque && opacity >= kOpaqueVoxelFloor);
+}
+
+// The voxel's stable hash, keyed on where its brick is (lattice origin, edge)
+// and the cluster's seed (firstVertex: the mesh's seed and the cluster's
+// index in its hierarchy), not pool or mesh upload indices, so a cache
+// rebuild or a new load order keeps the pattern, and two clusters sharing a
+// brick roll independently. The seed is hashed first: XORed raw into all
+// three axes, a brick at O in cluster i and one at O ^ (i ^ j) in cluster j
+// would hash alike. x: the hash rule's noise, or a shrunk quad's extra phase;
+// y: a shrunk quad's place in its full quad; z: the phase sequence's shift.
+uvec3 voxelHash(uint instance, VoxelBrick brick, float edge, uint clusterSeed, uint i) {
+    uint place = pcg3d(uvec3(uint(brick.originX), uint(brick.originY),
+                             uint(brick.originZ) ^ floatBitsToUint(edge)) ^
+                       pcg3d(uvec3(clusterSeed, 0x9E3779B9u, 0x85EBCA6Bu))).x;
+    return pcg3d(uvec3(instance, place, i));
+}
+
+float voxelUnit(uint bits) {
+    return float(bits) * (1.0 / 4294967296.0);
+}
+
+// The main view's coverage rule (SceneData.voxelCoverage: rule in the low
+// byte, the jitter phase in bits 8-15, the phases per cycle from bit 16).
+// AreaPixelPhase: a leaf voxel's quad at area fraction a = f, never under
+// one pixel, drawn on floor(P f / a) of the P jitter phases plus one with
+// the fractional part's chance by its hash's x;
+// wood, the cascades and the Hash A/B draw whole quads by voxelDraws. Must
+// match voxel_shape.h (VoxelCoverage).
+const uint kVoxelCoverageHash = 0u;
+const uint kVoxelCoverageAreaPixelPhase = 1u;
+
+// Whether a voxel draws its whole quad by the hash: in a cascade, under the
+// Hash A/B, or of an opaque part (wood).
+bool voxelDrawsWhole(uint coverage, bool cascade, uvec4 voxel) {
+    return cascade || (coverage & 255u) == kVoxelCoverageHash || (voxel.z & 0xFFFFFFu) == 0u;
+}
+
+// `pixels`: the full quad's area on screen.
+float voxelAreaFraction(float f, float pixels) {
+    return pixels > 0.0 ? min(max(f, 1.0 / pixels), 1.0) : 1.0;
+}
+
+// The full quad voxel_instance.mesh draws for a voxel of edge `edge`
+// (metres) at `relative`, seen along unit `view` (mesh space), in pixels.
+float voxelQuadPixels(SceneBuffer scene, vec3 relative, vec3 view, float edge) {
+    vec4 center = scene.viewProjection * displayedPosition(scene, relative);
+    float spread = abs(view.x) + abs(view.y) + abs(view.z);
+    vec2 halfSize = 0.5 * edge * sqrt(spread) * abs(scene.projectionScale);
+    return center.w > 0.0 ? halfSize.x * halfSize.y /
+                                (center.w * center.w * scene.inverseResolution.x * scene.inverseResolution.y)
+                          : 0.0;
+}
+
+bool voxelPhaseDraws(float p, uint phase, uint phases, uint offset, float noise) {
+    float t = float(phases) * p;
+    uint whole = uint(t);
+    uint draws = min(whole + (noise < t - float(whole) ? 1u : 0u), phases);
+    uint j = (phase + offset) % phases;
+    return (j + 1u) * draws / phases > j * draws / phases;
+}
+
+// A shrunk quad's draw on this frame's jitter phase.
+bool voxelShrunkDraws(uint coverage, float f, float pixels, uint offset, float noise) {
+    return voxelPhaseDraws(f / voxelAreaFraction(f, pixels), (coverage >> 8) & 255u, coverage >> 16, offset, noise);
 }
 
 // The optical depth from a voxel's centre out of its model along unit d

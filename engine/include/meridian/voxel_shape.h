@@ -5,7 +5,9 @@
 
 #include <meridian/math/vec3.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace meridian {
 
@@ -33,6 +35,52 @@ inline float voxelViewOpacity(const float depth[3], Vec3 d) {
 constexpr float kOpaqueVoxelFloor = 0.5f;
 inline bool voxelDraws(float opacity, bool opaque, float noise) {
   return noise < opacity || (opaque && opacity >= kOpaqueVoxelFloor);
+}
+
+// How the main view draws a voxel of coverage f (spec
+// 2026-11-26-voxel-leaf-coverage-design.md): a quad of area fraction a with
+// chance p, a p = f. AreaPixelPhase (the default): a leaf voxel's quad
+// shrinks to a = f but never under one pixel (a = 1 / q for a full quad of q
+// pixels, at most 1), and draws on floor(P f / a) of the P jitter phases,
+// plus one by its stable hash with the fractional part's chance, spread
+// evenly, so a still camera converges over one cycle to coverage f on
+// average over voxels. Wood keeps
+// Hash (a = 1, voxelDraws with its floor): centre-shrunk quads turn a trunk
+// one or two voxels wide into a lattice of dots. Hash for every voxel is
+// kept for A/B (--voxel-coverage hash); the cascades always take Hash. Must
+// match voxel_lod.glsl.
+enum class VoxelCoverage : uint32_t { Hash, AreaPixelPhase };
+
+// Whether the voxel draws its whole quad by the hash.
+inline bool voxelDrawsWhole(VoxelCoverage rule, bool opaque) {
+  return rule == VoxelCoverage::Hash || opaque;
+}
+
+// `pixels`: the full quad's area on screen (q).
+inline float voxelAreaFraction(float f, float pixels) {
+  return pixels > 0.0f ? std::min(std::max(f, 1.0f / pixels), 1.0f) : 1.0f;
+}
+
+// Whether the phase sequence draws on jitter phase `phase` of `phases` a
+// voxel of draw chance p, its sequence shifted by `offset` (its hash):
+// floor(P p) draws per cycle, one more when `noise` (its hash, uniform in
+// [0, 1)) is under the fractional part, so a voxel draws P p times per cycle
+// on average however small p is; at most P, at most one phase apart from
+// even.
+inline bool voxelPhaseDraws(float p, uint32_t phase, uint32_t phases, uint32_t offset, float noise) {
+  const float t = static_cast<float>(phases) * p;
+  const uint32_t whole = static_cast<uint32_t>(t);
+  const uint32_t draws = std::min(whole + (noise < t - static_cast<float>(whole) ? 1u : 0u), phases);
+  const uint32_t j = (phase + offset) % phases;
+  return (j + 1) * draws / phases > j * draws / phases;
+}
+
+// Whether a voxel of coverage f draws: noise uniform in [0, 1) from its
+// stable hash, pixels its full quad's area on screen.
+inline bool voxelCoverageDraws(VoxelCoverage rule, float f, bool opaque, float noise, float pixels,
+                               uint32_t phase, uint32_t phases, uint32_t offset) {
+  return voxelDrawsWhole(rule, opaque) ? voxelDraws(f, opaque, noise)
+                                       : voxelPhaseDraws(f / voxelAreaFraction(f, pixels), phase, phases, offset, noise);
 }
 
 } // namespace meridian

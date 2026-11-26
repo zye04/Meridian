@@ -734,6 +734,7 @@ struct Options {
   meridian::VoxelLod voxelLod = meridian::VoxelLod::On;
   // Instances nearer than this keep their triangles in the main view.
   float voxelNear = 0.0f;
+  meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -1037,6 +1038,14 @@ Options parseOptions(int argc, char **argv) {
       if (!(options.voxelNear >= 0.0f)) {
         throw std::runtime_error("--voxel-near takes meters >= 0");
       }
+    } else if (arg == "--voxel-coverage" && i + 1 < argc) {
+      const std::string rule = argv[++i];
+      const char *names[] = {"hash", "area-pixel-phase"};
+      const auto it = std::find(std::begin(names), std::end(names), rule);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--voxel-coverage takes hash or area-pixel-phase");
+      }
+      options.voxelCoverage = static_cast<meridian::VoxelCoverage>(it - std::begin(names));
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -1089,6 +1098,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
+                               "--voxel-coverage hash|area-pixel-phase, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1358,6 +1368,7 @@ int main(int argc, char **argv) {
   }
   renderer.setVoxelLod(options.voxelLod);
   renderer.setVoxelNear(options.voxelNear);
+  renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);
 
