@@ -1,8 +1,8 @@
 # Voxel leaf coverage and look — design
 
-Status: in progress. Stages 0 and 1 done; stage 2 built (leaves take
-`area-pixel-phase`, wood keeps the hash with its floor); stages 3 to 5 not
-started.
+Status: in progress. Stages 0, 1 and 2 done (leaves take
+`area-pixel-phase`, wood keeps the hash with its floor; stage 2 waits for
+its fix check before merge); stages 3 to 5 not started.
 
 Covers the backlog rows "G1 Distant forests read as grey speckle", "Terrain
 shows through crowns more than in the reference", "Trunk holes below half
@@ -225,6 +225,22 @@ got wrong and the spec is revised before anything else is built).
   views; the gate (resident <= 12 GB) holds.
 - Independent Opus review of the diff before merge; decisions.md entry;
   the 2026-11-24 spec's section 5 gets a "superseded by" line.
+
+Stage 2 results (decisions.md "Leaf voxels draw shrunk quads on their
+jitter phases" has the numbers):
+
+- Built: one rule, leaves `area-pixel-phase`, wood and cascades the hash
+  with `kOpaqueVoxelFloor` (identical to main, shown with leaf voxels
+  dropped: same quad counts, difference at repeat noise). `hash` stays as
+  the A/B flag value; the other variants are gone.
+- Shrunk quads sit at a stable-hash point inside the full quad: centred,
+  they lined up in horizontal 1 px dashes on voxel crowns (lattice rows
+  on screen rows) that DLAA kept.
+- Cascades keep the hash: no visible shadow difference at beech_130m.
+- `kMaxVoxelQuads` 55.87M from the fly-toward need 37.2M; resident
+  +477 MiB (11370), peak 11782 MiB.
+- Left for the fix check before merge: an independent review of
+  99266f0..HEAD.
 
 ## Stages 3 to 5: re-measure first, each its own decision
 

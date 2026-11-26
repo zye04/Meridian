@@ -424,7 +424,8 @@ voxels by projected size as before; the cascades keep their voxel casters.
 of coverage f (voxel_shape.h `VoxelCoverage`, voxel_lod.glsl).
 area-pixel-phase: a leaf voxel's quad shrinks to area f but never under one
 pixel (a = 1 / q for a full quad of q pixels, at most 1) and draws on
-round(P f / a) of the P jitter phases; wood draws whole quads by the hash
+round(P f / a) of the P jitter phases, placed at a stable-hash point
+inside the full quad; wood draws whole quads by the hash
 (chance f, always at f >= 0.5). hash (A/B): every voxel as wood. The
 cascades always take hash.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
