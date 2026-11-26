@@ -1010,8 +1010,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        ? static_cast<uint32_t>(impl_->voxelLod)
                        : 0;
   scene.voxelNear = impl_->voxelNear;
-  scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) | (phase - 1) << 8 |
-                        phases << 16;
+  const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
+  scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |
+                        static_cast<uint32_t>((impl_->frameNumber - impl_->cutFrame) % voxelPhases) << 8 |
+                        voxelPhases << 16;
   extractFrustumPlanes(scene.currentViewProjection, scene.frustumPlanes);
   scene.wind = impl_->wind;
   scene.previousWind = impl_->previousWind;

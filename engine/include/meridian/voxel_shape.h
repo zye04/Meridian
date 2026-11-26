@@ -41,8 +41,10 @@ inline bool voxelDraws(float opacity, bool opaque, float noise) {
 // 2026-11-26-voxel-leaf-coverage-design.md): a quad of area fraction a with
 // chance p, a p = f. AreaPixelPhase (the default): a leaf voxel's quad
 // shrinks to a = f but never under one pixel (a = 1 / q for a full quad of q
-// pixels, at most 1), and draws on round(P f / a) of the P jitter phases,
-// spread evenly, so a still camera converges to f over one cycle. Wood keeps
+// pixels, at most 1), and draws on floor(P f / a) of the P jitter phases,
+// plus one by its stable hash with the fractional part's chance, spread
+// evenly, so a still camera converges over one cycle to coverage f on
+// average over voxels. Wood keeps
 // Hash (a = 1, voxelDraws with its floor): centre-shrunk quads turn a trunk
 // one or two voxels wide into a lattice of dots. Hash for every voxel is
 // kept for A/B (--voxel-coverage hash); the cascades always take Hash. Must
@@ -61,9 +63,14 @@ inline float voxelAreaFraction(float f, float pixels) {
 
 // Whether the phase sequence draws on jitter phase `phase` of `phases` a
 // voxel of draw chance p, its sequence shifted by `offset` (its hash):
-// round(P p) draws per cycle, at most one phase apart from even.
-inline bool voxelPhaseDraws(float p, uint32_t phase, uint32_t phases, uint32_t offset) {
-  const uint32_t draws = static_cast<uint32_t>(std::lround(static_cast<float>(phases) * p));
+// floor(P p) draws per cycle, one more when `noise` (its hash, uniform in
+// [0, 1)) is under the fractional part, so a voxel draws P p times per cycle
+// on average however small p is; at most P, at most one phase apart from
+// even.
+inline bool voxelPhaseDraws(float p, uint32_t phase, uint32_t phases, uint32_t offset, float noise) {
+  const float t = static_cast<float>(phases) * p;
+  const uint32_t whole = static_cast<uint32_t>(t);
+  const uint32_t draws = std::min(whole + (noise < t - static_cast<float>(whole) ? 1u : 0u), phases);
   const uint32_t j = (phase + offset) % phases;
   return (j + 1) * draws / phases > j * draws / phases;
 }
@@ -73,7 +80,7 @@ inline bool voxelPhaseDraws(float p, uint32_t phase, uint32_t phases, uint32_t o
 inline bool voxelCoverageDraws(VoxelCoverage rule, float f, bool opaque, float noise, float pixels,
                                uint32_t phase, uint32_t phases, uint32_t offset) {
   return voxelDrawsWhole(rule, opaque) ? voxelDraws(f, opaque, noise)
-                                       : voxelPhaseDraws(f / voxelAreaFraction(f, pixels), phase, phases, offset);
+                                       : voxelPhaseDraws(f / voxelAreaFraction(f, pixels), phase, phases, offset, noise);
 }
 
 } // namespace meridian
