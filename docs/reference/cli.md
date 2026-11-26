@@ -57,12 +57,25 @@ DLSS/TAA smear): `base-color` the diffuse albedo the shading used (base
 colour x (1 - metallic); voxels their mean leaf colour); `lod` triangle
 clusters green (DAG level 0, full detail) to red (level 7+), voxel
 clusters blue to violet by level, far cells cyan, terrain grey, sky
-black, each cluster a slightly different brightness. A magenta crosshair
+black, each cluster a slightly different brightness (0.7-1.0 of its
+colour, a per-cluster hash, so borders show). Legend at full brightness
+(sRGB; `lodViewLegend`, renderer_debug.cpp, from debug_view.frag's
+formulas; every report also writes it as `legend.txt`):
+
+| kind | level 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7+ |
+|---|---|---|---|---|---|---|---|---|
+| triangles | #72ff6c | #abff6c | #d2ff6c | #f2ff6c | #fff06c | #ffd06c | #ffa86c | #ff6c6c |
+| voxels | #7caeff | #7c95ff | #827cff | #9f7cff | #b67cff | #ca7cff | #dc7cff | #ec7cff |
+| far cells | #61cbcb | #69dada | #6fe7e7 | #76f3f3 | | | | |
+
+Terrain #898989, sky #000000. Voxel clusters reach DAG level 11 at
+~5-9 km (all drawn as 7+). A magenta crosshair
 marks the render's centre pixel while a view is on (the mouse stays
 captured). `F6` (or `--report-at N`: at frame N of a capture run) writes a
 bundle to `~/meridian-reports/<YYYY-MM-DD_HH-MM-SS>/` and prints `Report:
 <dir>`: `shot.png` (that frame without the view or crosshair, lossless),
-`views/<view>.png` (every view of the same frame), `pixel.json` (the
+`views/<view>.png` (every view of the same frame), `legend.txt` (the lod
+view's colours), `pixel.json` (the
 centre render pixel: kind sky/triangles/voxels/far cell/terrain, instance
 id and placed, mesh and material index and glTF names (`mesh_name` is
 `<file>/<glTF mesh name>#<primitive>`), cluster index and DAG level or

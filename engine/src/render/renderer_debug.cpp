@@ -3,6 +3,8 @@
 #include <basisu_enc.h>
 
 #include <bit>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace meridian {
@@ -26,7 +28,44 @@ struct DebugViewPush {
 };
 static_assert(sizeof(DebugViewPush) == 32);
 
+// debug_view.frag's hsv, then the sRGB encoding the swapchain applies.
+std::string srgbHex(float h, float s, float v) {
+  char text[8];
+  uint8_t rgb[3];
+  for (int c = 0; c < 3; ++c) {
+    const float offset = c == 0 ? 0.0f : c == 1 ? 2.0f / 3.0f : 1.0f / 3.0f;
+    float f = h + offset;
+    f -= std::floor(f);
+    const float k = std::clamp(std::abs(f * 6.0f - 3.0f) - 1.0f, 0.0f, 1.0f);
+    const float linear = v * (1.0f + (k - 1.0f) * s);
+    const float encoded = linear <= 0.0031308f ? linear * 12.92f
+                                               : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+    rgb[c] = uint8_t(std::lround(std::clamp(encoded, 0.0f, 1.0f) * 255.0f));
+  }
+  std::snprintf(text, sizeof(text), "#%02x%02x%02x", rgb[0], rgb[1], rgb[2]);
+  return text;
+}
+
 } // namespace
+
+std::string lodViewLegend() {
+  std::string text = "lod view: kind + DAG level (0 = full detail) -> sRGB at full brightness;\n"
+                     "each cluster is drawn at 0.7-1.0 of it (a per-cluster hash), so borders show\n";
+  for (int level = 0; level < 8; ++level) {
+    text += "triangles level " + std::to_string(level) + (level == 7 ? "+" : "") + ": " +
+            srgbHex(0.33f * (1.0f - level / 7.0f), 0.85f, 1.0f) + "\n";
+  }
+  for (int level = 0; level < 8; ++level) {
+    text += "voxels level " + std::to_string(level) + (level == 7 ? "+" : "") + ": " +
+            srgbHex(0.62f + 0.18f * level / 7.0f, 0.8f, 1.0f) + "\n";
+  }
+  for (int level = 0; level < 4; ++level) {
+    text += "far cell level " + std::to_string(level) + ": " +
+            srgbHex(0.5f, 0.8f, 0.6f + 0.1f * level) + "\n";
+  }
+  text += "terrain: " + srgbHex(0.0f, 0.0f, 0.25f) + "\nsky: #000000\n";
+  return text;
+}
 
 const char *debugViewName(DebugView view) {
   return view < DebugView::Count ? kViewNames[size_t(view)] : "?";

@@ -23,6 +23,9 @@ enum class DebugView : uint32_t {
 };
 
 const char *debugViewName(DebugView view);
+// The lod view's colours (kind + level -> sRGB), one per line, from the
+// same formulas as debug_view.frag; the report writes it as legend.txt.
+std::string lodViewLegend();
 std::optional<DebugView> parseDebugView(std::string_view name);
 
 // What a pixel shows. Must match the kinds in debug_id.glsl.

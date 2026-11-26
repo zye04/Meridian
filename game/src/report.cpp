@@ -136,6 +136,7 @@ void Report::finish(meridian::Renderer &renderer, const ReportState &state) {
   json << "}\n";
 
   std::ofstream(directory_ / "look.json") << lookToJson(state.look);
+  std::ofstream(directory_ / "legend.txt") << meridian::lodViewLegend();
 
   // A --capture run steps game time by 1/60 s per frame; start it so its
   // last frame lands on this one's game time.

@@ -5198,3 +5198,13 @@ minimum of that: an id target, a report key and two views.
   deterministic to 1e-6). Forest edge with `--debug-view lod`: a European
   beech (Forest_03) at 19.9 m, level 1. 0 validation errors in every run
   (Release with asserts and validation).
+- Pre-merge (2026-11-26): the user's interactive F5/F6 test passed (18
+  bundles; triangles, voxels to 1.27 km, terrain picked right). Debug
+  (ASan/UBSan, sync validation) start view with `--placement off
+  --debug-view lod --report-at 20`: 0 validation errors, no sanitizer
+  report. Far-cell pick: `--camera 6000 2500 6000 -0.84381 -0.08295 --trees`
+  (aimed at a far-cell pixel of the lod view): far cell 5902, level 1,
+  17.98 km; looking along the grid's diagonal, voxel clusters (level 11)
+  cover everything to ~8.6 km and far cells only show near the horizon.
+  The lod legend (cli.md, legend.txt) is printed from the shader's
+  formulas.

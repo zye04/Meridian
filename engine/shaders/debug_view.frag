@@ -7,6 +7,7 @@
 // A debug view (meridian::DebugView) in place of the tonemap: reads the
 // render-sized scene attachments at the nearest render pixel, so nothing is
 // filtered or smeared. The target is sRGB-encoded: write linear colour.
+// The lod colours are mirrored by lodViewLegend (renderer_debug.cpp).
 
 layout(buffer_reference, std430) readonly buffer ClusterLevels {
     uint levels[];
