@@ -13,15 +13,6 @@ agent writes the answer into the spec or here.
 
 None open.
 
-Decided by the user 2026-11-24, not yet applied: reset the saved grade file
-to the starting grade (the file `~/.config/meridian/grade.json` overrides
-the starting grade in every interactive run). To apply, either delete the
-file (`rm ~/.config/meridian/grade.json`; a missing file means the
-defaults, and the sun, haze and fov it holds reset too), or open the game,
-press `G`, click Reset, then Save. Whoever next runs the game
-interactively does it; it was not done in the docs lane. Board issues #9
-and #17 were already closed on 2026-11-24 with a reason comment each.
-
 No spec waits for approval: the broadleaf forest floor spec is decided
 and sequenced, the GTAO spec is superseded (rewrite after the visibility
 buffer), the DAG voxel design is approved.
@@ -30,61 +21,40 @@ buffer), the DAG voxel design is approved.
 
 | Branch | Window / worktree | State |
 |---|---|---|
-| `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` until the next lane |
-| `main` | `../meridian-main` | main's worktree; the g1 merge was built and verified here |
+| `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` (the director works here) |
+| `main` | `../meridian-main` | main's worktree (housekeeping and merges) |
+| `voxel-coverage` | `../meridian-leaf` | leaf lane: leaf voxel look per `specs/2026-11-26-voxel-leaf-coverage-design.md` (draft, on branch `spec-voxel-coverage`, worktree `../meridian-spec-leaf`); stages 0 and 1 running |
+| `voxel-crown-9` | `../meridian-crown` | parked: rule A for root wood groups; waits for the leaf lane's trunk view |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
-| `voxel-look` | `../meridian-voxel-look` | merged into main 2026-11-25; its notes, tools and captures in `.superpowers/voxel-look/` (RESUME.md) |
-| `debug-tools-2` | `../meridian-debug` | round 1 merged 2026-11-26; round 2 on branch `debug-tools-2` (from main 4f01f72), not merged: views stretch/sun/ambient/specular/luminance, light split + stretch + EV in pixel.json, F8 solo/hide, F7 time freeze (cli.md "Debug views and the report"); first use diagnosed the user's alder bundle (decisions.md "Debug tools round 2", backlog "Alder bark wet gloss"); next: user review, merge; round 3 in backlog |
 
 Lane report shape (every lane ends its report with these five, numbers
 at 2560x1440): done, measured, look (image paths), needs from the user,
 next. The user relays between windows by pasting them.
 
-## Ordered next steps (Fable assessment, 2026-11-24)
+## Ordered next steps (updated 2026-11-26; steps 4 on from the Fable assessment of 2026-11-24)
 
 The assessment is `.superpowers/fable-review/architecture-assessment.md`
 in the main checkout (git-ignored); decisions.md holds the three entries
 that came out of it ("Performance gate restated", "Visibility buffer is
 unconditional", "VRAM budget").
 
-1. Done 2026-11-24: g1 merged (fd3df78), every exit criterion in its plan
-   met (the high overview's GPU criterion waived; main's image drops
-   there).
-2. Done: versioned `.clusters` file names (cache and voxelizer version).
-3. Measurement repair (split "cull early", exclude hop frames from 1%
-   lows, R5-1 forest walk, explain aa 2.45 vs 1.36 ms, re-measure the
-   scene-early split on current trees); several views in one process for
-   evidence passes (no such flag exists; `--benchmark --route` is the
-   nearest); a startup time breakdown with `--trees` (81 s warm against
-   ~11 s with `--placement off`); capture runs exiting non-zero on any
-   list drop, a render size other than 2560x1440, or a GPU buffer outside
-   device memory (today they only print a warning); timestamps for the
-   frames still in flight (backlog); the cascade changes (drop the
-   sun-axis re-render trigger, static ground cover out of the cascades).
-   Done with g1: the VRAM print (device-local and all heaps, peak at load
-   and at the far field), the drop warning over the whole run, voxel
-   casters, the caster LOD of one texel in every cascade.
-4. Vertex compression (backlog "Cluster vertices are 48 B uncompressed"),
-   in a fresh lane once trunk-fix merges (it may change the vertex
-   format). It must keep a position path the BLAS build can read:
-   `buildBlas` reads float3 positions straight from the vertex pool at
-   the vertex stride (renderer_resources.cpp:178-182). No new content
-   (forest floor, more species, texture packs) before it lands. Done
-   2026-11-25 (merge 3d51440): the TLAS and BLAS only for `--shadows rt`
-   and `--reference` (decisions.md "TLAS and BLAS only for ray-traced
-   modes"), resident 13956 -> 11998 MiB at the forest edge.
-5. Visibility buffer: spec, then build (structural: spec and plan).
-6. Ambient occlusion respecified on the resolve: GTAO or the visibility
+1. Leaf voxel look per `specs/2026-11-26-voxel-leaf-coverage-design.md`
+   (leaf lane, `voxel-coverage`).
+2. Bark material lane: specular per material, import channels, EON A/B.
+3. Far wood triangle cost: crown round 9, rule A, rootless models
+   (`voxel-crown-9`).
+4. Visibility buffer: spec, then build (structural: spec and plan).
+5. Ambient occlusion respecified on the resolve: GTAO or the visibility
    bitmask, chosen in that spec.
-7. Forest floor: cook (independent of the renderer, once memory headroom
+6. Forest floor: cook (independent of the renderer, once memory headroom
    exists), then placement and the contact look (after AO).
-8. Far tile tier spec (instance-less aggregates past ~1 km; aerial gate).
-9. Wind on trees and grass with the static-plus-dynamic shadow split.
-10. Frame pacing, HDR output (before the final grade is tuned, on a real
+7. Far tile tier spec (instance-less aggregates past ~1 km; aerial gate).
+8. Wind on trees and grass with the static-plus-dynamic shadow split.
+9. Frame pacing, HDR output (before the final grade is tuned, on a real
     HDR monitor), then the final grade.
-11. Water (river; planar reflections plus screen-space).
-12. Ambient sound.
+10. Water (river; planar reflections plus screen-space).
+11. Ambient sound.
 
 Ceremony by size: structural changes (visibility buffer, far tile tier,
 wind) get a spec and a plan; everything else gets a backlog row, the
@@ -110,7 +80,7 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   MiB at the far field, on the 16 GB card. Main at 3d51440 meets the
   gate at the forest edge (`--trees`): resident 11998 MiB (`Loaded:`),
   peak 13086 MiB (models loading; far field 12411), 290 MiB of resident
-  headroom. No content before vertex compression (step 4).
+  headroom.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
   (the 0.5 m relief patch), flying included; the world stays 15 x 15 km
   with 2 m terrain and the far tile tier as backdrop.
@@ -135,14 +105,9 @@ cascade".
   backlog rows for the crown sun-diffuse design, the far-crown cascade
   offset and small-model solid parts. The walk across a hornbeam's switch
   (instance 1621093) is no worse than main b6c1b3b in any segment.
-- Next, in order: (1) the trunk close-up fix (pale trunk at 1 m: streaks,
-  shards, patches, gloss; diagnosis in the voxel-look lane's round 5);
-  (2) a small exposure and sky-light lane; (3) the crown
-  opacity/density/sun-diffuse design, with the far-crown cascade offset
-  under it and the walk flicker split (still vs moving, sun visibility
-  forced to 1).
+- Next: the trunk close-up fix merged (9944513); the open voxel work is in "Ordered next steps" above and the backlog.
 
-## State of main (2026-11-24)
+## State of main (2026-11-26, 99266f0)
 
 Native 1440p; DLSS Super Resolution DLAA default (own stable TAA = fallback,
 Ray Reconstruction an A/B); raster cascaded sun shadows default; `--fov` 70
@@ -154,19 +119,32 @@ cluster DAGs (G1), casting into sun cascades 0-3, and the far field from
 the same voxelizer;
 volumetric clouds (outline off by default); valley-anchored haze; geo
 channels and causal placement (forest follows land use, scree layer).
+Landed since the g1 merge: `--capture-views FILE DIR` (many views in
+one launch), `--voxel-near M` (voxel switch distance floor, default 0),
+cluster vertices 48 -> 20 B, wood voxels folded into the leaf voxel of
+their cell, crown round 7 (bark stays triangles until thinner than its
+voxel edge) and round 8 (held-back wood groups join the voxels at the
+next power of two, voxelizer 16).
 Parity route baseline 27.9 fps with the causal forest (accepted; the
 performance lane takes it, backlog "Forest render cost after causal
 placement").
 
 ## Workspace
 
-- Worktrees: the main checkout (branch `g1`), `../meridian-main` (branch
-  `main`), `../meridian-lane-b`, `../meridian-canopy`.
+- Worktrees: the main checkout (branch `g1`), `../meridian-main` (`main`),
+  `../meridian-leaf` (`voxel-coverage`), `../meridian-spec-leaf`
+  (`spec-voxel-coverage`), `../meridian-crown` (`voxel-crown-9`),
+  `../meridian-lane-b`, `../meridian-canopy`. `../meridian-voxel-look`
+  removed 2026-11-26; its `.superpowers/` is in
+  `.superpowers/archive/voxel-look/` (main checkout, git-ignored).
 - Parked branches (unmerged, on origin; finish or drop when the area comes up):
   - `clouds-25d`, `clouds-25d-mip`: paused 2.5D clouds (volumetric kept).
   - origin only: `ground2` (natural terrain transitions WIP),
     `ground2-cliffs` (non-repeating cliffs WIP); both wait for the forest
     floor work to decide them.
+- Archive tags `archive/trunk-fix`, `archive/voxel-crown`, `-2`, `-4`, `-6`,
+  `-6-trunk`, `-7-wood`, `-8-wait`: branches fully merged into main,
+  deleted locally 2026-11-26 (none existed on origin); tags pushed.
 - Archive tags for the five branches deleted on 2026-11-24 (locally and on
   origin); `git checkout archive/<name>` to read one:
   - `archive/far-c`: far-cell raster with two-phase Hi-Z, slower than main
@@ -243,6 +221,8 @@ The user's rules:
   turns, interactive settings), not only static captures.
 - Look target: `assets/reference/chlorophyll/` plus
   `assets/reference/target-meadow.png`; clouds stay volumetric.
+- No frame-time limit while a look is being found; a general performance
+  pass comes later; costs are still reported (user, 2026-11-26).
 - Stability over sharpness; judge clarity in motion at user speeds.
 - Reports: "status" = running and waiting work only; "overview" = done.
 - Usage: the user reports the 5-hour and weekly %; Sonnet for mechanical
