@@ -317,12 +317,21 @@ else
     size="$(awk -v e="$extent" -v u="$fab_units_per_meter" -v d="$broadleaf_texels_per_meter" \
       -v lo="$broadleaf_min_texture" -v hi="$broadleaf_max_texture" \
       'BEGIN { s = lo; while (s < e / u * d && s < hi) s *= 2; print s }')"
-    stamp="$size green-flipped"
+    stamp="$size green-flipped baked"
     [[ "$(cat "$out/texture-size" 2>/dev/null)" != "$stamp" ]] || continue
     staging="$megascans/_broadleaf/$name"
     rm -rf "$staging"
     mkdir -p "$staging/textures"
-    cp "$gltf" "$extract"/*.bin "$staging/"
+    cp "$extract"/*.bin "$staging/"
+    # The Fab node chain (axis swap, then centimeters) nets to a uniform
+    # 1/fab_units_per_meter; one scale node on the lone mesh lets the cook
+    # bake it, so the mesh is in meters and stands alone as a placement
+    # prototype.
+    jq --argjson s "$(awk -v u="$fab_units_per_meter" 'BEGIN { print 1 / u }')" '
+      [.nodes[] | select(.mesh != null) | .mesh] as $meshes
+      | if ($meshes | length) != 1 then error("expected one mesh node") else . end
+      | .nodes = [{mesh: $meshes[0], scale: [$s, $s, $s]}] | .scenes = [{nodes: [0]}] | .scene = 0
+    ' "$gltf" > "$staging/$(basename "$gltf")"
     for texture in "$extract"/textures/*; do
       edits=()
       [[ "$(magick identify -format '%w' "$texture")" -le "$size" ]] ||
