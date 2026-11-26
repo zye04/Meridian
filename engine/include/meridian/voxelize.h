@@ -99,6 +99,8 @@ VoxelGrid mergeVoxelGrid(const VoxelGrid &fine);
 // depths add (independent media) up to the opaque limit, and their material
 // is weighted by coverage.
 VoxelGrid combineVoxelGrids(std::span<const VoxelGrid *const> grids);
+// Coincident voxels as one, as combineVoxelGrids combines them.
+VoxelPayload combineVoxels(std::span<const VoxelPayload> voxels);
 
 // Reference for tests: the optical depth of the voxel at voxelLo along axis
 // from raysPerSide^2 rays at the cell centres of its face, each blocked when

@@ -125,7 +125,10 @@ struct VoxelSource {
 // mergeVoxelGrid).
 ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels = nullptr);
 
-// Fills every ClusterLod::voxelAxis of one model's meshes: the optical depth
+// First folds each opaque voxel that shares its cell (same edge) with a
+// transmissive one into it (combineVoxels): a branch inside leaves blends
+// into them instead of drawing as a cube of its own. Then fills every
+// ClusterLod::voxelAxis of one model's meshes: the optical depth
 // through all of the model's voxels at the same edge, from each voxel's
 // centre out along the six axis directions. Then drops the voxels deeper
 // than kVoxelHiddenDepth along all six (no view sees them, the sun's

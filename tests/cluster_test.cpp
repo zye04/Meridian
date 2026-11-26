@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -934,6 +935,43 @@ TEST_CASE("a short part of a tall model voxelizes no finer than the model's heig
     }
   }
   CHECK(voxels);
+}
+
+TEST_CASE("an opaque voxel sharing a cell with a transmissive one folds into it") {
+  // Two meshes on one lattice: leaves at voxels 0 and 1, wood at 0 and 2.
+  const auto mesh = [](uint64_t occupied, const VoxelPayload &v) {
+    ClusterLod lod;
+    Cluster c;
+    c.brickCount = 1;
+    c.voxelEdge = 1.0f;
+    lod.clusters.push_back(c);
+    lod.bricks.push_back({{0, 0, 0}, 0, occupied});
+    lod.voxels.assign(std::popcount(occupied), packVoxelPayload(v));
+    return lod;
+  };
+  VoxelPayload leaf, wood;
+  for (int a = 0; a < 3; ++a) {
+    leaf.depth[a] = 1.0f;
+    wood.depth[a] = 0.25f;
+  }
+  leaf.albedo = {0.04f, 0.09f, 0.01f};
+  leaf.transmission = {0.1f, 0.2f, 0.02f};
+  wood.albedo = {0.25f, 0.2f, 0.15f};
+  std::vector<ClusterLod> lods{mesh(0b011, leaf), mesh(0b101, wood)};
+  bakeModelAxisDepths(lods);
+  // The wood keeps only the voxel it has alone.
+  REQUIRE(lods[1].voxels.size() == 1);
+  CHECK(lods[1].bricks[0].occupied == 0b100);
+  REQUIRE(lods[0].voxels.size() == 2);
+  const VoxelPayload mixed = unpackVoxelPayload(lods[0].voxels[0]);
+  const VoxelPayload alone = unpackVoxelPayload(lods[0].voxels[1]);
+  CHECK(mixed.depth[1] == doctest::Approx(1.25f).epsilon(0.05));
+  CHECK(alone.depth[1] == doctest::Approx(1.0f).epsilon(0.05));
+  // Material by coverage: leaf 1 - e^-1 = 0.63, wood 1 - e^-0.25 = 0.22.
+  const float w = 0.221f / (0.632f + 0.221f);
+  CHECK(mixed.albedo.x == doctest::Approx(0.04f + w * (0.25f - 0.04f)).epsilon(0.05));
+  CHECK(mixed.transmission.y == doctest::Approx((1.0f - w) * 0.2f).epsilon(0.05));
+  CHECK(alone.albedo.x == doctest::Approx(0.04f).epsilon(0.05));
 }
 
 TEST_CASE("voxels hidden from every direction are dropped from the bricks") {

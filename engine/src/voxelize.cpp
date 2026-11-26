@@ -391,55 +391,77 @@ VoxelGrid mergeVoxelGrid(const VoxelGrid &fine) {
   return coarse;
 }
 
+namespace {
+
+// Coincident voxels as independent media: optical depths add up to the opaque
+// limit, the material is weighted by coverage.
+struct VoxelSum {
+  float depth[3] = {};
+  float weight = 0.0f;
+  Vec3 albedo, transmission;
+  float moment[6] = {};
+  float roughness = 0.0f;
+
+  void add(const VoxelPayload &v) {
+    const float w = std::max(v.coverage, 1e-6f);
+    for (int a = 0; a < 3; ++a) {
+      depth[a] += v.depth[a];
+    }
+    weight += w;
+    albedo = albedo + v.albedo * w;
+    transmission = transmission + v.transmission * w;
+    for (int k = 0; k < 6; ++k) {
+      moment[k] += v.moment[k] * w;
+    }
+    roughness += v.roughness * w;
+  }
+
+  VoxelPayload payload() const {
+    VoxelPayload v;
+    const float opaque = -std::log(kVoxelMinTransmittance);
+    for (int a = 0; a < 3; ++a) {
+      v.depth[a] = std::min(depth[a], opaque);
+    }
+    const float inv = 1.0f / weight;
+    v.albedo = albedo * inv;
+    v.transmission = transmission * inv;
+    for (int k = 0; k < 6; ++k) {
+      v.moment[k] = moment[k] * inv;
+    }
+    v.roughness = roughness * inv;
+    v.coverage = coverageOf(v.depth);
+    return v;
+  }
+};
+
+} // namespace
+
 VoxelGrid combineVoxelGrids(std::span<const VoxelGrid *const> grids) {
-  struct Sum {
-    float depth[3] = {};
-    float weight = 0.0f;
-    Vec3 albedo, transmission;
-    float moment[6] = {};
-    float roughness = 0.0f;
-  };
-  std::unordered_map<uint64_t, Sum> sums;
+  std::unordered_map<uint64_t, VoxelSum> sums;
   for (const VoxelGrid *grid : grids) {
     for (const VoxelBrick &brick : grid->bricks) {
       for (uint32_t i = 0; i < 64; ++i) {
         if (!((brick.occupied >> i) & 1u)) {
           continue;
         }
-        const VoxelPayload &v = brick.voxels[i];
-        Sum &s = sums[voxelKey(brick.origin[0] + int64_t(i % 4), brick.origin[1] + int64_t(i / 4 % 4),
-                               brick.origin[2] + int64_t(i / 16))];
-        const float w = std::max(v.coverage, 1e-6f);
-        for (int a = 0; a < 3; ++a) {
-          s.depth[a] += v.depth[a];
-        }
-        s.weight += w;
-        s.albedo = s.albedo + v.albedo * w;
-        s.transmission = s.transmission + v.transmission * w;
-        for (int k = 0; k < 6; ++k) {
-          s.moment[k] += v.moment[k] * w;
-        }
-        s.roughness += v.roughness * w;
+        sums[voxelKey(brick.origin[0] + int64_t(i % 4), brick.origin[1] + int64_t(i / 4 % 4),
+                      brick.origin[2] + int64_t(i / 16))]
+            .add(brick.voxels[i]);
       }
     }
   }
   VoxelGrid out;
   out.edge = grids.empty() ? 0.0f : grids[0]->edge;
-  const float opaque = -std::log(kVoxelMinTransmittance);
-  out.bricks = toBricks(sums, [&](VoxelPayload &v, const Sum &s) {
-    for (int a = 0; a < 3; ++a) {
-      v.depth[a] = std::min(s.depth[a], opaque);
-    }
-    const float inv = 1.0f / s.weight;
-    v.albedo = s.albedo * inv;
-    v.transmission = s.transmission * inv;
-    for (int k = 0; k < 6; ++k) {
-      v.moment[k] = s.moment[k] * inv;
-    }
-    v.roughness = s.roughness * inv;
-    v.coverage = coverageOf(v.depth);
-  });
+  out.bricks = toBricks(sums, [](VoxelPayload &v, const VoxelSum &s) { v = s.payload(); });
   return out;
+}
+
+VoxelPayload combineVoxels(std::span<const VoxelPayload> voxels) {
+  VoxelSum sum;
+  for (const VoxelPayload &v : voxels) {
+    sum.add(v);
+  }
+  return sum.payload();
 }
 
 float bruteForceOpticalDepth(std::span<const VoxelTriangle> triangles,

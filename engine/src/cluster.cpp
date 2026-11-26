@@ -33,7 +33,7 @@ constexpr float kMaxLeafScale = 4.0f;
 constexpr size_t kBvhBranching = 8;
 // Bump when voxelize's output or the voxel levels' rules change for the same
 // inputs.
-constexpr uint32_t kVoxelizerVersion = 12;
+constexpr uint32_t kVoxelizerVersion = 13;
 // A voxel cluster holds the bricks of one aligned region this many voxels
 // on a side (8^3 bricks at most): fine levels of sparse foliage still fill
 // clusters of tens of bricks (4^3-brick regions averaged 6-11 bricks and
@@ -893,8 +893,7 @@ void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
     uint32_t voxel;
     int64_t c[3];
   };
-  std::map<float, std::map<std::array<int64_t, 3>, Cell>> cells;
-  std::map<float, std::vector<Ref>> refs;
+  std::map<float, std::map<std::array<int64_t, 3>, std::vector<std::pair<size_t, uint32_t>>>> at;
   for (size_t m = 0; m < meshes.size(); ++m) {
     ClusterLod &lod = meshes[m];
     lod.voxelAxis.assign(lod.voxels.size(), 0);
@@ -906,17 +905,63 @@ void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
           if (!((brick.occupied >> i) & 1u)) {
             continue;
           }
-          const std::array<int64_t, 3> key = {brick.origin[0] + int64_t(i % 4),
-                                              brick.origin[1] + int64_t(i / 4 % 4),
-                                              brick.origin[2] + int64_t(i / 16)};
-          const VoxelPayload v = unpackVoxelPayload(lod.voxels[voxel]);
-          Cell &cell = cells[c.voxelEdge][key];
-          for (int a = 0; a < 3; ++a) {
-            cell.depth[a] += v.depth[a];
-          }
-          refs[c.voxelEdge].push_back({m, voxel, {key[0], key[1], key[2]}});
-          ++voxel;
+          at[c.voxelEdge][{brick.origin[0] + int64_t(i % 4), brick.origin[1] + int64_t(i / 4 % 4),
+                           brick.origin[2] + int64_t(i / 16)}]
+              .push_back({m, voxel++});
         }
+      }
+    }
+  }
+  // Opaque voxels (branches) in a cell with a transmissive one (leaves) fold
+  // into it: what an opaque voxel holds there is thinner than the voxel, and
+  // as a cube of its own it shows as a block of bark colour where the leaves
+  // around it blend it in. Folded voxels are marked hidden from every
+  // direction, so the drop below removes them.
+  constexpr uint32_t kFolded = ~0u;
+  for (auto &[edge, grid] : at) {
+    for (auto &[key, list] : grid) {
+      std::vector<VoxelPayload> v;
+      for (const auto &[m, voxel] : list) {
+        v.push_back(unpackVoxelPayload(meshes[m].voxels[voxel]));
+      }
+      const auto transmits = [](const VoxelPayload &p) {
+        return p.transmission.x + p.transmission.y + p.transmission.z > 0.0f;
+      };
+      size_t target = list.size();
+      for (size_t k = 0; k < list.size(); ++k) {
+        if (transmits(v[k]) && (target == list.size() || v[k].coverage > v[target].coverage)) {
+          target = k;
+        }
+      }
+      if (target == list.size()) {
+        continue;
+      }
+      std::vector<VoxelPayload> parts = {v[target]};
+      for (size_t k = 0; k < list.size(); ++k) {
+        if (!transmits(v[k])) {
+          parts.push_back(v[k]);
+          meshes[list[k].first].voxelAxis[list[k].second] = kFolded;
+        }
+      }
+      if (parts.size() > 1) {
+        meshes[list[target].first].voxels[list[target].second] = packVoxelPayload(combineVoxels(parts));
+      }
+    }
+  }
+  std::map<float, std::map<std::array<int64_t, 3>, Cell>> cells;
+  std::map<float, std::vector<Ref>> refs;
+  for (const auto &[edge, grid] : at) {
+    for (const auto &[key, list] : grid) {
+      for (const auto &[m, voxel] : list) {
+        if (meshes[m].voxelAxis[voxel] == kFolded) {
+          continue;
+        }
+        const VoxelPayload v = unpackVoxelPayload(meshes[m].voxels[voxel]);
+        Cell &cell = cells[edge][key];
+        for (int a = 0; a < 3; ++a) {
+          cell.depth[a] += v.depth[a];
+        }
+        refs[edge].push_back({m, voxel, {key[0], key[1], key[2]}});
       }
     }
   }
@@ -1009,6 +1054,9 @@ void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
         const uint32_t voxel = lod.bricks[c.firstBrick].firstVoxel;
         brick.firstVoxel = uint32_t(voxels.size());
         voxels.push_back(lod.voxels[voxel]);
+        if (lod.voxelAxis[voxel] == kFolded) {
+          voxels.back().depthSpread &= 0xFF000000u; // its coverage is in a leaf voxel: draws nowhere
+        }
         axis.push_back(lod.voxelAxis[voxel]);
         bricks.push_back(brick);
       }

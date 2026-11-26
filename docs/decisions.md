@@ -5504,3 +5504,51 @@ cached shadow pages are invalidated.
   1st/99th percentile -3.0 / -2.0, residual 0.22 at 1 m), and its levels
   above 0.25 m come from mergeVoxelGrid, which a voxelize filter never
   reaches. The far-crown speckle's source is still open (backlog).
+
+## Wood voxels fold into the leaf voxel of their cell (crown lane round 5, 2026-11-26)
+
+- Problem: far crowns speckle with pale blocks. Inside the crown mask at the
+  Part B pose 27.6% of raster pixels were wood-coloured against 6.5% in the
+  256 spp reference (backlog "Voxel crown speckle: wood voxels").
+- Premise, checked offline before the change: the wood *amount* is about
+  right; its *form* is wrong. (a) Mean linear crown albedo, raster / reference
+  1.051 on the common mask (main b40f1f6). (b) The coverage-to-cube rule
+  (voxel_bricks.comp: each mesh's voxel an opaque cube with probability its
+  view opacity, meshes rolled independently) simulated over beech and
+  hornbeam Forest_01's levels (`.superpowers/crown5/sim.cpp`): the visible
+  share of wood cubes matches the share of wood that is first hit on the
+  triangles within ~2 points (beech 0.5 m: x 0.33 / z 0.30 / top 0.11
+  against 0.31 / 0.31 / 0.12). The reference blends sub-pixel twigs into
+  leaf-coloured pixels; the raster drew them as cubes the size of a voxel.
+- Choice: in `bakeModelAxisDepths` (the model-level pass over every mesh's
+  voxels by lattice cell), an opaque voxel (no diffuse transmission) in a
+  cell that also holds a transmissive one folds into the transmissive voxel
+  with the most coverage, as coarse levels already combine coincident
+  voxels (`combineVoxels`, the combineVoxelGrids rule: optical depths add,
+  albedo, transmission, normal moment and roughness weighted by coverage).
+  The folded voxel is dropped. Cells with wood only (trunks, bare
+  branches) keep it. Generic: the rule reads transmission, not mesh names.
+- Level: every voxel level. Wood in mixed cells is 1.4-3.4 cm thick (beech,
+  coverage-weighted median to upper quartile of its side coverage x edge
+  at 0.0625-0.125 m; hornbeam alike), under the finest voxel edge (6.25 cm),
+  so no level has it filling the cell.
+- Measured at the Part B pose (Release, `Render 2560x1440, display
+  2560x1440`, main b40f1f6 vs the fold, the same reference;
+  `.superpowers/crown5/`):
+
+  | metric | before | after | reference |
+  |---|---|---|---|
+  | wood-coloured crown px (crown3/classify.py) | 0.276 | 0.149 | 0.065 |
+  | albedo residual (log) | 0.244 | 0.209 | 0.149 |
+  | mean crown albedo, raster / reference | 1.051 | 1.035 | |
+  | thin runs >= 3 px (coverage-exact mask) | 2074 | 2051 | |
+  | GPU ms | 29.48 | 27.71 | |
+
+  Voxel bricks drawn 11.56 M -> 8.22 M (cull clusters 11.33 -> 9.71 ms). The
+  thin-structure metric of analyze.py rose (36638 -> 62095 runs) only because
+  its 0.02 albedo mask drops blended voxels whose colour lies near the
+  ground's; the pixels where the terrain shows exactly are unchanged
+  (0.3737 vs 0.3736 of the frame).
+- Not done: wood-only cubes still read pale (the rest of the 0.149); a
+  leaf and a wood mesh whose LOD cuts differ at a distance can show a cell
+  twice or not at all (the axis depth bake assumes the same).
