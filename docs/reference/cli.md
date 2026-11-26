@@ -343,8 +343,11 @@ and medium pieces (main.cpp `ForestFloorScatter`, `ClearingStones`): stones
 and roots under the canopy (layer 14), flat ground rocks on open knolls
 (15), the pack's medium rocks on the steep-ground layer (3) and its small
 and clustered rocks as scree (13), without the sandstone cliff. Cliffs,
-ledges, embankments and large rocks are not placed. Without the flag the
-placement is unchanged.
+ledges, embankments and large rocks are not placed. With `--trees` the
+forest layer then takes only the open-crowned variants (`BroadleafForest`:
+beech Field_01 and Forest_03, hornbeam Field_01 and Forest_02, alder
+Field_02 and Field_01) at 9 m spacing. Without the flag the placement is
+unchanged.
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast

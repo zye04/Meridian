@@ -5851,3 +5851,20 @@ cached shadow pages are invalidated.
   resident 10598 MiB with the layers (10327 without), placed 721909
   (layer 14: 368859, 15: 5101, 3: 4831, 13: 20303), 0 dropped in every
   cull list of every view.
+
+## Broadleaf forest from open-crowned variants (scene lane round 2b, 2026-11-26)
+
+- Choice: with `--scenery broadleaf` the forest layer places only the
+  broad, dense, round-crowned variants (`BroadleafForest`, main.cpp: beech
+  Field_01 23 m crown / Forest_03 16 m, hornbeam Field_01 13 m / Forest_02
+  15 m, alder Field_02 16 m / Field_01 13 m; species shares 0.6 / 0.25 /
+  0.15 as before) at 9 m spacing. The forest-grown variants it drops are
+  mostly poles with 3-8 m crowns (beech Forest_06/08, alder Forest_06/08,
+  hornbeam Forest_10), which read as speckle from above.
+- Try 16 m (spacing = mean crown width): 40442 trees, crowns stand apart
+  and ground shows (the forest rule's density stays under 1). 9 m:
+  126735 trees (281999 before), closed canopy. a1 at sun 35 deg, -1.25 EV:
+  GPU 26.36 -> 21.35 ms, resident 10598 -> 9296 MiB, 0 dropped.
+- Still open: at 1:1 against 1.jpg (crown scale ~40 px) the crowns read as
+  fine speckle, not round domes; the crown-scale light/dark ratio already
+  matches (1.67 against 1.70).

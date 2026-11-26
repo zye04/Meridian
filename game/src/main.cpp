@@ -273,6 +273,24 @@ struct ForestFloorScatter {
   static constexpr float kForestLo = 0.2f, kForestHi = 0.5f;
   static constexpr float kRootWeight = 0.5f; // per root piece, against 1 per stone
 };
+// With the broadleaf scenery the forest is made of the open-crowned
+// variants only (broad, dense, round crowns: the closed canopy seen from
+// above), spaced so neighbouring crowns touch.
+struct BroadleafForest {
+  // Crown-weighted mean width of the picks below is ~17 m at scale 1, but
+  // the forest rule's density stays under 1 over most of the forest, so the
+  // dither spacing has to be about half that for the crowns to meet.
+  static constexpr float kFootprint = 9.0f; // m
+  struct Pick {
+    const char *species, *pack;
+    std::initializer_list<const char *> variants;
+  };
+  static constexpr std::array<Pick, 3> kPicks{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01", "Forest_03"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01", "Forest_02"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
+  }};
+};
 // Flat ground rocks breaking through the turf where the soil is thin: on
 // convex ground (ridges, knolls) in the open the forest leaves.
 struct ClearingStones {
@@ -344,10 +362,33 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       into.emplace_back(id, weight / static_cast<float>(ids.size()));
     }
   };
+  // The species' forest shares, also for the broadleaf picks.
+  constexpr float kBeechShare = 0.6f, kHornbeamShare = 0.25f, kAlderShare = 0.15f;
+  if (trees && broadleaf) {
+    const std::array<float, 3> shares{kBeechShare, kHornbeamShare, kAlderShare};
+    for (size_t s = 0; s < BroadleafForest::kPicks.size(); ++s) {
+      const auto &pick = BroadleafForest::kPicks[s];
+      std::vector<uint32_t> ids;
+      for (const char *variant : pick.variants) {
+        const std::string directory =
+            treePalette.empty() ? std::string(pick.species) : pick.species + ("-" + treePalette);
+        const std::string name = std::string("SM_") + pick.pack + "_" + variant;
+        const std::string path = "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
+        if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
+          const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
+          ids.insert(ids.end(), added.begin(), added.end());
+        }
+      }
+      for (uint32_t id : ids) {
+        forest.emplace_back(id, shares[s] / static_cast<float>(ids.size()));
+      }
+    }
+  } else if (trees) {
+    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", kBeechShare, forest);
+    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", kHornbeamShare, forest);
+    addUnrealTrees("blackalder", "BlackAlder", "Forest", kAlderShare, forest);
+  }
   if (trees) {
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.6f, forest);
-    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", 0.25f, forest);
-    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.15f, forest);
     addUnrealTrees("blackalder", "BlackAlder", "Field", 0.5f, lone);
     addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Field", 0.3f, lone);
     addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.2f, lone);
@@ -519,7 +560,8 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   std::vector<PlacementLayer> layers;
   std::optional<PlacementLayer> forestLayer; // a copy: layers grows
   if (!forest.empty()) {
-    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(), 0.8f * treeScale,
+    layers.push_back({kForestLayerId, forest, broadleaf ? BroadleafForest::kFootprint : 6.0f,
+                      forestRule(), 0.8f * treeScale,
                       1.2f * treeScale, Rotation::Yaw, 0.3f});
     layers.back().farField = farField;
     // Field trees stand on the open pasture the forest leaves.
