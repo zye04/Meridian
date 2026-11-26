@@ -1033,6 +1033,15 @@ TEST_CASE("a solid part's voxel groups keep the errors of their edges") {
   CHECK(finest > 0);
 }
 
+TEST_CASE("powers of two around a value are exact one ulp off a power of two") {
+  CHECK(powerOfTwoAtOrAbove(0x1p-5f) == 0x1p-5f);
+  CHECK(powerOfTwoAtOrAbove(0x1.000002p-5f) == 0x1p-4f);
+  CHECK(powerOfTwoAtOrAbove(0x1.fffffep-6f) == 0x1p-5f);
+  CHECK(powerOfTwoAtOrBelow(0x1p-5f) == 0x1p-5f);
+  CHECK(powerOfTwoAtOrBelow(0x1.fffffep-6f) == 0x1p-6f);
+  CHECK(powerOfTwoAtOrBelow(0x1.000002p-5f) == 0x1p-5f);
+}
+
 TEST_CASE("a solid group with no power of two between its errors joins at the next one up") {
   // Wavy limbs 3-5 cm across on a 16 m model (finest edge 1/32 m): thick at
   // the finest edges, they keep their triangles past them, and a later pass
@@ -1070,9 +1079,26 @@ TEST_CASE("a solid group with no power of two between its errors joins at the ne
   mesh.voxelize = true;
   mesh.voxelModelHeight = 16.0f;
   const VoxelSource source{{&material, 1}};
+  // Triangle groups at or past the finest edge with no power of two between
+  // their children's error and their own: voxelizer 15 kept them waiting.
+  const auto waiting = [](const ClusterLod &lod) {
+    std::map<uint32_t, std::pair<float, float>> groups; // children's error, own
+    for (const Cluster &c : lod.clusters) {
+      if (!isVoxel(c) && c.self.error != FLT_MAX) {
+        auto &g = groups.try_emplace(c.group, 0.0f, c.self.error).first->second;
+        g.first = std::max(g.first, c.refined.error);
+      }
+    }
+    size_t n = 0;
+    for (const auto &[group, errors] : groups) {
+      n += errors.second >= 1.0f / 32.0f && powerOfTwoAtOrBelow(errors.second) < errors.first;
+    }
+    return n;
+  };
+  // Control: this mesh's simplification has such passes (its triangle-only
+  // DAG keeps every group).
+  CHECK(waiting(buildClusterLod(mesh)) > 0);
   const ClusterLod lod = buildClusterLod(mesh, &source);
-  // Per triangle group kept as triangles: its children's error and its own.
-  std::map<uint32_t, std::pair<float, float>> groups;
   size_t voxels = 0;
   for (const Cluster &c : lod.clusters) {
     if (isVoxel(c)) {
@@ -1081,18 +1107,10 @@ TEST_CASE("a solid group with no power of two between its errors joins at the ne
       if (c.self.error != FLT_MAX) {
         CHECK(c.self.error == 2.0f * c.voxelEdge);
       }
-    } else if (c.self.error != FLT_MAX) {
-      auto &g = groups.try_emplace(c.group, 0.0f, c.self.error).first->second;
-      g.first = std::max(g.first, c.refined.error);
     }
   }
-  size_t waiting = 0;
-  for (const auto &[group, errors] : groups) {
-    waiting += errors.second >= 1.0f / 32.0f &&
-               std::exp2(std::floor(std::log2(errors.second))) < errors.first;
-  }
   CHECK(voxels > 0);
-  CHECK(waiting == 0);
+  CHECK(waiting(lod) == 0);
 }
 
 TEST_CASE("an opaque voxel sharing a cell with a transmissive one folds into it") {

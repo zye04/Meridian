@@ -139,6 +139,10 @@ ClusterLod buildClusterLod(const MeshData &mesh, const VoxelSource *voxels = nul
 // included), and the bricks that leave empty.
 void bakeModelAxisDepths(std::vector<ClusterLod> &meshes);
 
+// The power of two at or above / at or below x > 0 (voxel lattice edges).
+float powerOfTwoAtOrAbove(float x);
+float powerOfTwoAtOrBelow(float x);
+
 // Simplification error in pixels on a screen `screenHeight` pixels tall,
 // for bounds already placed in world space and uniformly scaled by `scale`
 // (projY: projection[1][1]). Ignores perspective distortion (clusterlod's

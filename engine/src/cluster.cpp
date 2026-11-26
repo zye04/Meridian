@@ -416,8 +416,7 @@ struct VoxelLevels {
     // simplified one (often a pass that adds no error), it takes the next one
     // up, as a stuck group does: its triangles then draw at most to twice the
     // distance where the children's error is the threshold. Waiting for a
-    // later pass instead chained up to seven passes in the tested trees,
-    // and kept sub-pixel wood triangles out to 800 m.
+    // later pass instead can chain over many passes.
     if (edge < minError) {
       edge = levels.edgeFor(minError, FLT_MAX);
     }
@@ -440,11 +439,10 @@ struct VoxelLevels {
   // and clodBuild's final single-cluster path it stays a terminal triangle
   // group (error FLT_MAX), drawn at every distance.
   float edgeFor(float minError, float maxError) const {
-    const float floorEdge = std::exp2(std::floor(std::log2(minEdge)));
-    const float edge =
-        maxError == FLT_MAX
-            ? std::max(floorEdge, std::exp2(std::ceil(std::log2(std::max(minError, minEdge)))))
-            : std::max(floorEdge, std::exp2(std::floor(std::log2(maxError))));
+    const float floorEdge = powerOfTwoAtOrBelow(minEdge);
+    const float edge = maxError == FLT_MAX
+                           ? std::max(floorEdge, powerOfTwoAtOrAbove(std::max(minError, minEdge)))
+                           : std::max(floorEdge, powerOfTwoAtOrBelow(maxError));
     return edge <= maxError ? edge : 0.0f;
   }
 
@@ -1120,6 +1118,15 @@ void bakeModelAxisDepths(std::vector<ClusterLod> &meshes) {
     lod.voxels = std::move(voxels);
     lod.voxelAxis = std::move(axis);
   }
+}
+
+// From the exponent, not a float log2: that rounds a value one ulp off a
+// power of two onto it.
+float powerOfTwoAtOrBelow(float x) { return std::ldexp(1.0f, std::ilogb(x)); }
+
+float powerOfTwoAtOrAbove(float x) {
+  const float below = powerOfTwoAtOrBelow(x);
+  return below == x ? below : 2.0f * below;
 }
 
 float projectedErrorPixels(const LodBounds &bounds, Vec3 camera, float scale,

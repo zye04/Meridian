@@ -5664,7 +5664,8 @@ cached shadow pages are invalidated.
   waited for a later pass. Replayed from the v15 caches
   (`.superpowers/crown8/dag.cpp`, REPLAY=1, in meridian-crown): waits hold
   2689 of the 3880 at 400 m, 2324 of them in passes that added no error,
-  in chains of up to seven passes (beech: four and five). Waits only follow
+  in chains of up to seven passes (beech: four and five), and held sub-pixel
+  wood triangles to 800 m (hornbeam: 410 there, all waiting). Waits only follow
   a thick hold (a group's children's error above the finest edge). Not
   the cause: stuck groups (none in the three trees) and the final single
   cluster (one per trunk in beech and hornbeam, 68 and 65 triangles); the
@@ -5678,6 +5679,11 @@ cached shadow pages are invalidated.
   where the children's error is 1 px. Voxelizer 16. Tried first (the
   director's text): only passes that add no error take the next power of
   two; worse at 400 m (4317 thin-cluster triangles: hornbeam 335 -> 1708).
+  Lattice edges come from the float's exponent (`powerOfTwoAtOrAbove`,
+  `powerOfTwoAtOrBelow`): a float log2 rounds a value one ulp off a power
+  of two onto it, so the next power of two could land under the children's
+  error (fix check). The three trees' v16 caches are byte-identical with
+  and without it.
 - Measured on the CPU (in-process build, identical to the game's cache for
   v15): thin-cluster wood triangles at 400 m beech 2328 -> 1867, hornbeam
   335 -> 0, alder 1217 -> 103 (3880 -> 1970); at 200 m 7384 -> 5534, 1740
