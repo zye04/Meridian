@@ -287,7 +287,9 @@ else
   done
   # The "Forest European Broadleaf" pack's meshes (Fab *_gltf_high.zip):
   # Fab's converter glTF, centimeters under a parent node chain the loader
-  # applies, 4K albedo, normal and ORM. Texture size by texel density: the
+  # applies, 4K albedo, normal and ORM. The normal maps are DirectX (green
+  # down: positive curl, where the pack's OpenGL surfaces give negative), so
+  # green is flipped. Texture size by texel density: the
   # smallest power of two that gives the mesh's largest extent
   # broadleaf_texels_per_meter, clamped to [min, max] (512 per meter is one
   # texel per pixel at ~3.6 m at 2560 px and 70 degrees; closer, mip 0 is
@@ -315,21 +317,26 @@ else
     size="$(awk -v e="$extent" -v u="$fab_units_per_meter" -v d="$broadleaf_texels_per_meter" \
       -v lo="$broadleaf_min_texture" -v hi="$broadleaf_max_texture" \
       'BEGIN { s = lo; while (s < e / u * d && s < hi) s *= 2; print s }')"
-    [[ "$(cat "$out/texture-size" 2>/dev/null)" != "$size" ]] || continue
+    stamp="$size green-flipped"
+    [[ "$(cat "$out/texture-size" 2>/dev/null)" != "$stamp" ]] || continue
     staging="$megascans/_broadleaf/$name"
     rm -rf "$staging"
     mkdir -p "$staging/textures"
     cp "$gltf" "$extract"/*.bin "$staging/"
     for texture in "$extract"/textures/*; do
-      if [[ "$(magick identify -format '%w' "$texture")" -le "$size" ]]; then
+      edits=()
+      [[ "$(magick identify -format '%w' "$texture")" -le "$size" ]] ||
+        edits+=(-resize "${size}x${size}")
+      [[ "$texture" != *_normal.* ]] || edits+=(-channel G -negate +channel)
+      if [[ ${#edits[@]} -eq 0 ]]; then
         cp "$texture" "$staging/textures/"
       else
-        magick "$texture" -resize "${size}x${size}" "$staging/textures/$(basename "$texture")"
+        magick "$texture" "${edits[@]}" "$staging/textures/$(basename "$texture")"
       fi
     done
     rm -rf "$out.part"
     "$cook" "$staging/$(basename "$gltf")" "$out.part"
-    echo "$size" > "$out.part/texture-size"
+    echo "$stamp" > "$out.part/texture-size"
     rm -rf "$out"
     mv "$out.part" "$out"
   done
