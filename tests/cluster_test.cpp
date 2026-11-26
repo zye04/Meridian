@@ -760,6 +760,41 @@ TEST_CASE("a mesh that does not opt in gets no voxels") {
   }
 }
 
+TEST_CASE("voxel seeds follow positions and indices only, and differ between models") {
+  std::vector<MeshData> model{leafCrown(10, 2), leafCrown(12, 3)};
+  seedVoxels(model);
+  const uint32_t seeds[2] = {model[0].voxelSeed, model[1].voxelSeed};
+  CHECK(seeds[0] != seeds[1]);
+
+  // What the cache key hashes besides geometry (vertex attributes beyond the
+  // position, i.e. the Vertex layout; versions are not inputs at all) moves
+  // the key but not the seeds.
+  const VoxelMaterial material{};
+  const uint32_t primitiveMaterial[2] = {0, 0};
+  const std::array<int, 3> imageOf{-1, -1, -1};
+  const auto key = [&] {
+    return clusterSourceKey(model, {}, {&material, 1}, primitiveMaterial, {&imageOf, 1});
+  };
+  const uint64_t before = key();
+  for (MeshData &mesh : model) {
+    for (Vertex &v : mesh.vertices) {
+      v.alpha = 0.5f;
+      v.uvX += 0.25f;
+      v.normal = {0.0f, 1.0f, 0.0f};
+      v.tangent[3] = -1.0f;
+    }
+  }
+  CHECK(key() != before);
+  seedVoxels(model);
+  CHECK(model[0].voxelSeed == seeds[0]);
+  CHECK(model[1].voxelSeed == seeds[1]);
+
+  std::vector<MeshData> other{leafCrown(10, 7), leafCrown(12, 3)};
+  seedVoxels(other);
+  CHECK(other[0].voxelSeed != seeds[0]);
+  CHECK(other[1].voxelSeed != seeds[1]);
+}
+
 TEST_CASE("the cluster source key changes when a voxelized texture changes") {
   std::vector<MeshData> meshes{leafCrown(10, 2)};
   std::vector<std::vector<uint8_t>> textures{{1, 2, 3, 4}};

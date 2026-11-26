@@ -131,6 +131,10 @@ def main():
                                           "metallicRoughnessTexture": texture(orm),
                                           "metallicFactor": 0.0},
                  "normalTexture": texture(normal)}
+            if k == "bark" and "trunk" in slot["slot"].lower():
+                # MA_Foliage fades the trunk base into the tiling bark by
+                # COLOR_0 alpha; glTF applies vertex alpha only to MASK.
+                m.update(alphaMode="MASK", alphaCutoff=0.5)
             if k != "bark":
                 m.update(alphaMode="MASK", alphaCutoff=0.5, doubleSided=True)
                 # Decoration cards (lichen, knots on the bark) don't transmit.

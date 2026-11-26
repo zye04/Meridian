@@ -262,7 +262,7 @@ cluster cull, which lists its bricks in the frustum (with the terrain's
 sun visibility marched once per brick) and, compacted, the voxels that
 draw: coverage by a stable hash of instance, the brick's lattice place and
 edge, the cluster's seed (a voxel cluster's ClusterInfo.firstVertex: the
-mesh's seed from its cluster cache key XOR the cluster's index in its
+mesh's seed from its model's positions and indices (`seedVoxels`) XOR the cluster's index in its
 ClusterLod) and voxel, against the voxel's opacity along the view, skipping voxels whose optical depth out
 of the model toward the camera exceeds 3.5; a masked cluster of radius <= 1 m also marches the
 terrain toward the sun once and packs the result into its entry's top 8
@@ -452,7 +452,9 @@ the layouts behind them.
   is 1, blending to the analytic sky + ground term outside the clipmap, and
   occludes the sharp sky reflection by the probes' rough irradiance over
   the open sky's (under a canopy the sky is not reflected at full strength).
-- GPU-driven scene: all meshes live in shared vertex/index pools (bump
+- GPU-driven scene: all meshes live in shared vertex/index pools (vertices
+  as `PackedVertex`, 20 B, quantized per mesh over `MeshInfo` (80 B)
+  bounds and UV range, decoded by common.glsl `loadVertex`; bump
   allocated; they and the cluster and voxel pools grow by >= 1.5x when an
   upload needs more, `grownPool`, and `setPlacement` trims them to the
   bytes in use, `trimPools`); `MeshInfo` and `InstanceData` tables are on

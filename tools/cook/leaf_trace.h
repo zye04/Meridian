@@ -30,6 +30,8 @@ struct CardVertex {
   std::array<float, 3> position;
   std::array<float, 3> normal;
   float uv[2];
+  // COLOR_0 alpha: wood only (tree.cpp), so 1 on every card.
+  float alpha = 1.0f;
 };
 
 // Every card triangle (indices into `vertices`) keeps the atlas triangles

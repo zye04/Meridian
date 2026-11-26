@@ -59,9 +59,9 @@ RayHit traceClosest(vec3 origin, vec3 direction, float tMax) {
     MeshInfo mesh = pc.scene.meshes.meshes[instanceMesh(
         pc.scene, id, rayQueryGetIntersectionGeometryIndexEXT(query, true))];
     uint first = mesh.firstIndex + rayQueryGetIntersectionPrimitiveIndexEXT(query, true) * 3u;
-    Vertex v0 = pc.scene.vertices.vertices[pc.scene.indices.indices[first] + mesh.vertexOffset];
-    Vertex v1 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 1u] + mesh.vertexOffset];
-    Vertex v2 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 2u] + mesh.vertexOffset];
+    Vertex v0 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first] + mesh.vertexOffset);
+    Vertex v1 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first + 1u] + mesh.vertexOffset);
+    Vertex v2 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first + 2u] + mesh.vertexOffset);
     vec2 b = rayQueryGetIntersectionBarycentricsEXT(query, true);
     vec3 w = vec3(1.0 - b.x - b.y, b);
     mat4x3 toWorld = rayQueryGetIntersectionObjectToWorldEXT(query, true);

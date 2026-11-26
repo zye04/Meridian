@@ -10,8 +10,7 @@
 
 namespace meridian {
 
-// Layout matches the std430 Vertex struct in the shaders: each vec3 is padded
-// to 16 bytes, so the UVs fill the padding for free.
+// CPU-side vertex; the GPU gets it quantized (PackedVertex, vertex_pack.h).
 struct Vertex {
   Vec3 position;
   float uvX = 0.0f;
@@ -19,8 +18,10 @@ struct Vertex {
   float uvY = 0.0f;
   // xyz: tangent along +U; w: bitangent sign (glTF/MikkTSpace convention).
   float tangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+  // glTF COLOR_0 alpha (1 without COLOR_0); the alpha test multiplies it in.
+  float alpha = 1.0f;
 };
-static_assert(sizeof(Vertex) == 48);
+static_assert(sizeof(Vertex) == 52);
 
 struct MeshData {
   std::vector<Vertex> vertices;
@@ -39,14 +40,15 @@ struct MeshData {
   // keeps its triangles. 0 for foliage, whose own height sets its switch.
   float voxelModelHeight = 0.0f;
   // Seeds its voxel clusters' coverage hash (voxel_bricks.comp): from the
-  // cluster cache key and the primitive's index, so a rebuild or another
-  // load order keeps the pattern. Not cached.
+  // model's positions and indices and the primitive's index (seedVoxels), so
+  // a rebuild, another load order or a cache/vertex format change keeps the
+  // pattern. Not cached.
   uint32_t voxelSeed = 0;
 };
 
 // A model gets voxel levels when it holds a tree crown: a foliage mesh
-// (material with diffuse transmission or alpha MASK, foliage[i] != 0) over
-// 4 m tall. Then all its meshes do, bark included; smaller plants keep their
+// (material with diffuse transmission, or alpha MASK on a mesh without
+// vertex alpha; foliage[i] != 0) over 4 m tall. Then all its meshes do, bark included; smaller plants keep their
 // triangles.
 bool voxelizesModel(std::span<const MeshData> meshes, std::span<const uint8_t> foliage);
 
@@ -60,6 +62,11 @@ uint64_t clusterSourceKey(std::span<const MeshData> meshes,
                           std::span<const VoxelMaterial> voxelMaterials,
                           std::span<const uint32_t> primitiveMaterial,
                           std::span<const std::array<int, 3>> materialTextures);
+
+// Sets each mesh's voxelSeed from the model's positions and indices only
+// (never cache or voxelizer versions or the Vertex layout), mixed with the
+// mesh's index, so models differ and a format change keeps the pattern.
+void seedVoxels(std::span<MeshData> meshes);
 
 // The MeshData::leaf rule, from the glTF material.
 inline bool keepsLeafArea(bool opaque, bool doubleSided, float diffuseTransmission) {

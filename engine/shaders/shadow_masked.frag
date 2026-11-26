@@ -7,10 +7,11 @@
 
 layout(location = 0) in vec2 inUv;
 layout(location = 1) flat in uint inMaterialIndex;
+layout(location = 2) in float inVertexAlpha;
 
 void main() {
     Material material = pc.scene.materials.materials[inMaterialIndex];
-    float alpha = material.baseColorFactor.a;
+    float alpha = material.baseColorFactor.a * inVertexAlpha;
     if (material.baseColorTexture != kNoTexture) {
         alpha *= texture(textures[nonuniformEXT(material.baseColorTexture)], inUv).a;
     }

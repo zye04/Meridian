@@ -34,7 +34,7 @@ const float kFarShadowDistance = 4000.0;
 
 // Alpha-masked geometry is non-opaque in the acceleration structure, so the
 // ray query reports each candidate hit; we accept it only where the base
-// color alpha passes the material's cutoff.
+// color alpha times the vertex alpha (COLOR_0) passes the material's cutoff.
 bool alphaTestCandidate(rayQueryEXT query) {
     MeshInfo mesh = pc.scene.meshes.meshes[instanceMesh(
         pc.scene, rayQueryGetIntersectionInstanceCustomIndexEXT(query, false),
@@ -43,15 +43,15 @@ bool alphaTestCandidate(rayQueryEXT query) {
     vec2 barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, false);
 
     uint first = mesh.firstIndex + primitive * 3u;
-    Vertex v0 = pc.scene.vertices.vertices[pc.scene.indices.indices[first] + mesh.vertexOffset];
-    Vertex v1 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 1u] + mesh.vertexOffset];
-    Vertex v2 = pc.scene.vertices.vertices[pc.scene.indices.indices[first + 2u] + mesh.vertexOffset];
+    Vertex v0 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first] + mesh.vertexOffset);
+    Vertex v1 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first + 1u] + mesh.vertexOffset);
+    Vertex v2 = loadVertex(pc.scene, mesh, pc.scene.indices.indices[first + 2u] + mesh.vertexOffset);
     vec3 w = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics);
     vec2 uv = w.x * vec2(v0.uvX, v0.uvY) + w.y * vec2(v1.uvX, v1.uvY) +
               w.z * vec2(v2.uvX, v2.uvY);
 
     Material m = pc.scene.materials.materials[mesh.materialIndex];
-    float alpha = m.baseColorFactor.a;
+    float alpha = m.baseColorFactor.a * (w.x * v0.alpha + w.y * v1.alpha + w.z * v2.alpha);
     if (m.baseColorTexture != kNoTexture) {
         alpha *= textureLod(textures[nonuniformEXT(m.baseColorTexture)], uv, 0.0).a;
     }

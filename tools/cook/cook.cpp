@@ -325,6 +325,14 @@ PlantImages preparePlants(fastgltf::Asset &asset, const std::filesystem::path &d
   if (!plant) {
     return result;
   }
+  // Their COLOR_0 is wind data (docs/assets.md), not an alpha for glTF to
+  // multiply into the mask.
+  for (fastgltf::Mesh &mesh : asset.meshes) {
+    for (fastgltf::Primitive &primitive : mesh.primitives) {
+      std::erase_if(primitive.attributes,
+                    [](const fastgltf::Attribute &a) { return a.name == "COLOR_0"; });
+    }
+  }
   for (size_t i = 0; i < asset.materials.size(); ++i) {
     if (!usedMaterials.contains(i)) {
       fastgltf::Material &m = asset.materials[i];

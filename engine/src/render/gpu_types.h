@@ -133,6 +133,8 @@ struct GpuMesh {
   // Bounding sphere (MeshInfo's), for placement's cell bounds.
   Vec3 boundsCenter;
   float boundsRadius = 0.0f;
+  // Bounding box half size around boundsCenter: the vertex dequantization.
+  Vec3 halfExtent;
   // Bottom-level acceleration structure: the mesh's triangles for ray
   // tracing. Built when an instance first uses the mesh (placed prototypes
   // have their own).
@@ -639,8 +641,11 @@ struct MeshInfo {
   uint32_t firstLevel = 0;
   uint32_t levelCount = 0;
   Vec3 halfExtent;
+  // uv = uvOffset + uvScale * the vertex's unorm16 pair (vertex_pack.h).
+  float uvOffset[2] = {0.0f, 0.0f};
+  float uvScale[2] = {1.0f, 1.0f};
 };
-static_assert(sizeof(MeshInfo) == 64);
+static_assert(sizeof(MeshInfo) == 80);
 
 // Must match ClusterInfo in common.glsl. See meridian::Cluster.
 struct ClusterInfo {

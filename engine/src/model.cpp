@@ -4,6 +4,7 @@
 #include <fastgltf/tools.hpp>
 #include <mikktspace.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -171,6 +172,16 @@ MeshData loadPrimitive(const fastgltf::Asset &asset,
     applyUvTransform(mesh, uvTransform);
   }
 
+  // Only COLOR_0's alpha is kept (a masked material's alpha test multiplies
+  // it in); a VEC3 COLOR_0 has none.
+  if (const auto it = primitive.findAttribute("COLOR_0");
+      it != primitive.attributes.cend() &&
+      asset.accessors[it->accessorIndex].type == fastgltf::AccessorType::Vec4) {
+    fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(
+        asset, asset.accessors[it->accessorIndex],
+        [&](fastgltf::math::fvec4 c, size_t i) { mesh.vertices[i].alpha = c.w(); });
+  }
+
   const auto &indices = asset.accessors[*primitive.indicesAccessor];
   mesh.indices.resize(indices.count);
   fastgltf::copyFromAccessor<uint32_t>(asset, indices, mesh.indices.data());
@@ -311,12 +322,7 @@ void loadClusters(const std::filesystem::path &gltf, std::vector<MeshData> &mesh
                                         voxels.primitiveMaterial, voxels.imageOf);
   std::filesystem::path cache = gltf;
   cache.replace_extension(clusterCacheExtension());
-  for (size_t i = 0; i < meshes.size(); ++i) {
-    uint64_t z = key + (i + 1) * 0x9E3779B97F4A7C15ull;
-    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-    meshes[i].voxelSeed = uint32_t((z ^ (z >> 31)) >> 32);
-  }
+  seedVoxels(meshes);
   auto cached = readClusterCache(cache, key);
   bool valid = cached && cached->size() == meshes.size();
   for (size_t i = 0; valid && i < meshes.size(); ++i) {
@@ -474,9 +480,14 @@ Model loadGltf(Renderer &renderer, const std::filesystem::path &path) {
       for (const fastgltf::Primitive &primitive : mesh.primitives) {
         const fastgltf::Material *m =
             primitive.materialIndex ? &asset.materials[*primitive.materialIndex] : nullptr;
+        // A mask cut by vertex alpha is a fade on a solid part (a trunk
+        // base), not foliage.
+        const std::vector<Vertex> &vertices = primitives[foliage.size()].vertices;
+        const bool fades = std::any_of(vertices.begin(), vertices.end(),
+                                       [](const Vertex &v) { return v.alpha < 1.0f; });
         foliage.push_back(m && ((m->diffuseTransmission &&
                                  m->diffuseTransmission->diffuseTransmissionFactor > 0.0f) ||
-                                m->alphaMode == fastgltf::AlphaMode::Mask));
+                                (m->alphaMode == fastgltf::AlphaMode::Mask && !fades)));
         voxels.primitiveMaterial.push_back(
             primitive.materialIndex ? uint32_t(*primitive.materialIndex)
                                     : uint32_t(asset.materials.size()));

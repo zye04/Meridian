@@ -20,7 +20,7 @@ void main() {
     // draw has already added the mesh's vertexOffset to gl_VertexIndex.
     LoadedInstance instance = loadInstance(pc.scene, uint(gl_InstanceIndex));
     MeshInfo mesh = pc.scene.meshes.meshes[instance.meshOrPrototype];
-    Vertex vertex = pc.scene.vertices.vertices[gl_VertexIndex];
+    Vertex vertex = loadVertex(pc.scene, mesh, uint(gl_VertexIndex));
 
     vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
     vec3 relative = world - pc.scene.cameraPosition;

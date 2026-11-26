@@ -49,13 +49,13 @@ struct Surface {
   float roughness;
 };
 
-Surface surfaceAt(const VoxelMaterial &m, float u, float v) {
+Surface surfaceAt(const VoxelMaterial &m, float u, float v, float vertexAlpha) {
   Vec3 base = m.baseColorFactor;
-  float alpha = 1.0f;
+  float alpha = vertexAlpha;
   if (m.baseColor) {
     const auto t = sample(*m.baseColor, u, v);
     base = {base.x * srgbToLinear(t[0]), base.y * srgbToLinear(t[1]), base.z * srgbToLinear(t[2])};
-    alpha = t[3];
+    alpha *= t[3];
   }
   if (m.alphaMask && alpha < m.alphaCutoff) {
     return {false, {}, {}, 0.0f};
@@ -100,11 +100,15 @@ bool hitAlong(const VoxelTriangle &t, int axis, double pu, double pw, PlaneHit &
   return true;
 }
 
-void hitUv(const VoxelTriangle &t, const PlaneHit &h, float &u, float &v) {
+void hitUv(const VoxelTriangle &t, const PlaneHit &h, float &u, float &v, float &alpha) {
   const float w0 = static_cast<float>(1.0 - h.w1 - h.w2);
   const float w1 = static_cast<float>(h.w1), w2 = static_cast<float>(h.w2);
   u = w0 * t.uv[0][0] + w1 * t.uv[1][0] + w2 * t.uv[2][0];
   v = w0 * t.uv[0][1] + w1 * t.uv[1][1] + w2 * t.uv[2][1];
+  // Three 1s interpolate to 1 - ulp; that must not fail a cutoff the
+  // texture alone passes.
+  const bool opaque = t.alpha[0] == 1.0f && t.alpha[1] == 1.0f && t.alpha[2] == 1.0f;
+  alpha = opaque ? 1.0f : w0 * t.alpha[0] + w1 * t.alpha[1] + w2 * t.alpha[2];
 }
 
 struct Accum {
@@ -158,9 +162,9 @@ void voxelizeRange(std::span<const VoxelTriangle> triangles,
           if (!hitAlong(t, axis, (a + 0.5) * step, (b + 0.5) * step, hit)) {
             continue;
           }
-          float hu, hv;
-          hitUv(t, hit, hu, hv);
-          const Surface s = surfaceAt(m, hu, hv);
+          float hu, hv, ha;
+          hitUv(t, hit, hu, hv, ha);
+          const Surface s = surfaceAt(m, hu, hv, ha);
           if (!s.opaque) {
             continue;
           }
@@ -456,9 +460,9 @@ float bruteForceOpticalDepth(std::span<const VoxelTriangle> triangles,
             static_cast<int64_t>(std::floor(hit.z / edge)) != index) {
           continue;
         }
-        float hu, hv;
-        hitUv(t, hit, hu, hv);
-        if (surfaceAt(materials[t.material], hu, hv).opaque) {
+        float hu, hv, ha;
+        hitUv(t, hit, hu, hv, ha);
+        if (surfaceAt(materials[t.material], hu, hv, ha).opaque) {
           ++blocked;
           break;
         }
