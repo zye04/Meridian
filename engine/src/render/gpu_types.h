@@ -611,6 +611,9 @@ struct SceneData {
   // | phases per cycle << 16 (voxel_lod.glsl), the cycle at most
   // kMaxVoxelCoveragePhases.
   uint32_t voxelCoverage = 0;
+  // A far cell draws its voxels once its tallest tree projects under this
+  // many pixels (cell_cull.comp farSwitch; Renderer::setFarSwitchPixels).
+  float farSwitchPixels = 0.0f;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -635,6 +638,7 @@ static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
 static_assert(offsetof(SceneData, debugLight) == 2712);
 static_assert(offsetof(SceneData, voxelNear) == 2720);
 static_assert(offsetof(SceneData, voxelCoverage) == 2724);
+static_assert(offsetof(SceneData, farSwitchPixels) == 2728);
 static_assert(sizeof(SceneData) == 2736);
 
 // Must match MeshInfo in common.glsl.

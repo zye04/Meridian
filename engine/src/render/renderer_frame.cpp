@@ -580,6 +580,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
+void Renderer::setFarSwitchPixels(float pixels) { impl_->farSwitchPixels = pixels; }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
@@ -1010,6 +1011,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        ? static_cast<uint32_t>(impl_->voxelLod)
                        : 0;
   scene.voxelNear = impl_->voxelNear;
+  scene.farSwitchPixels = impl_->farSwitchPixels;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |
                         static_cast<uint32_t>((impl_->frameNumber - impl_->cutFrame) % voxelPhases) << 8 |

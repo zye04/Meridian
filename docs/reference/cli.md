@@ -418,6 +418,10 @@ Every run prints `Loaded: resident N MiB device memory allocated (all heaps
 M MiB)` once at the first draw, after everything loaded: the VRAM gate's
 resident figure. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
+`--far-switch-px N` (default 6, `kFarSwitchPixels`): a far-field cell
+draws its voxels instead of its trees once its tallest tree projects under
+N pixels from the nearest point of its canopy box (cell_cull.comp
+`farSwitch`); larger N moves the switch nearer (far tile tier stage 0).
 `--voxel-lod on|off|near` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
 mesh over 4 m tall) replace their triangles where the LOD cut picks them,

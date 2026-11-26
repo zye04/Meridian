@@ -108,6 +108,10 @@ struct TerrainLayer {
 // Placement rules that follow rock (boulders) use the same values.
 constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 
+// The far switch's default: a far-field cell's trees give way to its voxels
+// once the tallest projects under 6 px (archive plan 2026-11-19-forests).
+constexpr float kFarSwitchPixels = 6.0f;
+
 // Where each terrain layer goes (mesh.frag, terrainSurface): meadow grass
 // on open ground; clover in damp flat hollows; mud in valley bottoms; worn
 // soil on ridges and the slopes below rock; forest path at forest edges and
@@ -420,6 +424,9 @@ public:
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
   void setVoxelNear(float meters);
+  // A far-field cell draws its voxels instead of its trees once its tallest
+  // tree projects under this many pixels (kFarSwitchPixels by default).
+  void setFarSwitchPixels(float pixels);
   // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
   // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);

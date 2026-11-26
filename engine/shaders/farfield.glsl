@@ -126,9 +126,9 @@ uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) 
 }
 
 // The far switch (cell_cull.comp): a cell draws its voxels instead of its
-// trees once its tallest tree projects under kFarSwitchPixels, at the
-// coarsest level whose voxel projects to at most kFarLevelPixels.
-const float kFarSwitchPixels = 6.0;
+// trees once its tallest tree projects under scene.farSwitchPixels
+// (kFarSwitchPixels in renderer.h by default), at the coarsest level whose
+// voxel projects to at most kFarLevelPixels.
 const float kFarLevelPixels = 1.0;
 
 // One occupied template voxel. Must match FarTemplateVoxel in farfield.h.

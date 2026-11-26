@@ -700,6 +700,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The main view's voxel coverage rule, jitter phase and phases per
     // cycle (voxel_lod.glsl voxelDrawsWhole).
     uint voxelCoverage;
+    // A far cell draws its voxels once its tallest tree projects under
+    // this many pixels (cell_cull.comp farSwitch).
+    float farSwitchPixels;
 };
 
 // Largest axis scale of a transform: a conservative bound under

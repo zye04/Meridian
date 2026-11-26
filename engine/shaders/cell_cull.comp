@@ -32,7 +32,7 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
 }
 
 // The far switch: whether the cell's tallest tree projects under
-// kFarSwitchPixels from the nearest point of its canopy box. A cell with
+// scene.farSwitchPixels from the nearest point of its canopy box. A cell with
 // bricks but no trees (crowns reaching in from a neighbor) uses the box's
 // height. Returns how many instances to skip: its trees if far, else 0.
 // Phase 0 appends a far cell in the frustum to the far list with its level.
@@ -54,7 +54,7 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
         shadow ? scene.orthoPixelsPerMeter
                : abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
     float height = far.treeCount > 0u ? far.treeHeight : far.top - far.bottom;
-    if (!shadow && height * pixelsPerMeter >= kFarSwitchPixels) {
+    if (!shadow && height * pixelsPerMeter >= scene.farSwitchPixels) {
         return 0u;
     }
     // The drawn box (voxel.mesh) reaches up to the coarsest level's pad past
