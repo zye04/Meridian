@@ -271,7 +271,7 @@ meridian::DensityRule forestRule() {
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
 void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed,
-                  bool geoChannels) {
+                  bool geoChannels, const std::string &treePalette) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -293,8 +293,10 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
     for (int variant = 1; variant <= 20; ++variant) {
       char name[96];
       std::snprintf(name, sizeof(name), "SM_%s_%s_%02d", pack, kind, variant);
+      const std::string directory =
+          treePalette.empty() ? std::string(species) : species + ("-" + treePalette);
       const std::string path =
-          std::string("source/megascans/") + species + "/" + name + "/" + name + ".gltf";
+          "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
       if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
         const std::vector<uint32_t> added = addPrototypes(renderer, prototypes, path, false);
         ids.insert(ids.end(), added.begin(), added.end());
@@ -696,6 +698,9 @@ struct Options {
   std::optional<std::filesystem::path> gradePath;
   // --terrain FILE: the heightfield (default assets/terrain/napf.height).
   std::optional<std::filesystem::path> terrainPath;
+  // --tree-palette NAME: the Megascans Trees cooked with that leaf palette
+  // (assets/source/megascans/<species>-NAME, tools/unreal/cook_palette.sh).
+  std::string treePalette;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -972,6 +977,8 @@ Options parseOptions(int argc, char **argv) {
       options.rayReconstruction = rr == "on";
     } else if (arg == "--terrain" && i + 1 < argc) {
       options.terrainPath = argv[++i];
+    } else if (arg == "--tree-palette" && i + 1 < argc) {
+      options.treePalette = argv[++i];
     } else if (arg == "--score-forest" && i + 1 < argc) {
       options.scoreForestPath = argv[++i];
     } else if (arg == "--trees") {
@@ -1086,7 +1093,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
@@ -1474,7 +1481,8 @@ int main(int argc, char **argv) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
   }
   if (options.placement) {
-    placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels);
+    placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
+                 options.treePalette);
   }
 
   const auto makeWeather = [](const Options &o) {

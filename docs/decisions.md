@@ -5706,3 +5706,38 @@ cached shadow pages are invalidated.
   111.83/121.77/104.09 vs 111.93/121.72/104.10); its 4.2/255 mean
   difference is per-pixel voxel coverage speckle, 1.9/255 over 8x8 blocks.
 - Open: forests still cost 1.0-1.8 ms over voxelizer 13 (backlog).
+
+## Leaf palette at cook time, trees only (scene lane round 1d, 2026-11-26)
+
+- Choice: retint each species' leaf atlas toward one OKLCh target before
+  the tree cook (`tools/unreal/retint_leaves.py`, target in
+  `tools/unreal/leaf-palette.json`, `tools/unreal/cook_palette.sh`), cooked
+  beside the originals as `<species>-<name>/` and loaded with
+  `--tree-palette <name>`. The atlas's alpha-weighted mean moves to the
+  target (hue rotation, chroma scale, uniform linear scale), every texel
+  with it, so the texture's own variation stays. The Chlorophyll author
+  recolours from one shared palette; this is the leaf part of that, at
+  the cook, with the engine untouched. Geometry is byte-identical (30/30
+  variants' buffers).
+- Target derivation (1.jpg, lit crown tops = brightest 20% of a 200 px
+  canopy crop, OKLCh L 0.602 C 0.034 h 124.3): our transfer from the
+  cooked base colour (forest mix, beech 0.6 / hornbeam 0.25 / alder 0.15:
+  L 0.458 C 0.069 h 117.9, Y 0.0985) to our rendered tops (built-in grade,
+  exposure 0, clean haze, sun 18 deg: L 0.696 C 0.043 h 104.8, Y 0.3405)
+  is h -13.1, C x0.626, Y x3.458; run backwards from the reference tops it
+  gives a base colour of L 0.397 C 0.054 h 137.4 (Y 0.065, within measured
+  green-leaf reflectance).
+- The cook multiplies the leaf atlas by 1 + t (t = 1.1, transmitted over
+  reflected) into the base colour and returns t / (1 + t) as transmission,
+  so the transmission colour follows the base colour and the atlas target
+  is the base colour target / 1.28 in L and C: L 0.310 C 0.042 h 137.4.
+  The first try matched the base colour target at the atlas and cooked to
+  L 0.508 C 0.070.
+- Result (a1, built-in grade at exposure -1 EV, clean haze, sun
+  0.707 0.325 -0.707): crown tops h 105.1 -> 133.2 (reference 124.3),
+  C 0.045 -> 0.030 (0.034), L 0.546 -> 0.518 (0.602). The lit-canopy
+  region's mean hue goes 136.5 -> 192.9 (reference 155.0): with
+  low-chroma leaves the blue sky light in the crowns' shaded parts
+  dominates the region mean. That blue is a lighting item, not the
+  palette. Resident VRAM unchanged (9850 MiB); first load rebuilds the 30
+  trees' cluster caches (launch 6:36 against ~2:30 warm).

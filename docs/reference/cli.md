@@ -335,6 +335,9 @@ docs/assets.md) are used when present: beech, hornbeam and alder forests and
 lone trees, saplings under the canopy (layer 12), every cooked
 variant; startup prints `Megascans Trees: F forest, L lone, S sapling
 prototypes`. Without them, the Megaplants.
+`--tree-palette NAME` loads those trees from
+`assets/source/megascans/<species>-NAME/` instead: the same trees cooked
+with a retinted leaf atlas (`tools/unreal/cook_palette.sh`, docs/assets.md).
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast
