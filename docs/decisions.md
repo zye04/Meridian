@@ -5783,8 +5783,10 @@ cached shadow pages are invalidated.
   5.1393 / 5.1395 against 5.0985 / 5.0990 (+0.6%, +0.8%, repeats within
   0.003); still and turning forest rows and all ground and sky rows within
   0.008. Near crown (beech_130m pose, crown rect, 5 m/s sideways) 7.10
-  against 8.54, still 1.14 against 1.86. Which of the rule and the
-  offset adds the forest-edge jitter is not measured.
+  against 8.54, still 1.14 against 1.86. Ruling (director, 2026-11-26):
+  the forest-edge jitter (+0.5% to +0.8%) is acceptable against the
+  near-crown gain; which of the rule and the offset adds it is not
+  measured and no separation test is planned.
 - Not done: the 150 m grain is leaf shading (triangles show it too);
   voxel crowns pass more terrain than the path tracer under every rule
   (0.33 vs 0.23); stages 3 to 5 of the spec; thin voxel trunks have no
