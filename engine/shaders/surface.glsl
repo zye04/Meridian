@@ -813,6 +813,19 @@ float crownOcclusion() {
 }
 #endif
 
+// The material's normal map applied to `normal` at `uv` (surfaceIn's
+// tangent and texture gradients); `normal` itself without one.
+vec3 mappedNormal(Material m, vec3 normal, vec2 uv) {
+    if (m.normalTexture != kNoTexture && dot(surfaceIn.tangent.xyz, surfaceIn.tangent.xyz) > 0.0) {
+        vec3 t = normalize(surfaceIn.tangent.xyz - normal * dot(normal, surfaceIn.tangent.xyz));
+        vec3 b = cross(normal, t) * surfaceIn.tangent.w;
+        vec3 n = sampleTexture(m.normalTexture, uv).xyz * 2.0 - 1.0;
+        n.xy *= m.normalScale;
+        return normalize(mat3(t, b, normal) * n);
+    }
+    return normal;
+}
+
 Surface materialSurface(Material m, vec3 normal) {
     Surface s;
     vec4 baseColor = m.baseColorFactor;
@@ -850,14 +863,7 @@ Surface materialSurface(Material m, vec3 normal) {
         s.emissive *= sampleTexture(m.emissiveTexture, surfaceIn.uv).rgb;
     }
 
-    s.normal = normal;
-    if (m.normalTexture != kNoTexture && dot(surfaceIn.tangent.xyz, surfaceIn.tangent.xyz) > 0.0) {
-        vec3 t = normalize(surfaceIn.tangent.xyz - normal * dot(normal, surfaceIn.tangent.xyz));
-        vec3 b = cross(normal, t) * surfaceIn.tangent.w;
-        vec3 n = sampleTexture(m.normalTexture, surfaceIn.uv).xyz * 2.0 - 1.0;
-        n.xy *= m.normalScale;
-        s.normal = normalize(mat3(t, b, normal) * n);
-    }
+    s.normal = mappedNormal(m, normal, surfaceIn.uv);
     return s;
 }
 

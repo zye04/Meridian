@@ -89,22 +89,31 @@ SceneOutputs shadeClusterPixel(ClusterPixel p) {
     surfaceIn.crownVisibility = p.crownVisibility;
 
     Material material = pc.scene.materials.materials[p.materialIndex];
-    vec3 normal = normalize(p.normal);
-    if (!p.frontFacing) {
-        normal = -normal;
-    }
+    float facing = p.frontFacing ? 1.0 : -1.0;
+    vec3 normal = normalize(p.normal) * facing;
     Surface s = materialSurface(material, normal);
+    vec3 fadeNormal = vec3(0.0);
     if (p.streamFade < 1.0) {
-        s.normal = normalize(mix(terrainNormal(), s.normal, p.streamFade));
+        fadeNormal = terrainNormal();
+        s.normal = normalize(mix(fadeNormal, s.normal, p.streamFade));
     }
 #ifdef CLUSTER_SHADING_SCREEN_DERIVATIVES
     vec3 normalDx = dFdx(s.normal);
     vec3 normalDy = dFdy(s.normal);
-#else
-    vec3 normalDx = p.normalDx;
-    vec3 normalDy = p.normalDy;
 #endif
     if (pc.scene.foliageSpecularAa != 0u && material.diffuseTransmission > 0.0) {
+#ifndef CLUSTER_SHADING_SCREEN_DERIVATIVES
+        // The shading normal one pixel over, normal map included, as the
+        // forward path's dFdx of it sees.
+        vec3 nx = mappedNormal(material, normalize(p.normal + p.normalDx) * facing, p.uv + p.uvDx);
+        vec3 ny = mappedNormal(material, normalize(p.normal + p.normalDy) * facing, p.uv + p.uvDy);
+        if (p.streamFade < 1.0) {
+            nx = normalize(mix(fadeNormal, nx, p.streamFade));
+            ny = normalize(mix(fadeNormal, ny, p.streamFade));
+        }
+        vec3 normalDx = nx - s.normal;
+        vec3 normalDy = ny - s.normal;
+#endif
         s.perceptualRoughness = specularAaRoughness(
             s.perceptualRoughness, dot(normalDx, normalDx) + dot(normalDy, normalDy));
     }
