@@ -24,21 +24,25 @@ plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
   through the cell's bricks (canopy-sky form); 336e429 sun march one voxel out to 32 m, then
   maps from the march end (backlog double self-shadow row removed); 892b979 per-voxel
   palette (256, median cut); 0a41b69 ledger; fe1d694 backlog.
-- Remaining gap at the 41 px switch: shaded canopy brighter (a1 0.304 vs 0.268, h1 0.201 vs
-  0.168): the ambient term (debug ambient 0.325 vs 0.245). Untried: sky march from the hit
-  (start 0) instead of 4 m. Far pass 6.46 -> 8.95 ms at a1 (default switch).
+- Director accepted stage 3. Ruling (a) done: sky march from the hit (see the latest
+  commit): a1 lit/shaded 0.386/0.280 vs voxels 0.382/0.268, h1 0.303/0.186 vs 0.304/0.168
+  (h1 shaded 0.018 above the director's ~0.015; every gap closed, lit moved toward the
+  voxels; kept, flagged to the director, a one-line revert if overruled). Cost accepted
+  (+2.5 ms, no kTileSunMarch tuning). Crown-light double count and the tile in-crown fill
+  are settled at the merge, not now (the leaf lane is still changing the fill).
 - Measurement kit: `.superpowers/far/s3/{views.sh,measure.sh,canopy.py,split.py,regions.py}`;
   default reference frames `.superpowers/far/s3/premise/default`.
 - `.superpowers/far/stage1`: local worktree at c607a93 with build-release (before frames).
 
 ## Next
-1. Director's ruling on the stage 3 report (ambient gap, cost).
-2. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
+1. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
    Report must include: fixed pools sized from the measured need; a cell always has something
    to draw; 1:1 crop of the switch band beside 7.jpg; whole frames a1/H2/H1; true resident
    VRAM (`Loaded:` + 72 MiB far window); frame-time maxima over a fly-through from the core
    across the crop edge; stream pass ms; the far window rebuild cost on a moving camera and a
-   low-sun run.
+   low-sun run. Proof at the switch band (director): the same lit/shaded table, tiles vs voxels
+   of the same trees (`.superpowers/far/s3/canopy.py`), plus the 1:1 crop and the motion run
+   across the switch.
 
 ## Tools
 - `.superpowers/far/cap.sh BIN VIEW OUT.png [flags]` (flock inside; views A1 H2 H1 in flags.sh).
