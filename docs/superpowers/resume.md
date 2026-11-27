@@ -23,7 +23,7 @@ buffer), the DAG voxel design is approved.
 |---|---|---|
 | `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` (the director works here) |
 | `main` | `../meridian-main` | main's worktree (housekeeping and merges) |
-| `voxel-coverage` | `../meridian-leaf` | leaf lane: stage 2 of `specs/2026-11-26-voxel-leaf-coverage-design.md` merged 2026-11-26 (leaves `area-pixel-phase`, wood and cascades main's hash; squashed history on `leaf-stage2-squash`, the branch `voxel-coverage` keeps the unsquashed WIP); stage 3 on hold; next: a lighting item |
+| `voxel-coverage` | `../meridian-leaf` | leaf lane: coverage stage 2 merged (8be2e9d); crown-specular (voxel crowns occlude their ambient by the crown with GI on) merged 2026-11-27; stage 3 on hold; next: `crown-light` premise round (crown-scale sun and sky darkening; RESUME in `.superpowers/crown-light/` of that worktree) |
 | `voxel-crown-9` | `../meridian-crown` | parked: rule A for root wood groups; waits for the leaf lane's trunk view |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
