@@ -210,6 +210,11 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
       attachment.colorWriteMask = 0;
     }
   }
+  for (size_t i = 0; i < blendAttachments.size(); ++i) {
+    if ((desc.colorWriteMaskBits >> i & 1u) == 0) {
+      blendAttachments[i].colorWriteMask = 0;
+    }
+  }
 
   VkPipelineColorBlendStateCreateInfo colorBlend{};
   colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

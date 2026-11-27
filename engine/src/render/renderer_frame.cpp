@@ -581,6 +581,17 @@ void Renderer::setOcclusionCulling(bool enabled) {
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
+void Renderer::setVisibilityBuffer(bool on) {
+  if (on == impl_->visibilityBuffer) {
+    return;
+  }
+  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+  impl_->visibilityBuffer = on;
+  impl_->destroySwapchain();
+  impl_->createSwapchain();
+  impl_->destroyScenePipelines();
+  impl_->createScenePipelines(impl_->debugPipelines);
+}
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
 void Renderer::setFoliageSpecularAa(FoliageSpecularAa mode) {
@@ -1221,9 +1232,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     colorTargets.insert(colorTargets.end(),
                         {impl_->specularAlbedo.image, impl_->normalRoughness.image});
   }
-  for (const Image *debug : {&impl_->debugId, &impl_->debugAlbedo}) {
-    if (debug->image != VK_NULL_HANDLE) {
-      colorTargets.push_back(debug->image);
+  for (const Image *extra : {&impl_->debugId, &impl_->debugAlbedo, &impl_->visibilityId}) {
+    if (extra->image != VK_NULL_HANDLE) {
+      colorTargets.push_back(extra->image);
     }
   }
   if (impl_->debugLight.buffer != VK_NULL_HANDLE) {
@@ -1311,7 +1322,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     return attachment;
   };
   // Null unless a debug view or the report is on (debugTargetsWanted).
-  VkRenderingAttachmentInfo debugIdAttachment = guideAttachment(impl_->debugId);
+  // Attachment 7: the debug id with the debug set, else the visibility id
+  // when the visibility buffer is on; both cleared to 0 (kind none).
+  const bool visibility = impl_->visibilityActive();
+  VkRenderingAttachmentInfo debugIdAttachment =
+      guideAttachment(visibility ? impl_->visibilityId : impl_->debugId);
   debugIdAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   const VkRenderingAttachmentInfo sceneAttachments[] = {
       hdrAttachment,
@@ -1323,9 +1338,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
       guideAttachment(impl_->normalRoughness),
       sunLightAttachment,
       debugIdAttachment};
-  // Attachment 7 only with the debug pipeline set.
-  sceneRendering.colorAttachmentCount =
-      impl_->debugPipelines ? std::size(sceneAttachments) : std::size(sceneAttachments) - 1;
+  sceneRendering.colorAttachmentCount = impl_->debugPipelines || visibility
+                                            ? std::size(sceneAttachments)
+                                            : std::size(sceneAttachments) - 1;
   sceneRendering.pColorAttachments = sceneAttachments;
   sceneRendering.pDepthAttachment = &depthAttachment;
 
@@ -1345,7 +1360,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // The GPU-culled cluster draw lists, one mesh workgroup per cluster:
   // opaque or alpha-masked (the masked ones twice: the depth prepass
   // carries the alpha test, the shading pass tests depth EQUAL), each
-  // single- and double-sided.
+  // single- and double-sided. With the visibility buffer each list is drawn
+  // once, depth and id only (the masked ones with the alpha test).
   auto drawCulled = [&](uint32_t phase, bool masked, bool prepass) {
     for (uint32_t bucket = masked ? 2 : 0; bucket < (masked ? kDrawBuckets : 2);
          ++bucket) {
@@ -1355,9 +1371,11 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
       vkCmdPushConstants(cmd, impl_->sceneLayout, kScenePushStages, 0,
                          sizeof(listPush), &listPush);
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        !masked ? impl_->meshPipeline
-                        : prepass ? impl_->maskedDepthPipeline
-                                  : impl_->maskedMeshPipeline);
+                        visibility ? (masked ? impl_->visibilityMaskedPipeline
+                                             : impl_->visibilityPipeline)
+                        : !masked  ? impl_->meshPipeline
+                        : prepass  ? impl_->maskedDepthPipeline
+                                   : impl_->maskedMeshPipeline);
       vkCmdSetCullMode(cmd, doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       impl_->dispatch.cmdDrawMeshTasksIndirectEXT(
           cmd, impl_->drawCounters.buffer,
@@ -1395,7 +1413,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   drawCulled(0, true, true);
   impl_->drawTerrain(cmd);
   drawCulled(0, false, false);
-  drawCulled(0, true, false);
+  if (!visibility) {
+    drawCulled(0, true, false);
+  }
   endPass("scene early");
   drawVoxelTrees(0);
   endPass("voxel trees");
@@ -1436,7 +1456,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   beginScene();
   drawCulled(1, true, true);
   drawCulled(1, false, false);
-  drawCulled(1, true, false);
+  if (!visibility) {
+    drawCulled(1, true, false);
+  }
   endPass("scene late");
   drawVoxelTrees(1);
   endPass("voxel trees late");

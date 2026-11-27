@@ -70,6 +70,9 @@ struct PipelineDesc {
   // tested EQUAL against the prepass, not written.
   bool noColorWrites = false;
   bool depthEqualNoWrite = false;
+  // Bit i clear: attachment i is not written (the visibility pipelines write
+  // only the id, attachment 7; the sky leaves it at its clear value).
+  uint32_t colorWriteMaskBits = ~0u;
 };
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc);

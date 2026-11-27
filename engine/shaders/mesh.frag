@@ -76,6 +76,11 @@ layout(location = 5) out vec4 outNormalRoughness;
 // scales what is behind it by its transmittance (alpha) and adds none of
 // its own, so glass never darkens.
 layout(location = 6) out vec4 outSunLight;
+#ifdef VISIBILITY_TARGET
+// Forward-shaded with the visibility buffer on: id 0, so the resolve leaves
+// this pixel as shaded here.
+layout(location = 7) out uvec2 outVisibility;
+#endif
 
 // inRelativePosition + cameraPosition, set first thing in main(); both are
 // in the flat world, before the curvature warp (common.glsl). World
@@ -132,6 +137,9 @@ void main() {
     return;
 #else
 #ifdef TERRAIN
+#ifdef VISIBILITY_TARGET
+    outVisibility = uvec2(0u);
+#endif
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
     surfaceIn.relativePosition = inRelativePosition;
     surfaceIn.worldPosition = worldPosition;
