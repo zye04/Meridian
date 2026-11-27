@@ -705,6 +705,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint crownFill;
     // Renderer::setFoliageSpecularAa (lighting.glsl specularAaRoughness).
     uint foliageSpecularAa;
+    // Renderer::setFarLight (lighting.glsl farLightGather).
+    uint farLight;
+    uint farLightPad[3];
 };
 
 // Largest axis scale of a transform: a conservative bound under

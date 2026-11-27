@@ -435,6 +435,13 @@ public:
   // visibility at the crown's top centre.
   enum class CrownFill : uint32_t { Off, Crown };
   void setCrownFill(CrownFill mode);
+  // Far light (development premise, off by default): per pixel, a few cones
+  // around the shading normal marched through the far-field voxels and the
+  // terrain replace the ambient outside the GI clipmap (Sky, Bounce) or
+  // everywhere (SkyAll, BounceAll); Bounce also lights the canopy and
+  // ground the cones hit.
+  enum class FarLight : uint32_t { Off, Sky, SkyAll, Bounce, BounceAll };
+  void setFarLight(FarLight mode);
   // Specular antialiasing for foliage (on by default, off for A/B):
   // leaves widen their specular lobe by the normal variation inside a pixel
   // (triangles: the shading normal's screen derivatives; voxels: the

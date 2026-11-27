@@ -616,6 +616,9 @@ struct SceneData {
   uint32_t crownFill = 0;
   // Renderer::setFoliageSpecularAa.
   uint32_t foliageSpecularAa = 0;
+  // Renderer::setFarLight.
+  uint32_t farLight = 0;
+  uint32_t farLightPad[3] = {};
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -642,7 +645,8 @@ static_assert(offsetof(SceneData, voxelNear) == 2720);
 static_assert(offsetof(SceneData, voxelCoverage) == 2724);
 static_assert(offsetof(SceneData, crownFill) == 2728);
 static_assert(offsetof(SceneData, foliageSpecularAa) == 2732);
-static_assert(sizeof(SceneData) == 2736);
+static_assert(offsetof(SceneData, farLight) == 2736);
+static_assert(sizeof(SceneData) == 2752);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

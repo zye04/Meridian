@@ -345,6 +345,9 @@ struct Shading {
     // Where the canopy-sky march starts (kCanopySkyStartFoliage for a point
     // inside a crown, so it doesn't count its own voxel).
     float canopyStart;
+    // The far light's mean sky visibility over its cones (1 without it):
+    // what the transmitted ambient's fallback share takes.
+    float farVisibility;
 };
 
 // `relativePosition` is the flat world's, relative to the camera.
@@ -391,6 +394,7 @@ Shading beginShading(Surface s, vec3 relativePosition) {
     sh.specularLight = vec3(0.0);
     sh.NoL = clamp(dot(sh.N, sh.L), 0.0, 1.0);
     sh.canopyStart = 0.0;
+    sh.farVisibility = 1.0;
     return sh;
 }
 
@@ -407,6 +411,96 @@ float canopySkyVisibility(Shading sh) {
     FarFieldBuffer farField = pc.scene.farField;
     return farFieldTransmittance(farField, sh.worldPosition, vec3(0.0, 1.0, 0.0), sh.canopyStart,
                                  kCanopySkyDistance, false);
+}
+
+// Far light (Renderer::setFarLight, a premise prototype): the diffuse
+// ambient gathered per pixel by kFarLightCones rays over the cosine lobe
+// around the normal (one stratum each, rotated by interleaved gradient noise
+// per pixel and frame, so the upscaler's history averages the strata into
+// cones), each marched through the far field's voxels and the terrain's
+// height pyramid as a GI probe ray is (gi_probes.comp): a miss sees the sky
+// with the sky capture's clouds, the terrain the ground cache (lit directly
+// where it holds none), and the far field takes its transmittance off them.
+// With bounce the voxels the ray crosses scatter the sun and the sky (short
+// marches toward each from their mean depth), with recollision, as a
+// probe's foliage hit.
+const uint kFarLightCones = 6u;
+// L0 voxels (4 m) end at 256 m along a ray; past that a crown is sub-voxel.
+const float kFarLightTreeDistance = 256.0;
+// Rays from the terrain and from objects leave the surface before the
+// march; rays from foliage start kCanopySkyStartFoliage out (canopyStart).
+const float kFarLightStart = 1.0;
+const uint kFarLightSky = 1u;
+const uint kFarLightSkyAll = 2u;
+const uint kFarLightBounce = 3u;
+const uint kFarLightBounceAll = 4u;
+
+vec3 farLightGather(inout Shading sh) {
+    uint mode = pc.scene.farLight;
+    bool bounce = mode >= kFarLightBounce;
+    FarFieldBuffer farField = pc.scene.farField;
+    vec3 sun = pc.scene.sunDirection;
+    vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
+    vec3 N = sh.N;
+    vec3 T = normalize(abs(N.y) < 0.99 ? cross(N, vec3(0.0, 1.0, 0.0)) : cross(N, vec3(1.0, 0.0, 0.0)));
+    vec3 B = cross(N, T);
+    float noise = interleavedGradientNoise(SHADING_PIXEL, pc.scene.frameIndex);
+    float start = max(sh.canopyStart, kFarLightStart);
+    vec3 irradiance = vec3(0.0);
+    float visible = 0.0;
+    for (uint i = 0u; i < kFarLightCones; ++i) {
+        // Stratified in cos^2 (cosine-weighted), golden-angle azimuths.
+        float u = (float(i) + fract(noise + 0.5 * float(i & 1u))) / float(kFarLightCones);
+        float phi = 2.0 * kPi * fract(noise + float(i) * 0.618034);
+        float sinTheta = sqrt(u);
+        vec3 d = normalize(T * (sinTheta * cos(phi)) + B * (sinTheta * sin(phi)) + N * sqrt(1.0 - u));
+        vec3 origin = sh.worldPosition;
+        float hit = terrainRayDistance(pc.scene, origin + N * 0.05, d, kGiMaxDistance);
+        vec3 radiance;
+        if (hit >= 0.0) {
+            vec3 p = origin + hit * d;
+            vec4 cached = giGroundRadiance(p.xz);
+            radiance = cached.rgb * cached.a;
+            if (cached.a < 1.0) {
+                vec3 n = terrainNormalAt(pc.scene.terrain, p.xz);
+                vec3 atmosphere = atmospherePosition(p);
+                float height = length(atmosphere);
+                vec3 sunAtGround = transmittanceToSun(height, dot(atmosphere / height, sun));
+                float lit = max(dot(n, sun), 0.0) * giGroundSunVisibility(p, n);
+                radiance += (1.0 - cached.a) * kGiGroundAlbedo / kPi * (sunAtGround * lit + skyIrradiance);
+            }
+        } else {
+            vec4 clouds = skyCaptureAt(d);
+            radiance = skyLuminance(sh.position, d) * clouds.a + clouds.rgb;
+        }
+        vec3 reflected, transmitted;
+        float meanDistance;
+        float transmittance = farFieldTransmittanceScatter(
+            farField, origin, d, start, hit >= 0.0 ? min(hit, kFarLightTreeDistance) : kFarLightTreeDistance,
+            reflected, transmitted, meanDistance);
+        vec3 leaf = vec3(0.0);
+        if (bounce && transmittance < 0.99) {
+            // The voxels' own march toward the sun, as the probes do: the
+            // hit's mean depth lies inside a crown, where the cascades (the
+            // crown's drawn surface above it) see none.
+            vec3 q = origin + meanDistance * d;
+            float sunVisible = sun.y > 0.0
+                ? farFieldTransmittance(farField, q, sun, 0.0, kGiLeafSunDistance, false)
+                : 0.0;
+            float skyVisible = farFieldTransmittance(farField, q, vec3(0.0, 1.0, 0.0), 0.0,
+                                                     kCanopySkyDistance, false);
+            vec3 albedo = reflected + transmitted;
+            vec3 single = sh.sunAtSurface * sunVisible * leafPhase(dot(sun, d), reflected, transmitted) +
+                          albedo / (2.0 * kPi) * skyVisible * skyIrradiance;
+            float recollision = min(1.0 - skyVisible, 0.95);
+            leaf = single / (1.0 - recollision * albedo);
+        }
+        irradiance += mix(leaf, radiance, transmittance);
+        visible += hit >= 0.0 ? 0.0 : transmittance;
+    }
+    sh.farVisibility = visible / float(kFarLightCones);
+    // Cosine-weighted estimator: E = pi / n x sum of the radiances.
+    return irradiance * (kPi / float(kFarLightCones));
 }
 
 // `surfaceShadow`: the surface's own sun occlusion on top of the ray's
@@ -442,7 +536,20 @@ void addAmbientLight(inout Shading sh, float occlusion) {
     vec3 diffuseIrradiance = mix(groundIrradiance, openSky, sh.N.y * 0.5 + 0.5);
     vec3 R = reflect(-sh.V, sh.N);
     vec3 roughIrradiance = openSky;
-    if (pc.scene.giMode != 0u) {
+    bool farAll = pc.scene.farLight == kFarLightSkyAll || pc.scene.farLight == kFarLightBounceAll;
+    bool farLight = pc.scene.farLight != 0u && pc.scene.farFieldEnabled != 0u &&
+                    (farAll || pc.scene.giMode == 0u || sh.gi.remaining > 0.0);
+    if (farLight) {
+        diffuseIrradiance = farLightGather(sh);
+        canopy = sh.farVisibility;
+        openSky = skyIrradiance * canopy;
+        roughIrradiance = openSky;
+    }
+    if (farLight && farAll) {
+        if (pc.scene.giMode != 0u) {
+            roughIrradiance = giIrradiance(sh.gi, R, openSky);
+        }
+    } else if (pc.scene.giMode != 0u) {
         diffuseIrradiance = giIrradiance(sh.gi, sh.N, diffuseIrradiance);
         roughIrradiance = giIrradiance(sh.gi, R, openSky);
     }
@@ -527,7 +634,7 @@ void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) 
     vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
     vec3 groundIrradiance =
         kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
-    vec3 backIrradiance = mix(groundIrradiance, skyIrradiance, -sh.N.y * 0.5 + 0.5);
+    vec3 backIrradiance = mix(groundIrradiance, skyIrradiance * sh.farVisibility, -sh.N.y * 0.5 + 0.5);
     if (pc.scene.giMode != 0u) {
         backIrradiance = giIrradiance(sh.gi, -sh.N, backIrradiance);
     }

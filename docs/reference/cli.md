@@ -459,6 +459,14 @@ visibility on the crown's top plane straight above the point
 (`crownTopSun`: one lookup through cascades, far shadow map and terrain,
 1 m toward the sun), so a crown in another's or a hill's shadow gets none
 and a passing shadow edge sweeps across a crown instead of switching it.
+`--far-light off|sky|sky-all|bounce|bounce-all` (default off; premise
+prototype, far-light lane, never merged): per pixel, 6 rays over the cosine
+lobe (IGN-rotated strata) marched through the far-field voxels (L0, 256 m)
+and the terrain pyramid replace the ambient's diffuse outside the GI
+clipmap (`sky`, `bounce`) or everywhere (`-all`; the probes keep the
+specular); `bounce` lights the voxels a ray crosses as a probe's foliage hit
+(lighting.glsl `farLightGather`). Forward shading runs it on every voxel
+quad fragment: o4 ~0.9-1.2 s per frame.
 `--foliage-specular-aa off|on` (default on; `off` for A/B): leaves widen their specular lobe by the normal variation a
 pixel covers (lighting.glsl `specularAaRoughness`, Tokuyoshi-Kaplanyan):
 triangle leaves by the shading normal's screen derivatives, voxels by
