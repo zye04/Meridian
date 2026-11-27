@@ -414,3 +414,10 @@ holes occlude a few more cells; far cells equal (61811 / 50845 / 26493 / 22464 i
 Item 4 (SHADOW carries): Debug H1 `far shadow map check: 8192 texels (6863 with a hit) compared with the CPU replica, max difference
 0.248 m (0 over 1 m), 0 hit/empty mismatches, 0 texels out of steps`, `far field check: 13 cells, 36864 voxels (20864 occupied)
 compared with the CPU replica, 0 mismatches`, `far field ray check: 256 rays (52 partly transmitted) ... max difference 8.7e-07`.
+
+Finish (build of 2331820). Release default switch (`VIEWS=.superpowers/far/cost2/views-final.txt .superpowers/far/s3/views.sh
+build-release/game/game .superpowers/far/fix2/final`): `Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS`;
+a1 `GPU 32.00 ms` far field 10.76, H1 `GPU 32.70 ms` far field 10.76, x4000 `GPU 21.22 ms` far field 10.78 (4504403: 10.64 / 10.62 /
+10.64; the sun lookup's offset and the carried-hit test, ~+0.13 ms); every view `0 dropped`, `0 validation errors`. Frame diff vs
+`cost2/final`: a1 0.2458, H1 0.1994, x4000 0.2851 (noise 0.26 / 0.20). Debug H1 (`fix2/final/debug-h1.log`): `0 validation errors`,
+`stream check: 25 cells, 6771325 points (1258932 kept), 0 mismatches`, the replica lines above.
