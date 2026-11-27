@@ -435,7 +435,7 @@ public:
   // visibility at the crown's top centre.
   enum class CrownFill : uint32_t { Off, Crown };
   void setCrownFill(CrownFill mode);
-  // Specular antialiasing for foliage (development A/B, off by default):
+  // Specular antialiasing for foliage (on by default, off for A/B):
   // leaves widen their specular lobe by the normal variation inside a pixel
   // (triangles: the shading normal's screen derivatives; voxels: the
   // neighbouring voxels' lobe axes a pixel spans), so sub-pixel glints don't

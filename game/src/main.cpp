@@ -900,7 +900,7 @@ struct Options {
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
   meridian::Renderer::CanopySky canopySky = meridian::Renderer::CanopySky::Off;
   meridian::Renderer::CrownFill crownFill = meridian::Renderer::CrownFill::Off;
-  meridian::Renderer::FoliageSpecularAa foliageSpecularAa = meridian::Renderer::FoliageSpecularAa::Off;
+  meridian::Renderer::FoliageSpecularAa foliageSpecularAa = meridian::Renderer::FoliageSpecularAa::On;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.

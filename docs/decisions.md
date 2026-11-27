@@ -6076,3 +6076,16 @@ Ruling on round 3: crown fill stays a flag for the user's eye; prove it stable a
   softer than one value per crown anyway, which is what popped.
 - `--shadows rt` (centre gate, s1): fill on lit canopy 19.4 against 15.8 raster, so the
   top point does not shadow itself through the TLAS; 0 validation errors.
+
+## Foliage specular AA on by default (leaf lane round 4, 2026-11-27)
+
+Ruling: specular AA is a correctness fix; default on if motion is at or below baseline, with no step at the
+triangle/voxel switch. Motion (frame 120 vs 121 at the same pose, `.superpowers/crown-light/r4/motion.sh`,
+motion-clarity.sh's method; jitter = mean |difference| 0-255, off / repeat of off / on):
+forest_still 0.480 / 0.481 / 0.454, forest_side5 4.241 / 4.241 / 4.034, forest_side30 5.056 / 5.054 / 4.788,
+forest_turn1 2.119 / 2.118 / 1.999, near crown still 1.001 / 1.003 / 0.998, near side5 5.390 / 5.388 / 5.374,
+s1 still 0.594 / 0.593 / 0.580, s1 side5 1.986 / 1.986 / 1.925. The repeat agrees to 0.006, so every row is at or
+below baseline. Sharpness ratios move by at most 0.003. Close range (start view and H2 trees at 20-60 m): the
+specular share of triangle leaf pixels goes 22.8 -> 21.6 % and 25.1 -> 24.3 %, lit leaves 16.6 -> 17.3 %, so leaves
+don't go dull; no footprint fade was needed. Switch: lone beech tri/vox 0.998 either way (round 3). Cost within
+noise. `--foliage-specular-aa off` keeps the A/B.
