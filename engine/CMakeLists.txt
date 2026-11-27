@@ -155,6 +155,7 @@ add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_library(meridian STATIC
     src/cluster.cpp
+    src/visibility.cpp
     src/clusterlod.cpp
     src/frame_stats.cpp
     src/farfield.cpp

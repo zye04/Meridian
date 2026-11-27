@@ -2,6 +2,7 @@
 // GLSL declarations in engine/shaders; change both together.
 #pragma once
 
+#include <meridian/cluster.h>
 #include <meridian/farfield.h>
 #include <meridian/placement.h>
 #include <meridian/renderer.h>
@@ -1046,6 +1047,12 @@ constexpr uint32_t kMaxVoxelInstances = 6650000;
 // (decisions.md "Leaf voxels draw shrunk quads on their jitter phases"):
 // the fly-toward, 37245138 under area-pixel-phase.
 constexpr uint32_t kMaxVoxelQuads = 55870000;
+// The visibility id's bit budget (visibility.h): instance 24 bits, cluster
+// 26, triangle 7, a voxel's index in its phase list 26.
+static_assert(kMaxInstanceId < (1u << 24));
+static_assert(kMaxClusterIndex <= (1u << 26));
+static_assert(kMaxVoxelQuads <= (1u << 26));
+static_assert(kMaxClusterTriangles <= (1u << 7));
 // A voxel cluster's brick (VoxelBrickRef with the first voxel rebased into
 // the voxel pool): voxel i is present when bit i of occupied is set, at
 // firstVoxel + the present voxels below it.
