@@ -1,9 +1,23 @@
-# Far lane: resume point (2026-11-27, hardening a-e done; waiting on the director's review)
+# Far lane: resume point (2026-11-27 late, review fixes + cost task done; waiting on the director)
 
-Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (merge ed758d8 + this RESUME commit).
-Read: CLAUDE.md, spec `docs/superpowers/specs/2026-11-26-far-tile-tier-design.md`,
-plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
-`docs/superpowers/plans/2026-11-26-far-tile-tier-ledger.md` (every number with its raw line).
+Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (5d91824 + this RESUME commit).
+
+## Latest (this session)
+- Director tasks after the hardening report and the independent review of f98f774, all committed:
+  31cfa1b far rays at max(distance level, cell finest) + CPU twin + tests (review 2);
+  8263fc7 cell-border lines fixed (sun/sky marches via farFieldMarch with minLevel; view march carries the previous cell);
+  2df00e8 sun lookup pulled back by farShadowTexel + bias (review 7, leak measured 0.959x);
+  67d3fa7 static placement mirrors every point past the crop: edge strip forested (review 1; placement hash 0x9f383bc0acab499b,
+  far static hash 0x944195d140d56146, interior ring hash unchanged 0x95b68fb05960ae2d; PlacementConstants 136 bytes);
+  bd2ec08 placementField throws over 16 km (review 3); 953076d backlog rows (review 4-6);
+  4504403 cost: sun march skipped where the lookup is 0, carry 2 voxels (a1 12.6 -> 10.64, H1 -> 10.62; target < 5 not reached);
+  ledger 20b1f09 and 5d91824 (sections "Review fixes ..." and "Far pass cost after the border fix").
+- Reports sent to main: task 1 + review 1-3 (short); task 2 lane report.
+- Artifacts: `.superpowers/far/lines/` (profile.py, contrast.py, cells/ per-cell hue lod view from a locally patched
+  debug_view.frag, before/after1/after2/final, sheet-lines.png), `.superpowers/far/review/` (edge, far6k, leak, debug-h1.log),
+  `.superpowers/far/cost2/` (probe copies + probe.sh/probe-engine.sh/msw.sh/default.sh, probe dirs, try/*.diff, fly/).
+- build-dev's voxel.frag.spv was overwritten by probes: rebuild (touch engine/shaders/voxel.frag) before using build-dev.
+- Open: fly-through far_field max 25.3 ms at t 14.1 s (x ~1410, core) not explained; < 5 ms needs shade-once (visibility buffer).
 
 ## State
 - Stage 0 and stage 1 are done and accepted. Plan boxes 1.x are still unticked: tick 1.1-1.7 when stage 2 lands.
