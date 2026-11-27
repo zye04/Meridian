@@ -366,3 +366,20 @@ Default Napf scene (`flock /tmp/meridian-gpu.lock ./build-release/game/game --tr
 every view `0 validation errors`, every cull list `0 dropped`.
 Fly spike pose (`final/spike`, `--camera 1414 1500 0 1.5708 -0.12`): `GPU 24.90 ms`, far field 14.03, 0 validation errors; lod view: tiles over ~75% of the frame,
 camera far above the canopy. The fly csv's 25.3 ms blocks (t 14.1-16 s) are not reproduced still (backlog row).
+
+## Fix check of the review fixes (2026-11-27; independent check of 18f280e)
+
+Runs: `VIEWS=.superpowers/far/fix2/views.txt .superpowers/far/s3/views.sh build-release/game/game .superpowers/far/fix2/<run> --far-switch-px 4`
+(a1, h1 plain / lod / sun, x4000-lod, x5000-lod; tiles from ~1.8 km), `before` = 6c97137, `after` = the fix commits, `nocarry` =
+6c97137's voxel.frag with the carried march off (`fix2/voxel.frag.nocarry` into build-dev). Every view `Render 2560x1440`,
+`0 validation errors`, `0 dropped`.
+
+Sun hand-off (item 7). Far tiles' sun debug view, mean OKLab L over the tile pixels both runs share
+(`python3 -I .superpowers/far/fix2/sunmean.py fix2/before fix2/after a1|h1`):
+`a1: tile px 395515, sun L all 0.2596 -> 0.2578 (0.9933x), lit half 0.4204 -> 0.4192 (0.9973x)`;
+`h1: tile px 557114, sun L all 0.3277 -> 0.3274 (0.9990x), lit half 0.4108 -> 0.4107 (0.9995x)`.
+Noise (same code, `cost2/sw-final` vs `fix2/before`): `a1 ... 0.2596 -> 0.2596 (1.0000x)`, `h1 ... 0.3277 -> 0.3277 (1.0000x)`.
+Tile table (`python3 -I .superpowers/far/s3/canopy.py cost2/default fix2/<run> a1|h1`), L lit / shaded, tiles before -> after vs voxels:
+a1 0.3836 / 0.2790 -> 0.3833 / 0.2787 vs 0.3808 / 0.2669 (both toward the voxels); h1 0.3050 / 0.1937 -> 0.3049 / 0.1935 vs
+0.3149 / 0.1817 (shaded toward; lit 0.0001 away, below the final frame's noise). Whole frame diff before/after a1 0.2756, h1 0.2149
+(noise 0.26 / 0.20; the after run carries the pinhole fill too).

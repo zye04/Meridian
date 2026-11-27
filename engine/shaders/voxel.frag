@@ -207,13 +207,15 @@ void main() {
     // they shadow the hit, the sun march is skipped.
     float sunLookup = 0.0;
     if (sunUp) {
-        // The shadow maps' receiver offset along the normal (here the sun:
-        // farShadowVisibility moves it a far shadow texel and its bias
-        // toward the sun) would skip that much canopy past the march's
-        // end; the lookup starts that much short of it instead (cascade
-        // receivers, nearer than kFarShadowDistance, shift a little less).
-        vec3 sunStart =
-            world + rayDirection * (kTileSunMarch - scene.farShadowTexel - kFarShadowBias);
+        // The lookup starts counting casters its path's receiver offset
+        // past its origin (sunLookupOffset: far map texel + bias, cascade
+        // 2.5 of its texels, 0 for a ray); placed that much short of the
+        // march's end, it counts from exactly where the march stopped. The
+        // path is the one at the march's end: one whose boundary lies
+        // between the two points (within the offset) can take the other.
+        vec3 marchEnd = world + rayDirection * kTileSunMarch;
+        vec3 sunStart = marchEnd - rayDirection * sunLookupOffset(marchEnd,
+                                                                  marchEnd - scene.cameraPosition);
         vec3 marchOrigin = sunStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);

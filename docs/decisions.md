@@ -6198,3 +6198,26 @@ in the ledger's "Review fixes" section.
   the sky in the view loop (-0.2, noise), coarser sun / sky levels
   (-0.9 ms but above the frame-diff noise at H1). The < 5 ms target needs
   shading once per pixel, which waits for the visibility buffer (backlog).
+
+## Far tile tier: fix check of the review fixes (far lane, 2026-11-27)
+
+An independent check of 18f280e failed three items; proof frames in
+`.superpowers/far/fix2/`, numbers in the ledger's "Fix check" section.
+
+- The tile's sun hand-off matches each lookup path. 2df00e8 pulled the
+  lookup back from the 32 m march's end by the far shadow map's receiver
+  offset (texel 8 m + 2 m bias) on every path, exact only past 4 km.
+  `sunLookupOffset` (lighting.glsl) now returns the offset of the path
+  `traceSunVisibility` takes at the march's end, with the sun as the
+  normal and start 0: far map texel + kFarShadowBias (its slope term is
+  0 facing the sun); its fallback march and the ray-traced TLAS ray 0
+  (they count from the origin); a cascade (kShadowNormalOffset +
+  kShadowDepthBias) x its texel, 2.5 x 6.27 m = 15.7 m in cascade 4, the
+  only one far cells cast into. The lookup starts that far short of the
+  march's end, so it counts from where the march stopped. The cascade
+  range had a 5.7 m gap (not the overlap the check expected: cascade
+  4's offset is larger than the far map's); closing it darkens the far
+  tiles' sun term at a1 with the forced switch 0.993x (debug views are
+  deterministic: two runs of the same code 1.0000x). Not matched: a
+  path boundary between the march's end and the lookup's origin, and
+  the next cascade's share in a blend band.

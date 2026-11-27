@@ -243,6 +243,39 @@ float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float st
            farFieldTransmittance(farField, origin, direction, start, kShadowRayLength, false);
 }
 
+// How far past origin, along the sun, traceSunVisibility(origin, ..., start
+// 0, relative, normal = the sun direction) starts counting casters: the
+// receiver offsets of the path it takes there. A march toward the sun that
+// ends at origin + this hands over with neither a gap nor an overlap.
+// - far shadow map: farShadowVisibility moves the receiver one far texel
+//   along the normal and biases it kFarShadowBias (its slope term is 0
+//   facing the sun): texel + kFarShadowBias.
+// - its fallback (farFieldTransmittance from start) and the ray-traced
+//   path (the TLAS from origin + start): 0.
+// - cascades: cascadeCoords' normal offset plus cascadeFiltered's depth
+//   bias, both in the texels of the cascade cascadeVisibility picks
+//   (in its blend band the next cascade's share is not matched).
+float sunLookupOffset(vec3 origin, vec3 relative) {
+    if (pc.scene.voxelFarShadows != 0u &&
+        distance(origin, pc.scene.cameraPosition) > kFarShadowDistance) {
+        return pc.scene.farShadowMode != 0u ? pc.scene.farShadowTexel + kFarShadowBias : 0.0;
+    }
+    if (pc.scene.shadowMode != 0u) {
+        return 0.0;
+    }
+    float distanceToCamera = length(relative);
+    vec3 normal = pc.scene.sunDirection;
+    for (uint i = 0u; i < kShadowCascades; ++i) {
+        vec3 coords;
+        if (pc.scene.sunShadows.cascades[i].valid != 0u &&
+            distanceToCamera < pc.scene.sunShadows.cascades[i].radius &&
+            cascadeCoords(i, relative, normal, coords)) {
+            return (kShadowNormalOffset + kShadowDepthBias) * pc.scene.sunShadows.cascades[i].texel;
+        }
+    }
+    return 0.0;
+}
+
 // ---------------------------------------------------------------- Surface
 
 struct Surface {
