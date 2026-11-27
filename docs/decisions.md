@@ -5827,3 +5827,46 @@ cached shadow pages are invalidated.
   moving 7.01 / 7.12, still 1.08 / 1.14: no added jitter.
 - Not done: triangle leaves have the same fault (backlog); haze and
   palette are the scene lane's.
+
+## Foliage specular AA (2026-11-27)
+
+Leaf-scale sparkle (backlog G18). Measured on branch crown-light (leaf lane, rounds 3 and 4;
+that branch also carried crown fill and canopy sky, which are not part of this change): at
+view m2 the white dots on the canopy (L > 0.85, 6.1 per 1e4 px, reference 0) are all voxels,
+91 % of their light is specular, essentially all of it sun specular (>= 5473 of 5528, 1e-3
+exposed; sky reflection <= 26): a flat voxel's one lobe axis glints where the leaves it
+stands for would spread the highlight.
+
+`--foliage-specular-aa` (default on, `off` for A/B): geometric specular AA (Tokuyoshi and
+Kaplanyan 2019, "Improved Geometric Specular Antialiasing":
+alpha^2 += min(2 x 0.15 x (|dN/dx|^2 + |dN/dy|^2), 0.2)), on foliage only (materials with
+diffuse transmission, and the voxels). The kernel and constants follow Filament's
+normalFiltering (variance 0.15, threshold 0.2), but the derivative is taken of the shading
+normal (normal-mapped, after the two-sided flip), not the geometric normal, so normal-map
+detail feeds the kernel; this was the measured configuration, and switching to the geometric
+normal is an open variant. Far-cell voxels (voxel.frag, fixed perceptual roughness 0.8) are
+not covered. A voxel is flat-shaded, so it has none: its pixel spans 1 / voxelPixels^2 of
+the change to the neighbouring voxels' lobe axes, taken as |N1 - N2|^2 = 1 (axes about 60
+degrees apart in a crown whose leaves face every way, `kVoxelNeighbourNormalChange`). The
+voxel term passes k / voxelPixels^2 where the triangle convention is |dN/dx|^2 + |dN/dy|^2,
+i.e. the constant already stands for both axes; the kernel reaches its cap once a voxel is
+about 1.2 px or smaller, so the factor matters only for voxels of about 2 to 4 px; and the
+voxel's pixel size uses radial distance, which errs toward rougher off-axis. On by
+default because it is a correctness fix (a pixel's highlight must cover the normals in it).
+
+Measured on branch crown-light:
+- m2: white dots 6.1 -> 0.1 per 1e4 px, |lap|/L 0.357 -> 0.348 (reference 0.251).
+- s1 (`--camera 218 1408 1298 -0.785 -0.57`, a sun-facing slope with no hill or cloud
+  shadow): dots 2.2 -> 0.0, |lap|/L 0.232 -> 0.215 (reference 0.251), lit-canopy specular
+  share 92.9 -> 92.4 %: energy kept, only the peaks spread.
+- Triangle/voxel switch (lone beech): tri/vox 0.998 on and off.
+- Motion (frame 120 vs 121 at the same pose, motion-clarity.sh's method; jitter = mean
+  |difference| 0-255, off / repeat of off / on): forest_still 0.480 / 0.481 / 0.454,
+  forest_side5 4.241 / 4.241 / 4.034, forest_side30 5.056 / 5.054 / 4.788, forest_turn1
+  2.119 / 2.118 / 1.999, near crown still 1.001 / 1.003 / 0.998, near side5 5.390 / 5.388 /
+  5.374, s1 still 0.594 / 0.593 / 0.580, s1 side5 1.986 / 1.986 / 1.925: every row at or below
+  baseline.
+- Close range (start view, trees at 20-60 m): specular share of triangle leaf pixels 22.8 ->
+  21.6 % and 25.1 -> 24.3 %, so leaves don't go dull; no footprint fade needed.
+- GPU within noise (s1 25.40 -> 25.34 ms, m2 24.28 -> 24.43 ms).
+No wider variant: s1's sparkle is already below the reference.

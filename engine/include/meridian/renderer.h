@@ -423,6 +423,13 @@ public:
   // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
   // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);
+  // Specular antialiasing for foliage (on by default, off for A/B):
+  // leaves widen their specular lobe by the normal variation inside a pixel
+  // (triangles: the shading normal's screen derivatives; voxels: the
+  // neighbouring voxels' lobe axes a pixel spans), so sub-pixel glints don't
+  // sparkle.
+  enum class FoliageSpecularAa : uint32_t { Off, On };
+  void setFoliageSpecularAa(FoliageSpecularAa mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.
