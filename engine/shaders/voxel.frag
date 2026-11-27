@@ -156,7 +156,8 @@ void main() {
     // cell draws its voxels at the level marched here: its own march covers
     // the same voxels from further back and stops there or nearer.
     // Elsewhere (it draws its trees, or another level, which can miss that
-    // canopy) the hit is shaded here; discarded, nothing drew the pixel:
+    // canopy) the hit is shaded here (main view only; the shadow variant
+    // discards carried hits, t < 0); discarded, nothing drew the pixel:
     // pinholes along the switch line and the level bands. Its depth stays
     // this box's face (depth_less writes nothing nearer), at most a carry's
     // length behind the hit.

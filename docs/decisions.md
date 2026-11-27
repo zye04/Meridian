@@ -6247,3 +6247,11 @@ An independent check of 18f280e failed three items; proof frames in
   canopy casts, and restarting would put the cascade's depths deeper at
   every border. Debug H1: far shadow map replica max difference 0.248 m,
   0 over 1 m.
+
+Second fix check (independent, of 173d973): items 2 and 4 pass; items 1
+and 3 partly fixed; residuals bounded, recorded in the backlog (rows
+"Sun handoff at path boundaries", "Tile sun: no terrain test just sunward
+of the hit", "Placement mirroring guard defaults open", "Carried far-cell
+hits at the tree/tile switch line", "Shadow-variant pinholes at band
+edges"), accepted for a branch shown to the user; to be closed before any
+merge to main.
