@@ -5900,7 +5900,10 @@ cached shadow pages are invalidated.
 - Cells outside the placement grid always draw (cell_cull's threads past
   the hand-placed chunks), in the main view's phase 0 and cascade 4.
 - The far shadow map is capped at 2^23 texels (`kFarShadowMaxTexels`):
-  over 32 km its texel is 16 m (was 8 m over the crop).
+  over 32 km its texel was 16 m (8 m over the crop). Director's ruling
+  (2026-11-27): its box holds only the L1 band's cells (6 km past the
+  placement grid), so the texel stays 8 m (9.3 MiB of the map used at the
+  default sun); receivers past it take terrain shadows only.
 - Measured (Debug a1, `Render 2560x1440`): far field resident 424 MiB
   (bricks 151/109/85, columns 32/8/2; was 47), `Loaded: resident` 9927
   MiB (9586 before), 23.4M transient instances placed in 19 ms, splat
