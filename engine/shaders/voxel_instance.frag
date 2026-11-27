@@ -41,7 +41,8 @@ layout(location = 6) out vec4 outSunLight;
 
 // |N1 - N2|^2 between neighbouring voxels' lobe axes, for specular AA: a
 // crown's leaves face every way, so neighbours' axes are about 60 degrees
-// apart (|N1 - N2|^2 = 2 - 2 cos).
+// apart (|N1 - N2|^2 = 2 - 2 cos). The value stands for the squared normal
+// change over both screen axes together (the sum the function expects).
 const float kVoxelNeighbourNormalChange = 1.0;
 
 void main() {

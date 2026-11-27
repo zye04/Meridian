@@ -5838,12 +5838,20 @@ exposed; sky reflection <= 26): a flat voxel's one lobe axis glints where the le
 stands for would spread the highlight.
 
 `--foliage-specular-aa` (default on, `off` for A/B): geometric specular AA (Tokuyoshi and
-Kaplanyan 2019, "Improved Geometric Specular Antialiasing", as Filament's normalFiltering:
+Kaplanyan 2019, "Improved Geometric Specular Antialiasing":
 alpha^2 += min(2 x 0.15 x (|dN/dx|^2 + |dN/dy|^2), 0.2)), on foliage only (materials with
-diffuse transmission, and the voxels). Triangle leaves take the screen derivatives of their
-shading normal. A voxel is flat-shaded, so it has none: its pixel spans 1 / voxelPixels^2 of
+diffuse transmission, and the voxels). The kernel and constants follow Filament's
+normalFiltering (variance 0.15, threshold 0.2), but the derivative is taken of the shading
+normal (normal-mapped, after the two-sided flip), not the geometric normal, so normal-map
+detail feeds the kernel; this was the measured configuration, and switching to the geometric
+normal is an open variant. Far-cell voxels (voxel.frag, fixed perceptual roughness 0.8) are
+not covered. A voxel is flat-shaded, so it has none: its pixel spans 1 / voxelPixels^2 of
 the change to the neighbouring voxels' lobe axes, taken as |N1 - N2|^2 = 1 (axes about 60
-degrees apart in a crown whose leaves face every way, `kVoxelNeighbourNormalChange`). On by
+degrees apart in a crown whose leaves face every way, `kVoxelNeighbourNormalChange`). The
+voxel term passes k / voxelPixels^2 where the triangle convention is |dN/dx|^2 + |dN/dy|^2,
+i.e. the constant already stands for both axes; the kernel reaches its cap once a voxel is
+about 1.2 px or smaller, so the factor matters only for voxels of about 2 to 4 px; and the
+voxel's pixel size uses radial distance, which errs toward rougher off-axis. On by
 default because it is a correctness fix (a pixel's highlight must cover the normals in it).
 
 Measured on branch crown-light:
