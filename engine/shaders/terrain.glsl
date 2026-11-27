@@ -317,29 +317,42 @@ float terrainRayDistance(SceneBuffer scene, vec3 origin, vec3 direction, float m
 }
 #endif
 
-// The terrain's sun visibility at p from the shadow-height map
-// (terrain_shadow.comp), soft over the sun disk's penumbra at the occluder's
-// distance; -1 where the map doesn't serve (no map, or p outside it).
-float terrainShadowVisibility(SceneBuffer scene, vec3 p) {
-    if (scene.terrainShadowMode == 0u) {
-        return -1.0;
-    }
-    vec2 offset = p.xz - scene.terrainShadowOrigin;
+// One window of the shadow-height map at p, or -1 outside it.
+float terrainShadowWindow(SceneBuffer scene, bool far, vec3 p) {
+    TerrainShadowBuffer map = far ? scene.terrainShadowFarTexels : scene.terrainShadowTexels;
+    vec2 origin = far ? scene.terrainShadowFarOrigin : scene.terrainShadowOrigin;
+    float texel = far ? scene.terrainShadowFarTexel : scene.terrainShadowTexel;
+    uint size = far ? scene.terrainShadowFarSize : scene.terrainShadowSize;
+    vec2 offset = p.xz - origin;
     vec2 q = vec2(dot(offset, scene.terrainShadowAlong),
-                  dot(offset, scene.terrainShadowAcross)) / scene.terrainShadowTexel - 0.5;
-    float last = float(scene.terrainShadowSize) - 2.0;
+                  dot(offset, scene.terrainShadowAcross)) / texel - 0.5;
+    float last = float(size) - 2.0;
     if (any(lessThan(q, vec2(1.0))) || any(greaterThan(q, vec2(last)))) {
         return -1.0;
     }
     uvec2 i = uvec2(q);
     vec2 f = q - vec2(i);
-    uint row = scene.terrainShadowSize;
+    uint row = size;
     uint base = i.y * row + i.x;
-    TerrainShadowBuffer map = scene.terrainShadowTexels;
     vec2 s = mix(mix(map.texels[base], map.texels[base + 1u], f.x),
                  mix(map.texels[base + row], map.texels[base + row + 1u], f.x), f.y);
     float width = max(s.y * scene.terrainShadowPenumbra, 0.05);
     return clamp((p.y - s.x) / width + 0.5, 0.0, 1.0);
+}
+
+// The terrain's sun visibility at p from the shadow-height map
+// (terrain_shadow.comp), soft over the sun disk's penumbra at the occluder's
+// distance: the near window, else the far one; -1 where neither serves (no
+// map, or p outside both).
+float terrainShadowVisibility(SceneBuffer scene, vec3 p) {
+    if (scene.terrainShadowMode == 0u) {
+        return -1.0;
+    }
+    float near = terrainShadowWindow(scene, false, p);
+    if (near >= 0.0 || scene.terrainShadowFarSize == 0u) {
+        return near;
+    }
+    return terrainShadowWindow(scene, true, p);
 }
 
 bool terrainOccludes(SceneBuffer scene, vec3 origin, vec3 direction, float maxDistance) {

@@ -703,6 +703,12 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // A far cell draws its voxels once its tallest tree projects under
     // this many pixels (cell_cull.comp farSwitch).
     float farSwitchPixels;
+    // The far window of the shadow-height map (same axes and penumbra):
+    // texels, origin, texel meters, size.
+    TerrainShadowBuffer terrainShadowFarTexels;
+    vec2 terrainShadowFarOrigin;
+    float terrainShadowFarTexel;
+    uint terrainShadowFarSize;
 };
 
 // Largest axis scale of a transform: a conservative bound under

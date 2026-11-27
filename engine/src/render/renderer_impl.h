@@ -420,15 +420,15 @@ struct Renderer::Impl {
   bool farShadowReady = false;
   VkPipelineLayout farShadowLayout = VK_NULL_HANDLE;
   VkPipeline farShadowPipeline = VK_NULL_HANDLE;
-  // The terrain shadow-height map (renderer_terrain_shadow.cpp) and the
-  // sun and window it was last built for.
-  Buffer terrainShadowMap;
+  // The terrain shadow-height map (renderer_terrain_shadow.cpp), near and
+  // far window, and the sun and windows it was last built for.
+  Buffer terrainShadowMap[2];
   VkPipelineLayout terrainShadowLayout = VK_NULL_HANDLE;
   VkPipeline terrainShadowPipeline = VK_NULL_HANDLE;
-  TerrainShadowConstants terrainShadowBuild;
+  TerrainShadowConstants terrainShadowBuild[2];
   Vec3 terrainShadowSun{};
   bool terrainShadowValid = false;
-  bool terrainShadowPending = false;
+  bool terrainShadowPending[2] = {};
   VkPipeline voxelPipeline = VK_NULL_HANDLE;
   VkPipeline voxelInstancePipeline = VK_NULL_HANDLE;
   VkPipeline voxelBricksPipeline = VK_NULL_HANDLE;

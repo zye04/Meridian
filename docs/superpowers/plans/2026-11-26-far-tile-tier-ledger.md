@@ -135,3 +135,36 @@ bluer/greyer than 7.jpg (no shading work yet, as the director ruled).
 Cost: the far pass is 18-19 ms at a1 and H1 (60k / 50k cells). Not yet
 measured why (director's candidate: overlapping boxes marched empty per
 pixel, no front-to-back early-out across cells): next step.
+
+## Far pass cost (director's blocking task before stage 2)
+
+All Release, `.superpowers/far/cap.sh <bin> A1|H1 .superpowers/far/cost/<v>-<tag>.png [flags]`,
+every log `Render 2560x1440, display 2560x1440 ... DLSS`, 0 dropped, 0 validation errors;
+the figure is `far field` in the run's `GPU passes:` line (120 frames).
+
+| run | a1 far field ms | H1 far field ms | far cells a1 |
+|---|---|---|---|
+| stage 1 (6bd5aed) | 18.24 | 19.18 | 60050 |
+| voxel.frag without the terrain shadow march (`noterrain`) | 5.87 (rerun 5.88) | 6.00 (rerun 6.00) | 60050 |
+| march only, shading skipped (`noshade`) | 2.55 | 2.41 | 60050 |
+| `--far-extent 4` | 4.17 | — | 3473 |
+| `--far-extent 0` | 0.00 | — | 0 |
+| far terrain window 2048^2 x 16 m (`farwin`) | 10.56 | 8.58 | 60050 |
+| far terrain window 3072^2 x 16 m (`farwin3072`) | 6.49 | 6.58 | 60050 |
+| + near-to-far draw in 8 distance bands (`bands`, reverted) | 6.39 | 6.60 | 60050 |
+
+Cause: a far cell's lit fragments lie outside the 8 km terrain
+shadow-height window and marched the height pyramid (`terrainOccludes`,
+up to 20 km) per fragment: ~12.4 ms of 18.24. Not the director's
+candidates: cost follows pixels (3473 cells at `--far-extent 4` still
+4.17 ms), and front-to-back order gives nothing measurable.
+
+Final (far window 3072 x 16 m, far shadow box limited to the L1 band), `.superpowers/far/cost/final-*.log`:
+- a1: `... scene early 4.31, voxel trees 6.07, far field 6.43, ...`, `Rendered 120 frames, GPU 27.52 ms` (stage 1: 39.47)
+- H2: `... scene early 7.29, voxel trees 6.77, far field 2.21, ...`, `GPU 27.95 ms` (stage 1: 31.55)
+- H1: `... scene early 4.00, voxel trees 6.32, far field 6.55, ...`, `GPU 28.50 ms` (stage 1: 41.44)
+- `Far shadow map: box 16128 x 641 x 16128 m, up to 8388608 texels (16.0 MiB per map, 2 maps), 8 m texels at the default sun (2835x1909)`; `first map 2853x1702 texels (8 m, 9.3 MiB used) built in 8 ms`
+- `Loaded: resident 9927 MiB` (unchanged; the 72 MiB far window is allocated with the near map at the first frame)
+- Debug a1 `--frames 2`: replica checks 0 mismatches (`far shadow map check: 8192 texels (6860 with a hit) ... max difference 0.248 m (0 over 1 m), 0 hit/empty mismatches`), `0 validation errors`.
+- Look: whole-frame mean difference to stage 1 (tools/image-gates.py diff) a1 0.2659, H2 0.4640, H1 0.2265;
+  noise (two runs, same look) a1 0.2559, H1 0.1980. Sheet `.superpowers/far/cost/sheet-farcost.png`.

@@ -614,6 +614,12 @@ struct SceneData {
   // A far cell draws its voxels once its tallest tree projects under this
   // many pixels (cell_cull.comp farSwitch; Renderer::setFarSwitchPixels).
   float farSwitchPixels = 0.0f;
+  // The far window of the shadow-height map (same axes and penumbra; size
+  // 0: none): texels, origin, texel meters, size.
+  VkDeviceAddress terrainShadowFarTexels = 0;
+  float terrainShadowFarOrigin[2] = {};
+  float terrainShadowFarTexel = 0.0f;
+  uint32_t terrainShadowFarSize = 0;
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -639,7 +645,9 @@ static_assert(offsetof(SceneData, debugLight) == 2712);
 static_assert(offsetof(SceneData, voxelNear) == 2720);
 static_assert(offsetof(SceneData, voxelCoverage) == 2724);
 static_assert(offsetof(SceneData, farSwitchPixels) == 2728);
-static_assert(sizeof(SceneData) == 2736);
+static_assert(offsetof(SceneData, terrainShadowFarTexels) == 2736);
+static_assert(offsetof(SceneData, terrainShadowFarOrigin) == 2744);
+static_assert(sizeof(SceneData) == 2768);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

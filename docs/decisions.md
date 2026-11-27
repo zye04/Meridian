@@ -5907,3 +5907,29 @@ cached shadow pages are invalidated.
   598 ms at load, far cells drawn 60050; replica checks 0 mismatches
   (13 cells across the bands, 6318 mirrored points, shadow map, rays).
   Release figures in the ledger.
+
+## Far pass cost: a far window of the terrain shadow-height map (far lane, 2026-11-27)
+
+- Measured first (Release, `Render 2560x1440`, ledger "Far pass cost"):
+  the far field pass was 18.24 ms at a1 and 19.18 ms at H1. Variants of
+  voxel.frag: without the terrain shadow march 5.87 / 6.00 ms (rerun
+  5.88 / 6.00); march only, no shading 2.55 / 2.41 ms. So ~12.4 ms was
+  `terrainOccludes`: a far cell's lit pixels sit outside the shadow-height
+  map's 8 km window and marched the height pyramid up to 20 km each.
+  `--far-extent 4` (3473 far cells) still cost 4.17 ms: cost follows
+  pixels, not cell count.
+- Choice: a second, far window of the same map (renderer_terrain_shadow.cpp,
+  3072^2 texels of 16 m, 49 km, sun-aligned around the camera, rebuilt
+  when the camera moves 4 km or the sun turns); `terrainShadowVisibility`
+  reads the near window, else the far one, else marches. 72 MiB, allocated
+  with the near map at the first frame. A 2048^2 far window (32.8 km)
+  left a1 at 10.56 ms: receivers up to ~18 km per axis from a camera in
+  the crop fell outside it.
+- Rejected variant: drawing the far cells near to far in 8 distance bands
+  (one indirect draw per band) for early depth: 6.39 / 6.60 ms against
+  6.49 / 6.58 without, no gain; reverted.
+- Result: far field 6.43 ms at a1, 6.55 at H1, 2.21 at H2 (was 5.94);
+  whole-frame mean difference to stage 1 0.27 / 0.23 / 0.46 per 255
+  (a1 / H1 / H2), run-to-run noise 0.26 / 0.20.
+- Still open (backlog): the remaining ~6.4 ms, ~2.5 ms march and raster
+  and ~3.9 ms shading per far fragment.

@@ -34,8 +34,8 @@ layout(push_constant) uniform TerrainShadowConstants {
 
 const float kUpstreamStep = 4.0;
 const uint kMaxUpstream = 5120u;
-// kMaxUpstream + 2 * the largest map size (2048).
-const uint kMaxSamples = kMaxUpstream + 4096u;
+// kMaxUpstream + 2 * the largest map size (3072, the far window).
+const uint kMaxSamples = kMaxUpstream + 6144u;
 const uint kThreads = 256u;
 
 shared float heights[kMaxSamples];
