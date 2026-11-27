@@ -298,7 +298,8 @@ Not run by the implementer. The director dispatches an independent reviewer over
 
 **Files:**
 - Shaders: `voxel_instance.mesh` gains `VISIBILITY` (`loadVoxelQuad` for the position; per-primitive `outVisibility = packVoxel(phase, first + slot)`; no flat varyings); new `voxel_visibility.frag` (writes location 7 only; no discard). `visibility_resolve.frag` gains the Voxel branch: `loadVoxelQuad(scene, phase * 2, index)` → `shadeVoxelPixel(quad.relative, quad.voxel, quad.info)`.
-- Modify: `renderer_setup.cpp` (Visibility set: voxel quads use the visibility pipeline, bits {7}; `voxel_instance_vt.frag` is deleted with its CMake line).
+- Modify: `renderer_setup.cpp` (Visibility set: voxel quads use the visibility pipeline, bits {7}; `voxel_instance_vt.frag` is deleted with its CMake line); `renderer_frame.cpp` `expandVoxelBricks` (its barrier gains `VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT` as a reader: the resolve reads the voxel list from the fragment stage).
+- Order (director, 2026-11-28): after the T9 review and a rebase onto main; not waiting for crown-fill (held).
 
 **Interfaces:**
 - Consumes: `loadVoxelQuad`, `shadeVoxelPixel` (Task 2); `packVoxel` (Task 4).
@@ -311,7 +312,8 @@ Not run by the implementer. The director dispatches an independent reviewer over
 
 ### Task 11: Stage 3 gates
 
-- [ ] **Step 1:** Repeat Task 8 Steps 1-8 in full. Expected: as there, and now the overview gains at least 4.0 ms.
+- [ ] **Step 1:** Repeat Task 8 Steps 1-8 in full, with o4 (`-1090.3 1254.6 1245.4 0.2 -0.24`) added to the views. Expected: as there, and now the overview gains at least 4.0 ms. Voxel pixels gate tighter than triangles (director, 2026-11-28): they shade flat at the voxel centre with no barycentrics, so on equals off within the placement floor (on minus off at most the floor at overview, s1 and o4; exact at `--placement off`).
+- [ ] **Step 1b: o4 baseline.** o4 has no stage 0 data: on the stage 0 build (`vb-stage0` 9c79d1f) capture o4 with `--debug-view lod` (coverage, `.superpowers/vb0/coverage.py`) and with `MERIDIAN_VB0_STRIP_VOXELS=ON` (the geometry floor), and add both to the research file's stage 0 tables.
 - [ ] **Step 2: Voxel switch seam.**
   - Find the 27 m beech from `--scatter 100` (`1115.47 1366.85 -429.72 1.223 0`, cli.md) with `--debug-view lod`, then step the camera back along −forward until its crown draws blue, as voxels. That is about 150 m (decisions.md "lone beech at 150 m"); record the pose.
   - At that pose capture `--voxel-near 1000` (triangles) and the default (voxels), each with `--visibility off` and `on`, and measure the crown crop with `tools/region-luminance.py` (linear `.pfm` captures).
