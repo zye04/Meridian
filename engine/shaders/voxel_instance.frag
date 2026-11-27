@@ -39,8 +39,16 @@ layout(location = 3) out vec4 outDiffuseAlbedo;
 layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
+#ifdef VISIBILITY_TARGET
+// Forward-shaded with the visibility buffer on: id 0, so the resolve leaves
+// this pixel as shaded here.
+layout(location = 7) out uvec2 outVisibility;
+#endif
 
 void main() {
+#ifdef VISIBILITY_TARGET
+    outVisibility = uvec2(0u);
+#endif
     SceneOutputs o = shadeVoxelPixel(inRelative, inVoxel, inInfo);
     outColor = o.color;
     outMotion = o.motion;

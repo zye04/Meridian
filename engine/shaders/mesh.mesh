@@ -3,6 +3,9 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "farfield.glsl"
+#ifdef VISIBILITY
+#include "visibility.glsl"
+#endif
 #define DEBUG_ID_CONSTANTS_ONLY
 #include "debug_id.glsl"
 #undef DEBUG_ID_CONSTANTS_ONLY
@@ -17,6 +20,14 @@ out gl_MeshPerVertexEXT {
     invariant vec4 gl_Position;
 } gl_MeshVerticesEXT[];
 
+#ifdef VISIBILITY
+// The visibility pass: position, the masked alpha test's inputs, and the
+// triangle's id (visibility.glsl) per primitive.
+layout(location = 4) out vec2 outUv[];
+layout(location = 6) flat out uint outMaterialIndex[];
+layout(location = 14) out float outVertexAlpha[];
+layout(location = 15) perprimitiveEXT flat out uvec2 outVisibility[];
+#else
 layout(location = 0) out vec3 outRelativePosition[];
 layout(location = 1) out vec3 outNormal[];
 layout(location = 2) out vec4 outCurrentClip[];
@@ -36,6 +47,7 @@ layout(location = 11) flat out float outTerrainSun[];
 layout(location = 12) out float outCrownVisibility[];
 // COLOR_0 alpha, for the masked depth prepass's alpha test.
 layout(location = 14) out float outVertexAlpha[];
+#endif
 #ifdef DEBUG_ID
 // (instance id, cluster index) for the debug id (debug_id.glsl).
 layout(location = 13) flat out uvec2 outDebugId[];
@@ -67,6 +79,11 @@ void main() {
     for (uint i = gl_LocalInvocationIndex; i < c.cluster.vertexCount; i += 32u) {
         ClusterVertex v = clusterVertex(scene, c, i);
         gl_MeshVerticesEXT[i].gl_Position = v.clip;
+#ifdef VISIBILITY
+        outUv[i] = v.uv;
+        outVertexAlpha[i] = v.alpha;
+        outMaterialIndex[i] = c.mesh.materialIndex;
+#else
         outRelativePosition[i] = v.relative;
         outNormal[i] = v.normal;
         outTangent[i] = v.tangent;
@@ -84,9 +101,13 @@ void main() {
         outCrownVisibility[i] = v.crownVisibility;
         outCurrentClip[i] = v.currentClip;
         outPreviousClip[i] = v.previousClip;
+#endif
     }
     for (uint i = gl_LocalInvocationIndex; i < c.cluster.triangleCount; i += 32u) {
         uint t = scene.clusterTriangles.triangles[c.cluster.firstTriangle + i];
         gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, t >> 16);
+#ifdef VISIBILITY
+        outVisibility[i] = packClusterTriangle(entry.x & 0xFFFFFFu, entry.y, i, terrainSunCode);
+#endif
     }
 }

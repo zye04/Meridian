@@ -446,6 +446,13 @@ Every run prints `Loaded: resident N MiB device memory allocated (all heaps
 M MiB)` once at the first draw, after everything loaded: the VRAM gate's
 resident figure. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
+`--visibility off|on` (default off; spec
+`2026-11-27-visibility-buffer-design.md`, plan stage 2): the cluster lists
+draw depth and a visibility id (scene attachment 7, RG32UI, +28 MiB at
+1440p) instead of shading; the masked lists are drawn once, with the alpha
+test (no depth pre-pass, no depth-EQUAL pass); terrain, the far field and
+voxel quads stay forward and write id 0. A launch flag (it recreates the
+targets); debug views use the forward debug set as before.
 `--voxel-lod on|off|near` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
 mesh over 4 m tall) replace their triangles where the LOD cut picks them,

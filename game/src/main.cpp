@@ -832,6 +832,7 @@ struct Options {
   bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
   meridian::VoxelLod voxelLod = meridian::VoxelLod::On;
+  bool visibilityBuffer = false;
   // Instances nearer than this keep their triangles in the main view.
   float voxelNear = 0.0f;
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
@@ -1166,6 +1167,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--gi takes off or probes");
       }
       options.gi = mode == "probes";
+    } else if (arg == "--visibility" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "on" && mode != "off") {
+        throw std::runtime_error("--visibility takes off or on");
+      }
+      options.visibilityBuffer = mode == "on";
     } else if (arg == "--voxel-lod" && i + 1 < argc) {
       const std::string mode = argv[++i];
       if (mode != "on" && mode != "off" && mode != "near") {
@@ -1256,7 +1263,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --tree-palette name|none, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
+                               "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --visibility off|on, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
                                "--haze clear|clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -1530,6 +1537,7 @@ int main(int argc, char **argv) {
     renderer.enableAlbedoCapture();
   }
   renderer.setVoxelLod(options.voxelLod);
+  renderer.setVisibilityBuffer(options.visibilityBuffer);
   renderer.setVoxelNear(options.voxelNear);
   renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setFoliageSpecularAa(options.foliageSpecularAa);

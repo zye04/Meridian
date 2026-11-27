@@ -91,6 +91,12 @@ void Renderer::Impl::createSwapchain() {
                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                                VK_IMAGE_ASPECT_COLOR_BIT);
+  if (visibilityBuffer) {
+    visibilityId = createRenderImage(kVisibilityIdFormat,
+                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                         VK_IMAGE_USAGE_SAMPLED_BIT,
+                                     VK_IMAGE_ASPECT_COLOR_BIT);
+  }
   const VkDescriptorImageInfo contactInfos[3] = {
       {nearestSampler, depth.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
       {nearestSampler, sunLight.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -364,6 +370,7 @@ void Renderer::Impl::destroySwapchain() {
   destroyImage(diffuseAlbedo);
   destroyImage(output);
   destroyImage(sunLight);
+  destroyImage(visibilityId);
   destroyImage(transparencyMask);
   destroyImage(motion);
   destroyImage(hdr);
@@ -997,15 +1004,21 @@ void Renderer::Impl::createScene() {
 }
 
 // The pipelines that draw into the scene attachments; with debugId, the set
-// with attachment 7 and the DEBUG_ID shader variants.
+// with attachment 7 and the DEBUG_ID shader variants; otherwise, with the
+// visibility buffer on, the set whose cluster lists write only depth and the
+// id (attachment 7), and whose forward pipelines write id 0 there (terrain,
+// far field, voxel quads) or leave its clear value (sky, blended).
 void Renderer::Impl::createScenePipelines(bool debugId) {
   VkDevice dev = device.device;
+  const bool visibility = visibilityBuffer && !debugId;
   const VkFormat formats[] = {kHdrFormat,    kMotionFormat,
                               kTransparencyMaskFormat, kAlbedoFormat,
                               kAlbedoFormat, kNormalRoughnessFormat,
-                              kSunLightFormat, kDebugIdFormat};
-  // Attachment 7 only in the debug set (debug_id.glsl).
-  const std::span<const VkFormat> sceneFormats(formats, debugId ? 8 : 7);
+                              kSunLightFormat, visibility ? kVisibilityIdFormat : kDebugIdFormat};
+  // Attachment 7 only in the debug set (debug_id.glsl) or with the
+  // visibility buffer.
+  const std::span<const VkFormat> sceneFormats(formats, debugId || visibility ? 8 : 7);
+  constexpr uint32_t kWithoutId = 0x7Fu;
   // Opaque and masked geometry is drawn as culled clusters (mesh shader),
   // blended geometry as whole meshes from the CPU (vertex shader).
   PipelineDesc meshDesc{.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh",
@@ -1014,42 +1027,58 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
                         .colorFormats = sceneFormats,
                         .depthFormat = kDepthFormat,
                         .dynamicCullMode = true};
-  meshPipeline = createGraphicsPipeline(dev, meshDesc);
-  // Alpha testing (discard) disables early depth testing, so masked
-  // materials are shaded after a depth-only alpha-test prepass and shade
-  // only the fragments whose depth equals the prepass's.
-  // The debug mesh shader applies solo/hide to the depth pre-pass too.
-  meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
-  meshDesc.fragmentShader = "mesh_masked_depth.frag";
-  meshDesc.noColorWrites = true;
-  maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
-  meshDesc.noColorWrites = false;
-  meshDesc.depthEqualNoWrite = true;
-  meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
-  meshDesc.fragmentShader = debugId ? "mesh_masked_debug.frag" : "mesh_masked.frag";
-  maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
-  meshDesc.depthEqualNoWrite = false;
+  if (visibility) {
+    // The masked lists are drawn once, with the alpha test; nothing is
+    // shaded until the resolve.
+    meshDesc.meshShader = "mesh_visibility.mesh";
+    meshDesc.fragmentShader = "visibility.frag";
+    meshDesc.colorWriteMaskBits = 1u << 7;
+    visibilityPipeline = createGraphicsPipeline(dev, meshDesc);
+    meshDesc.fragmentShader = "visibility_masked.frag";
+    visibilityMaskedPipeline = createGraphicsPipeline(dev, meshDesc);
+    meshDesc.colorWriteMaskBits = ~0u;
+  } else {
+    meshPipeline = createGraphicsPipeline(dev, meshDesc);
+    // Alpha testing (discard) disables early depth testing, so masked
+    // materials are shaded after a depth-only alpha-test prepass and shade
+    // only the fragments whose depth equals the prepass's.
+    // The debug mesh shader applies solo/hide to the depth pre-pass too.
+    meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
+    meshDesc.fragmentShader = "mesh_masked_depth.frag";
+    meshDesc.noColorWrites = true;
+    maskedDepthPipeline = createGraphicsPipeline(dev, meshDesc);
+    meshDesc.noColorWrites = false;
+    meshDesc.depthEqualNoWrite = true;
+    meshDesc.meshShader = debugId ? "mesh_debug.mesh" : "mesh.mesh";
+    meshDesc.fragmentShader = debugId ? "mesh_masked_debug.frag" : "mesh_masked.frag";
+    maskedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+    meshDesc.depthEqualNoWrite = false;
+  }
   meshDesc.meshShader = nullptr;
   meshDesc.vertexShader = "mesh.vert";
   meshDesc.fragmentShader = "mesh_blended.frag";
   meshDesc.alphaBlend = true;
+  meshDesc.colorWriteMaskBits = visibility ? kWithoutId : ~0u;
   blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
+  meshDesc.colorWriteMaskBits = ~0u;
 
   // The CDLOD terrain: opaque, back faces culled.
   meshDesc.vertexShader = nullptr;
   meshDesc.meshShader = debugId ? "terrain_debug.mesh" : "terrain.mesh";
-  meshDesc.fragmentShader = debugId ? "terrain_debug.frag" : "terrain.frag";
+  meshDesc.fragmentShader = debugId ? "terrain_debug.frag" : visibility ? "terrain_vt.frag" : "terrain.frag";
   meshDesc.alphaBlend = false;
   terrainPipeline = createGraphicsPipeline(dev, meshDesc);
 
   // Far cells' canopy boxes, back faces culled; voxel.frag writes the march's
   // depth behind the face (conservative depth_less).
   meshDesc.meshShader = "voxel.mesh";
-  meshDesc.fragmentShader = debugId ? "voxel_debug.frag" : "voxel.frag";
+  meshDesc.fragmentShader = debugId ? "voxel_debug.frag" : visibility ? "voxel_vt.frag" : "voxel.frag";
   voxelPipeline = createGraphicsPipeline(dev, meshDesc);
   // Voxel clusters: one camera-facing quad per voxel.
   meshDesc.meshShader = debugId ? "voxel_instance_debug.mesh" : "voxel_instance.mesh";
-  meshDesc.fragmentShader = debugId ? "voxel_instance_debug.frag" : "voxel_instance.frag";
+  meshDesc.fragmentShader = debugId     ? "voxel_instance_debug.frag"
+                            : visibility ? "voxel_instance_vt.frag"
+                                         : "voxel_instance.frag";
   voxelInstancePipeline = createGraphicsPipeline(dev, meshDesc);
   skyPipeline = createGraphicsPipeline(dev, {.vertexShader = "sky.vert",
                                              .fragmentShader =
@@ -1057,13 +1086,15 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
                                              .layout = sceneLayout,
                                              .colorFormats = sceneFormats,
                                              .depthFormat = kDepthFormat,
-                                             .depthTest = false});
+                                             .depthTest = false,
+                                             .colorWriteMaskBits = visibility ? kWithoutId : ~0u});
 }
 
 void Renderer::Impl::destroyScenePipelines() {
-  for (VkPipeline *pipeline : {&skyPipeline, &meshPipeline, &maskedMeshPipeline,
-                               &maskedDepthPipeline, &blendedMeshPipeline, &terrainPipeline,
-                               &voxelPipeline, &voxelInstancePipeline}) {
+  for (VkPipeline *pipeline :
+       {&skyPipeline, &meshPipeline, &maskedMeshPipeline, &maskedDepthPipeline,
+        &blendedMeshPipeline, &terrainPipeline, &voxelPipeline, &voxelInstancePipeline,
+        &visibilityPipeline, &visibilityMaskedPipeline}) {
     vkDestroyPipeline(device.device, *pipeline, nullptr);
     *pipeline = VK_NULL_HANDLE;
   }

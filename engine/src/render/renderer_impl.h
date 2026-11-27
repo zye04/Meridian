@@ -209,6 +209,9 @@ struct Renderer::Impl {
   VkPipeline meshPipeline = VK_NULL_HANDLE;
   VkPipeline maskedMeshPipeline = VK_NULL_HANDLE;
   VkPipeline maskedDepthPipeline = VK_NULL_HANDLE;
+  // The visibility buffer's cluster pipelines (id + depth): opaque, masked.
+  VkPipeline visibilityPipeline = VK_NULL_HANDLE;
+  VkPipeline visibilityMaskedPipeline = VK_NULL_HANDLE;
   VkPipeline blendedMeshPipeline = VK_NULL_HANDLE;
   VkPipelineLayout cullLayout = VK_NULL_HANDLE;
   VkPipeline cellCullPipeline = VK_NULL_HANDLE;
@@ -708,6 +711,11 @@ struct Renderer::Impl {
   // The scene pipelines in use are the debug set (createScenePipelines).
   bool debugPipelines = false;
   Image debugId;
+  // setVisibilityBuffer; the id target exists while it is on. The debug set
+  // stays forward, so the visibility path is active only outside it.
+  bool visibilityBuffer = false;
+  Image visibilityId;
+  bool visibilityActive() const { return visibilityBuffer && !debugPipelines; }
   // Scene attachment 3 when no diffuse albedo target exists (GI off, no RR).
   Image debugAlbedo;
   // Per global cluster index: its DAG level, 4 per uint (debug_view.frag).

@@ -419,6 +419,11 @@ public:
   // triangles where the LOD cut picks them; off keeps the triangles at every
   // distance (an A/B: what the voxels stand in for).
   void setVoxelLod(VoxelLod mode);
+  // Off by default (until it is the only path): cluster lists draw depth and
+  // a visibility id (scene attachment 7), shaded once per pixel by a
+  // fullscreen resolve. Recreates the targets and scene pipelines when it
+  // changes, which resets temporal history: call before the first frame.
+  void setVisibilityBuffer(bool on);
   // With voxel LOD on, the main view keeps the triangles of instances whose
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
