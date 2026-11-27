@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace meridian;
@@ -480,6 +481,77 @@ TEST_CASE("farFieldTransmittanceCpu matches a brute-force march") {
   const std::vector<uint8_t> all(size_t{grid.cellsX} * grid.cellsZ, 1);
   CHECK(farFieldTransmittanceCpu(field, rays[0].origin, rays[0].direction, 0.0f, 1270.0f, &all) ==
         1.0f);
+}
+
+TEST_CASE("farFinestLevel and farColumnRect follow nested bands") {
+  FarFieldGrid grid{0.0f, 0.0f, 90.0f, 20, 20};
+  const int32_t bands[kFarLevels - 1][4] = {
+      {8, 8, 12, 12}, {-4, 6, 14, 30}, {2, 2, 16, 16}, {0, 0, 20, 18}};
+  std::memcpy(grid.bands, bands, sizeof bands);
+  CHECK(farFinestLevel(grid.bands, 9, 11) == 0);
+  CHECK(farFinestLevel(grid.bands, 12, 11) == 1);
+  CHECK(farFinestLevel(grid.bands, 1, 7) == 1);
+  CHECK(farFinestLevel(grid.bands, 15, 2) == 2);
+  CHECK(farFinestLevel(grid.bands, 16, 2) == 3);
+  CHECK(farFinestLevel(grid.bands, 0, 17) == 1);
+  CHECK(farFinestLevel(grid.bands, 0, 18) == 1);
+  CHECK(farFinestLevel(grid.bands, 15, 18) == 4);
+  CHECK(farFinestLevel(grid.bands, 19, 19) == 4);
+  // A fine band clamped to the grid; a static level spans the grid.
+  CHECK(farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, 0) == FarRect{8, 8, 12, 12});
+  CHECK(farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, 1) == FarRect{0, 6, 14, 20});
+  for (uint32_t level = kFarFineLevels; level < kFarLevels; ++level) {
+    CHECK(farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, level) == FarRect{0, 0, 20, 20});
+  }
+}
+
+TEST_CASE("farFieldTransmittanceCpu marches a cell past a level's band at its finest level") {
+  const FarTemplates tree = filterFarTemplate(treeGrid());
+  // The 4 m level over the west 6 cells, the 8 m over the west 12; the
+  // forest covers all 20.
+  FarFieldGrid grid{0.0f, 0.0f, 90.0f, 20, 20};
+  grid.bands[2][2] = 6;
+  grid.bands[3][2] = 12;
+  std::vector<DecodedInstance> instances;
+  for (uint32_t i = 0; i < 400; ++i) {
+    const float x = 1280.0f * hash01(4 * i), z = 400.0f * hash01(4 * i + 1);
+    instances.push_back(instanceAt({x, 100.0f + 0.02f * x, z}, {0, 1, 0},
+                                   2.0f * kPi * hash01(4 * i + 2), 0.8f + 0.5f * hash01(4 * i + 3)));
+  }
+  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f, 16384.0f, 16384.0f};
+  const FarFieldCpu field = splatFarField(grid, {&tree, 1}, kPalette, instances, scale);
+  const auto bruteForce = [&](Vec3 origin, Vec3 direction, float max) {
+    constexpr double kStep = 2.5e-4;
+    double depth = 0.0;
+    for (double t = 0.5 * kStep; t < max; t += kStep) {
+      const Vec3 p = origin + direction * static_cast<float>(t);
+      const uint32_t level = std::max(
+          kFarFineLevels + (t < kFarRayLevelEnd[0] ? 0u : t < kFarRayLevelEnd[1] ? 1u : 2u),
+          farFinestLevel(grid.bands, static_cast<int32_t>(std::floor(p.x / 64.0f)),
+                         static_cast<int32_t>(std::floor(p.z / 64.0f))));
+      depth += farFieldExtinction(field, level, p) * kStep;
+    }
+    return static_cast<float>(std::exp(-depth));
+  };
+  // Short rays (4 m by distance) inside the 8 m and 16 m cells, and one
+  // across all three bands.
+  const float grazing = 2.0f * kPi / 180.0f;
+  const struct {
+    Vec3 origin, direction;
+    float max;
+  } rays[] = {
+      {{900.0f, 125.0f, 200.0f}, {std::cos(grazing), -std::sin(grazing), 0.0f}, 200.0f},
+      {{500.0f, 125.0f, 100.0f}, {std::cos(grazing), -std::sin(grazing), 0.0f}, 230.0f},
+      {{5.0f, 125.0f, 200.0f}, {std::cos(grazing), -std::sin(grazing), 0.0f}, 1270.0f},
+  };
+  for (const auto &ray : rays) {
+    const float expected = bruteForce(ray.origin, ray.direction, ray.max);
+    CAPTURE(ray.origin.x);
+    CHECK(std::abs(farFieldTransmittanceCpu(field, ray.origin, ray.direction, 0.0f, ray.max,
+                                            nullptr) -
+                   expected) < 1e-3f);
+    CHECK(expected < 0.99f);
+  }
 }
 
 TEST_CASE("Compact bricks return the dense brick's voxels") {

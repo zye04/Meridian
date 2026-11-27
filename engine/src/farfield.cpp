@@ -846,8 +846,11 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
     const double levelEnd =
         level + 1 < kFarLevels ? kFarRayLevelEnd[level - kFarFineLevels] : 1e300;
     const double a = std::max<double>(start, levelStart), b = std::min<double>(max, levelEnd);
-    if (a < b && !field.columns[level].empty()) {
-      depth += levelDepth(field, level, origin, direction, a, b, cellInTlas, level);
+    // A cell past this level's band marches at its finest stored level.
+    for (uint32_t drawn = level; a < b && drawn < kFarLevels; ++drawn) {
+      if (!field.columns[drawn].empty()) {
+        depth += levelDepth(field, drawn, origin, direction, a, b, cellInTlas, level);
+      }
     }
     levelStart = levelEnd;
   }

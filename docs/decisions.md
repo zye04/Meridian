@@ -6123,3 +6123,24 @@ No code change; numbers in the ledger's "Hardening" section, gaps as backlog row
 - The default Napf scene fits the VRAM gates with 263 MiB to spare
   (resident 12025 MiB, peak 12454; main 11370 / 11782): the 4 m level
   over the 15 km crop and its band is 895 MiB.
+
+## Far tile tier: review fixes and the cell-border lines (far lane, 2026-11-27)
+
+The director's ruling on the hardening report and the independent review
+of f98f774. Proof frames in `.superpowers/far/{lines,review}/`, numbers
+in the ledger's "Review fixes" section.
+
+- Far rays march a cell at its finest stored level. `farFieldMarch` picked
+  the level by distance only (4 m to 256 m, 8 m to 1 km), but cells more
+  than 2 km past the placement grid store no 4 m columns and cells more
+  than 6 km none at 8 m, so those cells added nothing to that part of a
+  ray: the ground sun and the GI probes under the forest past the crop
+  saw open sky and sun. Now the level is max(the distance level, the
+  cell's finest stored level), as `farFieldShadowDistance` already did,
+  the canopy pad from the coarsest level of the block (its two corner
+  cells: a band rect holding both holds the block); the CPU twin marches
+  each distance range at every coarser level for the cells whose finest
+  level that is. Test: `farFieldTransmittanceCpu` against a brute-force
+  march over bands that end inside the forest (fails without the fix).
+  At `5000 1500 0 1.5708 -0.5` the far tiles' ambient view drops to 0.61x
+  in the lower half (probes under the forest now occluded).

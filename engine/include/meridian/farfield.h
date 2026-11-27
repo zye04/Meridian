@@ -271,8 +271,8 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
 // Extinction (1/m) at a world position, at one level; 0 outside the bricks.
 float farFieldExtinction(const FarFieldCpu &field, uint32_t level, Vec3 position);
 // Transmittance along origin + t direction (unit), t in [start, max], level
-// by distance (kFarRayLevelEnd), voxels constant inside; a cell that does
-// not store that level adds nothing. Cells flagged in cellInTlas are
+// by distance (kFarRayLevelEnd) or, coarser, the cell's finest stored level
+// (farFinestLevel), voxels constant inside. Cells flagged in cellInTlas are
 // skipped (M2b; nullptr in M2a).
 float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direction, float start,
                                float max, const std::vector<uint8_t> *cellInTlas);

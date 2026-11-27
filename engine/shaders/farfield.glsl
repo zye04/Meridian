@@ -371,10 +371,12 @@ const uint kFarMaxRaySteps = 1024u;
 // pyramid (Tevs 2008, as terrainOccludes): a block of 2^k cells whose
 // canopy stays below the ray is skipped and the next tried one level
 // coarser; otherwise it descends, and a cell the ray passes through at
-// canopy height marches its bricks at the ray's level (by distance).
-// skipTlasCells: M2b skips the cells its TLAS holds; in M2a no far ray
-// traces trees in the TLAS, so there is nothing to skip. wantAlbedo: see
-// farMarchCellImpl; scatter then holds the absorbed-weighted sums.
+// canopy height marches its bricks at the coarser of the ray's level (by
+// distance) and the cell's finest stored level (farFinestLevel: a cell past
+// a level's band stores no columns at it). skipTlasCells: M2b skips the
+// cells its TLAS holds; in M2a no far ray traces trees in the TLAS, so there
+// is nothing to skip. wantAlbedo: see farMarchCellImpl; scatter then holds
+// the absorbed-weighted sums.
 float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                     float startDistance, float maxDistance, bool skipTlasCells,
                     const bool wantAlbedo, inout FarScatterSum scatter) {
@@ -425,9 +427,14 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
         float tExit = min(min(axisExit.x, axisExit.y), tEnd);
         float y0 = origin.y + direction.y * t;
         float y1 = origin.y + direction.y * tExit;
-        float pad = farCanopyPad(kFarFineLevels + (tExit < kFarRayLevelEnd0   ? 0u
-                                                   : tExit < kFarRayLevelEnd1 ? 1u
-                                                                              : 2u));
+        // The block's coarsest level: a band rect holding both corners
+        // holds the block.
+        uint blockLevel = max(farFinestLevel(farField.field.bands, lo),
+                              farFinestLevel(farField.field.bands, hi));
+        float pad = farCanopyPad(max(blockLevel,
+                                     kFarFineLevels + (tExit < kFarRayLevelEnd0   ? 0u
+                                                       : tExit < kFarRayLevelEnd1 ? 1u
+                                                                                  : 2u)));
         bool below = blockTop + pad <= min(y0, y1);
         if (!below) {
             if (k > 0u) {
@@ -438,8 +445,10 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                 // One level per march (a single call site, as the march is
                 // inlined); a cell the level changes in is revisited from
                 // the change on.
-                uint level = kFarFineLevels +
-                             (t < kFarRayLevelEnd0 ? 0u : t < kFarRayLevelEnd1 ? 1u : 2u);
+                uint level = max(blockLevel,
+                                 kFarFineLevels + (t < kFarRayLevelEnd0   ? 0u
+                                                   : t < kFarRayLevelEnd1 ? 1u
+                                                                          : 2u));
                 float levelEnd = level == kFarFineLevels        ? kFarRayLevelEnd0
                                  : level == kFarFineLevels + 1u ? kFarRayLevelEnd1
                                                : tExit;
