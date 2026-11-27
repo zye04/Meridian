@@ -41,7 +41,7 @@ layout(location = 9) flat in vec3 inTint;
 layout(location = 10) flat in float inStreamFade;
 // Sky visibility inside a tree crown (mesh.mesh), 1 elsewhere.
 layout(location = 12) in float inCrownVisibility;
-layout(location = 15) in float inCrownSunDepth;
+layout(location = 15) in vec4 inCrownSun;
 #endif
 #ifdef ALPHA_MASK
 // The cluster's terrain sun visibility (cluster_cull.comp), or -1 where the
@@ -268,7 +268,10 @@ void main() {
 #ifndef TERRAIN
     if (leaf) {
         addTransmittedAmbient(sh, transmitted, s.occlusion);
-        addCrownFill(sh, sh.diffuseColor, transmitted, inCrownSunDepth, inCrownVisibility);
+        if (pc.scene.crownFill != 0u && inCrownSun.x > 0.0) {
+            addCrownFill(sh, sh.diffuseColor, transmitted, inCrownSun.x, inCrownVisibility,
+                         crownTopSun(worldPosition + inCrownSun.yzw, sh.L));
+        }
     }
 #endif
 

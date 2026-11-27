@@ -449,13 +449,15 @@ crown-light): the sky part of the ambient that the GI probes don't cover
 (outside their +-768 m clipmap, or all of it with `--gi off`) passes through
 the far field's forest opacity (lighting.glsl `canopySkyVisibility`, 64 m
 march straight up from the point, foliage starting 4 m out; a1 +2.4 ms).
-`--crown-fill off|crown|axis` (default off; development A/B, leaf lane
+`--crown-fill off|crown` (default off; development A/B, leaf lane
 crown-light): sun light scattered between a crown's leaves, added as a
 diffuse fill growing with the crown's optical depth toward the sun
-(lighting.glsl `addCrownFill`, capped at what direct sun on a sunward leaf
-gives). `crown`: the depth through the mesh's crown ellipsoid (common.glsl
-`crownSunDepth`) for triangle leaves and voxels alike; `axis`: voxels take
-their model's baked axis depths (`voxelBoxDepth`) instead.
+through the mesh's crown ellipsoid (common.glsl `crownSun`; triangle
+leaves and leaf voxels alike, not bark), capped at what direct sun on a
+sunward leaf gives (lighting.glsl `addCrownFill`), times the sun's
+visibility at the crown's top centre (`crownTopSun`: one lookup through
+cascades, far shadow map and terrain, 1 m toward the sun), so a crown in
+another's or a hill's shadow gets none.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

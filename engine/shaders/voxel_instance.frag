@@ -128,25 +128,25 @@ void main() {
                                                        mix(1.0, crownR, scene.microShadowStrength);
     }
     addTransmittedAmbient(sh, transmitted, s.occlusion);
-    // Crown fill: the triangles' crown (mesh.mesh) at the voxel's centre, or
-    // with Axis the model's own depths toward the sun and out of it.
-    if (scene.crownFill != 0u) {
-        vec3 meshSun = normalize(toLocal * sh.L);
-        float sunDepth = voxelBoxDepth(axisWord, meshSun);
-        float escape = 0.5 * (up + sides);
-        MeshInfo crown;
-        if (scene.crownFill == 1u &&
-            findCrown(scene, scene.meshes.meshes[cluster.mesh], instance, crown)) {
-            vec3 meshPosition = toLocal * (world - instance.transform[3].xyz);
-            sunDepth = crownSunDepth(crown, meshPosition, meshSun);
-            escape = crownVisibility(crown, meshPosition, normalize(toLocal * s.normal));
-        }
-        addCrownFill(sh, sh.diffuseColor, transmitted, sunDepth, escape);
-    }
     if (scene.giMode != 0u) {
         sh.diffuseLight = diffuseBeforeAmbient +
                           (sh.diffuseLight - diffuseBeforeAmbient) *
                               mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
+    }
+    // Crown fill: the triangles' crown at the voxel's centre, on leaf voxels
+    // only, as mesh.frag (the bark's voxels stay as their triangles). After the
+    // ambient's occlusion: the fill's own escape term holds the crown's.
+    MeshInfo crown;
+    MeshInfo voxelMesh = scene.meshes.meshes[cluster.mesh];
+    if (scene.crownFill != 0u && isLeafMesh(scene, voxelMesh) &&
+        findCrown(scene, voxelMesh, instance, crown)) {
+        vec3 meshPosition = toLocal * (world - instance.transform[3].xyz);
+        vec4 sunThroughCrown = crownSun(crown, meshPosition, normalize(toLocal * sh.L));
+        if (sunThroughCrown.x > 0.0) {
+            addCrownFill(sh, sh.diffuseColor, transmitted, sunThroughCrown.x,
+                         crownVisibility(crown, meshPosition, normalize(toLocal * s.normal)),
+                         crownTopSun(world + linear * sunThroughCrown.yzw, sh.L));
+        }
     }
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,

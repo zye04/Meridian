@@ -5988,3 +5988,39 @@ At m2 it gives shaded/lit 0.052, shaded ambient 62.1, b/g 0.75. Switch 0.3938/0.
 sides) is the one to keep.
 Noise floor: a repeat m2 off capture differs by MAE 0.43/255. The cd.py numbers repeat to
 the third digit.
+
+## Crown fill gate: the sun that reaches the crown (leaf lane round 3, 2026-11-27)
+
+Ruling on round 2: keep `crown`, drop `axis` (removed), no stronger fill, and gate it by the
+sun that actually reaches the crown before it can be a default.
+- Premise: `sunAtSurface` (lighting.glsl beginShading) is the atmosphere's transmittance
+  times `cloudShadow`, nothing else: no cascades, no terrain. The large dark slope on the
+  right of a1 is a cloud shadow (it is lit with `--clouds off`), so the fill there was already
+  near 0 (0.35 against 8-13 on lit crowns, 1e-3 exposed). A real hill shadow (a1 pose with
+  the sun at 15 deg, clouds off, `.superpowers/crown-light/fill.py`, fill = ambient view on
+  minus off on canopy pixels without sun): ungated fill 15.7 and 14.9 there, as much as on
+  lit crowns (15.2). The centre band of the m2 crop is such a hill shadow too: the "even
+  green wash" of round 2.
+- Try (lookup where the point's own sun ray leaves the crown ellipsoid, per fragment, 1 m
+  further out): hill-shadow fill 0.07 / 0.10. But in the sunlit part of m2 (right 220 px of the
+  crop) shaded/lit falls back to 0.016 (ungated 0.061) and canopy L < 0.15 rises to 24.8 %
+  (ungated 1.7 %, reference 2.4 %): a neighbour that shades the one ray cuts the fill though
+  the crown's top is lit.
+- Variant, kept (`crownTopSun`): the same lookup at the crown's top centre (bounds centre +
+  half height, 1 m toward the sun), the same for all its leaves and voxels. Multiple
+  scattering gathers light entering anywhere on the crown, so one visibility per crown fits it
+  better than one per ray. Hill shadow 0.32 / 1.13 (lit crowns 12.0). m2 sunlit part:
+  shaded/lit 0.027, L < 0.15 12.9 %; whole crop 0.013 (the hill shadow dominates its darkest
+  quartile), L < 0.15 27.5 % (reference 2.4 %, ungated 1.5 %, off 33 %). Sparkle |lap|/L 0.357.
+- Two fixes found on the way: voxels took the fill before the ambient's crown occlusion
+  outside the GI clipmap (multiBounceOcclusion), which cut it on distant crowns (the
+  triangles never were); the fill now comes after it. And bark voxels took the fill with their
+  wood albedo: the fill is now on leaf voxels only, as on triangle leaves. Red-brown fill specks
+  at m2 (fill hue < 90 deg, C > 0.02): 535 -> 186 per 1e4 canopy px from that; 131 remain with
+  the gate. Those are leaf-material voxels whose mean albedo is brown (0.083, 0.068, 0.048
+  against 0.029, 0.042, 0.019): twig texels in the leaf cards, which take the fill on triangles
+  too.
+- Switch (pair.sh lone beech tri/vox): 0.3945 / 0.3947 (0.999).
+- GPU (one shadow lookup per leaf fragment): m2 22.16 -> 24.28 ms, a1 21.25 -> 22.62,
+  low sun 19.64 -> 20.71 (ungated -> gated). The lookup is per instance, so it can move to
+  one evaluation per instance (backlog).

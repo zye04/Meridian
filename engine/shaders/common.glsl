@@ -966,13 +966,16 @@ bool findCrown(SceneBuffer scene, MeshInfo mesh, LoadedInstance instance, out Me
     return found;
 }
 
-// The crown's optical depth from a point toward the sun (mesh space, unit
-// `sun`), through the same uniform leaf medium as crownVisibility.
-float crownSunDepth(MeshInfo mesh, vec3 position, vec3 sun) {
+// From a point toward the sun (mesh space, unit `sun`): the crown's optical
+// depth (x), through the same uniform leaf medium as crownVisibility, and
+// the mesh-space offset (yzw) to where the crown fill looks up the sun, the
+// crown's top centre.
+vec4 crownSun(MeshInfo mesh, vec3 position, vec3 sun) {
     vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
     if (halfExtent.y < kCrownMinHalfHeight) {
-        return 0.0;
+        return vec4(0.0);
     }
     vec3 q = (position - mesh.boundsCenter) / max(halfExtent, vec3(1e-3));
-    return kCrownDensity * crownExit(q, sun);
+    return vec4(kCrownDensity * crownExit(q, sun),
+                mesh.boundsCenter + vec3(0.0, halfExtent.y, 0.0) - position);
 }

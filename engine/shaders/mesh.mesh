@@ -34,8 +34,9 @@ layout(location = 10) flat out float outStreamFade[];
 // -1 where mesh.frag marches the terrain per fragment.
 layout(location = 11) flat out float outTerrainSun[];
 layout(location = 12) out float outCrownVisibility[];
-// The crown's optical depth toward the sun (crownSunDepth), with crown fill.
-layout(location = 15) out float outCrownSunDepth[];
+// With crown fill (crownSun): the crown's optical depth toward the sun, and
+// the world offset to the point where the fill looks up the sun.
+layout(location = 15) out vec4 outCrownSun[];
 // COLOR_0 alpha, for the masked depth prepass's alpha test.
 layout(location = 14) out float outVertexAlpha[];
 #ifdef DEBUG_ID
@@ -106,8 +107,11 @@ void main() {
         float top = mesh.boundsCenter.y + mesh.boundsRadius;
         outHeight[i] = tuft ? clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0) : 1.0;
         outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;
-        outCrownSunDepth[i] =
-            hasCrown && scene.crownFill != 0u ? crownSunDepth(crown, vertex.position, meshSun) : 0.0;
+        vec4 sunThroughCrown = hasCrown && scene.crownFill != 0u
+            ? crownSun(crown, vertex.position, meshSun)
+            : vec4(0.0);
+        outCrownSun[i] =
+            vec4(sunThroughCrown.x, mat3(instance.transform) * sunThroughCrown.yzw);
         // Static geometry for now: only the camera moves between frames.
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *

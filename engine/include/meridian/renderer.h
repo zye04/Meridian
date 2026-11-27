@@ -430,10 +430,10 @@ public:
   void setCanopySky(CanopySky mode);
   // Crown fill (development A/B, off by default): the sun light scattered
   // between a crown's leaves (multiple scattering), added as a diffuse fill
-  // that grows with the crown's depth toward the sun. Crown: the depth
-  // through the mesh's crown ellipsoid for triangles and voxels alike; Axis:
-  // voxels take their model's baked axis depths instead.
-  enum class CrownFill : uint32_t { Off, Crown, Axis };
+  // that grows with the crown's depth toward the sun through the mesh's
+  // crown ellipsoid (triangles and leaf voxels alike), times the sun's
+  // visibility at the crown's top centre.
+  enum class CrownFill : uint32_t { Off, Crown };
   void setCrownFill(CrownFill mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
