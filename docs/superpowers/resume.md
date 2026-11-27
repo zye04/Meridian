@@ -1,4 +1,4 @@
-# Resume here (entry point; updated 2026-11-26)
+# Resume here (entry point; updated 2026-11-27)
 
 Read this file first, ask the open questions below, and update the file
 before ending the session. It holds current truth only: open questions,
@@ -11,7 +11,15 @@ in `docs/decisions.md`.
 At most three, each answered in chat (the user opens no documents); the
 agent writes the answer into the spec or here.
 
-None open.
+1. Tree structure: the reference crowns are separate round domes, ours a
+   continuous mat of open crowns. Denser, rounder tree assets, or keep the
+   current Megaplants variants? Image (main checkout, under
+   `.superpowers/fable-review/img/morning-2026-11-27/`): `crown-s1-final.jpg`.
+2. Crown fill (`--crown-fill crown`) on by default at +1.4 to 2.0 ms?
+   Image: `crown-whole-off-vs-aa-fill.jpg` (same directory).
+3. Far tile tier: keep the forest to the horizon at its current cost while
+   the visibility buffer is built, or hold the branch? Image:
+   `far-final-sheet.png` (same directory).
 
 No spec waits for approval: the broadleaf forest floor spec is decided
 and sequenced, the GTAO spec is superseded (rewrite after the visibility
@@ -23,7 +31,11 @@ buffer), the DAG voxel design is approved.
 |---|---|---|
 | `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` (the director works here) |
 | `main` | `../meridian-main` | main's worktree (housekeeping and merges) |
-| `voxel-coverage` | `../meridian-leaf` | leaf lane: coverage stage 2 merged (8be2e9d); crown-specular (voxel crowns occlude their ambient by the crown with GI on) merged 2026-11-27; stage 3 on hold; next: `crown-light` premise round (crown-scale sun and sky darkening; RESUME in `.superpowers/crown-light/` of that worktree) |
+| `voxel-coverage` | `../meridian-leaf` | leaf lane: coverage stage 2 merged (8be2e9d); crown-specular (voxel crowns occlude their ambient by the crown with GI on) merged 2026-11-27 (363096d); stage 3 on hold; next: see the `crown-light` row |
+| `far-tier` | `../meridian-far` | at 1deda3b (pushed): far tile tier per `specs/2026-11-26-far-tile-tier-design.md` and `plans/2026-11-26-far-tile-tier.md` (both on that branch, not on main): forest beyond the heightfield crop out to 16 km from the mirrored placement rule (transient placement feeding the far-field splat), far cells shaded through the cluster voxels' functions, `--far-fine` 1 m / 2 m levels (off; streaming deferred: 1 m tiles cost more than the trees they replace), `--far-extent`, `--far-switch-px`. Independent review plus two fix checks: the two major findings fixed and verified; residuals recorded as backlog rows on the branch; they close before any merge. Cost: far pass about 10.8 ms at the scene views, fly-through average 23.7 ms vs 10.2 ms with `--far-extent 0`. Waits for the user's eye; no merge |
+| `crown-light` | `../meridian-leaf` | at e1639df (pushed): `--canopy-sky up` (sky ambient outside the GI clipmap attenuated through the far-field bricks, off), `--crown-fill crown` (multiple-scattering fill inside crowns, gated by the sun above each point on the crown's top plane, off, +1.4 to 2.0 ms), plus the specular AA that already merged separately. Carries a merge of `scene-broadleaf`, so it cannot merge as a whole. Waits for the user's eye on the fill |
+| `scene-broadleaf` | `../meridian-scene` | at 97bd2ef (pushed): broadleaf scenery, tree palette, ground colours toward the meadow (round 2c), main 363096d merged in. Parked |
+| `foliage-specular-aa` | `../meridian-aa` | merged 2026-11-27 (d8440c4: foliage specular antialiasing, on by default, `--foliage-specular-aa off` for A/B); worktree removable |
 | `voxel-crown-9` | `../meridian-crown` | parked: rule A for root wood groups; waits for the leaf lane's trunk view |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
@@ -32,7 +44,7 @@ Lane report shape (every lane ends its report with these five, numbers
 at 2560x1440): done, measured, look (image paths), needs from the user,
 next. The user relays between windows by pasting them.
 
-## Ordered next steps (updated 2026-11-26)
+## Ordered next steps (updated 2026-11-27)
 
 Steps 4 onward come from the assessment of 2026-11-24.
 
@@ -42,7 +54,11 @@ that came out of it ("Performance gate restated", "Visibility buffer is
 unconditional", "VRAM budget").
 
 1. Leaf voxel look per `specs/2026-11-26-voxel-leaf-coverage-design.md`
-   (leaf lane, `voxel-coverage`).
+   (leaf lane, `voxel-coverage`). The crown-scale light gap was measured:
+   shaded/lit luminance in crowns is 11x below the reference inside the GI
+   clipmap; the gated crown fill closes most of it at a sunlit view (0.114
+   vs 0.133). What remains at crown scale is tree structure and leaf
+   colour, a content question for the user (open question 1).
 2. Bark material lane: specular per material, import channels, EON A/B.
 3. Far wood triangle cost: crown round 9, rule A, rootless models
    (`voxel-crown-9`).
@@ -51,7 +67,11 @@ unconditional", "VRAM budget").
    bitmask, chosen in that spec.
 6. Forest floor: cook (independent of the renderer, once memory headroom
    exists), then placement and the contact look (after AO).
-7. Far tile tier spec (instance-less aggregates past ~1 km; aerial gate).
+7. Far tile tier: spec decided and stages 0, 1, 3 and stage 2 part 1 built
+   on `far-tier` (2026-11-27); open: the user's verdict, the review
+   residuals, the far pass cost (needs shade-once pixels: the visibility
+   buffer), streamed 2 m level and a mirrored margin of real trees past
+   the crop edge.
 8. Wind on trees and grass with the static-plus-dynamic shadow split.
 9. Frame pacing, HDR output (before the final grade is tuned, on a real
     HDR monitor), then the final grade.
@@ -82,7 +102,8 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   MiB at the far field, on the 16 GB card. Main at 3d51440 meets the
   gate at the forest edge (`--trees`): resident 11998 MiB (`Loaded:`),
   peak 13086 MiB (models loading; far field 12411), 290 MiB of resident
-  headroom.
+  headroom. Main at d8440c4 loads the default scene (`--trees`) at 11370
+  MiB resident; `far-tier` loads it at 12033 MiB (255 MiB under the gate).
 - VRAM figures predate vertex compression; the next GPU lane updates them
   from its `Loaded: resident` line.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
@@ -111,7 +132,7 @@ cascade".
   (instance 1621093) is no worse than main b6c1b3b in any segment.
 - Next: the trunk close-up fix merged (9944513); the open voxel work is in "Ordered next steps" above and the backlog.
 
-## State of main (2026-11-26, 99266f0)
+## State of main (2026-11-27, d8440c4)
 
 Native 1440p; DLSS Super Resolution DLAA default (own stable TAA = fallback,
 Ray Reconstruction an A/B); raster cascaded sun shadows default; `--fov` 70
@@ -129,6 +150,8 @@ cluster vertices 48 -> 20 B, wood voxels folded into the leaf voxel of
 their cell, crown round 7 (bark stays triangles until thinner than its
 voxel edge) and round 8 (held-back wood groups join the voxels at the
 next power of two, voxelizer 16).
+Merged 2026-11-27: crown-specular (363096d) and foliage specular
+antialiasing (d8440c4, on by default); neither has had a long Debug run.
 Parity route baseline 27.9 fps with the causal forest (accepted; the
 performance lane takes it, backlog "Forest render cost after causal
 placement").
