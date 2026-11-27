@@ -71,9 +71,29 @@ file(GLOB SHADER_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl)
 
 # Compiles shaders/<source> to <output>.spv; extra arguments become -D
 # defines, so one source can produce several variants.
+# Visibility buffer stage 0 (measurement only, never merged): strip the
+# shading of the cluster and voxel fragment shaders, and the mesh shader's
+# per-vertex work, to measure what a visibility buffer could remove.
+option(MERIDIAN_VB0_STRIP_CLUSTERS "Stage 0: constant cluster fragment shading" OFF)
+option(MERIDIAN_VB0_STRIP_VOXELS "Stage 0: constant voxel fragment shading" OFF)
+option(MERIDIAN_VB0_STRIP_VERTEX "Stage 0: strip mesh.mesh per-vertex work" OFF)
+set(VB0_DEFINES "")
+if(MERIDIAN_VB0_STRIP_CLUSTERS)
+  list(APPEND VB0_DEFINES VB0_STRIP_CLUSTERS)
+endif()
+if(MERIDIAN_VB0_STRIP_VOXELS)
+  list(APPEND VB0_DEFINES VB0_STRIP_VOXELS)
+endif()
+if(MERIDIAN_VB0_STRIP_VERTEX)
+  if(NOT MERIDIAN_VB0_STRIP_CLUSTERS)
+    message(FATAL_ERROR "MERIDIAN_VB0_STRIP_VERTEX needs MERIDIAN_VB0_STRIP_CLUSTERS")
+  endif()
+  list(APPEND VB0_DEFINES VB0_STRIP_VERTEX)
+endif()
+
 function(add_shader source output)
   set(defines "")
-  foreach(define ${ARGN})
+  foreach(define ${ARGN} ${VB0_DEFINES})
     list(APPEND defines -D${define})
   endforeach()
   set(spv ${SHADER_DIR}/${output}.spv)

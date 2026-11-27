@@ -21,6 +21,24 @@ layout(early_fragment_tests) in;
 #include "placement.glsl"
 #endif
 
+#if defined(VB0_STRIP_VERTEX) && !defined(TERRAIN) && !defined(DEBUG_ID)
+// Stage 0: mesh.mesh writes only these; the rest are plain globals so the
+// code below still compiles.
+layout(location = 4) in vec2 inUv;
+layout(location = 6) flat in uint inMaterialIndex;
+layout(location = 14) in float inVertexAlpha;
+vec3 inRelativePosition;
+vec3 inNormal;
+vec4 inCurrentClip;
+vec4 inPreviousClip;
+vec4 inTangent;
+float inLodError;
+float inHeight;
+vec3 inTint;
+float inStreamFade;
+float inCrownVisibility;
+float inTerrainSun;
+#else
 layout(location = 0) in vec3 inRelativePosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inCurrentClip;
@@ -51,6 +69,7 @@ layout(location = 11) flat in float inTerrainSun;
 layout(location = 14) in float inVertexAlpha;
 #endif
 
+#endif
 #ifdef ALPHA_MASK
 #ifndef DEPTH_ONLY
 layout(early_fragment_tests) in;
@@ -141,6 +160,13 @@ void main() {
         discard;
     }
     return;
+#elif defined(VB0_STRIP_CLUSTERS) && !defined(TERRAIN) && !defined(DEBUG_ID) && !defined(ALPHA_BLEND)
+    outColor = vec4(0.5, 0.0, 0.5, 1.0);
+    outMotion = vec2(0.0);
+    outDiffuseAlbedo = vec4(0.5, 0.0, 0.5, 1.0);
+    outSpecularAlbedo = vec4(0.04, 0.04, 0.04, 1.0);
+    outNormalRoughness = vec4(0.0, 1.0, 0.0, 0.5);
+    outSunLight = vec4(0.0, 0.0, 0.0, 1.0);
 #else
     worldPosition = inRelativePosition + pc.scene.cameraPosition;
     surfaceIn.relativePosition = inRelativePosition;

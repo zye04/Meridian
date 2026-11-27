@@ -46,6 +46,15 @@ layout(location = 6) out vec4 outSunLight;
 const float kVoxelNeighbourNormalChange = 1.0;
 
 void main() {
+#if defined(VB0_STRIP_VOXELS) && !defined(DEBUG_ID)
+    outColor = vec4(0.0, 0.5, 0.5, 1.0);
+    outMotion = vec2(0.0);
+    outDiffuseAlbedo = vec4(0.0, 0.5, 0.5, 1.0);
+    outSpecularAlbedo = vec4(0.04, 0.04, 0.04, 1.0);
+    outNormalRoughness = vec4(0.0, 1.0, 0.0, 0.5);
+    outSunLight = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+#endif
     SceneBuffer scene = pc.scene;
     LoadedInstance instance = loadInstance(scene, inInfo.x);
     ClusterInfo cluster = scene.clusters.clusters[inInfo.w];

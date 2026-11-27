@@ -17,6 +17,12 @@ out gl_MeshPerVertexEXT {
     invariant vec4 gl_Position;
 } gl_MeshVerticesEXT[];
 
+#if defined(VB0_STRIP_VERTEX) && !defined(DEBUG_ID)
+#define VB0_MESH
+layout(location = 4) out vec2 outUv[];
+layout(location = 6) flat out uint outMaterialIndex[];
+layout(location = 14) out float outVertexAlpha[];
+#else
 layout(location = 0) out vec3 outRelativePosition[];
 layout(location = 1) out vec3 outNormal[];
 layout(location = 2) out vec4 outCurrentClip[];
@@ -36,6 +42,7 @@ layout(location = 11) flat out float outTerrainSun[];
 layout(location = 12) out float outCrownVisibility[];
 // COLOR_0 alpha, for the masked depth prepass's alpha test.
 layout(location = 14) out float outVertexAlpha[];
+#endif
 #ifdef DEBUG_ID
 // (instance id, cluster index) for the debug id (debug_id.glsl).
 layout(location = 13) flat out uvec2 outDebugId[];
@@ -104,6 +111,7 @@ void main() {
 #endif
     SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
 
+#ifndef VB0_MESH
     // The crown: a leaf mesh's own bounds; the rest of a placed tree (bark)
     // takes its leaf mesh's, so trunks and branches under it darken too.
     bool hasCrown = isLeafMesh(scene, mesh);
@@ -126,6 +134,7 @@ void main() {
     vec3 tint = instance.placed
                     ? unpackPrototypeTint(scene.prototypes.prototypes[instance.meshOrPrototype].tint)
                     : vec3(1.0);
+#endif
     for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
         uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
                      uint(mesh.vertexOffset);
@@ -134,6 +143,11 @@ void main() {
         vec3 relative = world - scene.cameraPosition;
         vec4 displayed = displayedPosition(scene, relative);
         gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * displayed;
+#ifdef VB0_MESH
+        outUv[i] = vec2(vertex.uvX, vertex.uvY);
+        outVertexAlpha[i] = vertex.alpha;
+        outMaterialIndex[i] = mesh.materialIndex;
+#else
         outRelativePosition[i] = relative;
         outNormal[i] = normalMatrix * vertex.normal;
         outTangent[i] = vec4(mat3(instance.transform) * vertex.tangent.xyz,
@@ -155,6 +169,7 @@ void main() {
         outCurrentClip[i] = scene.currentViewProjection * displayed;
         outPreviousClip[i] = scene.previousViewProjection *
                              displayedPosition(scene, world - scene.previousCameraPosition);
+#endif
     }
     for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {
         uint t = scene.clusterTriangles.triangles[cluster.firstTriangle + i];
