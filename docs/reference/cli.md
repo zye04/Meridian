@@ -458,6 +458,12 @@ sunward leaf gives (lighting.glsl `addCrownFill`), times the sun's
 visibility at the crown's top centre (`crownTopSun`: one lookup through
 cascades, far shadow map and terrain, 1 m toward the sun), so a crown in
 another's or a hill's shadow gets none.
+`--foliage-specular-aa off|on` (default off; development A/B, leaf lane
+crown-light): leaves widen their specular lobe by the normal variation a
+pixel covers (lighting.glsl `specularAaRoughness`, Tokuyoshi-Kaplanyan):
+triangle leaves by the shading normal's screen derivatives, voxels by
+`kVoxelNeighbourNormalChange` over the voxel's size in pixels
+(voxel_instance.frag).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

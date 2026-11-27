@@ -401,6 +401,7 @@ struct Renderer::Impl {
   VoxelCoverage voxelCoverage = VoxelCoverage::AreaPixelPhase;
   uint32_t canopySky = 0;
   uint32_t crownFill = 0;
+  uint32_t foliageSpecularAa = 0;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;

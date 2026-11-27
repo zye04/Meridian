@@ -6024,3 +6024,29 @@ sun that actually reaches the crown before it can be a default.
 - GPU (one shadow lookup per leaf fragment): m2 22.16 -> 24.28 ms, a1 21.25 -> 22.62,
   low sun 19.64 -> 20.71 (ungated -> gated). The lookup is per instance, so it can move to
   one evaluation per instance (backlog).
+
+## Foliage specular AA (leaf lane round 3, 2026-11-27)
+
+Item D, leaf-scale sparkle. Source first (`.superpowers/crown-light/dots.py`, debug light
+views): at m2 the white dots (canopy L > 0.85, 6.1 per 1e4 px, reference 0) are all voxels,
+and 91 % of their light is specular, essentially all of it sun specular (>= 5473 of 5528,
+1e-3 exposed; sky reflection <= 26). The lit canopy's light is 21 % specular.
+
+`--foliage-specular-aa on` (try, kept): geometric specular AA (Tokuyoshi and Kaplanyan
+2019, as Filament's normalFiltering: alpha^2 += min(2 x 0.15 x (|dN/dx|^2 + |dN/dy|^2), 0.2)).
+Triangle leaves take the derivatives of their shading normal. A voxel is flat-shaded, so it
+has none: its pixel spans 1 / voxelPixels^2 of the change to the neighbouring voxels' lobe
+axes, taken as |N1 - N2|^2 = 1 (axes about 60 degrees apart in a crown whose leaves face
+every way, `kVoxelNeighbourNormalChange`).
+- m2 (fill on): white dots 6.1 -> 0.1 per 1e4, |lap|/L 0.357 -> 0.348 (reference 0.251; the
+  rest there is the hill-shadow edge structure).
+- s1, a new sunlit matched view (`--camera 218 1408 1298 -0.785 -0.57`, a sun-facing slope
+  with no hill or cloud shadow, 400 m to the crop's crowns so that they come near the
+  reference's size; they are still larger): dots 2.2 -> 0.0, |lap|/L 0.232 -> 0.215
+  (reference 0.251). Lit-canopy specular 92.9 -> 92.4: energy kept, only the peaks spread.
+- Switch (pair.sh lone beech, AA only): tri/vox 0.3858 / 0.3864 (0.998, off 0.998).
+- GPU within noise (s1 25.40 -> 25.34 ms, m2 24.28 -> 24.43 ms).
+No variant: the try removed the dots and s1's sparkle is already below the reference, so a
+wider lobe would only move away from it.
+At s1 the crown fill does what round 2 aimed for: shaded/lit 0.091 off -> 0.114 gated
+(reference 0.133), canopy L < 0.15 4.0 % -> 2.6 % (reference 2.4 %).

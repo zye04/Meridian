@@ -348,6 +348,19 @@ struct Shading {
 };
 
 // `relativePosition` is the flat world's, relative to the camera.
+// Specular antialiasing for foliage (Renderer::setFoliageSpecularAa):
+// the normals a pixel covers spread its highlight, so widen alpha^2 by
+// their variance (Tokuyoshi and Kaplanyan 2019, "Improved Geometric
+// Specular Antialiasing"; as Filament's normalFiltering). `normalChange` is
+// |dN/dx|^2 + |dN/dy|^2 per pixel.
+const float kSpecularAaVariance = 0.15;
+const float kSpecularAaThreshold = 0.2;
+float specularAaRoughness(float perceptualRoughness, float normalChange) {
+    float alpha = perceptualRoughness * perceptualRoughness;
+    float kernel = min(2.0 * kSpecularAaVariance * normalChange, kSpecularAaThreshold);
+    return sqrt(sqrt(clamp(alpha * alpha + kernel, 0.0, 1.0)));
+}
+
 Shading beginShading(Surface s, vec3 relativePosition) {
     Shading sh;
     sh.N = s.normal;

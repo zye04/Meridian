@@ -175,6 +175,12 @@ void main() {
     if (inStreamFade < 1.0) {
         s.normal = normalize(mix(terrainNormal(), s.normal, inStreamFade));
     }
+    vec3 normalDx = dFdx(s.normal);
+    vec3 normalDy = dFdy(s.normal);
+    if (pc.scene.foliageSpecularAa != 0u && material.diffuseTransmission > 0.0) {
+        s.perceptualRoughness = specularAaRoughness(
+            s.perceptualRoughness, dot(normalDx, normalDx) + dot(normalDy, normalDy));
+    }
 #endif
     Shading sh = beginShading(s, inRelativePosition);
     vec2 debugStretch = vec2(0.0);

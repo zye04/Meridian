@@ -703,6 +703,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint voxelCoverage;
     // Renderer::setCrownFill (lighting.glsl addCrownFill).
     uint crownFill;
+    // Renderer::setFoliageSpecularAa (lighting.glsl specularAaRoughness).
+    uint foliageSpecularAa;
 };
 
 // Largest axis scale of a transform: a conservative bound under
