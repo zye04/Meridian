@@ -1,4 +1,4 @@
-# Far lane: resume point (2026-11-27, stage 2 ruled (C); hardening next)
+# Far lane: resume point (2026-11-27, hardening a-e done; waiting on the director's review)
 
 Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (merge ed758d8 + this RESUME commit).
 Read: CLAUDE.md, spec `docs/superpowers/specs/2026-11-26-far-tile-tier-design.md`,
@@ -52,7 +52,15 @@ plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
 - Note: `rtk grep -h` over several files reorders output; grep files one at a time for per-view numbers.
 - measure.sh's `--far-switch-px 41` is stale (the flag now means voxel px); call views.sh directly.
 
-## Next (director's order, 2026-11-27; stop and report after d if context is short)
+## Hardening done (2026-11-27): 37812f2 docs sweep, 8d27425 measurements (ledger "Hardening")
+- Artifacts: fly/ (route, csv, maxima.py, views/, sheet-fly.png), motion/ (motion.sh, table.sh, far/, ext0/),
+  default/ (far/, main/, ext0/, sheet-default.png), debugcap/ (Debug H1/H2), sheet/sheet-final.png.
+- main comparison worktree: .superpowers/far/main at 363096d with build-release (no --scenery/--tree-palette there).
+- Findings to the director: 8 m blocks past the 4 m band; route GPU 20.6 vs 10.2 ms; 3.1 ms far window rebuild;
+  default scene resident 12025 MiB (263 under gate).
+- Next: the director's independent review (4.3), then the user's merge decision. Do not start the review.
+
+## Next (done; kept for reference)
 a. Fly-through from the core across the crop edge and 3 km past it (benchmark/route mechanism in
    docs/reference/cli.md or a short custom route): frame-time maxima, far shadow-height window
    rebuild cost while moving, holes/popping in the far forest; one run at low sun (5 degrees) at H1.
