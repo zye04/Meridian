@@ -244,11 +244,14 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
 
   // Each far prototype's 1 m template from its meshes' far voxels (the
   // cluster build voxelized them; slot = mesh, up to kFarSlots, the rest
-  // share the last slot), one palette entry per slot.
+  // share the last slot), each voxel with its own colour (times the
+  // prototype's tint, as the cluster voxels); one palette over all of them.
   constexpr uint32_t kFarSlots = 8;
+  // The voxel word's albedo index is 8 bit.
+  constexpr uint32_t kFarPaletteEntries = 256;
   std::vector<FarTemplates> templates(prototypes.size());
-  std::vector<FarSlotColor> colors;
-  std::vector<float> transmissionFactors;
+  std::vector<FarBakeGrid> bakes(prototypes.size());
+  std::vector<FarBakeGrid *> baked;
   const auto bakeStart = Clock::now();
   for (uint32_t p = 0; p < prototypes.size(); ++p) {
     if (!far[p]) {
@@ -257,7 +260,6 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     const auto meshCount = static_cast<uint32_t>(prototypes[p].meshes.size());
     const uint32_t slots = std::min(meshCount, kFarSlots);
     std::vector<VoxelGrid> grids(slots);
-    std::vector<float> slotTransmission(slots, 0.0f);
     for (uint32_t m = 0; m < meshCount; ++m) {
       const uint32_t index = prototypes[p].meshes[m].index;
       const MeshFarVoxels &source = meshFarVoxels[index];
@@ -265,32 +267,38 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       const uint32_t slot = std::min(m, slots - 1);
       grids[slot].edge = kFarTemplateVoxel;
       grids[slot].bricks.insert(grids[slot].bricks.end(), grid.bricks.begin(), grid.bricks.end());
-      slotTransmission[slot] =
-          std::max(slotTransmission[slot], materials[meshes[index].materialIndex].diffuseTransmission);
     }
-    const auto paletteBase = static_cast<uint32_t>(colors.size());
-    if (paletteBase + slots > 256) {
-      throw std::runtime_error("far field palette exceeds 256 entries");
-    }
-    colors.resize(paletteBase + slots);
-    transmissionFactors.insert(transmissionFactors.end(), slotTransmission.begin(),
-                               slotTransmission.end());
-    const FarBakeGrid grid =
-        farBakeGridFromVoxels(grids, static_cast<uint8_t>(paletteBase),
-                              std::span(colors).subspan(paletteBase));
+    std::vector<FarSlotColor> slotColors(slots);
+    FarBakeGrid &grid = bakes[p];
+    grid = farBakeGridFromVoxels(grids, 0, slotColors);
     if (grid.extinction.empty()) {
       std::fprintf(stderr, "Far field: prototype %u has no far voxels (not voxelized)\n", p);
       continue;
     }
+    const Vec3 tint = prototypes[p].tint;
+    for (size_t i = 0; i < grid.reflected.size(); ++i) {
+      const Vec3 r = grid.reflected[i], t = grid.transmitted[i];
+      grid.reflected[i] = {r.x * tint.x, r.y * tint.y, r.z * tint.z};
+      grid.transmitted[i] = {t.x * tint.x, t.y * tint.y, t.z * tint.z};
+    }
+    baked.push_back(&grid);
+  }
+  const FarPalette farColors = buildFarPalette(baked, kFarPaletteEntries);
+  for (uint32_t p = 0; p < prototypes.size(); ++p) {
+    if (bakes[p].extinction.empty()) {
+      continue;
+    }
     FarTemplates &t = templates[p];
-    t = filterFarTemplate(grid);
+    t = filterFarTemplate(bakes[p], farColors.reflected);
     std::printf("Far field template: prototype %u, %ux%ux%u m; %zu/%zu/%zu template voxels "
                 "L0/L1/L2\n",
-                p, grid.size[0], grid.size[1], grid.size[2], t[0].voxels.size(),
+                p, bakes[p].size[0], bakes[p].size[1], bakes[p].size[2], t[0].voxels.size(),
                 t[1].voxels.size(), t[2].voxels.size());
   }
+  bakes.clear();
   const double bakeMs = msSince(bakeStart);
-  const auto paletteSize = static_cast<uint32_t>(colors.size());
+  const auto paletteSize = static_cast<uint32_t>(farColors.reflected.size());
+  std::printf("Far field palette: %u entries\n", paletteSize);
 
   const auto makeLayout = [&](uint32_t bytes, bool materials) {
     const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes};
@@ -305,22 +313,15 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     check(vkCreatePipelineLayout(dev, &info, nullptr, &layout), "vkCreatePipelineLayout");
     return layout;
   };
-  // Entries 0..paletteSize-1: (reflected diffuse rgb, diffuse transmission
-  // factor); entries paletteSize..: (transmitted rgb, 0), the factor times
-  // the transmission colour (farfield.glsl).
-  std::vector<Vec3> palette(paletteSize, Vec3{0.5f, 0.5f, 0.5f});
+  // Entries 0..paletteSize-1: (reflected diffuse rgb, 0); entries
+  // paletteSize..: (transmitted rgb, 0), the factor times the transmission
+  // colour (farfield.glsl).
+  const std::vector<Vec3> &palette = farColors.reflected;
   std::vector<float> paletteData, transmittedData;
   for (uint32_t e = 0; e < paletteSize; ++e) {
-    Vec3 transmitted{};
-    if (colors[e].coverage > 0.0) {
-      const auto inverse = static_cast<float>(1.0 / colors[e].coverage);
-      palette[e] = colors[e].albedo * inverse;
-      transmitted = colors[e].transmission * inverse;
-    }
-    paletteData.insert(paletteData.end(),
-                       {palette[e].x, palette[e].y, palette[e].z, transmissionFactors[e]});
-    transmittedData.insert(transmittedData.end(),
-                           {transmitted.x, transmitted.y, transmitted.z, 0.0f});
+    const Vec3 r = farColors.reflected[e], t = farColors.transmitted[e];
+    paletteData.insert(paletteData.end(), {r.x, r.y, r.z, 0.0f});
+    transmittedData.insert(transmittedData.end(), {t.x, t.y, t.z, 0.0f});
   }
   paletteData.insert(paletteData.end(), transmittedData.begin(), transmittedData.end());
 

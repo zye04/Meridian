@@ -4889,7 +4889,8 @@ peak stays the `TLAS:` line's load peak and the `Far field:` line's peak.
 - **Far-field palette, an accepted deviation (user)**: one palette entry
   per mesh slot (`kFarSlots` = 8, reflected and transmitted colour), not
   per-voxel albedo and transmission as the plan's Task 6 said; revisit with
-  the far tile tier.
+  the far tile tier (done: a palette of the voxels' own colours, "Far tile
+  tier stage 3").
 - **The darker forest is accepted as correct shadowing (user)**: against
   main ray traced (`--shadows rt`) on fly frame 010, OKLCh, g1's residual is
   at most L 0.021, C 0.001, h 1.5 deg per region, while main's raster is
@@ -6036,3 +6037,15 @@ sky occlusion.
   inlined copy of the march costs ~3 ms in registers alone, a zero-length
   probe showed): far pass with the switch at 41 px 9.02 -> 12.05 ms
   (14.58 with two call sites; 16 m instead of 32 m saves ~1 ms).
+- Colour (3.1): every far template voxel keeps its own reflected and
+  transmitted colour (the combined 1 m `VoxelPayload`, times the
+  prototype's tint as the cluster voxels), and one palette of 256 entries
+  (`buildFarPalette`: median cut on sqrt rgb, weighted by extinction; the
+  voxel word's index stays 8 bit) replaces one entry per mesh slot. The
+  coarse levels take the entry nearest their voxels' mean colour by the
+  splat's own rule (`farFieldNearestEntry`, CPU and GPU). `--tree-palette`
+  already reached the far palette (it is built from the loaded model's far
+  voxels); the slot means flattened it. a1 base colour on the same pixels
+  L 0.309 h 139 -> 0.330 h 131 (cluster voxels 0.341 h 128); final lit /
+  shaded L 0.405 / 0.304, h1 0.315 / 0.201. Splat at load 255 -> 279 ms.
+

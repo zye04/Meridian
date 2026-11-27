@@ -142,6 +142,8 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
   grid.extinction.assign(count, 0.0f);
   grid.normal.assign(count, Vec3{});
   grid.moment.assign(count, {});
+  grid.reflected.assign(count, Vec3{});
+  grid.transmitted.assign(count, Vec3{});
   grid.albedo.assign(count, paletteBase);
   std::vector<float> best(count, -1.0f);
   for (size_t s = 0; s < slots.size(); ++s) {
@@ -173,6 +175,8 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
         // doesn't cancel opposite signs of the same axis.
         const Vec3 axis = normalLobe(v).axis;
         grid.normal[at] = dot(axis, Vec3{0.3f, 1.0f, 0.2f}) < 0.0f ? axis * -1.0f : axis;
+        grid.reflected[at] = v.albedo;
+        grid.transmitted[at] = v.transmission;
         const float trace = v.moment[0] + v.moment[1] + v.moment[2];
         if (trace > 0.0f) {
           for (int k = 0; k < 6; ++k) {
@@ -185,7 +189,141 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
   return grid;
 }
 
-FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
+uint32_t farFieldNearestEntry(std::span<const Vec3> palette, Vec3 albedo) {
+  uint32_t best = 0;
+  float bestDistance = 1e30f;
+  for (uint32_t entry = 0; entry < palette.size(); ++entry) {
+    const Vec3 d = palette[entry] - albedo;
+    if (dot(d, d) < bestDistance) {
+      bestDistance = dot(d, d);
+      best = entry;
+    }
+  }
+  return best;
+}
+
+FarPalette buildFarPalette(std::span<FarBakeGrid *const> grids, uint32_t maxEntries) {
+  maxEntries = std::min(maxEntries, 256u); // albedo is 8 bit
+  struct Point {
+    Vec3 key; // sqrt rgb of the reflected colour
+    double weight;
+    FarBakeGrid *grid;
+    size_t index;
+  };
+  std::vector<Point> points;
+  for (FarBakeGrid *grid : grids) {
+    for (size_t i = 0; i < grid->extinction.size(); ++i) {
+      if (grid->extinction[i] > 0.0f) {
+        const Vec3 c = grid->reflected[i];
+        points.push_back({Vec3{std::sqrt(std::max(c.x, 0.0f)), std::sqrt(std::max(c.y, 0.0f)),
+                               std::sqrt(std::max(c.z, 0.0f))},
+                          grid->extinction[i], grid, i});
+      }
+    }
+  }
+  // Median cut: split the box with the largest weighted spread along its
+  // widest axis at the weighted median, until maxEntries boxes.
+  struct Box {
+    size_t begin, end;
+    double spread;
+    int axis;
+  };
+  const auto measure = [&](size_t begin, size_t end) {
+    double w = 0.0;
+    double mean[3] = {}, square[3] = {};
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    for (size_t i = begin; i < end; ++i) {
+      const Point &p = points[i];
+      const float k[3] = {p.key.x, p.key.y, p.key.z};
+      w += p.weight;
+      for (int a = 0; a < 3; ++a) {
+        mean[a] += p.weight * k[a];
+        square[a] += p.weight * k[a] * k[a];
+        lo[a] = std::min(lo[a], k[a]);
+        hi[a] = std::max(hi[a], k[a]);
+      }
+    }
+    Box box{begin, end, 0.0, 0};
+    for (int a = 0; a < 3; ++a) {
+      // An axis the box's colours all share can't split (its variance may
+      // round above 0).
+      const double variance =
+          w > 0.0 && hi[a] > lo[a] ? std::max(square[a] / w - (mean[a] / w) * (mean[a] / w), 1e-30) : 0.0;
+      if (variance * w > box.spread) {
+        box.spread = variance * w;
+        box.axis = a;
+      }
+    }
+    if (end - begin < 2) {
+      box.spread = 0.0;
+    }
+    return box;
+  };
+  std::vector<Box> boxes;
+  if (!points.empty()) {
+    boxes.push_back(measure(0, points.size()));
+  }
+  while (boxes.size() < maxEntries) {
+    const auto widest = std::max_element(boxes.begin(), boxes.end(), [](const Box &a, const Box &b) {
+      return a.spread < b.spread;
+    });
+    if (widest->spread <= 0.0) {
+      break;
+    }
+    const Box box = *widest;
+    const auto key = [&](const Point &p) {
+      return box.axis == 0 ? p.key.x : box.axis == 1 ? p.key.y : p.key.z;
+    };
+    std::sort(points.begin() + box.begin, points.begin() + box.end,
+              [&](const Point &a, const Point &b) { return key(a) < key(b); });
+    double total = 0.0;
+    for (size_t i = box.begin; i < box.end; ++i) {
+      total += points[i].weight;
+    }
+    size_t split = box.begin + 1;
+    double below = points[box.begin].weight;
+    while (split + 1 < box.end && below < 0.5 * total) {
+      below += points[split++].weight;
+    }
+    // Not through a run of equal keys: to its end, or if it reaches the
+    // box's end, to its start.
+    size_t runEnd = split;
+    while (runEnd < box.end && key(points[runEnd]) == key(points[runEnd - 1])) {
+      ++runEnd;
+    }
+    if (runEnd < box.end) {
+      split = runEnd;
+    } else {
+      while (split > box.begin + 1 && key(points[split]) == key(points[split - 1])) {
+        --split;
+      }
+    }
+    *widest = measure(box.begin, split);
+    boxes.push_back(measure(split, box.end));
+  }
+  FarPalette palette;
+  for (const Box &box : boxes) {
+    double w = 0.0;
+    Vec3 reflected, transmitted;
+    for (size_t i = box.begin; i < box.end; ++i) {
+      const Point &p = points[i];
+      const auto weight = static_cast<float>(p.weight);
+      w += p.weight;
+      reflected = reflected + p.grid->reflected[p.index] * weight;
+      transmitted = transmitted + p.grid->transmitted[p.index] * weight;
+    }
+    const auto inverse = static_cast<float>(1.0 / w);
+    const auto entry = static_cast<uint8_t>(palette.reflected.size());
+    palette.reflected.push_back(reflected * inverse);
+    palette.transmitted.push_back(transmitted * inverse);
+    for (size_t i = box.begin; i < box.end; ++i) {
+      points[i].grid->albedo[points[i].index] = entry;
+    }
+  }
+  return palette;
+}
+
+FarTemplates filterFarTemplate(const FarBakeGrid &grid, std::span<const Vec3> palette) {
   FarTemplates templates;
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     const auto f = static_cast<uint32_t>(kFarVoxelSize[level] / kFarTemplateVoxel);
@@ -201,6 +339,7 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
           double sum = 0.0;
           Vec3 normal;
           VoxelPayload moment;
+          Vec3 reflected;
           std::array<float, 256> albedo{};
           for (uint32_t cz = z * f; cz < std::min((z + 1) * f, grid.size[2]); ++cz) {
             for (uint32_t cy = y * f; cy < std::min((y + 1) * f, grid.size[1]); ++cy) {
@@ -209,10 +348,15 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
                 const float e = grid.extinction[i];
                 sum += e;
                 normal = normal + grid.normal[i] * e;
-                for (int k = 0; k < 6; ++k) {
-                  moment.moment[k] += grid.moment[i][k] * e;
+                if (!grid.moment.empty()) {
+                  for (int k = 0; k < 6; ++k) {
+                    moment.moment[k] += grid.moment[i][k] * e;
+                  }
                 }
                 albedo[grid.albedo[i]] += e;
+                if (!palette.empty()) {
+                  reflected = reflected + grid.reflected[i] * e;
+                }
               }
             }
           }
@@ -224,8 +368,11 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
                          Vec3{(x + 0.5f) * f, (y + 0.5f) * f, (z + 0.5f) * f} * kFarTemplateVoxel;
           voxel.extinction = static_cast<float>(sum / std::pow(static_cast<double>(f), 3.0));
           voxel.normal = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
-          voxel.albedo = static_cast<uint32_t>(std::max_element(albedo.begin(), albedo.end()) -
-                                               albedo.begin());
+          voxel.albedo =
+              palette.empty()
+                  ? static_cast<uint32_t>(std::max_element(albedo.begin(), albedo.end()) -
+                                          albedo.begin())
+                  : farFieldNearestEntry(palette, reflected * static_cast<float>(1.0 / sum));
           out.voxels.push_back(voxel);
           alignmentSum += normalLobe(moment).alignment * sum;
           out.extinctionSum += sum;
@@ -532,15 +679,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
           normal = length(normal) > 0.0f ? normalize(normal) : Vec3{0.0f, 1.0f, 0.0f};
           const Vec3 albedo{static_cast<float>(a[4]) / e, static_cast<float>(a[5]) / e,
                             static_cast<float>(a[6]) / e};
-          uint32_t best = 0;
-          float bestDistance = 1e30f;
-          for (uint32_t entry = 0; entry < palette.size(); ++entry) {
-            const Vec3 d = palette[entry] - albedo;
-            if (dot(d, d) < bestDistance) {
-              bestDistance = dot(d, d);
-              best = entry;
-            }
-          }
+          const uint32_t best = farFieldNearestEntry(palette, albedo);
           mask[local / 32] |= 1u << (local % 32);
           field.voxels[level].push_back(packVoxel(e / scale, normal, static_cast<uint8_t>(best)));
         }

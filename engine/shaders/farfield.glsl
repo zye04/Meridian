@@ -78,9 +78,9 @@ layout(buffer_reference, std430) readonly buffer FarPyramidBuffer {
     float tops[];
 };
 
-// Entry i < paletteSize: rgb the mean reflected diffuse albedo, a the
-// diffuse transmission factor of the baked material; entry paletteSize + i:
-// rgb its transmitted albedo (factor x transmission colour).
+// Entry i < paletteSize: rgb a reflected diffuse albedo of the templates'
+// voxels (buildFarPalette); entry paletteSize + i: rgb the transmitted
+// albedo (factor x transmission colour) of the voxels quantized to it.
 layout(buffer_reference, std430) readonly buffer FarPaletteBuffer {
     vec4 albedo[];
 };

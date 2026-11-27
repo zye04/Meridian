@@ -131,11 +131,31 @@ struct FarBakeGrid {
   // The leaves' normal moment (VoxelPayload::moment over its trace).
   std::vector<std::array<float, 6>> moment;
   std::vector<uint8_t> albedo;
+  // The voxel's own reflected and transmitted colour (the combined
+  // VoxelPayload's albedo and transmission), which buildFarPalette
+  // quantizes into albedo.
+  std::vector<Vec3> reflected, transmitted;
 };
 // Box-filters the 1 m template to each level: mean extinction (which keeps
-// the optical mass), extinction-weighted normal and moment (the alignment),
-// the albedo entry with the most extinction.
-FarTemplates filterFarTemplate(const FarBakeGrid &grid);
+// the optical mass), extinction-weighted normal and moment (the alignment).
+// The albedo: without a palette the entry with the most extinction; with
+// one (buildFarPalette's reflected colours) the entry nearest the
+// extinction-weighted mean reflected colour, by the splat's rule
+// (farFieldNearestEntry).
+FarTemplates filterFarTemplate(const FarBakeGrid &grid, std::span<const Vec3> palette = {});
+
+// The palette entry whose reflected colour is nearest `albedo` (squared
+// linear rgb distance, the first on a tie): the splat's rule, CPU and GPU.
+uint32_t farFieldNearestEntry(std::span<const Vec3> palette, Vec3 albedo);
+
+// A palette of at most maxEntries colours over every occupied voxel of the
+// grids (median cut on sqrt rgb of the reflected colour, weighted by
+// extinction; an entry is its voxels' weighted mean reflected and
+// transmitted colour), and each voxel's albedo set to its entry.
+struct FarPalette {
+  std::vector<Vec3> reflected, transmitted;
+};
+FarPalette buildFarPalette(std::span<FarBakeGrid *const> grids, uint32_t maxEntries);
 
 // Per palette slot: coverage-weighted sums of its voxels' reflected and
 // transmitted colours (VoxelPayload::albedo, ::transmission) and the

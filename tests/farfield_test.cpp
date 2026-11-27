@@ -702,3 +702,36 @@ TEST_CASE("The shadow map rebuild never stalls and follows the sun") {
   CHECK(step.count == 0);
   CHECK_FALSE(step.state.building);
 }
+
+TEST_CASE("buildFarPalette gives each voxel its own colour and filterFarTemplate keeps it") {
+  FarBakeGrid a = bakeGrid({0.0f, 0.0f, 0.0f}, 4, 4, 4);
+  FarBakeGrid b = bakeGrid({0.0f, 0.0f, 0.0f}, 4, 4, 4);
+  for (FarBakeGrid *g : {&a, &b}) {
+    g->reflected.assign(64, Vec3{});
+    g->transmitted.assign(64, Vec3{});
+  }
+  const Vec3 green{0.05f, 0.2f, 0.03f}, dark{0.02f, 0.05f, 0.01f}, bark{0.3f, 0.2f, 0.1f};
+  for (size_t i = 0; i < 64; ++i) {
+    a.extinction[i] = 0.5f;
+    a.reflected[i] = i < 32 ? green : dark;
+    a.transmitted[i] = a.reflected[i] * 0.5f;
+  }
+  b.extinction[0] = 1.0f;
+  b.reflected[0] = bark;
+  FarBakeGrid *grids[] = {&a, &b};
+  const FarPalette palette = buildFarPalette(grids, 256);
+  REQUIRE(palette.reflected.size() == 3);
+  for (size_t i = 0; i < 64; ++i) {
+    CHECK(length(palette.reflected[a.albedo[i]] - a.reflected[i]) < 1e-6f);
+    CHECK(length(palette.transmitted[a.albedo[i]] - a.transmitted[i]) < 1e-6f);
+  }
+  CHECK(length(palette.reflected[b.albedo[0]] - bark) < 1e-6f);
+  CHECK(buildFarPalette(grids, 2).reflected.size() == 2);
+
+  // L0 (4 m) is the whole grid: the mean of green and dark, its nearest entry.
+  const FarTemplates t = filterFarTemplate(a, palette.reflected);
+  REQUIRE(t[0].voxels.size() == 1);
+  const Vec3 mean = (green + dark) * 0.5f;
+  CHECK(t[0].voxels[0].albedo == farFieldNearestEntry(palette.reflected, mean));
+}
+
