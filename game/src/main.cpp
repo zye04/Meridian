@@ -290,6 +290,27 @@ struct BroadleafForest {
       {"europeanhornbeam", "EuropeanHornbeam", {"Field_01", "Forest_02"}},
       {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
   }};
+  // Trees lane (throwaway): only the closed, dome-crowned variants
+  // (inventory: leaf area index 4.3-4.8, no tiered or lobed crowns).
+  static constexpr std::array<Pick, 3> kDomePicks{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
+  }};
+  // Variant: the domes plus the small round crowns, for size variety.
+  static constexpr std::array<Pick, 3> kDomeAndSmallPicks{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01", "Forest_05"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01", "Forest_03", "Forest_04"}},
+  }};
+};
+// Trees lane levers (throwaway): --forest-picks domes, --forest-footprint M,
+// --forest-scale S (multiplies the forest layer's 0.8-1.2 scale range).
+struct ForestLevers {
+  bool domes = false;
+  bool small = false; // --forest-picks domes+small
+  float footprint = BroadleafForest::kFootprint;
+  float scale = 1.0f;
 };
 // With the broadleaf scenery, the terrain's own colour targets for the
 // roles seen from the air (linear RGB): the grass toward the streamed meadow
@@ -336,7 +357,8 @@ meridian::DensityRule forestRule() {
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
 void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed,
-                  bool geoChannels, const std::string &treePalette, bool broadleaf) {
+                  bool geoChannels, const std::string &treePalette, bool broadleaf,
+                  const ForestLevers &levers) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -375,8 +397,11 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   constexpr float kBeechShare = 0.6f, kHornbeamShare = 0.25f, kAlderShare = 0.15f;
   if (trees && broadleaf) {
     const std::array<float, 3> shares{kBeechShare, kHornbeamShare, kAlderShare};
-    for (size_t s = 0; s < BroadleafForest::kPicks.size(); ++s) {
-      const auto &pick = BroadleafForest::kPicks[s];
+    const auto &picks = levers.small   ? BroadleafForest::kDomeAndSmallPicks
+                        : levers.domes ? BroadleafForest::kDomePicks
+                                       : BroadleafForest::kPicks;
+    for (size_t s = 0; s < picks.size(); ++s) {
+      const auto &pick = picks[s];
       std::vector<uint32_t> ids;
       for (const char *variant : pick.variants) {
         const std::string directory =
@@ -569,9 +594,9 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   std::vector<PlacementLayer> layers;
   std::optional<PlacementLayer> forestLayer; // a copy: layers grows
   if (!forest.empty()) {
-    layers.push_back({kForestLayerId, forest, broadleaf ? BroadleafForest::kFootprint : 6.0f,
-                      forestRule(), 0.8f * treeScale,
-                      1.2f * treeScale, Rotation::Yaw, 0.3f});
+    layers.push_back({kForestLayerId, forest, broadleaf ? levers.footprint : 6.0f,
+                      forestRule(), 0.8f * treeScale * levers.scale,
+                      1.2f * treeScale * levers.scale, Rotation::Yaw, 0.3f});
     layers.back().farField = farField;
     // Field trees stand on the open pasture the forest leaves.
     PlacementLayer loneTrees{2, lone, 40.0f,
@@ -859,6 +884,7 @@ struct Options {
   std::string treePalette;
   // --scenery broadleaf: place the broadleaf pack's small and medium pieces.
   bool broadleafScenery = false;
+  ForestLevers forestLevers;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -1145,6 +1171,14 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--scenery takes broadleaf");
       }
       options.broadleafScenery = true;
+    } else if (arg == "--forest-picks" && i + 1 < argc) {
+      const std::string picks = argv[++i];
+      options.forestLevers.domes = picks.starts_with("domes");
+      options.forestLevers.small = picks == "domes+small";
+    } else if (arg == "--forest-footprint" && i + 1 < argc) {
+      options.forestLevers.footprint = std::stof(argv[++i]);
+    } else if (arg == "--forest-scale" && i + 1 < argc) {
+      options.forestLevers.scale = std::stof(argv[++i]);
     } else if (arg == "--tree-palette" && i + 1 < argc) {
       options.treePalette = argv[++i];
     } else if (arg == "--score-forest" && i + 1 < argc) {
@@ -1697,7 +1731,7 @@ int main(int argc, char **argv) {
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
-                 options.treePalette, options.broadleafScenery);
+                 options.treePalette, options.broadleafScenery, options.forestLevers);
   }
 
   const auto makeWeather = [](const Options &o) {
