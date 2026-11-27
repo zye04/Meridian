@@ -245,3 +245,9 @@ Debug a1 `--far-fine 3700 --frames 2` (`.superpowers/far/s2/a1-debug.log`):
 (static hashes equal 892b979/4772a79's), `far field check: 13 cells, 787584 voxels (334557 occupied) compared with the CPU replica, 0 mismatches`
 (3 crop cells at the fine levels), placement / shadow map / ray checks as before, `0 validation errors`. Tests: 221 passed.
 Look: `.superpowers/far/s2/crop-switch-a1.png` (1:1 switch band, a1, beside 7.jpg), `.superpowers/far/s2/sheet-fine.png`.
+
+Director ruling (C), 2026-11-27: fine levels stay as an A/B, streaming deferred. Default check at de862ea:
+`.superpowers/far/cap.sh build-release/game/game A1 .superpowers/far/s2/a1-default.png`: `Render 2560x1440 ... DLSS`,
+`Rendered 120 frames, GPU 30.19 ms` (4772a79 30.15), `cull clusters 4.16 ... voxel trees 5.82, far field 9.04` (4.19 / 5.87 / 9.00),
+main voxel quads 16709735 (equal), `Loaded: resident 9927 MiB` (equal), 0 validation errors;
+`python3 -I tools/image-gates.py diff .superpowers/far/s3/final3b/a1.png .superpowers/far/s2/a1-default.png`: `diff 0.2440` (noise a1 0.26).

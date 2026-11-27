@@ -87,6 +87,12 @@ docs in the same commit as the change.
 
 ## Stage 2: streamed fine levels and the switch (after stage 3)
 
+Status: part 1 done (de862ea: fine levels over a static window,
+`--far-fine`, default off; switch by finest built voxel), streaming
+deferred (director 2026-11-27: inside the crop trees are cheaper than
+fine tiles; spec decisions 3 and 4). 2.1 and 2.3 done, 2.2 deferred, 2.4
+done for the static window, 2.5 measured at a1/h1 (ledger).
+
 - [ ] 2.1 Levels 2 m and 1 m as streamed levels: `kFarLevels` grows to 5
   with the two fine levels first or last (choose by least churn; the level
   index packed into the far entry's top bits needs 3 bits: find every

@@ -1,6 +1,6 @@
 # Far tile tier (forest patch proxies) — design
 
-Status: decided (director, 2026-11-26 night; the user chose "far forest as
+Status: in progress (stage 2 part 1 done, streaming deferred, 2026-11-27; decided by the director 2026-11-26 night; the user chose "far forest as
 patch proxies" and delegated the technical design). Look gates stay the
 user's by eye. Not started. Plan: `plans/2026-11-26-far-tile-tier.md`.
 
@@ -51,17 +51,22 @@ The tier is the far field grown into its intended role, not a new system.
    never stored, never in the instance table, the cell table's instance
    ranges or the TLAS. Extent `farExtent` from the crop centre, at most the
    fixed-point range of placement (cells -256..255, about 16 km).
-3. **Levels by distance, streamed**: two finer levels (2 m and 1 m voxels;
-   the templates are already 1 m) exist only in a camera-centred window and
-   are splatted over frames as the camera moves, into fixed-size pools. The
-   coarse levels (4, 8, 16 m) stay static, each over the area where it can
-   be the drawn level.
-4. **The switch moves in**: a cell draws its bricks instead of its trees as
-   soon as a built level's voxel projects to at most `kFarLevelPixels`
-   (today 1 px), instead of waiting for the tallest tree to fall under 6 px.
-   With the 1 m level that is about 1.8 km at 1440p and 70 degrees; cells
-   whose fine level is not built yet keep their trees (inside the crop) or
-   draw the finest level they have (outside it).
+3. **Fine levels exist, not streamed (director, 2026-11-27, after stage 2
+   part 1)**: 1 m and 2 m levels are built at load over a static window
+   inside the placement grid (`--far-fine M`, default off, an A/B). Measured
+   need: 0.29 MiB per crop cell at 1 m, 0.05 at 2 m. The 1 m level is the
+   drawn one from 1.8 to 3.7 km (where 2 m reaches 1 px), not inside 1.8 km
+   as first estimated. Inside the crop the trees exist, and per-tree voxels
+   give the same image for less: at a1 with the whole crop fine, far pass
+   +7.5 ms against voxel trees and cluster cull -2.5 ms, +1.4 GB resident.
+   So streaming is deferred; the coarse levels (4, 8, 16 m) stay static.
+4. **The switch rule**: a cell with trees draws its bricks once the voxel
+   of the finest level it has built projects to at most 1 px
+   (`kFarSwitchPixels`); the 6 px tallest-tree rule is gone. By default
+   that is the 4 m level at about 7.3 km at 1440p and 70 degrees: no crop
+   cell at the scene views, so the crop keeps its trees as before. With
+   `--far-fine` the switch sits at about 1.8 km. Cells outside the crop
+   draw their finest level always.
 5. **The tier shades like the trees it replaces**: per-voxel colour from the
    template (not one colour per mesh slot), sun attenuated by the optical
    depth marched through the bricks toward the sun, sky occlusion from the
@@ -129,14 +134,18 @@ without the user's eye.
 |---|---|
 | Static 4 m level, crop + 2 km band (48 km2 more) | +36 MiB |
 | Static 8 m to +6 km, 16 m to the extent | +30 MiB |
-| Streamed 2 m pool (window to where 2 m is 1 px, 3.7 km) | 200 MiB fixed |
-| Streamed 1 m pool (window to 1.8 km) | 300 MiB fixed |
+| 1 m level, measured (only with `--far-fine`; whole 4 km crop) | 1204 MiB (0.29 MiB per cell) |
+| 2 m level, measured (only with `--far-fine`; whole crop) | 209 MiB (0.05 MiB per cell) |
 | Per-voxel colour (stage 3; palette index stays 8 bit, larger palette) | about 0 |
 | Far shadow map over the extent (8 m texels, capped by `farShadowGrid`) | at most +32 MiB |
 
-Total at most +600 MiB resident: inside the headroom, with little left.
-If the measured pools exceed the estimate, the 1 m window shrinks before
-any gate moves. Transient: the splat's slices stay at 256 MiB.
+Default (no fine levels): the static rows only. The first estimate (+600
+MiB with 200 / 300 MiB streamed pools) assumed the wrong 1 m annulus.
+
+Open item (not decided): near the crop edge the forest beyond it is 4 m
+tiles. Candidates: a mirrored margin of real placed trees (trees are
+cheaper than tiles per the stage 2 numbers) plus a streamed 2 m level
+outside the crop only (backlog row "Far forest past the crop edge"). Transient: the splat's slices stay at 256 MiB.
 
 ## Acceptance
 

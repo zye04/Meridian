@@ -6095,3 +6095,12 @@ measured need, before any per-frame streaming.
 - Not yet decided (part 2): the streamed window, its pools and the
   per-frame budget; the load splat's occupancy readback would stall a
   frame, so streaming needs a GPU-side bound or a late readback.
+
+Ruling (director, 2026-11-27, option C): the fine levels stay as the
+`--far-fine` A/B, default off, and streaming is deferred. Inside the crop
+the trees exist and per-tree voxels give the same image for less (far
+pass +7.5 ms against voxel trees and cluster cull -2.5 ms at a1, +1.4 GB);
+the tier's value is where no trees exist and at distance. The default
+switch (finest built voxel at 1 px, 4 m at ~7.3 km) leaves the scene
+views as before: a1 frame diff 0.244 against 4772a79 (noise 0.26), same
+voxel quads, far pass 9.04 ms (9.00).

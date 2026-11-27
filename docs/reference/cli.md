@@ -431,7 +431,8 @@ voxels) over a static window inside the placement grid, the 1 m level
 within M meters of the `--camera` position (x, z), the 2 m level within
 2M; with them the switch sits where the 1 m voxel is 1 px (about 1.8 km).
 Startup prints `Far field 1 m:` / `2 m:` (bricks, MiB); 0.29 MiB per crop
-cell at 1 m. Far tile tier stage 2 before the streamed window.
+cell at 1 m. An A/B: inside the crop the trees are cheaper than fine
+tiles (decisions.md "Far tile tier stage 2, part 1"), streaming deferred.
 `--far-extent KM` (default and at most 16.384, placement's fixed-point
 range): the far field's forest reaches this far from the crop's centre;
 beyond the crop the forest layers' rule runs on the mirrored terrain
