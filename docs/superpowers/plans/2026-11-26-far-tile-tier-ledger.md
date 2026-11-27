@@ -251,3 +251,37 @@ Director ruling (C), 2026-11-27: fine levels stay as an A/B, streaming deferred.
 `Rendered 120 frames, GPU 30.19 ms` (4772a79 30.15), `cull clusters 4.16 ... voxel trees 5.82, far field 9.04` (4.19 / 5.87 / 9.00),
 main voxel quads 16709735 (equal), `Loaded: resident 9927 MiB` (equal), 0 validation errors;
 `python3 -I tools/image-gates.py diff .superpowers/far/s3/final3b/a1.png .superpowers/far/s2/a1-default.png`: `diff 0.2440` (noise a1 0.26).
+
+## Hardening (2026-11-27, build of 37812f2; code unchanged since 466a760 apart from comments)
+
+Scene flags `$SCENE` = `.superpowers/far/flags.sh`. Every run `Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS`.
+
+a. Fly-through, route `.superpowers/far/fly/fly.route` (1500 m, yaw +x, 100 m/s: x 0 -> 2000 "core", 2000 -> 5000 "beyond-edge"):
+`flock /tmp/meridian-gpu.lock ./build-release/game/game $SCENE [--far-extent 0] --benchmark 50 F.csv --route fly.route`.
+- far-tier: `Recorded 2433 frames: AVG 48.7, 0.1% low 26.8, 1% low 29.2, 5% low 33.7, MAX 57.3 FPS`, `0 dropped`, `0 validation errors`.
+  bench-route: `core 855 42.8 27.3 23.38 far_field 10.28`, `beyond-edge 1577 52.6 44.5 19.02 far_field 8.54`.
+  Maxima (`.superpowers/far/fly/maxima.py`): `gpu_ms: max 38.22 at frame 110 t 3.10s` (far field 15.71, voxel trees 7.31), `far_field: max 16.31`, p99 13.88.
+- `--far-extent 0`: `Recorded 4913 frames: AVG 98.2, 0.1% low 40.0, 1% low 49.7`; `core 12.29 ms`, `beyond-edge 9.13 ms`; `gpu_ms: max 27.53`.
+- Terrain shadow builds, both runs: near window 1.28-1.36 ms every 1 km; far window `(1882, 40.07, 3.11)` at x ~4000 (rebuild distance 4 km), one frame.
+- Frames `.superpowers/far/fly/views/` (x1000..x5000, x5000-back + lod, H1 at 5 degrees sun): no holes (lod: every non-meadow cell cyan);
+  past x = 4096 the camera is in the 8 m band: at x5000 looking back the ground below is 8 m blocks (backlog row).
+  H1 low sun (`--sun 0.704 0.0872 -0.704`): `GPU 29.76 ms`, `far field 7.59`, `0 validation errors`.
+
+b. Motion (`.superpowers/far/motion/motion.sh`, `table.sh`; side 30 m/s, yaw 0.25 rad/s; jitter = frame 120 vs 121, far band a1 rows 0.15-0.28, H1 0.35-0.49):
+`--far-extent 0` draws `far cells 0` at a1 and H1 (main's far field draws none there either, stage 0), so it is the main-equivalent.
+- A1 far band jitter far / ext0: still 0.44 / 0.42, side30 1.33 / 1.29, turn 1.31 / 1.29.
+- H1 far band jitter far / ext0: still 0.45 / 0.39, side30 0.92 / 0.73, turn 1.04 / 0.81 (ext0 shows bare terrain there).
+- Still runs: `far/A1_still_120.log` `GPU 30.42 ms`, far field 9.48; `ext0/A1` `GPU 20.98 ms`; H1 30.55 / 21.63.
+
+c. Default scene (`./build-release/game/game --trees --capture-views .superpowers/far/default/views.txt DIR`; main = 363096d built in `.superpowers/far/main`):
+- far-tier: `Far field: resident 1376 MiB; peak transient 1166 MiB, device memory allocated at peak 12454 MiB`, `Loaded: resident 12025 MiB`,
+  start `GPU 24.79 ms` far field 0.68, summit horizon `GPU 32.59 ms` far field 1.55 (far cells 40186), 0 dropped, 0 validation errors.
+- main: `resident 731 MiB ... at peak 11782 MiB`, `Loaded: resident 11370 MiB`, start `GPU 23.97 ms`, summit horizon `GPU 31.67 ms` far field 0.04 (far cells 470).
+- `image-gates.py diff`: start 0.63, summit horizon 1.24 (far vs main); `--far-extent 0` vs main 1.02, far vs `--far-extent 0` 1.27;
+  far-tier is ~1/255 brighter everywhere (summit view mean 109.57 vs 108.60), no local far-field artifact.
+
+d. Debug (`.superpowers/far/cap.sh build/game/game H1|H2`, `.superpowers/far/debugcap/`): both `0 validation errors`,
+`far field hash 0x18e4df10c8f99dce`, far field / far placement / stream checks `0 mismatches`, `far shadow map check ... max difference 0.248 m (0 over 1 m)`,
+`far field ray check ... max difference 8.7e-07`; the 10 known warnings (outputs 4/5, backlog).
+
+Sheet: `.superpowers/far/sheet/sheet-final.png` (a1/H2/H1 far-tier, `--far-extent 0`, 5.jpg/7.jpg); far pass a1 9.05, H2 3.07, H1 9.10 ms; `Loaded: resident 9927 MiB`.

@@ -6106,3 +6106,20 @@ the tier's value is where no trees exist and at distance. The default
 switch (finest built voxel at 1 px, 4 m at ~7.3 km) leaves the scene
 views as before: a1 frame diff 0.244 against 4772a79 (noise 0.26), same
 voxel quads, far pass 9.04 ms (9.00).
+
+## Far tile tier hardening: fly-through, motion, default scene (far lane, 2026-11-27)
+
+No code change; numbers in the ledger's "Hardening" section, gaps as backlog rows.
+
+- Fly-through at 1500 m from the core across the crop edge and 3 km
+  past it: no holes; route GPU 20.6 ms (far field mean 9.2, max 16.3 ms)
+  against 10.2 ms with `--far-extent 0`. The bands are static around the
+  crop, so a camera past the 4 m band sees 8 m blocks below it: a reason
+  to put the bands around the camera when streaming comes back.
+- The shadow-height far window rebuilds in one frame (3.1 ms) every 4 km.
+- In motion the far canopy adds ~0.2/255 frame-to-frame jitter in the
+  H1 horizon band against bare terrain (side 30 m/s 0.92 vs 0.73), none
+  at a1 (1.33 vs 1.29).
+- The default Napf scene fits the VRAM gates with 263 MiB to spare
+  (resident 12025 MiB, peak 12454; main 11370 / 11782): the 4 m level
+  over the 15 km crop and its band is 895 MiB.
