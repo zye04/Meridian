@@ -41,45 +41,7 @@ layout(location = 14) out float outVertexAlpha[];
 layout(location = 13) flat out uvec2 outDebugId[];
 #endif
 
-// Tree crowns get no sky inside: leaves deep in the crown see the sky through
-// the leaves around them. The crown is the ellipsoid inscribed in the mesh's
-// bounding box, a uniform leaf medium; the visibility is its transmittance
-// toward the zenith, up-and-outward and low outward (normalized units),
-// averaged: a trunk under a lone crown still sees the sky below it.
-// Meshes shorter than this are plant tufts (plantOcclusion in mesh.frag).
-const float kCrownMinHalfHeight = 2.0;
-const float kCrownDensity = 2.5;
-
-bool isLeafMesh(SceneBuffer scene, MeshInfo mesh) {
-    return scene.materials.materials[mesh.materialIndex].diffuseTransmission > 0.0;
-}
-
-// The path length inside the unit sphere along q + t w, t >= 0.
-float crownExit(vec3 q, vec3 w) {
-    float b = dot(q, w);
-    float d = b * b - dot(q, q) + 1.0;
-    if (d <= 0.0) {
-        return 0.0;
-    }
-    float root = sqrt(d);
-    return max(-b + root - max(-b - root, 0.0), 0.0);
-}
-
-float crownVisibility(MeshInfo mesh, vec3 position, vec3 normal) {
-    vec3 halfExtent = vec3(mesh.halfExtentX, mesh.halfExtentY, mesh.halfExtentZ);
-    if (halfExtent.y < kCrownMinHalfHeight) {
-        return 1.0;
-    }
-    vec3 q = (position - mesh.boundsCenter) / max(halfExtent, vec3(1e-3));
-    // Away from the crown's axis; on it (a trunk) the way the surface faces.
-    vec2 outward = q.xz + 0.5 * normal.xz;
-    outward = dot(outward, outward) > 1e-6 ? normalize(outward) : vec2(0.0);
-    float up = crownExit(q, vec3(0.0, 1.0, 0.0));
-    float steep = crownExit(q, normalize(vec3(outward.x, 1.0, outward.y)));
-    float low = crownExit(q, normalize(vec3(outward.x, 0.3, outward.y)));
-    return (exp(-kCrownDensity * up) + exp(-kCrownDensity * steep) +
-            exp(-kCrownDensity * low)) / 3.0;
-}
+#include "cluster_vertex.glsl"
 
 void main() {
     // Entries past the list's capacity were dropped by the cull.
@@ -90,74 +52,41 @@ void main() {
     SceneBuffer scene = pc.scene;
     uvec2 entry = scene.drawLists.entries[pc.drawList * kMaxDrawnClusters +
                                           gl_WorkGroupID.x];
-    LoadedInstance instance = loadInstance(scene, entry.x & 0xFFFFFFu);
     uint terrainSunCode = entry.x >> 24;
     float terrainSun = terrainSunCode == kTerrainSunPerFragment ? -1.0 : float(terrainSunCode);
-    ClusterInfo cluster = scene.clusters.clusters[entry.y];
-    MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
+    ClusterContext c = loadClusterContext(scene, entry.x & 0xFFFFFFu, entry.y);
 #ifdef DEBUG_ID
     // Solo/hide: the cluster goes from every pass this mesh shader feeds.
-    if (debugFilterRejects(scene.debugFilter, entry.x, mesh.materialIndex)) {
+    if (debugFilterRejects(scene.debugFilter, entry.x, c.mesh.materialIndex)) {
         SetMeshOutputsEXT(0, 0);
         return;
     }
 #endif
-    SetMeshOutputsEXT(cluster.vertexCount, cluster.triangleCount);
+    SetMeshOutputsEXT(c.cluster.vertexCount, c.cluster.triangleCount);
 
-    // The crown: a leaf mesh's own bounds; the rest of a placed tree (bark)
-    // takes its leaf mesh's, so trunks and branches under it darken too.
-    bool hasCrown = isLeafMesh(scene, mesh);
-    MeshInfo crown = mesh;
-    if (!hasCrown && instance.placed) {
-        PrototypeInfo prototype = scene.prototypes.prototypes[instance.meshOrPrototype];
-        for (uint m = 0u; m < prototype.meshCount && !hasCrown; ++m) {
-            crown = scene.meshes.meshes[scene.prototypeMeshes.meshes[prototype.firstMesh + m]];
-            hasCrown = isLeafMesh(scene, crown);
-        }
-    }
-
-    // Only tufts darken toward their base (plantOcclusion); a crown's leaves
-    // are occluded by the crown itself (crown visibility or the GI probes).
-    bool tuft = mesh.halfExtentY < kCrownMinHalfHeight;
-
-    // Normals use the inverse transpose so non-uniform scale stays correct.
-    mat3 normalMatrix = transpose(inverse(mat3(instance.transform)));
-    float lodError = max(cluster.refinedError, 0.0) * instance.scale;
-    vec3 tint = instance.placed
-                    ? unpackPrototypeTint(scene.prototypes.prototypes[instance.meshOrPrototype].tint)
-                    : vec3(1.0);
-    for (uint i = gl_LocalInvocationIndex; i < cluster.vertexCount; i += 32u) {
-        uint index = scene.clusterVertices.vertices[cluster.firstVertex + i] +
-                     uint(mesh.vertexOffset);
-        Vertex vertex = loadVertex(scene, mesh, index);
-        vec3 world = (instance.transform * vec4(vertex.position, 1.0)).xyz;
-        vec3 relative = world - scene.cameraPosition;
-        vec4 displayed = displayedPosition(scene, relative);
-        gl_MeshVerticesEXT[i].gl_Position = scene.viewProjection * displayed;
-        outRelativePosition[i] = relative;
-        outNormal[i] = normalMatrix * vertex.normal;
-        outTangent[i] = vec4(mat3(instance.transform) * vertex.tangent.xyz,
-                             vertex.tangent.w);
-        outUv[i] = vec2(vertex.uvX, vertex.uvY);
-        outVertexAlpha[i] = vertex.alpha;
-        outMaterialIndex[i] = mesh.materialIndex;
-        outLodError[i] = lodError;
-        outTint[i] = tint;
-        outStreamFade[i] = instance.fade;
+    for (uint i = gl_LocalInvocationIndex; i < c.cluster.vertexCount; i += 32u) {
+        ClusterVertex v = clusterVertex(scene, c, i);
+        gl_MeshVerticesEXT[i].gl_Position = v.clip;
+        outRelativePosition[i] = v.relative;
+        outNormal[i] = v.normal;
+        outTangent[i] = v.tangent;
+        outUv[i] = v.uv;
+        outVertexAlpha[i] = v.alpha;
+        outMaterialIndex[i] = c.mesh.materialIndex;
+        outLodError[i] = c.lodError;
+        outTint[i] = c.tint;
+        outStreamFade[i] = c.instance.fade;
         outTerrainSun[i] = terrainSun;
 #ifdef DEBUG_ID
         outDebugId[i] = uvec2(entry.x & 0xFFFFFFu, entry.y);
 #endif
-        float top = mesh.boundsCenter.y + mesh.boundsRadius;
-        outHeight[i] = tuft ? clamp(vertex.position.y / max(top, 1e-4), 0.0, 1.0) : 1.0;
-        outCrownVisibility[i] = hasCrown ? crownVisibility(crown, vertex.position, vertex.normal) : 1.0;
-        // Static geometry for now: only the camera moves between frames.
-        outCurrentClip[i] = scene.currentViewProjection * displayed;
-        outPreviousClip[i] = scene.previousViewProjection *
-                             displayedPosition(scene, world - scene.previousCameraPosition);
+        outHeight[i] = v.height;
+        outCrownVisibility[i] = v.crownVisibility;
+        outCurrentClip[i] = v.currentClip;
+        outPreviousClip[i] = v.previousClip;
     }
-    for (uint i = gl_LocalInvocationIndex; i < cluster.triangleCount; i += 32u) {
-        uint t = scene.clusterTriangles.triangles[cluster.firstTriangle + i];
+    for (uint i = gl_LocalInvocationIndex; i < c.cluster.triangleCount; i += 32u) {
+        uint t = scene.clusterTriangles.triangles[c.cluster.firstTriangle + i];
         gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, t >> 16);
     }
 }
