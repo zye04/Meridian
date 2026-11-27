@@ -1349,8 +1349,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
 
   // Two phases (occlusion culling): first what was visible last frame, then,
   // tested against a depth pyramid of that, whatever has become visible.
-  auto beginScene = [&] {
-    vkCmdBeginRendering(cmd, &sceneRendering);
+  auto beginScene = [&](const VkRenderingInfo &rendering) {
+    vkCmdBeginRendering(cmd, &rendering);
     const VkDescriptorSet sceneSets[] = {impl_->atmosphereSet, impl_->materialSet};
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             impl_->sceneLayout, 0, 2, sceneSets, 0, nullptr);
@@ -1410,7 +1410,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        &scenePush);
   };
 
-  beginScene();
+  beginScene(sceneRendering);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->skyPipeline);
   vkCmdDraw(cmd, 3, 1, 0, 0);
   drawCulled(0, true, true);
@@ -1457,7 +1457,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
   depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   sceneRendering.pColorAttachments = lateAttachments;
-  beginScene();
+  beginScene(sceneRendering);
   drawCulled(1, true, true);
   drawCulled(1, false, false);
   if (!visibility) {
@@ -1466,6 +1466,46 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   endPass("scene late");
   drawVoxelTrees(1);
   endPass("voxel trees late");
+
+  // The visibility resolve: shade every pixel whose id names a cluster
+  // triangle, once, into attachments 0-6; then the blended surfaces over it.
+  if (visibility) {
+    vkCmdEndRendering(cmd);
+    transitionImage(cmd, {impl_->visibilityId.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingInfo resolveRendering = sceneRendering;
+    resolveRendering.colorAttachmentCount = 7;
+    resolveRendering.pDepthAttachment = nullptr;
+    vkCmdBeginRendering(cmd, &resolveRendering);
+    const VkDescriptorSet resolveSets[] = {impl_->atmosphereSet, impl_->materialSet,
+                                           impl_->visibilitySet};
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->resolveLayout, 0, 3,
+                            resolveSets, 0, nullptr);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    vkCmdPushConstants(cmd, impl_->resolveLayout, kScenePushStages, 0, sizeof(scenePush),
+                       &scenePush);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impl_->resolvePipeline);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    endPass("resolve");
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingInfo blendedRendering = sceneRendering;
+    blendedRendering.colorAttachmentCount = 7;
+    beginScene(blendedRendering);
+  }
 
   // Blended last, back to front, from the CPU: each surface must composite
   // over everything behind it, and there are few of them.
@@ -1506,7 +1546,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   // mask in GENERAL and depth in SHADER_READ_ONLY.
   const bool clouds = impl_->cloudsEnabled;
   for (size_t i = 0; i < colorTargets.size(); ++i) {
-    if (colorTargets[i] == impl_->hdr.image) {
+    // The visibility id is already read-only (the resolve sampled it).
+    if (colorTargets[i] == impl_->hdr.image ||
+        (visibility && colorTargets[i] == impl_->visibilityId.image)) {
       continue;
     }
     const bool written = clouds && i < 3;

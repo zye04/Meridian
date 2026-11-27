@@ -716,6 +716,17 @@ struct Renderer::Impl {
   bool visibilityBuffer = false;
   Image visibilityId;
   bool visibilityActive() const { return visibilityBuffer && !debugPipelines; }
+  // The resolve (renderer_visibility.cpp), with the targets while on:
+  // set 2 = the id target and the stats counters (resolved, clamped pixels
+  // on every 16th frame, over the run).
+  VkDescriptorSetLayout visibilitySetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool visibilityPool = VK_NULL_HANDLE;
+  VkDescriptorSet visibilitySet = VK_NULL_HANDLE;
+  VkPipelineLayout resolveLayout = VK_NULL_HANDLE;
+  VkPipeline resolvePipeline = VK_NULL_HANDLE;
+  Buffer resolveStats;
+  void createVisibilityResolve();
+  void destroyVisibilityResolve();
   // Scene attachment 3 when no diffuse albedo target exists (GI off, no RR).
   Image debugAlbedo;
   // Per global cluster index: its DAG level, 4 per uint (debug_view.frag).
