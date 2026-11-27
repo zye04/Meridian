@@ -210,7 +210,13 @@ void main() {
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     if (sunUp) {
-        vec3 sunStart = world + rayDirection * kTileSunMarch;
+        // The shadow maps' receiver offset along the normal (here the sun:
+        // farShadowVisibility moves it a far shadow texel and its bias
+        // toward the sun) would skip that much canopy past the march's
+        // end; the lookup starts that much short of it instead (cascade
+        // receivers, nearer than kFarShadowDistance, shift a little less).
+        vec3 sunStart =
+            world + rayDirection * (kTileSunMarch - scene.farShadowTexel - kFarShadowBias);
         vec3 marchOrigin = sunStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);

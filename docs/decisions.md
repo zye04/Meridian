@@ -6160,3 +6160,12 @@ in the ledger's "Review fixes" section.
   one call site of the cell march; a hit there belongs to that cell's
   fragment). Border profile at x4000 after both: flat (0.99-1.01).
   The base colour carries nothing at the borders (1.00).
+- The tile's sun lookup starts short of the march's end by the shadow
+  maps' receiver offset. voxel.frag passes the sun as the receiver's
+  normal, so `farShadowVisibility` moved the lookup a far shadow texel
+  (8 m) toward the sun and biased it 2 m more: canopy between 32 and
+  ~42 m along the ray was counted by neither the march nor the map.
+  Measured by marching on to 42 m (lookup kept at 32 m): far tiles' sun
+  at x4000 0.959x, H1 at a 5 degree sun 0.993x (whole frame). Fix
+  (free): the lookup moves back by that offset instead. Cascade
+  receivers (within 4 km) offset by 1.5 cascade texels, a little less.
