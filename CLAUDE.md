@@ -119,7 +119,9 @@ the trees back (hidden by default). Capture runs print validation errors,
 - Interactive runs pick up the user's mouse; use capture runs for checks.
 - Captures step time by a fixed 1/60 s (motion and exposure adaptation).
   With `--placement off`, two captures of the same view with the same
-  build match exactly (0.0000/255 mean). With placement on they don't:
+  build match exactly (0.0000/255 mean), apart from a rare run that lands
+  ~0.17/255 off on model textures at the start view; `--rr on` is never
+  exact (backlog "`--rr on` captures not repeatable"). With placement on they don't:
   measured 2026-11-27 (Release 2560x1440, `--trees`), the start view
   differs by 0.58/255, the forest edge 0.23, the forest overview 0.45, a
   close leaf view 0.02, and the start view 0.33 without `--trees`
