@@ -450,6 +450,10 @@ crown-light): the sky part of the ambient that the GI probes don't cover
 the far field's forest opacity (lighting.glsl `canopySkyVisibility`, 64 m
 march from the point, foliage starting 4 m out): up = straight up (a1 +2.4
 ms), cone = mean of up and halfway between up and the normal (a1 +14.7 ms).
+`--crown-sun off|depth|normal` (default off; development A/B): depth = a
+voxel's sun also passes through its own model's crown (exp of its axis
+depth toward the sun, voxel_instance.frag); normal = depth plus the lobe
+bent halfway toward the crown-scale normal (where the model is thinnest).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
