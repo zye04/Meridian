@@ -147,6 +147,21 @@ void main() {
                           (sh.diffuseLight - diffuseBeforeAmbient) *
                               mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
     }
+    // Crown fill: the triangles' crown at the voxel's centre, on leaf voxels
+    // only, as mesh.frag (the bark's voxels stay as their triangles). After the
+    // ambient's occlusion: the fill's own escape term holds the crown's.
+    MeshInfo crown;
+    MeshInfo voxelMesh = scene.meshes.meshes[cluster.mesh];
+    if (scene.crownFill != 0u && isLeafMesh(scene, voxelMesh) &&
+        findCrown(scene, voxelMesh, instance, crown)) {
+        vec3 meshPosition = toLocal * (world - instance.transform[3].xyz);
+        vec4 sunThroughCrown = crownSun(crown, meshPosition, normalize(toLocal * sh.L));
+        if (sunThroughCrown.x > 0.0) {
+            addCrownFill(sh, sh.diffuseColor, transmitted, sunThroughCrown.x,
+                         crownVisibility(crown, meshPosition, normalize(toLocal * s.normal)),
+                         crownTopSun(world + linear * sunThroughCrown.yzw, sh.L));
+        }
+    }
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);

@@ -430,6 +430,13 @@ public:
   // sparkle.
   enum class FoliageSpecularAa : uint32_t { Off, On };
   void setFoliageSpecularAa(FoliageSpecularAa mode);
+  // Crown fill (on by default, off for A/B): the sun light scattered between
+  // a crown's leaves (multiple scattering), added as a diffuse fill that
+  // grows with the crown's depth toward the sun through the mesh's crown
+  // ellipsoid (triangle leaves and leaf voxels alike), times the sun's
+  // visibility on the crown's top plane above the point.
+  enum class CrownFill : uint32_t { Off, Crown };
+  void setCrownFill(CrownFill mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

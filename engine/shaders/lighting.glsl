@@ -448,6 +448,54 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
     sh.diffuseLight += transmitted / kPi * sh.sunAtSurface * (backNoL * visibility);
 }
 
+// Crown fill (Renderer::setCrownFill): sun light scattered between a crown's
+// leaves. The beam loses 1 - exp(-depth) of itself on the way in from the
+// crown's sunward edge; leaves scatter `albedo` (reflected + transmitted) of
+// what they intercept, which recollides inside the crown with the chance it
+// doesn't escape (spectral invariant, as the probes' leaf hits in
+// gi_probes.comp), so the fill is greener than one bounce. A leaf facing
+// every way sees it on both sides. Energy: the factor is capped at 1, so the
+// fill never exceeds what direct sun on a sunward leaf gives (albedo / pi x
+// sunAtSurface). It reaches the shaded side: added light, the lit side is
+// left as it is. GI probes don't resolve it: their columns (2-32 m) and the
+// far field's 4 m voxels are as large as a crown. `beam` is the sun that
+// reaches the crown (crownTopSun): a crown in another's shadow or a hill's
+// gets none.
+// Leaves facing every way intercept half the beam per unit area (G = 0.5).
+const float kCrownFillProjection = 0.5;
+// As the probes' leaf recollision cap: some light always escapes.
+const float kCrownFillMaxRecollision = 0.95;
+void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunDepth, float escape,
+                  float beam) {
+    if (pc.scene.crownFill == 0u || sh.L.y <= 0.0 || beam <= 0.0) {
+        return;
+    }
+    vec3 albedo = reflected + transmitted;
+    float recollision = min(1.0 - escape, kCrownFillMaxRecollision);
+    vec3 scattered = min(kCrownFillProjection * (1.0 - exp(-sunDepth)) * albedo /
+                             (1.0 - recollision * albedo),
+                         vec3(1.0));
+    sh.diffuseLight += albedo / kPi * sh.sunAtSurface * (beam * scattered);
+}
+
+// The sun that reaches a crown, for its fill: the visibility on the crown's
+// top plane straight above the point (crownSun), one lookup through the
+// surfaces' sun path (cascades, far shadow map, terrain): the fill is light
+// scattered through the crown from where the beam enters its top, not along
+// the point's own ray. A per-point lookup where that ray enters the crown
+// cut the fill wherever a neighbour shades that one ray, and one lookup at
+// the top centre switched whole crowns as a shadow edge passed it
+// (decisions.md "Crown fill gate"); above the point, an edge sweeps across
+// the crown. The point moves a little toward the sun so that the crown's
+// own leaves above its bounds' top don't shadow it.
+const float kCrownTopBias = 1.0;
+float crownTopSun(vec3 top, vec3 L) {
+    vec3 entry = top + L * kCrownTopBias;
+    vec3 marchOrigin = entry;
+    marchOrigin.y = max(entry.y, terrainHeight(pc.scene.terrain, entry.xz) + kShadowRayBias);
+    return traceSunVisibility(entry, marchOrigin, L, 0.0, true, entry - pc.scene.cameraPosition, L);
+}
+
 // After addAmbientLight: a thin surface's two sides read the same probes, so
 // its sample serves the back direction too.
 void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) {

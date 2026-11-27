@@ -5870,3 +5870,50 @@ Measured on branch crown-light:
   21.6 % and 25.1 -> 24.3 %, so leaves don't go dull; no footprint fade needed.
 - GPU within noise (s1 25.40 -> 25.34 ms, m2 24.28 -> 24.43 ms).
 No wider variant: s1's sparkle is already below the reference.
+
+## Crown fill on main (fill lane, 2026-11-27)
+
+Port of branch crown-light's crown fill (commits a61a660 fill, c9c690f and 05d1f62 gate,
+c458abf mesh.vert varying; technique and sources in that branch's decisions.md entries
+"Crown fill: multiple scattering inside tree crowns" and "Crown fill gate: the sun that
+reaches the crown"). Its round 4 per-instance gate was reverted there and is not ported;
+`--canopy-sky`, `--crown-sun` and the broadleaf scene stay behind. On by default,
+`--crown-fill off|crown` keeps the A/B.
+
+What it is: a crown is a uniform leaf medium in the ellipsoid inscribed in the mesh bounds.
+The mesh shader (and voxel_instance.frag per voxel) finds the optical depth toward the sun
+through it (common.glsl `crownSun`, the crown helpers moved there from mesh.mesh so both
+paths share them); lighting.glsl `addCrownFill` turns that into light scattered between
+leaves by the spectral invariant (recollision capped at 0.95, projection 0.5), capped at
+what direct sun on a sunward leaf gives. The fill is gated by the sun's visibility on the
+crown's top plane straight above the point (`crownTopSun`: one `traceSunVisibility`
+through cascades, far shadow map and terrain, 1 m toward the sun), so a crown in another
+crown's or a hill's shadow gets none. SceneData gains `crownFill` at offset 2732 (size
+unchanged, 2736); location 15 carries `crownSun` (mesh.vert writes zero).
+
+Measured at 2560x1440, Release, DLSS, `--terrain assets/terrain/relief-0.5.height --trees
+--time-scale 0 --haze clean --sun 0.707 0.700 -0.707` (scripts and logs in the fill lane's
+worktree `.superpowers/fill/`):
+- Look, crop 880 544 800x352 vs the 1.jpg crop (0.133, 2.4 %), shaded/lit ratio and L<0.15
+  share, off -> on: s1 0.082 -> 0.104, 3.7 -> 2.7 %; a1 0.065 -> 0.076, 2.6 -> 1.5 %; m2
+  0.007 -> 0.008, 28.8 -> 22.6 %. Crown-light's s1 went 0.091 -> 0.114: same direction and
+  size on main's scene.
+- Gate, hill-shadow view (`--sun 0.683 0.259 -0.683`, canopy pixels with no sun within
+  32 px): fill on shadowed crowns 0.07 (p95 0.00) vs lit crowns 16.77 (1e-3 exposed units).
+- Triangle/voxel switch (lone beech): tri/vox 0.998 off, 0.999 on.
+- VRAM: resident 10612 MiB off, on and on main.
+- GPU ms, off -> on: s1 29.20 / 29.13 / 29.10 / 29.07 -> 31.75 / 31.76 / 31.80 / 31.75;
+  a1 27.07 / 27.01 -> 28.85 / 28.67; m2 24.72 / 24.55 -> 26.59 / 26.71; ground view h2
+  28.77 -> 30.68; main at s1 27.92 / 28.29, a1 26.85 / 26.73, m2 23.61 / 24.04. The rise is
+  in "voxel trees" (m2 7.83 -> 9.75). With `--shadows rt` the fill costs 48.98 -> 56.79 ms
+  at s1 (the gate becomes a ray query per fragment).
+
+Cost attribution: with `crownTopSun` returning 1 (no lookup, measurement only) on equals
+main (a1 27.12 / 26.73, m2 24.29 / 24.23), so the fill math is about free and the cost is
+the per-fragment sun lookup times the voxel quads' overdraw (about 5x the frame's pixels).
+Two cheaper lookups were tried: one hardware-compare tap in the first covering cascade with
+the terrain shadow map but no march (s1 31.40 / 31.52, a1 28.51 / 28.70, m2 26.54 / 26.52),
+and the same without the `traceSunVisibility` fallback (no gain; in rt mode it gates by
+terrain only). Both held the gate (0.06 vs 16.81) and the look, and saved about 0.2 ms, in
+the noise, so crown-light's lookup ships unchanged. The lookup's presence also costs with
+the fill off: s1 +0.8-1.2 ms over main, "scene early" 5.41 -> 6.35 (backlog row).

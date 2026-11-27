@@ -434,6 +434,17 @@ their specular lobe by the normal variation a pixel covers (lighting.glsl
 `specularAaRoughness`, Tokuyoshi-Kaplanyan): triangle leaves by the shading
 normal's screen derivatives, voxels by `kVoxelNeighbourNormalChange` over
 the voxel's size in pixels (voxel_instance.frag).
+`--crown-fill off|crown` (default crown; `off` for A/B): sun light
+scattered between a crown's leaves, added as a diffuse fill growing with
+the crown's optical depth toward the sun through the mesh's crown
+ellipsoid (common.glsl `crownSun`; triangle leaves and leaf voxels alike,
+not bark), capped at what direct sun on a sunward leaf gives (lighting.glsl
+`addCrownFill`), times the sun's visibility on the crown's top plane
+straight above the point (`crownTopSun`: one lookup through cascades, far
+shadow map and terrain, 1 m toward the sun), so a crown in another's or a
+hill's shadow gets none and a passing shadow edge sweeps across a crown
+instead of switching it. Costs 1.8-2.7 ms at 2560x1440 (7.8 ms with
+`--shadows rt`; decisions.md "Crown fill on main").
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

@@ -736,6 +736,7 @@ struct Options {
   float voxelNear = 0.0f;
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
   meridian::Renderer::FoliageSpecularAa foliageSpecularAa = meridian::Renderer::FoliageSpecularAa::On;
+  meridian::Renderer::CrownFill crownFill = meridian::Renderer::CrownFill::Crown;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -1056,6 +1057,14 @@ Options parseOptions(int argc, char **argv) {
       }
       options.foliageSpecularAa =
           static_cast<meridian::Renderer::FoliageSpecularAa>(it - std::begin(names));
+    } else if (arg == "--crown-fill" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      const char *names[] = {"off", "crown"};
+      const auto it = std::find(std::begin(names), std::end(names), mode);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--crown-fill takes off or crown");
+      }
+      options.crownFill = static_cast<meridian::Renderer::CrownFill>(it - std::begin(names));
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -1108,7 +1117,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
-                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, "
+                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --crown-fill off|crown, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1380,6 +1389,7 @@ int main(int argc, char **argv) {
   renderer.setVoxelNear(options.voxelNear);
   renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setFoliageSpecularAa(options.foliageSpecularAa);
+  renderer.setCrownFill(options.crownFill);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);
 
