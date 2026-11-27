@@ -35,7 +35,10 @@ Smaller notes, not blocking:
 
 - 2560x1440 Release for every gate number, with identical `Render WxH` lines between compared runs; every game run goes through `flock /tmp/meridian-gpu.lock`.
 - `--visibility off|on` selects the path until stage 4 (a launch flag; the debug set stays forward). Default `off` until Task 12.
-- Look parity: whole-frame mean absolute difference below 0.5/255 per view (start, forest edge, overview, s1, meadow, close leaf). Above that, or any visible change, a whole-frame A/B sheet goes to the user.
+- Look parity (re-based by the director 2026-11-27 after T1): captures with placement are not repeatable (CLAUDE.md "Testing policy"; backlog "Placement captures not repeatable": start 0.58/255, edge 0.23, overview 0.45, close leaf 0.02 between two runs of one build). So every look gate has two parts:
+  - **`--placement off` views:** exact (0.0000/255), or the difference explained by a bisect like T1's.
+  - **Views with placement:** measured against a floor run (the same build twice, in the same session), reporting both figures. The bar is the gate's figure above the floor: forward-parity steps (stages 1 and 2 `off`) allow floor + 0.02/255; `--visibility on` against `off` allows floor + 0.3/255 at tree views.
+  - Above either bar, or on any visible change, a whole-frame A/B sheet goes to the user.
 - Cost: no view loses more than 0.3 ms. The forest views gain stage 0's projection within a third (edge 9.2 ms, overview 6.0 ms, so at least 6.1 and 4.0).
 - VRAM: resident +28.1 MiB (2560 x 1440 x 8 B), peak not above main's.
 - Debug: one short capture per stage with 0 validation errors; the debug views keep working, forward.
@@ -64,16 +67,16 @@ Smaller notes, not blocking:
 - Modify: `engine/shaders/reference.comp` (fills zero gradients if it fills `surfaceIn` fields by name)
 
 **Interfaces:**
-- Produces: `SurfaceInput` gains `vec2 uvDx, uvDy;`. `sampleTexture(uint index, vec2 uv)` under `SURFACE_FRAGMENT` calls `sampleGrad(index, uv, surfaceIn.uvDx, surfaceIn.uvDy)` (surface.glsl:132, already scales by `2^mipBias`), so it must move below `sampleGrad` or `sampleGrad` above it. `terrainNormal()` under `SURFACE_FRAGMENT` uses `textureGrad` with the uv gradients `surfaceIn.dpdx.xz / (spacing * size)` and `surfaceIn.dpdy.xz / (spacing * size)`.
+- Produces (as built, c03b527): `SurfaceInput` gains `vec2 uvDx, uvDy, terrainUvDx, terrainUvDy;` and `vec2 terrainNormalUv(vec3 worldPosition)`; the forward path fills them with `dFdxCoarse`/`dFdyCoarse` (the implicit LOD's derivatives), the resolve with analytic gradients. Planned form: `sampleTexture(uint index, vec2 uv)` under `SURFACE_FRAGMENT` calls `sampleGrad(index, uv, surfaceIn.uvDx, surfaceIn.uvDy)` (surface.glsl:132, already scales by `2^mipBias`), so it must move below `sampleGrad` or `sampleGrad` above it. `terrainNormal()` under `SURFACE_FRAGMENT` uses `textureGrad` with the uv gradients `surfaceIn.dpdx.xz / (spacing * size)` and `surfaceIn.dpdy.xz / (spacing * size)`.
 
-- [ ] **Step 1:** Change the cascade taps in `lighting.glsl` from `texture(shadowMaps[...], vec3(...))` to `textureLod(shadowMaps[...], vec3(...), 0.0)`. The maps have one mip, so this changes nothing visible, and the resolve then has no implicit LOD left in shared code.
-- [ ] **Step 2:** Add `uvDx`/`uvDy` and switch `sampleTexture` and `terrainNormal` as in Interfaces. In `mesh.frag` set `surfaceIn.uvDx = dFdx(inUv); surfaceIn.uvDy = dFdy(inUv);` beside `dpdx`. `mesh.frag`'s own `sampleTexture(material.diffuseTransmissionColorTexture, inUv)` then goes through the same path.
-- [ ] **Step 3: Verify no implicit LOD or derivative remains in shared code**
+- [x] **Step 1:** Change the cascade taps in `lighting.glsl` from `texture(shadowMaps[...], vec3(...))` to `textureLod(shadowMaps[...], vec3(...), 0.0)`. The maps have one mip, so this changes nothing visible, and the resolve then has no implicit LOD left in shared code.
+- [x] **Step 2:** Add `uvDx`/`uvDy` and switch `sampleTexture` and `terrainNormal` as in Interfaces. In `mesh.frag` set `surfaceIn.uvDx = dFdx(inUv); surfaceIn.uvDy = dFdy(inUv);` beside `dpdx`. `mesh.frag`'s own `sampleTexture(material.diffuseTransmissionColorTexture, inUv)` then goes through the same path.
+- [x] **Step 3: Verify no implicit LOD or derivative remains in shared code**
   Run: `grep -nE 'dFd|fwidth|\btexture\(' engine/shaders/{surface,material,lighting,terrain,atmosphere,common,gi}.glsl`
   Expected: no output.
-- [ ] **Step 4: Build, ctest, parity**
+- [x] **Step 4: Build, ctest, parity**
   Run: `cmake --build build-release && ctest --test-dir build-release`. Then capture main (a43f627, in `../meridian/build-release`) and this branch at the start view (`1119 1355.9 -431 -1.55 -0.1`), the forest edge (`600 1205.6 -400 -1.55 0.02`) and a close leaf view (the stage-0 r4 pose `1944.3 953.4 -1923.9 -1.2 -0.9`), all `--trees`, and run `python3 -I tools/image-gates.py diff main.png branch.png`.
-  Expected: mean difference <= 0.02/255 per view. If the implicit LOD and `textureGrad` disagree above that, record the per-view figure and stop for the director (risk named in the spec).
+  Done 2026-11-27 (c03b527): with `--placement off`, the terrain normal and cascade taps are exact. Model textures through `textureGrad` differ from implicit LOD by 0.169/255 at start; the director accepted that gap (option a).
 - [ ] **Step 5: Commit** (`Shared surface code: explicit texture gradients, no implicit LOD`)
 
 ### Task 2: Shading and vertex functions shared between forward and resolve
@@ -98,7 +101,7 @@ ClusterContext loadClusterContext(SceneBuffer scene, uint instanceId, uint clust
 ClusterVertexOut clusterVertex(SceneBuffer scene, ClusterContext c, uint i);
 // cluster_shading.glsl
 struct ClusterPixel { vec3 relative; vec3 relativeDx; vec3 relativeDy; vec3 normal;
-                      vec3 geometricNormal; bool frontFacing; vec2 uv; vec2 uvDx; vec2 uvDy;
+                      vec3 geometricNormal; bool frontFacing; vec2 uv; vec2 uvDx; vec2 uvDy; vec2 terrainUvDx; vec2 terrainUvDy;
                       vec4 tangent; uint materialIndex; float lodError; float height;
                       vec3 tint; float streamFade; float crownVisibility; float terrainSun;
                       vec4 currentClip; vec4 previousClip; vec3 normalDx; vec3 normalDy; };
@@ -120,7 +123,7 @@ SceneOutputs shadeVoxelPixel(vec3 relative, uvec4 voxel, uvec4 info);
   Run: `cmake --build build-release 2>&1 | grep -iE 'error' ; ctest --test-dir build-release`
   Expected: no errors; all tests pass.
 - [ ] **Step 3: Parity, same views as Task 1 Step 4, plus the overview (`700 1450 -400 -1.55 -0.5`) for the voxels**
-  Expected: mean difference against Task 1's captures <= 0.02/255.
+  Expected: `--placement off` views (start, edge, close leaf, overview) exactly equal (0.0000) to T1's (c03b527) captures, since this task is a pure refactor. Views with `--trees`: T2 against c03b527 within floor + 0.02/255, where the floor is c03b527 twice; report both.
 - [ ] **Step 4: Debug capture**
   Run: `cmake --build build && flock /tmp/meridian-gpu.lock ./build/game/game --trees --camera 600 1205.6 -400 -1.55 0.02 --capture .superpowers/vb/s1-debug.png --frames 30`
   Expected: `0 validation errors`.
@@ -215,7 +218,7 @@ static_assert(kMaxClusterTriangles <= (1u << 7));  // move kMaxClusterTriangles 
 - Frame order with the Visibility set: sky → masked visibility lists (early) → terrain → opaque visibility lists → voxel quads → far field; late: masked visibility → opaque visibility → voxel quads. No masked depth pre-pass and no depth-EQUAL pass. `visibilityId` is cleared to 0 in the early pass (`loadOp CLEAR`) and loaded late.
 
 - [ ] **Step 1:** Implement. Forward (`--visibility off`) must stay byte-identical: it uses the Forward set, which is today's non-debug set.
-- [ ] **Step 2: Off is unchanged.** Capture the forest edge with `--visibility off` and compare with Task 2's capture. Expected: mean <= 0.02/255.
+- [ ] **Step 2: Off is unchanged.** Capture the start, edge, close leaf and overview with `--placement off --visibility off` and compare them with Task 2's captures. Expected: 0.0000.
 - [ ] **Step 3: On draws ids.** Run `--visibility on --capture` at the forest edge. Expected: `0 validation errors` (Debug build, `--frames 30`); clusters are not shaded yet, so their pixels show what lies behind (look at the PNG).
 - [ ] **Step 4: Cost of the id pass alone.** The `GPU passes:` line at the forest edge, off vs on, Release. Expected: `scene early` + `scene late` drop by at least stage 0's "clusters stripped" saving minus 1 ms (8.2 − 1 = 7.2 ms). Write the raw lines into the ledger (Task 8).
 - [ ] **Step 5: VRAM.** The `Loaded: resident` line, off vs on. Expected: +28 MiB (± 1).
@@ -242,7 +245,7 @@ static_assert(kMaxClusterTriangles <= (1u << 7));  // move kMaxClusterTriangles 
 
 - [ ] **Step 1:** Implement.
 - [ ] **Step 2: Debug capture with `--visibility on`.** Expected: 0 validation errors; `resolve: ... clamped` printed.
-- [ ] **Step 3: Quick look.** `--visibility on` vs off at the forest edge and the close leaf view (`image-gates.py diff`). Expected: mean < 0.5/255. Above that, stop and inspect before Task 8.
+- [ ] **Step 3: Quick look.** `--visibility on` vs off at the forest edge and the close leaf view with `--trees` (`image-gates.py diff`), and off twice for the floor. Expected: mean below floor + 0.3/255. Above that, stop and inspect before Task 8.
 - [ ] **Step 4: Commit** (`Visibility resolve: cluster triangles shaded once per pixel`)
 
 ### Task 7: Stage 2 sweep for the late pass and the far field
@@ -251,7 +254,7 @@ static_assert(kMaxClusterTriangles <= (1u << 7));  // move kMaxClusterTriangles 
 
 - [ ] **Step 1:** Run `grep -nE 'colorAttachmentCount|sceneAttachments|maskedDepthPipeline|maskedMeshPipeline|depthEqualNoWrite|debugPipelines' engine/src/render/*.cpp engine/src/render/*.h`.
   Expected: every hit is either in the Forward/Debug set path or knows about the Visibility set. List each hit and its verdict in the commit message.
-- [ ] **Step 2:** Run `--visibility on` at the overview (far cells drawn: `far cells N` > 0 in the capture line) and diff against off. Expected: mean < 0.5/255; no pixel of far cell shows a cluster's shading (inspect at 2x crop).
+- [ ] **Step 2:** Run `--visibility on` at the overview (far cells drawn: `far cells N` > 0 in the capture line) and diff against off. Expected: below floor + 0.3/255 (floor: off twice); no pixel of far cell shows a cluster's shading (inspect at 2x crop).
 - [ ] **Step 3: Commit** fixes, if any.
 
 ### Task 8: Stage 2 gates (ledger in the research file)
@@ -260,7 +263,7 @@ static_assert(kMaxClusterTriangles <= (1u << 7));  // move kMaxClusterTriangles 
 
 All runs are Release at 2560x1440, `--trees`, `--visibility off` vs `on`, on the same commit. Write the views file once: start `1119 1355.9 -431 -1.55 -0.1`, edge `600 1205.6 -400 -1.55 0.02`, overview `700 1450 -400 -1.55 -0.5`, s1 `218 1408 1298 -0.785 -0.57`, meadow `1119 1355.9 -431 -1.55 -0.10 --frames 120`, close leaf `1944.3 953.4 -1923.9 -1.2 -0.9`.
 
-- [ ] **Step 1: Look, still.** `flock /tmp/meridian-gpu.lock ./build-release/game/game --trees --visibility X --capture-views views.txt out-X`, then `python3 -I tools/image-gates.py diff out-off/V.png out-on/V.png` per view. Expected: mean < 0.5/255 each; otherwise `tools/capture-sheet.py` an A/B sheet for the user.
+- [ ] **Step 1: Look, still.** `flock /tmp/meridian-gpu.lock ./build-release/game/game --trees --visibility X --capture-views views.txt out-X`, then `python3 -I tools/image-gates.py diff out-off/V.png out-on/V.png` per view. Run the off list twice for the floor and repeat the list with `--placement off` (exact or explained). Expected: on minus off below floor + 0.3/255 at every placement view, both figures reported; otherwise `tools/capture-sheet.py` an A/B sheet for the user.
 - [ ] **Step 2: Look, motion.** `tools/motion-gates.sh build-release out-mg-X --visibility X` and `tools/motion-clarity.sh build-release out-mc-X --visibility X`. Expected: every row of on at or below off (shimmer, smear, jitter).
 - [ ] **Step 3: Guides.** At the edge and s1, `--rr on --capture-guides out/V-X`, then `tools/pfm-diff.py` per buffer. Report mean and max for motion, diffuse, specular, normal and sun.
 - [ ] **Step 4: Sparkle.** `tools/white-dots.py` on s1 and edge, off vs on. Expected: on ≤ off + 0.5 per 1e4 px (normal-map specular AA dropped in the resolve, spec risk).
@@ -290,7 +293,7 @@ Not run by the implementer. The director dispatches an independent reviewer over
 
 - [ ] **Step 1:** Implement.
 - [ ] **Step 2: Debug capture at the overview, `--visibility on`.** Expected: 0 validation errors.
-- [ ] **Step 3: Quick look at the overview and s1.** Expected: mean < 0.5/255.
+- [ ] **Step 3: Quick look at the overview and s1.** Expected: below floor + 0.3/255 (off twice for the floor).
 - [ ] **Step 4: Commit** (`Visibility buffer: voxel quads`)
 
 ### Task 11: Stage 3 gates

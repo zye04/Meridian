@@ -117,11 +117,17 @@ the trees back (hidden by default). Capture runs print validation errors,
   Fullscreen sizes the window to the monitor mode from the start
   (`Window::framebufferSize`), so startup prints one `Swapchain:` line.
 - Interactive runs pick up the user's mouse; use capture runs for checks.
-- Captures step time by a fixed 1/60 s (motion and exposure adaptation), so
-  two captures of the same view with the same build match almost exactly
-  (mean difference ~1e-6/255; GPU atomics can still reorder a pixel).
-  Debug and Release differ by ~0.02/255. Compare mean differences, not
-  exact pixels.
+- Captures step time by a fixed 1/60 s (motion and exposure adaptation).
+  With `--placement off`, two captures of the same view with the same
+  build match exactly (0.0000/255 mean). With placement on they don't:
+  measured 2026-11-27 (Release 2560x1440, `--trees`), the start view
+  differs by 0.58/255, the forest edge 0.23, the forest overview 0.45, a
+  close leaf view 0.02, and the start view 0.33 without `--trees`
+  (backlog "Placement captures not repeatable"). Gate a look change on
+  `--placement off` views (exact, or explained), and on placement views
+  against a floor run (the same build twice, same session), reporting
+  both. Debug and Release differ by ~0.02/255. Compare mean differences,
+  not exact pixels.
 - Prefer unit tests for math (e.g. frustum planes in tests/mat4_test.cpp)
   over visual checks.
 - Gates (decisions.md "Performance gate restated", "VRAM budget"): route
