@@ -399,7 +399,7 @@ struct Renderer::Impl {
   VoxelLod voxelLod = VoxelLod::On;
   float voxelNear = 0.0f;
   VoxelCoverage voxelCoverage = VoxelCoverage::AreaPixelPhase;
-  uint32_t crownLight = 0;
+  uint32_t canopySky = 0;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
   uint32_t drawnVoxelQuads = 0;

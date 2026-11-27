@@ -622,8 +622,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint streamRecordCount;
     // Effects: extra mip bias of the alpha cut-out test (mesh.frag DEPTH_ONLY).
     float cutoutMipBias;
-    // Renderer::setCrownLight (lighting.glsl): canopy sky | crown sun << 8.
-    uint crownLight;
+    // Renderer::setCanopySky (lighting.glsl canopySkyVisibility).
+    uint canopySky;
     StreamLayerBuffer streamLayers;
     StreamThresholdBuffer streamThresholds;
     StreamCoordBuffer streamCoords;

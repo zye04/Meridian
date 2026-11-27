@@ -381,30 +381,19 @@ Shading beginShading(Surface s, vec3 relativePosition) {
     return sh;
 }
 
-// Crown light, canopy sky (Renderer::setCrownLight): how much of the sky the
-// far field's forest lets through to the point, straight up, or the mean of
-// up and halfway between up and the normal (a two-ray cone). The far field's
-// first level (4 m voxels) is the forest's opacity at this scale.
+// Canopy sky (Renderer::setCanopySky): how much of the sky the far field's
+// forest lets through to the point, straight up. The far field's first
+// level (4 m voxels) is the forest's opacity at this scale.
 const float kCanopySkyDistance = 64.0;
 const float kCanopySkyStartFoliage = 4.0;
-const uint kCanopySkyUp = 1u;
 
 float canopySkyVisibility(Shading sh) {
-    uint mode = pc.scene.crownLight & 0xFFu;
-    if (mode == 0u || pc.scene.farFieldEnabled == 0u) {
+    if (pc.scene.canopySky == 0u || pc.scene.farFieldEnabled == 0u) {
         return 1.0;
     }
-    const vec3 up = vec3(0.0, 1.0, 0.0);
     FarFieldBuffer farField = pc.scene.farField;
-    float visibility = farFieldTransmittance(farField, sh.worldPosition, up,
-                                             sh.canopyStart, kCanopySkyDistance, false);
-    if (mode == kCanopySkyUp) {
-        return visibility;
-    }
-    vec3 bent = sh.N + up;
-    bent = dot(bent, bent) > 1e-4 ? normalize(bent) : up;
-    return 0.5 * (visibility + farFieldTransmittance(farField, sh.worldPosition, bent,
-                                                     sh.canopyStart, kCanopySkyDistance, false));
+    return farFieldTransmittance(farField, sh.worldPosition, vec3(0.0, 1.0, 0.0), sh.canopyStart,
+                                 kCanopySkyDistance, false);
 }
 
 // `surfaceShadow`: the surface's own sun occlusion on top of the ray's

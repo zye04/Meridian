@@ -423,15 +423,11 @@ public:
   // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
   // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);
-  // Crown light (development A/B, off by default). Canopy sky: the sky part
-  // of the ambient that the GI probes don't cover (outside their clipmap, or
-  // all of it with GI off) passes through the far field's forest opacity,
-  // straight up (Up) or up and along the normal (Cone). Crown sun: a voxel's
-  // sun also passes through its own model's crown (Depth), and its diffuse
-  // sun takes the crown-scale normal into the leaf lobe (Normal).
-  enum class CanopySky : uint32_t { Off, Up, Cone };
-  enum class CrownSun : uint32_t { Off, Depth, Normal };
-  void setCrownLight(CanopySky canopySky, CrownSun crownSun);
+  // Canopy sky (development A/B, off by default): the sky part of the
+  // ambient that the GI probes don't cover (outside their clipmap, or all of
+  // it with GI off) passes through the far field's forest opacity, straight up.
+  enum class CanopySky : uint32_t { Off, Up };
+  void setCanopySky(CanopySky mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.

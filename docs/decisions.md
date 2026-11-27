@@ -5942,14 +5942,14 @@ voxels' sky with GI on (crownOcclusion() = 1).
   The 1.jpg foliage-shadow region L goes 0.310 -> 0.300 (ref 0.257), because haze dominates
   there. GPU 21.18 -> 23.62 ms.
 - `--canopy-sky cone` (A, variant): also a ray halfway between up and the normal. The
-  numbers match `up`, at 35.86 ms; the sideways march is long. Rejected.
+  numbers match `up`, at 35.86 ms; the sideways march is long. Rejected, code removed.
 - `--crown-sun depth` (B, try): a voxel's sun times exp(-its axis depth toward the sun).
   It dims lit crowns about uniformly (a1 lit-crown sun 116.7 -> 57.8). The lit region turns
   blue (h 163 -> 227, sky share up) and shadow/sunlit goes 0.84 -> 1.00 (ref 0.64). At m2 no
   sun side and far side appears. Rejected: the cascade already shadows the model, and at
   the 4-bit axis-depth resolution the depth toward a 45 deg sun is large for most visible voxels.
 - `--crown-sun normal` (B, variant): depth plus the lobe bent halfway to the crown-scale
-  normal. Same verdict (lit h 226, shadow/sunlit 0.97).
+  normal. Same verdict (lit h 226, shadow/sunlit 0.97). B reverted (director).
 - At m2 (1:1 beside a 1.jpg crop) the gap to the reference is crown structure, not light:
   reference crowns are dense convex clumps with mid-green shaded sides; ours are open, with
   near-black interior gaps.
