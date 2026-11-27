@@ -285,3 +285,34 @@ d. Debug (`.superpowers/far/cap.sh build/game/game H1|H2`, `.superpowers/far/deb
 `far field ray check ... max difference 8.7e-07`; the 10 known warnings (outputs 4/5, backlog).
 
 Sheet: `.superpowers/far/sheet/sheet-final.png` (a1/H2/H1 far-tier, `--far-extent 0`, 5.jpg/7.jpg); far pass a1 9.05, H2 3.07, H1 9.10 ms; `Loaded: resident 9927 MiB`.
+
+## Review fixes and the cell-border lines (2026-11-27; commits 31cfa1b, 8263fc7, 2df00e8, 67d3fa7, bd2ec08)
+
+Scene flags `$SCENE` = `.superpowers/far/flags.sh`; captures `VIEWS=FILE .superpowers/far/s3/views.sh BIN DIR`; every run
+`Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS`, `0 validation errors`.
+Before = f98f774 (build-dev, or the hardening frames `.superpowers/far/fly/views/`, same code).
+
+Grid lines (fly frames). Light split at x4000 (`lines/before/`): base colour flat at the borders, sun and ambient not.
+Border profile (`lines/profile.py`: mean linear luminance at -8..8 px across the far-cell changes of the per-cell hue
+lod view `lines/cells/x4000-cells.png`, debug_view.frag patched locally, not committed; normalised to |d| >= 5):
+- before `x4000.png 0.97 0.97 0.97 0.97 0.97 0.96 0.94 0.90 0.99 1.02 1.03 1.04 1.04 1.04 1.03 1.03 1.02` (lit step + dark line)
+- sun march across cells only (`lines/after1`; step gone, dark line left): `after1/x4000.png 1.01 1.00 1.00 1.00 0.99 0.98 0.96 0.91 0.95 0.97 0.98 0.99 0.99 1.00 1.00 1.00 1.00`
+- plus the carried view march (`lines/after2`, final `lines/final`): `final/x4000.png 1.00 1.00 1.00 1.00 1.01 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 0.99 0.99`
+- Sheet 1:1: `.superpowers/far/lines/sheet-lines.png` (x3000, x4000, x5000, x5000-back; before | after).
+
+Sun lookup leak (review item 7): march to 32 m + far shadow texel + bias, lookup at 32 m (`review/leak`): far tiles' sun at x4000
+`mean 0.03494 -> 0.03351 ratio 0.9591`, H1 at a 5 degree sun `ratio 0.9926` (whole frame). Committed fix: lookup pulled back instead.
+
+Edge strip (review item 1), `--camera 2000 1500 -1000 3.1416 -0.45` (`review/{before,after}/edge{,-lod}.png`): a bare
+grey strip along x = 2000..2048 before, voxel trees across it after.
+Far level (review item 2), `--camera 5000 1500 0 1.5708 -0.5` (`review/{before,after}/far6k{,-sun,-ambient}.png`):
+ambient view `far6k-ambient mean before 0.04143 after 0.03518 ratio 0.8492 lower half 0.6148`.
+
+Debug H1 (`.superpowers/far/cap.sh build/game/game H1`, `review/debug-h1.log`): `0 validation errors` (the 10 known warnings),
+`placement hash 0x9f383bc0acab499b` (was 0x212a5bc72625e8fe: the edge strip's trees), `placement check: 5425 points (762 kept) ... 0 mismatches`,
+`far field hash 0x944195d140d56146, placement grid inside its outer ring+1 cells 0x95b68fb05960ae2d (static levels)` (static hash was
+0x18e4df10c8f99dce; the interior one is unchanged), far field / far placement / stream checks `0 mismatches`,
+`far shadow map check ... max difference 0.248 m (0 over 1 m)`, `far field ray check: 256 rays (52 partly transmitted) ... max difference 8.7e-07`.
+
+Release after (`lines/final/run.log`): x4000 `GPU 22.11 ms` far field 11.76; a1 `GPU 34.31 ms` far field 12.64; h1 `GPU 34.39 ms` far field 12.31
+(hardening: a1 9.05, h1 9.10): the marches across cells cost ~3.4 ms at a1; task 2 next.
