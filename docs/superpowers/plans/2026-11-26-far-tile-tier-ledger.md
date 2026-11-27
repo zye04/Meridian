@@ -357,3 +357,12 @@ Fly-through (`$SCENE --benchmark 50 cost2/fly/fly.csv --route .superpowers/far/f
 `Recorded 2108 frames: AVG 42.1, 0.1% low 24.3, 1% low 27.4, 5% low 30.6, MAX 50.0 FPS`;
 bench-route `core 734 36.7 26.0 27.23 far_field 13.60`, `beyond-edge 1373 45.8 37.5 21.86 far_field 11.42`, `route 2107 42.1 27.4 23.73 far_field 12.18`;
 maxima `far_field: max 25.32 at frame 512 t 14.14s, mean 12.18, p99 23.26`, `gpu_ms: max 43.43 at frame 514 t 14.22s, mean 23.67`.
+
+## Final checks (2026-11-27, build of 4504403)
+
+Default Napf scene (`flock /tmp/meridian-gpu.lock ./build-release/game/game --trees --capture-views .superpowers/far/default/views.txt .superpowers/far/final/default`, log `final/default.log`):
+`Placed 3398673 instances` (before the edge-strip change 3364956), `Far field: resident 1382 MiB; peak transient 1172 MiB, device memory allocated at peak 12460 MiB`
+(before 1376 / 12454), `Loaded: resident 12033 MiB` (before 12025); start `GPU 25.18 ms` far field 0.82, summit horizon `GPU 33.03 ms` far field 1.85;
+every view `0 validation errors`, every cull list `0 dropped`.
+Fly spike pose (`final/spike`, `--camera 1414 1500 0 1.5708 -0.12`): `GPU 24.90 ms`, far field 14.03, 0 validation errors; lod view: tiles over ~75% of the frame,
+camera far above the canopy. The fly csv's 25.3 ms blocks (t 14.1-16 s) are not reproduced still (backlog row).
