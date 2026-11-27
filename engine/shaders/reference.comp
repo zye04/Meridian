@@ -68,6 +68,10 @@ Surface hitSurface(RayHit hit) {
     surfaceIn.dpdx = vec3(0.0);
     surfaceIn.dpdy = vec3(0.0);
     surfaceIn.uv = hit.uv;
+    surfaceIn.uvDx = vec2(0.0);
+    surfaceIn.uvDy = vec2(0.0);
+    surfaceIn.terrainUvDx = vec2(0.0);
+    surfaceIn.terrainUvDy = vec2(0.0);
     surfaceIn.tangent = hit.tangent;
     surfaceIn.tint = hit.tint;
     surfaceIn.height = hit.height;

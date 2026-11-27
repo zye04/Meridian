@@ -14,6 +14,13 @@ struct SurfaceInput {
     vec3 dpdx;
     vec3 dpdy;
     vec2 uv;
+    // Screen derivatives for texture LOD (zero on a ray) of uv and of
+    // terrainNormalUv(worldPosition). The forward raster path takes them per
+    // 2x2 quad (dFdxCoarse), as the implicit LOD they replace did.
+    vec2 uvDx;
+    vec2 uvDy;
+    vec2 terrainUvDx;
+    vec2 terrainUvDy;
     vec4 tangent;
     vec3 tint;
     // Object-space height over the mesh top, 0..1 (plant base occlusion).
@@ -29,12 +36,29 @@ SurfaceInput surfaceIn;
 // The raster path filters by the pixel's footprint; a ray hit samples the
 // finest level, and averaging many jittered samples per pixel is the
 // footprint integral that mipmapping approximates.
+vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
+    // textureGrad takes no bias: scaling the gradients by 2^bias is the same.
+    float scale = exp2(pc.scene.mipBias);
+    return textureGrad(textures[nonuniformEXT(index)], uv, dx * scale, dy * scale);
+}
+
+// The raster path filters by the pixel's footprint, from explicit gradients
+// (the visibility resolve has no pixel quad to take them from); a ray hit
+// samples the finest level, and averaging many jittered samples per pixel is
+// the footprint integral that mipmapping approximates.
 vec4 sampleTexture(uint index, vec2 uv) {
 #ifdef SURFACE_FRAGMENT
-    return texture(textures[nonuniformEXT(index)], uv, pc.scene.mipBias);
+    return sampleGrad(index, uv, surfaceIn.uvDx, surfaceIn.uvDy);
 #else
     return textureLod(textures[nonuniformEXT(index)], uv, 0.0);
 #endif
+}
+
+// The terrain normal map's uv at a flat world position.
+vec2 terrainNormalUv(vec3 worldPosition) {
+    Terrain terrain = pc.scene.terrain;
+    vec2 size = vec2(float(terrain.width), float(terrain.height));
+    return (worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
 }
 
 // The heightfield's normal from the normal map, filtered (trilinear,
@@ -43,10 +67,10 @@ vec4 sampleTexture(uint index, vec2 uv) {
 // displacement's slope is added.
 vec3 terrainNormal() {
     Terrain terrain = pc.scene.terrain;
-    vec2 size = vec2(float(terrain.width), float(terrain.height));
-    vec2 uv = (surfaceIn.worldPosition.xz / terrain.spacing + 0.5 * (size - 1.0) + 0.5) / size;
+    vec2 uv = terrainNormalUv(surfaceIn.worldPosition);
 #ifdef SURFACE_FRAGMENT
-    vec2 xz = texture(textures[terrain.normalTexture], uv).rg;
+    vec2 xz = textureGrad(textures[terrain.normalTexture], uv, surfaceIn.terrainUvDx,
+                          surfaceIn.terrainUvDy).rg;
 #else
     vec2 xz = textureLod(textures[terrain.normalTexture], uv, 0.0).rg;
 #endif
@@ -129,11 +153,6 @@ float terrainMicroOcclusion(TerrainLayer layer, float occlusion) {
     return mix(1.0, clamp(occlusion / max(mean, 1e-3), 0.0, 1.0), layer.occlusionStrength);
 }
 
-vec4 sampleGrad(uint index, vec2 uv, vec2 dx, vec2 dy) {
-    // textureGrad takes no bias: scaling the gradients by 2^bias is the same.
-    float scale = exp2(pc.scene.mipBias);
-    return textureGrad(textures[nonuniformEXT(index)], uv, dx * scale, dy * scale);
-}
 
 // Hex-tiling (Mikkelsen 2022, "Practical Real-Time Hex-Tiling", JCGT;
 // ported from github.com/mmikk/hextile-demo): each point blends three

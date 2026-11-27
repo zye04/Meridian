@@ -148,6 +148,11 @@ void main() {
     surfaceIn.dpdx = dFdx(inRelativePosition);
     surfaceIn.dpdy = dFdy(inRelativePosition);
     surfaceIn.uv = inUv;
+    surfaceIn.uvDx = dFdxCoarse(inUv);
+    surfaceIn.uvDy = dFdyCoarse(inUv);
+    vec2 terrainUv = terrainNormalUv(worldPosition);
+    surfaceIn.terrainUvDx = dFdxCoarse(terrainUv);
+    surfaceIn.terrainUvDy = dFdyCoarse(terrainUv);
     surfaceIn.tangent = inTangent;
 #ifdef TERRAIN
     surfaceIn.tint = vec3(1.0);

@@ -145,10 +145,10 @@ float cascadeFiltered(uint i, vec3 coords) {
     vec2 w1 = 1.0 + 2.0 * f;
     vec2 o0 = ((2.0 - f) / w0 - 1.0) / size;
     vec2 o1 = (f / w1 + 1.0) / size;
-    float sum = w0.x * w0.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o0.y), receiverDepth)) +
-                w1.x * w0.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o0.y), receiverDepth)) +
-                w0.x * w1.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o1.y), receiverDepth)) +
-                w1.x * w1.y * texture(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o1.y), receiverDepth));
+    float sum = w0.x * w0.y * textureLod(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o0.y), receiverDepth), 0.0) +
+                w1.x * w0.y * textureLod(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o0.y), receiverDepth), 0.0) +
+                w0.x * w1.y * textureLod(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o0.x, o1.y), receiverDepth), 0.0) +
+                w1.x * w1.y * textureLod(shadowMaps[nonuniformEXT(map)], vec3(base + vec2(o1.x, o1.y), receiverDepth), 0.0);
     return sum / 16.0;
 }
 
