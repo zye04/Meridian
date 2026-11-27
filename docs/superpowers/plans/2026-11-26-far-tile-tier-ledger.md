@@ -208,3 +208,40 @@ after = build-release 892b979, before = `.superpowers/far/stage1` worktree at c6
 - Load: `templates 13 ms, splat 279 ms` (was 9 / 255).
 Look: `.superpowers/far/s3/final/sheet-stage3.png`, `.superpowers/far/s3/final/crop-h1.png`,
 `.superpowers/far/s3/premise/crops.png` (41 px switch, before).
+
+## Stage 3b sheet (director's first small task), 4772a79
+
+`.superpowers/far/cap.sh build-release/game/game A1|H2|H1 .superpowers/far/s3/final3b/<v>.png`
+(default switch, build-release at 4772a79), each `Render 2560x1440, display 2560x1440, jitter phases 8, mip bias 0, DLSS`,
+`Loaded: resident 9927 MiB` (+72 MiB far window), 0 validation errors:
+- a1: `cull clusters 4.19 ... voxel trees 5.87, far field 9.00`, `Rendered 120 frames, GPU 30.15 ms`, main voxel quads 16709735
+- H2: `cull clusters 5.11 ... voxel trees 6.59, far field 3.10`, `GPU 28.72 ms`, voxel quads 21010977
+- H1: `cull clusters 4.38 ... voxel trees 5.87, far field 9.03`, `GPU 30.58 ms`, voxel quads 19025468
+Sheet: `.superpowers/far/s3/final/sheet-stage3b.png` (a1/H2/H1, then 5.jpg / 7.jpg).
+
+## Stage 2 part 1: fine levels over a static window (`--far-fine`)
+
+Decisions with reasons: decisions.md "Far tile tier stage 2, part 1".
+Need (a1, `--far-fine 1024`, window 33x33 / 65x65 cells): `Far field 1 m: 2748590 bricks (63430147 occupied voxels) ... bricks 273.4 MiB`,
+`Far field 2 m: 1656278 bricks ... bricks 206.0 MiB` (before the fine bands were limited to the crop).
+Whole crop (`--far-fine 3700` at a1, 64x64 cells): `Far field 1 m: 11459524 bricks (281231435 occupied voxels) in 983590 columns, 64 slices; bricks 1204.0 MiB, columns 8.0 MiB; splat 632 ms`,
+`Far field 2 m: 1653111 bricks (49711928 occupied voxels) ... bricks 208.6 MiB`; `Loaded: resident 11340 MiB` (+1413 MiB over 4772a79; +72 MiB far window = 11412 MiB).
+
+Switch band, same-tree pixels (`VIEWS=.superpowers/far/s3/views-measure.txt .superpowers/far/s3/views.sh build-release/game/game .superpowers/far/s2/<dir> --far-fine 3700`,
+`python3 -I canopy.py premise/default ../s2/<dir> a1|h1`), L lit / shaded, `Render 2560x1440`, 0 validation errors:
+
+| run | a1 lit | a1 shaded | h1 lit | h1 shaded | far field ms a1 |
+|---|---|---|---|---|---|
+| cluster voxels (default) | 0.381 | 0.267 | 0.306 | 0.175 | — |
+| 1 m tiles, sun/sky at own level (`s2/fine`) | 0.354 | 0.266 | 0.276 | 0.196 | 20.91 |
+| 1 m tiles, sun/sky from 4 m (`s2/fine-shade4`, kept) | 0.369 | 0.266 | 0.291 | 0.189 | 16.51 |
+
+Cost, 4772a79 default vs `--far-fine 3700` (fine-shade4):
+- a1: voxel quads 16709735 -> 12730153; cull clusters 4.19 -> 2.83; voxel trees 5.87 -> 4.75; far field 9.00 -> 16.51; `GPU 30.15 ms` -> `GPU 34.67 ms`.
+- h1: voxel quads 19025468 -> 16002194; cull clusters 4.38 -> 3.98; voxel trees 5.87 -> 5.32; far field 9.03 -> 12.95; `GPU 30.58` -> `GPU 33.23 ms`.
+
+Debug a1 `--far-fine 3700 --frames 2` (`.superpowers/far/s2/a1-debug.log`):
+`far field hash 0x18e4df10c8f99dce, placement grid inside its outer ring+1 cells 0x95b68fb05960ae2d (static levels); fine levels 0xc0a1e97bc3a0eee6`
+(static hashes equal 892b979/4772a79's), `far field check: 13 cells, 787584 voxels (334557 occupied) compared with the CPU replica, 0 mismatches`
+(3 crop cells at the fine levels), placement / shadow map / ray checks as before, `0 validation errors`. Tests: 221 passed.
+Look: `.superpowers/far/s2/crop-switch-a1.png` (1:1 switch band, a1, beside 7.jpg), `.superpowers/far/s2/sheet-fine.png`.
