@@ -333,9 +333,11 @@ so early depth holds); then
 the far field pass (cell_cull appends far cells: placement cells past
 the switch, and every far-grid cell outside the placement grid, at
 least at its finest stored level): voxel.mesh emits each far cell's
-canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
-and writes the hit's depth (conservative, depth_less), motion and the
-same attachments) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
+canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5,
+a ray entering through a side face carrying the optical depth of the
+cell it comes from, and writes the hit's depth (conservative,
+depth_less), motion and the same attachments; its sky and sun marches
+go through the whole field, farFieldMarch at the drawn level) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late
 cull (cell cull phase 1: every cell against frustum + pyramid, writing
 cell visibility; then every instance of the emitted chunks against
 frustum + pyramid; the newly visible

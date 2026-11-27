@@ -371,14 +371,14 @@ const uint kFarMaxRaySteps = 1024u;
 // pyramid (Tevs 2008, as terrainOccludes): a block of 2^k cells whose
 // canopy stays below the ray is skipped and the next tried one level
 // coarser; otherwise it descends, and a cell the ray passes through at
-// canopy height marches its bricks at the coarser of the ray's level (by
-// distance) and the cell's finest stored level (farFinestLevel: a cell past
-// a level's band stores no columns at it). skipTlasCells: M2b skips the
-// cells its TLAS holds; in M2a no far ray traces trees in the TLAS, so there
-// is nothing to skip. wantAlbedo: see farMarchCellImpl; scatter then holds
-// the absorbed-weighted sums.
+// canopy height marches its bricks at the coarsest of the ray's level (by
+// distance), minLevel and the cell's finest stored level (farFinestLevel:
+// a cell past a level's band stores no columns at it). skipTlasCells: M2b
+// skips the cells its TLAS holds; in M2a no far ray traces trees in the
+// TLAS, so there is nothing to skip. wantAlbedo: see farMarchCellImpl;
+// scatter then holds the absorbed-weighted sums.
 float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
-                    float startDistance, float maxDistance, bool skipTlasCells,
+                    float startDistance, float maxDistance, uint minLevel, bool skipTlasCells,
                     const bool wantAlbedo, inout FarScatterSum scatter) {
     // Heights (canopy extents included) relative to heightBase from here on.
     float heightBase = farField.field.heightBase;
@@ -431,7 +431,7 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
         // holds the block.
         uint blockLevel = max(farFinestLevel(farField.field.bands, lo),
                               farFinestLevel(farField.field.bands, hi));
-        float pad = farCanopyPad(max(blockLevel,
+        float pad = farCanopyPad(max(max(minLevel, blockLevel),
                                      kFarFineLevels + (tExit < kFarRayLevelEnd0   ? 0u
                                                        : tExit < kFarRayLevelEnd1 ? 1u
                                                                                   : 2u)));
@@ -445,7 +445,7 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                 // One level per march (a single call site, as the march is
                 // inlined); a cell the level changes in is revisited from
                 // the change on.
-                uint level = max(blockLevel,
+                uint level = max(max(minLevel, blockLevel),
                                  kFarFineLevels + (t < kFarRayLevelEnd0   ? 0u
                                                    : t < kFarRayLevelEnd1 ? 1u
                                                                           : 2u));
@@ -491,7 +491,7 @@ float farFieldTransmittance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dire
                             float startDistance, float maxDistance, bool skipTlasCells) {
     FarScatterSum unused = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
     return farFieldMarch(farField, worldOrigin, direction, startDistance, maxDistance,
-                         skipTlasCells, false, unused);
+                         kFarFineLevels, skipTlasCells, false, unused);
 }
 
 // Transmittance plus, over what the ray crossed and weighted by the light
@@ -502,7 +502,7 @@ float farFieldTransmittanceScatter(FarFieldBuffer farField, vec3 worldOrigin, ve
                                    out vec3 transmitted, out float meanDistance) {
     FarScatterSum sum = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
     float transmittance = farFieldMarch(farField, worldOrigin, direction, startDistance,
-                                        maxDistance, false, true, sum);
+                                        maxDistance, kFarFineLevels, false, true, sum);
     float absorbed = max(1.0 - transmittance, 1e-6);
     reflected = sum.reflected / absorbed;
     transmitted = sum.transmitted / absorbed;

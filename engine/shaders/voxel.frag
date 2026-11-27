@@ -39,14 +39,14 @@ layout(depth_less) out float gl_FragDepth;
 
 // Optical depth at opacity 0.5.
 const float kHitOpticalDepth = 0.69314718;
-// The sun through the cell's own volume: the optical depth from the hit
-// toward the sun over at most this far (and inside the cell's box), marched
-// through the bricks at the drawn level; the shadow maps and the terrain
+// The sun through the forest's volume: the optical depth from the hit
+// toward the sun over this far, marched through the bricks at the drawn
+// level (farFieldMarch, into the neighbouring cells); the shadow maps and the terrain
 // take over where that march ends, so the crown shadows the hit once (its
 // copy in cascade 4 or the far shadow map lies behind the march's end).
 const float kTileSunMarch = 32.0;
 const float kVoxelPerceptualRoughness = 0.8;
-// Sky occlusion from the cell's own bricks, in the canopy-sky form of the
+// Sky occlusion from the bricks above the hit, in the canopy-sky form of the
 // crown-light lane (lighting.glsl canopySkyVisibility, branch crown-light,
 // kCanopySkyDistance): the transmittance straight up over 64 m from the hit.
 // Unlike that lane's foliage start (4 m), the hit's own voxel counts: the
@@ -97,9 +97,52 @@ void main() {
 #else
     float tStart = length(inDisplayed);
 #endif
-    float t = farMarchCell(farField, cell, level, origin, direction, tStart, tEnd,
-                           kHitOpticalDepth, opticalDepth, voxel);
-    if (t < 0.0) {
+    // A ray entering through a side face first gathers the optical depth of
+    // the cell it comes from (at this level, or that cell's finest stored
+    // one), from that cell's box on; a hit there is that cell's fragment's.
+    // Restarting at zero put the hits next to every cell border deeper into
+    // the canopy: a dark line along each border.
+    vec3 tNear = min(t0, t1);
+    float tEntry = max(max(tNear.x, tNear.y), tNear.z);
+    ivec2 from = ivec2(cell);
+    if (tNear.x >= tEntry) {
+        from.x -= direction.x >= 0.0 ? 1 : -1;
+    } else if (tNear.z >= tEntry) {
+        from.y -= direction.z >= 0.0 ? 1 : -1;
+    }
+    bool carried = from != ivec2(cell) && all(greaterThanEqual(from, ivec2(0))) &&
+                   all(lessThan(from, ivec2(field.cellsX, field.cellsZ)));
+    float t = -1.0;
+    uint pass = carried ? 0u : 1u;
+    for (; pass < 2u; ++pass) {
+        uvec2 marchCell = cell;
+        uint marchLevel = level;
+        float a = tStart;
+        float b = tEnd;
+        if (pass == 0u) {
+            marchCell = uvec2(from);
+            marchLevel = max(level, farFinestLevel(field.bands, from));
+            FarCell previous = field.cells.cells[marchCell.y * field.cellsX + marchCell.x];
+            float previousPad = farCanopyPad(marchLevel);
+            vec3 lo = vec3(vec2(marchCell) * kCellSize,
+                           previous.bottom - previousPad - field.heightBase).xzy;
+            vec3 hi = lo + vec3(kCellSize, previous.top - previous.bottom + 2.0 * previousPad,
+                                kCellSize);
+            vec3 near = min((lo - origin) * inverseDirection, (hi - origin) * inverseDirection);
+#ifdef SHADOW
+            a = max(max(near.x, near.y), near.z);
+#else
+            a = max(max(max(near.x, near.y), near.z), 0.0);
+#endif
+            b = tEntry;
+        }
+        t = farMarchCell(farField, marchCell, marchLevel, origin, direction, a, b,
+                         kHitOpticalDepth, opticalDepth, voxel);
+        if (t >= 0.0) {
+            break;
+        }
+    }
+    if (t < 0.0 || pass == 0u) {
         discard;
     }
 #ifdef SHADOW
@@ -137,17 +180,14 @@ void main() {
         s.normal = -s.normal;
     }
 
-    // Two short marches through the cell's own bricks from the hit, at one
+    // Two short marches through the field's bricks from the hit, at one
     // call site (each inlined copy of the march costs registers): up for the
-    // sky (it stays in the cell's column) and toward the sun, out of the
-    // hit's voxel, to the cell's box or kTileSunMarch.
-    vec3 hitField = origin + direction * t;
+    // sky and toward the sun, out of the hit's voxel, over kTileSunMarch.
+    // Both cross into the neighbouring cells: stopping at the cell's box left
+    // the canopy past it to the shadow maps, whose receiver offsets skip
+    // it, and lit a stripe along every cell's sunward edge.
     vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
     bool sunUp = rayDirection.y > -sin(scene.sunAngularRadius);
-    vec3 inverseSun = 1.0 / mix(vec3(1e-12), rayDirection,
-                                greaterThan(abs(rayDirection), vec3(1e-12)));
-    vec3 sunExit = max((boxLo - hitField) * inverseSun, (boxHi - hitField) * inverseSun);
-    float sunEnd = clamp(min(min(sunExit.x, sunExit.y), sunExit.z), 0.0, kTileSunMarch);
     // depths.x: up, depths.y: toward the sun (also what an in-crown fill
     // toward the sun, crown-light lane, would read).
     vec2 depths = vec2(0.0);
@@ -157,21 +197,20 @@ void main() {
     uint shadeLevel = max(level, kFarFineLevels);
     for (uint ray = 0u; ray < (sunUp ? 2u : 1u); ++ray) {
         bool sky = ray == 0u;
-        float depth = 0.0;
-        uint unused;
-        farMarchCell(farField, cell, shadeLevel, hitField,
-                     sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
-                     sky ? 0.0 : farVoxelSize(shadeLevel),
-                     sky ? min(kTileSkyDistance, boxHi.y - hitField.y) : sunEnd, kFarOpaqueDepth,
-                     depth, unused);
-        depths[ray] = depth;
+        FarScatterSum unused = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
+        float transmittance =
+            farFieldMarch(farField, world, sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
+                          sky ? 0.0 : farVoxelSize(shadeLevel),
+                          sky ? kTileSkyDistance : kTileSunMarch, shadeLevel, false, false,
+                          unused);
+        depths[ray] = -log(max(transmittance, exp(-kFarOpaqueDepth)));
     }
     float occlusion = mix(1.0, exp(-depths.x), scene.microShadowStrength);
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     if (sunUp) {
-        vec3 sunStart = world + rayDirection * sunEnd;
+        vec3 sunStart = world + rayDirection * kTileSunMarch;
         vec3 marchOrigin = sunStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);

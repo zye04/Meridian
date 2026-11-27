@@ -6144,3 +6144,19 @@ in the ledger's "Review fixes" section.
   march over bands that end inside the forest (fails without the fix).
   At `5000 1500 0 1.5708 -0.5` the far tiles' ambient view drops to 0.61x
   in the lower half (probes under the forest now occluded).
+- Cell-border lines in the tile forest (fly-through frames x3000 to
+  x5000-back). Two causes, found with the light split (sun, ambient, base
+  colour) and a per-cell hue lod view (the cell borders): (1) the sun
+  march stopped at the cell's box, so a hit near a cell's sunward side
+  marched a few metres and left the neighbour's canopy to the shadow
+  maps, whose receiver offset (8 m + 2 m bias toward the sun) skips it: a
+  lit stripe along every sunward edge (luminance step 0.97 -> 1.04 across
+  the border); (2) the view march restarted at zero optical depth in each
+  cell's box, so hits next to a border lay deeper in the canopy: a dark
+  line two pixels wide (0.90 of the surroundings). Fixes: the sky and sun
+  marches go through `farFieldMarch` (field-wide, crossing cells; one
+  call site; `minLevel` keeps the drawn level), and a ray entering a cell
+  through a side face first marches the cell it comes from (one loop,
+  one call site of the cell march; a hit there belongs to that cell's
+  fragment). Border profile at x4000 after both: flat (0.99-1.01).
+  The base colour carries nothing at the borders (1.00).
