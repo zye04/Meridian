@@ -456,7 +456,9 @@ chance f, wood also always at f >= 0.5. The cascades always take hash.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
-(`farfield_shadow.comp`, farfield.h: 8 m texels, 16-bit depth of the first
+(`farfield_shadow.comp`, farfield.h: 8 m texels over the box of the L1
+band's cells, 6 km past the placement grid; receivers outside the map
+take terrain shadows only, no tree shadows; 16-bit depth of the first
 0.5-opacity point along the sun, read with a normal offset and a
 slope-scaled bias, built on frame 1 and rebuilt a slice per
 frame into a second map when the sun turns more than 0.1 degrees; a sun more
