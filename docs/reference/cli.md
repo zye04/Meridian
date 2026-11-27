@@ -201,6 +201,17 @@ VIEW` prints per-region mean albedo against approximate physical ranges
 and, for single-material rects, a source texture (materials spec D6).
 A `.pfm` capture path writes the linear HDR image the tonemap reads
 (the upscaler's output, pre-exposed) instead, for luminance ratios.
+`--capture-guides PREFIX` (with `--capture`) saves the scene attachments
+as the frame left them, render-sized, as `PREFIX-{diffuse,motion,specular,
+normal,sun}.pfm` (motion in r, g; specular albedo and normal + roughness
+exist only under `--rr on`, otherwise that file fails with a message;
+sun is pre-exposed). `python3 -I tools/pfm-diff.py A.pfm B.pfm` prints the
+per-channel mean and max |a - b| (exit 1 on a size mismatch or NaN/Inf).
+Under `--rr on` two runs differ even with `--placement off` (0.60/255 on
+the image; the pre-exposed sun buffer by ~0.4%, diffuse, specular, normal
+and motion exact), so compare the sun buffer against a floor run.
+`python3 -I tools/white-dots.py A.png [X0 Y0 X1 Y1]` counts leaf sparkle:
+pixels with OKLab L > 0.85 per 1e4 px (decisions.md "Foliage specular AA").
 
 ## Motion gates
 

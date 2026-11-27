@@ -47,9 +47,10 @@ namespace {
 
 // Portable Float Map: RGB float, rows bottom to top; a negative scale means
 // little-endian, which the host is.
+// `channels` per texel in `texels`; missing ones of RGB are written as 0.
 template <typename Texel, typename ToFloat>
 bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
-             const Texel *rgba, ToFloat toFloat) {
+             const Texel *texels, ToFloat toFloat, uint32_t channels = 4) {
   std::FILE *file = std::fopen(path.c_str(), "wb");
   if (!file) {
     return false;
@@ -59,7 +60,8 @@ bool savePfm(const std::filesystem::path &path, VkExtent2D extent,
   for (uint32_t y = extent.height; y-- > 0;) {
     for (uint32_t x = 0; x < extent.width; ++x) {
       for (uint32_t c = 0; c < 3; ++c) {
-        row[x * 3 + c] = toFloat(rgba[(size_t{y} * extent.width + x) * 4 + c]);
+        row[x * 3 + c] =
+            c < channels ? toFloat(texels[(size_t{y} * extent.width + x) * channels + c]) : 0.0f;
       }
     }
     std::fwrite(row.data(), sizeof(float), row.size(), file);
@@ -674,7 +676,9 @@ void Renderer::setWeather(const Weather &weather) {
 void Renderer::setCloudsEnabled(bool enabled) { impl_->cloudsEnabled = enabled; }
 
 void Renderer::requestCapture(const std::filesystem::path &path, CaptureSource source) {
-  (source == CaptureSource::Display ? impl_->capturePath : impl_->albedoCapturePath) = path;
+  (source == CaptureSource::Display
+       ? impl_->capturePath
+       : impl_->attachmentCapturePaths[static_cast<size_t>(source) - 1]) = path;
 }
 
 uint32_t Renderer::validationErrorCount() const { return validationErrors; }
@@ -1796,21 +1800,40 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   }
   impl_->slotPassCount[frameSlot] = passCount;
 
-  // The diffuse albedo is in SHADER_READ_ONLY since the scene pass ended;
-  // the next frame starts it from UNDEFINED, so it isn't transitioned back.
-  Buffer albedoBuffer;
-  const bool albedoCapturing =
-      impl_->albedoCapturePath.has_value() && impl_->diffuseAlbedo.image != VK_NULL_HANDLE;
-  if (impl_->albedoCapturePath && !albedoCapturing) {
-    std::fprintf(stderr, "Albedo capture failed: no albedo target (enableAlbedoCapture)\n");
-    impl_->albedoCapturePath.reset();
-  }
-  if (albedoCapturing) {
-    albedoBuffer = impl_->createBuffer(
-        VkDeviceSize{renderExtent.width} * renderExtent.height * 4,
+  // The scene attachments are in SHADER_READ_ONLY since the scene pass
+  // ended; the next frame starts them from UNDEFINED, so they aren't
+  // transitioned back.
+  struct AttachmentCapture {
+    const Image *image;
+    uint32_t channels;
+    bool half;
+    Buffer buffer;
+  };
+  std::array<AttachmentCapture, kAttachmentCaptures> attachmentCaptures = {{
+      {&impl_->diffuseAlbedo, 4, false, {}},
+      {&impl_->motion, 2, true, {}},
+      {&impl_->specularAlbedo, 4, false, {}},
+      {&impl_->normalRoughness, 4, true, {}},
+      {&impl_->sunLight, 4, true, {}},
+  }};
+  for (size_t i = 0; i < kAttachmentCaptures; ++i) {
+    std::optional<std::filesystem::path> &path = impl_->attachmentCapturePaths[i];
+    AttachmentCapture &capture = attachmentCaptures[i];
+    if (!path) {
+      continue;
+    }
+    if (capture.image->image == VK_NULL_HANDLE) {
+      std::fprintf(stderr, "Capture failed: %s: that target doesn't exist in this run\n",
+                   path->c_str());
+      path.reset();
+      continue;
+    }
+    capture.buffer = impl_->createBuffer(
+        VkDeviceSize{renderExtent.width} * renderExtent.height * capture.channels *
+            (capture.half ? 2 : 1),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-    transitionImage(cmd, {impl_->diffuseAlbedo.image, VK_IMAGE_ASPECT_COLOR_BIT,
+    transitionImage(cmd, {capture.image->image, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0,
@@ -1818,9 +1841,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     VkBufferImageCopy region{};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {renderExtent.width, renderExtent.height, 1};
-    vkCmdCopyImageToBuffer(cmd, impl_->diffuseAlbedo.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, albedoBuffer.buffer, 1,
-                           &region);
+    vkCmdCopyImageToBuffer(cmd, capture.image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           capture.buffer.buffer, 1, &region);
   }
 
   // Optional capture: copy the finished frame into a CPU-readable buffer.
@@ -1873,7 +1895,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_NONE, 0});
   }
-  if (gradeReadback.buffer != VK_NULL_HANDLE || albedoCapturing || capturing) {
+  const bool attachmentCapturing =
+      std::any_of(attachmentCaptures.begin(), attachmentCaptures.end(),
+                  [](const AttachmentCapture &c) { return c.buffer.buffer != VK_NULL_HANDLE; });
+  if (gradeReadback.buffer != VK_NULL_HANDLE || attachmentCapturing || capturing) {
     // A fence wait alone doesn't make device writes visible to the host.
     memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
@@ -1922,18 +1947,27 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     }
   }
 
-  if (albedoCapturing) {
+  for (size_t i = 0; i < kAttachmentCaptures; ++i) {
+    AttachmentCapture &capture = attachmentCaptures[i];
+    if (capture.buffer.buffer == VK_NULL_HANDLE) {
+      continue;
+    }
+    std::optional<std::filesystem::path> &path = impl_->attachmentCapturePaths[i];
     check(vkWaitForFences(dev, 1, &frame.renderFence, VK_TRUE, UINT64_MAX),
           "vkWaitForFences");
-    check(vmaInvalidateAllocation(impl_->allocator, albedoBuffer.allocation, 0, VK_WHOLE_SIZE),
+    check(vmaInvalidateAllocation(impl_->allocator, capture.buffer.allocation, 0, VK_WHOLE_SIZE),
           "vmaInvalidateAllocation");
-    if (!savePfm(*impl_->albedoCapturePath, renderExtent,
-                 static_cast<const uint8_t *>(albedoBuffer.mapped),
-                 [](uint8_t v) { return v / 255.0f; })) {
-      std::fprintf(stderr, "Capture failed: %s\n", impl_->albedoCapturePath->c_str());
+    const bool saved =
+        capture.half
+            ? savePfm(*path, renderExtent, static_cast<const uint16_t *>(capture.buffer.mapped),
+                      halfToFloat, capture.channels)
+            : savePfm(*path, renderExtent, static_cast<const uint8_t *>(capture.buffer.mapped),
+                      [](uint8_t v) { return v / 255.0f; }, capture.channels);
+    if (!saved) {
+      std::fprintf(stderr, "Capture failed: %s\n", path->c_str());
     }
-    impl_->destroyBuffer(albedoBuffer);
-    impl_->albedoCapturePath.reset();
+    impl_->destroyBuffer(capture.buffer);
+    path.reset();
   }
 
   if (capturing) {

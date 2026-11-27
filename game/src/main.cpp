@@ -812,6 +812,7 @@ struct Options {
   std::optional<std::filesystem::path> capturePath;
   // The linear diffuse albedo of the --capture frame (.pfm), for the albedo audit.
   std::optional<std::filesystem::path> albedoCapturePath;
+  std::optional<std::string> guidesCapturePrefix;
   // Poly Haven models and Megascans trees to scatter around the start.
   int scatter = 0;
   // Forests, lone trees and rocks over the terrain (placeScenery).
@@ -986,6 +987,8 @@ Options parseOptions(int argc, char **argv) {
       options.captureSequence = static_cast<int>(number(i));
     } else if (arg == "--capture-albedo" && i + 1 < argc) {
       options.albedoCapturePath = argv[++i];
+    } else if (arg == "--capture-guides" && i + 1 < argc) {
+      options.guidesCapturePrefix = argv[++i];
     } else if (arg == "--capture" && i + 1 < argc) {
       options.capturePath = argv[++i];
     } else if (arg == "--capture-views" && i + 2 < argc) {
@@ -1264,7 +1267,7 @@ Options parseOptions(int argc, char **argv) {
                                "--debug-filter solo-instance|solo-material|hide-instance|hide-material frame, "
                                "--weather clear|fair|broken|overcast, --time-scale x, "
                                "--weather-front seconds, --clouds on|off, --dump-weather-map file.png, "
-                               "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-sequence n, "
+                               "--capture file.png|file.pfm, --capture-albedo file.pfm, --capture-guides prefix, --capture-sequence n, "
                                "--capture-views file dir, "
                                "--frames n)");
     }
@@ -1301,11 +1304,15 @@ Options parseOptions(int argc, char **argv) {
   if (options.albedoCapturePath && !options.capturePath) {
     throw std::runtime_error("--capture-albedo needs --capture");
   }
+  if (options.guidesCapturePrefix && !options.capturePath) {
+    throw std::runtime_error("--capture-guides needs --capture");
+  }
   if (options.referenceSamples > 0 &&
       (!options.capturePath || options.benchmarkSeconds > 0.0f || options.captureSequence > 0 ||
-       options.cameraVelocity || options.cameraAngularVelocity || options.albedoCapturePath)) {
+       options.cameraVelocity || options.cameraAngularVelocity || options.albedoCapturePath ||
+       options.guidesCapturePrefix)) {
     throw std::runtime_error("--reference needs --capture, without --benchmark, "
-                             "--capture-sequence, --capture-albedo or camera velocities "
+                             "--capture-sequence, --capture-albedo, --capture-guides or camera velocities "
                              "(the reference's albedo: --reference-mode albedo)");
   }
   // The reference traces display pixels, while the haze froxels it reads are
@@ -1519,7 +1526,7 @@ int main(int argc, char **argv) {
   renderer.setDebugView(options.debugView);
   Report report(argc, argv);
   renderer.setGiMode(options.gi ? meridian::GiMode::Probes : meridian::GiMode::Off);
-  if (options.albedoCapturePath) {
+  if (options.albedoCapturePath || options.guidesCapturePrefix) {
     renderer.enableAlbedoCapture();
   }
   renderer.setVoxelLod(options.voxelLod);
@@ -1985,6 +1992,14 @@ int main(int argc, char **argv) {
       renderer.requestCapture(*options.capturePath);
       if (options.albedoCapturePath) {
         renderer.requestCapture(*options.albedoCapturePath, meridian::CaptureSource::DiffuseAlbedo);
+      }
+      if (options.guidesCapturePrefix) {
+        const std::string &prefix = *options.guidesCapturePrefix;
+        renderer.requestCapture(prefix + "-diffuse.pfm", meridian::CaptureSource::DiffuseAlbedo);
+        renderer.requestCapture(prefix + "-motion.pfm", meridian::CaptureSource::Motion);
+        renderer.requestCapture(prefix + "-specular.pfm", meridian::CaptureSource::SpecularAlbedo);
+        renderer.requestCapture(prefix + "-normal.pfm", meridian::CaptureSource::NormalRoughness);
+        renderer.requestCapture(prefix + "-sun.pfm", meridian::CaptureSource::SunLight);
       }
     } else if (options.captureSequence > 0 && totalFrames % options.captureSequence == 0) {
       char suffix[24];
