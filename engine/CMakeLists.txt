@@ -118,6 +118,7 @@ add_shader(mesh.frag terrain.frag TERRAIN ${MARCH_DEFINES})
 add_shader(mesh.mesh mesh_visibility.mesh VISIBILITY)
 add_shader(visibility.frag visibility.frag)
 add_shader(visibility.frag visibility_masked.frag VISIBILITY_MASKED)
+add_shader(visibility_resolve.frag visibility_resolve.frag ${MARCH_DEFINES})
 add_shader(mesh.frag terrain_vt.frag TERRAIN VISIBILITY_TARGET ${MARCH_DEFINES})
 add_shader(voxel.frag voxel_vt.frag VISIBILITY_TARGET ${MARCH_DEFINES})
 add_shader(voxel_instance.frag voxel_instance_vt.frag VISIBILITY_TARGET ${MARCH_DEFINES})
@@ -176,6 +177,7 @@ add_library(meridian STATIC
     src/render/renderer_reference.cpp
     src/render/renderer_debug.cpp
     src/render/renderer_gi.cpp
+    src/render/renderer_visibility.cpp
     src/render/renderer_shadows.cpp
     src/render/renderer_farfield.cpp
     src/render/renderer_farshadow.cpp

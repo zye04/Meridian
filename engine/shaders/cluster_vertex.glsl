@@ -104,11 +104,16 @@ ClusterVertex clusterVertex(SceneBuffer scene, ClusterContext c, uint i) {
     uint index = scene.clusterVertices.vertices[c.cluster.firstVertex + i] +
                  uint(c.mesh.vertexOffset);
     Vertex vertex = loadVertex(scene, c.mesh, index);
-    vec3 world = (c.instance.transform * vec4(vertex.position, 1.0)).xyz;
+    // precise: the visibility resolve recomputes these in a fragment shader
+    // and must land on the rasterizer's positions (no contraction to fma on
+    // one side only).
+    precise vec3 world = (c.instance.transform * vec4(vertex.position, 1.0)).xyz;
+    precise vec3 relative = world - scene.cameraPosition;
+    precise vec4 displayed = displayedPosition(scene, relative);
+    precise vec4 clip = scene.viewProjection * displayed;
     ClusterVertex v;
-    v.relative = world - scene.cameraPosition;
-    vec4 displayed = displayedPosition(scene, v.relative);
-    v.clip = scene.viewProjection * displayed;
+    v.relative = relative;
+    v.clip = clip;
     v.normal = c.normalMatrix * vertex.normal;
     v.tangent = vec4(mat3(c.instance.transform) * vertex.tangent.xyz, vertex.tangent.w);
     v.uv = vec2(vertex.uvX, vertex.uvY);

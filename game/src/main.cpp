@@ -1702,6 +1702,12 @@ int main(int argc, char **argv) {
     const meridian::Renderer::StreamStats stream = renderer.streamStats();
     std::printf("streamed: %u layers, window %ux%u, ring %u slots, %u live\n", stream.layers,
                 stream.window, stream.window, stream.ringInstances, stream.live);
+    const meridian::Renderer::VisibilityResolveStats resolve = renderer.visibilityResolveStats();
+    if (resolve.resolvedPixels > 0) {
+      std::printf("resolve: %u pixels, %u clamped > 1e-3 (%.2e; every 16th frame)\n",
+                  resolve.resolvedPixels, resolve.clampedPixels,
+                  double(resolve.clampedPixels) / resolve.resolvedPixels);
+    }
     std::printf("GPU passes:");
     const char *separator = " ";
     for (const meridian::PassTime &pass : renderer.gpuPassTimes()) {

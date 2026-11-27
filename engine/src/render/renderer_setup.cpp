@@ -96,6 +96,7 @@ void Renderer::Impl::createSwapchain() {
                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                          VK_IMAGE_USAGE_SAMPLED_BIT,
                                      VK_IMAGE_ASPECT_COLOR_BIT);
+    createVisibilityResolve();
   }
   const VkDescriptorImageInfo contactInfos[3] = {
       {nearestSampler, depth.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -370,6 +371,7 @@ void Renderer::Impl::destroySwapchain() {
   destroyImage(diffuseAlbedo);
   destroyImage(output);
   destroyImage(sunLight);
+  destroyVisibilityResolve();
   destroyImage(visibilityId);
   destroyImage(transparencyMask);
   destroyImage(motion);
@@ -1058,9 +1060,13 @@ void Renderer::Impl::createScenePipelines(bool debugId) {
   meshDesc.vertexShader = "mesh.vert";
   meshDesc.fragmentShader = "mesh_blended.frag";
   meshDesc.alphaBlend = true;
-  meshDesc.colorWriteMaskBits = visibility ? kWithoutId : ~0u;
+  // With the visibility buffer, blended surfaces draw after the resolve, in
+  // a rendering of attachments 0-6.
+  if (visibility) {
+    meshDesc.colorFormats = sceneFormats.first(7);
+  }
   blendedMeshPipeline = createGraphicsPipeline(dev, meshDesc);
-  meshDesc.colorWriteMaskBits = ~0u;
+  meshDesc.colorFormats = sceneFormats;
 
   // The CDLOD terrain: opaque, back faces culled.
   meshDesc.vertexShader = nullptr;
