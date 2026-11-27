@@ -121,7 +121,7 @@ void main() {
         float level = float(min(clusterLevel(id.y), 7u));
         color = hsv(0.62 + 0.18 * level / 7.0, 0.8, clusterShade(id.y));
     } else if (kind == kDebugFarCell) {
-        color = hsv(0.5, 0.8, 0.6 + 0.1 * float(id.y >> 30u));
+        color = hsv(0.5, 0.8, 0.5 + 0.1 * float(id.y >> 29u)); // kFarEntryLevelShift
     } else if (kind == kDebugTerrain) {
         color = vec3(0.25);
     }

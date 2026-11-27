@@ -69,6 +69,19 @@ double templateSum(const FarTemplate &tmpl, float voxelSize) {
   return sum;
 }
 
+// The grid with its fine levels stored over the cells [x0, x1) x [z0, z1)
+// (default: all of it), so every level splats.
+FarFieldGrid withFineLevels(FarFieldGrid grid, int32_t x0 = 0, int32_t z0 = 0,
+                            int32_t x1 = INT32_MAX, int32_t z1 = INT32_MAX) {
+  for (uint32_t level = 0; level < kFarFineLevels; ++level) {
+    grid.bands[level][0] = x0;
+    grid.bands[level][1] = z0;
+    grid.bands[level][2] = x1;
+    grid.bands[level][3] = z1;
+  }
+  return grid;
+}
+
 double packedSum(const FarFieldCpu &field, uint32_t level) {
   double sum = 0.0;
   const double volume = std::pow(double{field.voxelSize[level]}, 3.0);
@@ -126,10 +139,10 @@ TEST_CASE("BrickColumn packs base height and brick count") {
   CHECK(columnBaseHeight(makeBrickColumn(0, 0, 65535)) == 0);
   CHECK(columnBrickCount(makeBrickColumn(0, 0, 65535)) == 65535);
 
-  // Untouched, one brick, a brick and a bit at L0 (16 m = 64 units).
+  // Untouched, one brick, a brick and a bit at 4 m (16 m = 64 units).
   const uint32_t loHi[] = {UINT32_MAX, 0, 100, 163, 40, 104};
   uint32_t total = 5;
-  const std::vector<BrickColumn> columns = farBrickColumns(loHi, 0, total);
+  const std::vector<BrickColumn> columns = farBrickColumns(loHi, kFarFineLevels, total);
   REQUIRE(columns.size() == 3);
   CHECK(columnBrickCount(columns[0]) == 0);
   CHECK(columns[1].firstBrick == 5);
@@ -152,11 +165,11 @@ TEST_CASE("A solid box splats to full occupancy, an empty template to none") {
     CHECK(templates[1][level].voxels.empty());
   }
 
-  const FarFieldGrid grid{0.0f, 0.0f, 0.0f, 4, 4};
+  const FarFieldGrid grid = withFineLevels({0.0f, 0.0f, 0.0f, 4, 4});
   // Template voxel centers on world voxel centers at every level.
   const DecodedInstance solid = instanceAt({112.0f, 96.0f, 80.0f}, {0, 1, 0}, 0.0f, 1.0f, 0);
   const DecodedInstance empty = instanceAt({112.0f, 96.0f, 80.0f}, {0, 1, 0}, 0.0f, 1.0f, 1);
-  const std::array<float, kFarLevels> scale = {4096.0f, 4096.0f, 4096.0f};
+  const std::array<float, kFarLevels> scale = {4096.0f, 4096.0f, 4096.0f, 4096.0f, 4096.0f};
 
   const FarFieldCpu field = splatFarField(grid, templates, kPalette, {&solid, 1}, scale);
   for (uint32_t level = 0; level < kFarLevels; ++level) {
@@ -192,8 +205,8 @@ TEST_CASE("A solid box splats to full occupancy, an empty template to none") {
 
 TEST_CASE("The splat conserves extinction under rotation and scale") {
   const FarTemplates tree = filterFarTemplate(treeGrid());
-  const FarFieldGrid grid{-256.0f, -256.0f, 400.0f, 8, 8};
-  const std::array<float, kFarLevels> scale = {65536.0f, 65536.0f, 65536.0f};
+  const FarFieldGrid grid = withFineLevels({-256.0f, -256.0f, 400.0f, 8, 8});
+  const std::array<float, kFarLevels> scale = {65536.0f, 65536.0f, 65536.0f, 65536.0f, 65536.0f};
   struct Case {
     Vec3 axis;
     float angle, scale;
@@ -220,14 +233,16 @@ TEST_CASE("The splat conserves extinction under rotation and scale") {
 
 TEST_CASE("A larger far grid anchored at the inner grid splats its cells bit-equal") {
   const FarTemplates tree = filterFarTemplate(treeGrid());
-  const FarFieldGrid inner{-256.0f, -256.0f, 400.0f, 8, 8};
+  const FarFieldGrid inner = withFineLevels({-256.0f, -256.0f, 400.0f, 8, 8});
   // 150 cells out the origin is ~9.9 km away: positions relative to it
   // would round 32x coarser.
   const uint32_t margin = 150;
   FarFieldGrid outer{inner.originX - margin * kCellSize, inner.originZ - margin * kCellSize,
                      inner.heightBase, inner.cellsX + 2 * margin, inner.cellsZ + 2 * margin};
   outer.anchorX = outer.anchorZ = static_cast<int32_t>(margin);
-  const std::array<float, kFarLevels> scale = {65536.0f, 65536.0f, 65536.0f};
+  const auto m = static_cast<int32_t>(margin);
+  outer = withFineLevels(outer, m, m, m + 8, m + 8);
+  const std::array<float, kFarLevels> scale = {65536.0f, 65536.0f, 65536.0f, 65536.0f, 65536.0f};
   std::vector<DecodedInstance> instances;
   for (int i = 0; i < 6; ++i) {
     instances.push_back(instanceAt({-150.3f + 61.7f * i, 437.9f + 0.37f * i, 140.1f - 53.3f * i},
@@ -240,8 +255,10 @@ TEST_CASE("A larger far grid anchored at the inner grid splats its cells bit-equ
     uint32_t occupied = 0;
     for (uint32_t z = 0; z < inner.cellsZ * n; ++z) {
       for (uint32_t x = 0; x < inner.cellsX * n; ++x) {
-        const BrickColumn &ca = a.columns[level][farColumnIndex(inner.cellsX, level, x, z)];
-        const BrickColumn &cb = b.columns[level][farColumnIndex(outer.cellsX, level,
+        const BrickColumn &ca = a.columns[level][farColumnIndex(
+            farColumnRect(inner.bands, inner.cellsX, inner.cellsZ, level), level, x, z)];
+        const BrickColumn &cb = b.columns[level][farColumnIndex(
+            farColumnRect(outer.bands, outer.cellsX, outer.cellsZ, level), level,
                                                                 x + margin * n, z + margin * n)];
         CAPTURE(level);
         CAPTURE(x);
@@ -373,7 +390,7 @@ TEST_CASE("A dense stand conserves extinction at the production fixed-point scal
       expected[level] += templateSum(tree[level], kFarVoxelSize[level]) * s * s * s;
     }
   }
-  const FarFieldGrid grid{0.0f, 0.0f, 250.0f, 4, 4};
+  const FarFieldGrid grid = withFineLevels({0.0f, 0.0f, 250.0f, 4, 4});
   std::array<double, kFarLevels> sums{};
   std::array<int64_t, kFarLevels> largest{};
   splatFarField(grid, {&tree, 1}, kPalette, stand, scales, &sums, &largest);
@@ -391,7 +408,7 @@ TEST_CASE("The worst-case overlap stays below 2^31 at the production scale") {
   // instancesPerVoxel copies of the largest scale at one point.
   const std::vector<DecodedInstance> stack(
       1053, instanceAt({100.0f, 300.0f, 100.0f}, {0, 1, 0}, 0.0f, 1.3f));
-  const FarFieldGrid grid{0.0f, 0.0f, 250.0f, 4, 4};
+  const FarFieldGrid grid = withFineLevels({0.0f, 0.0f, 250.0f, 4, 4});
   std::array<int64_t, kFarLevels> largest{};
   splatFarField(grid, {&tree, 1}, kPalette, stack, scales, nullptr, &largest);
   std::array<float, kFarLevels> tooLarge = scales;
@@ -419,14 +436,15 @@ TEST_CASE("farFieldTransmittanceCpu matches a brute-force march") {
     instances.push_back(
         instanceAt({x, 100.0f + 0.02f * x, z}, {0, 1, 0}, yaw, 0.8f + 0.5f * hash01(4 * i + 3)));
   }
-  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f};
+  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f, 16384.0f, 16384.0f};
   const FarFieldCpu field = splatFarField(grid, {&tree, 1}, kPalette, instances, scale);
 
   const auto bruteForce = [&](Vec3 origin, Vec3 direction, float start, float max) {
     constexpr double kStep = 2.5e-4;
     double depth = 0.0;
     for (double t = start + 0.5 * kStep; t < max; t += kStep) {
-      const uint32_t level = t < kFarRayLevelEnd[0] ? 0 : t < kFarRayLevelEnd[1] ? 1 : 2;
+      const uint32_t level =
+          kFarFineLevels + (t < kFarRayLevelEnd[0] ? 0 : t < kFarRayLevelEnd[1] ? 1 : 2);
       const auto tf = static_cast<float>(t);
       depth += farFieldExtinction(field, level, origin + direction * tf) * kStep;
     }
@@ -507,7 +525,7 @@ TEST_CASE("The sliced splat equals the unsliced splat bit for bit") {
   for (const float z : {63.0f, 64.0f, 127.5f}) {
     stand.push_back(instanceAt({100.0f, 301.0f, z}, {0, 1, 0}, 0.3f, 1.2f));
   }
-  const FarFieldGrid grid{0.0f, 0.0f, 250.0f, 4, 4};
+  const FarFieldGrid grid = withFineLevels({0.0f, 0.0f, 250.0f, 4, 4});
   std::array<double, kFarLevels> sums{};
   std::array<int64_t, kFarLevels> largest{};
   const FarFieldCpu whole =
@@ -536,17 +554,18 @@ TEST_CASE("The sliced splat equals the unsliced splat bit for bit") {
 }
 
 TEST_CASE("Slice rows keep each slice within the brick budget") {
-  // Level 2: one column per cell; rows of 3 cells with 2, 5, 1, 9 bricks.
+  // The coarsest level: one column per cell; rows of 3 cells with 2, 5, 1, 9
+  // bricks.
   std::vector<BrickColumn> columns;
   for (const uint32_t bricks : {2u, 5u, 1u, 9u}) {
     for (uint32_t x = 0; x < 3; ++x) {
       columns.push_back(makeBrickColumn(0, 0, x == 0 ? bricks : 0));
     }
   }
-  CHECK(farSliceRows(columns, 2, 3, 4, 100) == std::vector<uint32_t>{0, 4});
-  CHECK(farSliceRows(columns, 2, 3, 4, 7) == std::vector<uint32_t>{0, 2, 3, 4});
+  CHECK(farSliceRows(columns, kFarLevels - 1, 3, 4, 100) == std::vector<uint32_t>{0, 4});
+  CHECK(farSliceRows(columns, kFarLevels - 1, 3, 4, 7) == std::vector<uint32_t>{0, 2, 3, 4});
   // A row over the budget is its own slice.
-  CHECK(farSliceRows(columns, 2, 3, 4, 4) == std::vector<uint32_t>{0, 1, 2, 3, 4});
+  CHECK(farSliceRows(columns, kFarLevels - 1, 3, 4, 4) == std::vector<uint32_t>{0, 1, 2, 3, 4});
 }
 
 TEST_CASE("farFieldShadowDistanceCpu matches a brute-force march") {
@@ -558,7 +577,7 @@ TEST_CASE("farFieldShadowDistanceCpu matches a brute-force march") {
     instances.push_back(instanceAt({x, 100.0f + 0.02f * x, z}, {0, 1, 0},
                                    2.0f * kPi * hash01(4 * i + 2), 0.8f + 0.5f * hash01(4 * i + 3)));
   }
-  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f};
+  const std::array<float, kFarLevels> scale = {16384.0f, 16384.0f, 16384.0f, 16384.0f, 16384.0f};
   const FarFieldCpu field = splatFarField(grid, {&tree, 1}, kPalette, instances, scale);
   uint32_t hit = 0, miss = 0;
   for (uint32_t level = 0; level < kFarLevels; ++level) {
@@ -728,10 +747,11 @@ TEST_CASE("buildFarPalette gives each voxel its own colour and filterFarTemplate
   CHECK(length(palette.reflected[b.albedo[0]] - bark) < 1e-6f);
   CHECK(buildFarPalette(grids, 2).reflected.size() == 2);
 
-  // L0 (4 m) is the whole grid: the mean of green and dark, its nearest entry.
+  // A 4 m voxel is the whole grid: the mean of green and dark, its nearest
+  // entry.
   const FarTemplates t = filterFarTemplate(a, palette.reflected);
-  REQUIRE(t[0].voxels.size() == 1);
+  REQUIRE(t[kFarFineLevels].voxels.size() == 1);
   const Vec3 mean = (green + dark) * 0.5f;
-  CHECK(t[0].voxels[0].albedo == farFieldNearestEntry(palette.reflected, mean));
+  CHECK(t[kFarFineLevels].voxels[0].albedo == farFieldNearestEntry(palette.reflected, mean));
 }
 

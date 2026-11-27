@@ -1,7 +1,7 @@
 #pragma once
 
 // Far-field forests (docs/superpowers/archive/specs/2026-11-20-far-field-design.md):
-// per 64 m placement cell, sparse columns of 4^3-voxel bricks at three
+// per 64 m placement cell, sparse columns of 4^3-voxel bricks at five
 // levels, splatted at load from the placed table and per-prototype
 // templates. This is the CPU side: voxel and column packing, the template
 // filter, and CPU replicas of the GPU splat (farfield_splat.comp) and of
@@ -19,22 +19,41 @@
 
 namespace meridian {
 
-constexpr uint32_t kFarLevels = 3;
-// Voxel edge per level (m). Bricks are 4^3 voxels at every level (16, 32
-// and 64 m), so a cell holds 4x4, 2x2 or 1 brick columns.
-constexpr float kFarVoxelSize[kFarLevels] = {4.0f, 8.0f, 16.0f};
+constexpr uint32_t kFarLevels = 5;
+// Levels 0 and 1 (1 and 2 m) are the fine levels: stored only in a window
+// around the camera (FarFieldGrid::bands), where they are the drawn level.
+// The static levels follow (4, 8 and 16 m). Fine levels first, so that the
+// level index grows with the voxel edge everywhere (the switch's log2, the
+// band nesting, the canopy pad).
+constexpr uint32_t kFarFineLevels = 2;
+// The far cell list's entry: cell | level << kFarEntryLevelShift (3 bits
+// for five levels; cells below 2^29).
+constexpr uint32_t kFarEntryLevelShift = 29;
+// Voxel edge per level (m). Bricks are 4^3 voxels at every level (4 to 64
+// m), so a cell holds 16x16 to 1 brick columns.
+constexpr float kFarVoxelSize[kFarLevels] = {1.0f, 2.0f, 4.0f, 8.0f, 16.0f};
 constexpr uint32_t kBrickEdge = 4;
 constexpr uint32_t kBrickVoxels = kBrickEdge * kBrickEdge * kBrickEdge;
-constexpr uint32_t farColumnsPerCell(uint32_t level) { return 4u >> level; }
-// Global column (x, z) of a level in FarFieldCpu::columns order.
-constexpr size_t farColumnIndex(uint32_t cellsX, uint32_t level, uint32_t x, uint32_t z) {
+constexpr uint32_t farColumnsPerCell(uint32_t level) { return 16u >> level; }
+// The cells [x0, x1) x [z0, z1) a level's column table covers: a fine
+// level's band (dense over the grid, its 1 m table alone would take 512 MiB
+// at 512^2 cells), else the whole grid. Bands lie inside the grid.
+using FarRect = std::array<int32_t, 4>;
+// Global column (x, z) of a level in FarFieldCpu::columns order: cell-major
+// over the level's rect (row-major from its north-west), then row-major in
+// the cell.
+constexpr size_t farColumnIndex(const FarRect &rect, uint32_t level, uint32_t x, uint32_t z) {
   const uint32_t n = farColumnsPerCell(level);
-  return (size_t{z / n} * cellsX + x / n) * n * n + (z % n) * n + x % n;
+  const auto cx = static_cast<uint32_t>(static_cast<int32_t>(x / n) - rect[0]);
+  const auto cz = static_cast<uint32_t>(static_cast<int32_t>(z / n) - rect[1]);
+  return (size_t{cz} * static_cast<uint32_t>(rect[2] - rect[0]) + cx) * n * n + (z % n) * n +
+         x % n;
 }
 // Column base heights count this unit (m) above FarFieldCpu::heightBase.
 constexpr float kFarHeightUnit = 0.25f;
-// Rays march L0 for their first 256 m, L1 to 1 km, L2 beyond.
-constexpr float kFarRayLevelEnd[kFarLevels - 1] = {256.0f, 1000.0f};
+// Rays march the first static level for their first 256 m, the next to 1
+// km, the coarsest beyond.
+constexpr float kFarRayLevelEnd[2] = {256.0f, 1000.0f};
 // The prototypes' template voxel (m): their meshes voxelized at this edge
 // by the cluster build (ClusterLod::farBricks).
 constexpr float kFarTemplateVoxel = 1.0f;
@@ -81,9 +100,8 @@ uint32_t farBrickVoxel(const uint32_t *pool, uint32_t brick, uint32_t local);
 // The pool of dense bricks (kBrickVoxels voxels each).
 std::vector<uint32_t> compactFarBricks(std::span<const uint32_t> dense);
 
-// The far field over the placement grid. columns[level]: cell-major (cells
-// row-major from the north-west, like the Cell table), then the cell's
-// columns row-major. voxels[level]: the level's brick pool, brickCount[level]
+// The far field over the placement grid. columns[level]: farColumnIndex
+// order over farColumnRect. voxels[level]: the level's brick pool, brickCount[level]
 // bricks. cellTop and cellBottom: the canopy's extent per cell over all
 // levels (bottom > top when empty). origin: the grid's north-west corner at
 // heightBase.
@@ -91,12 +109,15 @@ struct FarFieldCpu {
   Vec3 origin;
   uint32_t cellsX = 0, cellsZ = 0;
   float cellSize = kCellSize, heightBase = 0.0f;
-  float voxelSize[kFarLevels] = {kFarVoxelSize[0], kFarVoxelSize[1], kFarVoxelSize[2]};
+  float voxelSize[kFarLevels] = {kFarVoxelSize[0], kFarVoxelSize[1], kFarVoxelSize[2],
+                                 kFarVoxelSize[3], kFarVoxelSize[4]};
   std::vector<BrickColumn> columns[kFarLevels];
   std::vector<uint32_t> voxels[kFarLevels];
   uint32_t brickCount[kFarLevels] = {};
   std::vector<float> cellTop, cellBottom;
-  int32_t bands[kFarLevels - 1][4] = {{INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
+  int32_t bands[kFarLevels - 1][4] = {{0, 0, 0, 0},
+                                      {0, 0, 0, 0},
+                                      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
                                       {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
 };
 
@@ -178,11 +199,14 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
 // bands[l]: the cells [x0, x1) x [z0, z1) (grid cells, x0 z0 x1 z1) that
 // store level l (< kFarLevels - 1); the coarsest level covers the grid. A
 // cell's finest stored level is the first band holding it; finer levels
-// nest inside coarser ones. The default band holds every cell.
+// nest inside coarser ones. The default static bands hold every cell, the
+// default fine bands none.
 struct FarFieldGrid {
   float originX = 0.0f, originZ = 0.0f, heightBase = 0.0f;
   uint32_t cellsX = 0, cellsZ = 0;
-  int32_t bands[kFarLevels - 1][4] = {{INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
+  int32_t bands[kFarLevels - 1][4] = {{0, 0, 0, 0},
+                                      {0, 0, 0, 0},
+                                      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
                                       {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
   // The splat takes positions relative to the corner of grid cell (anchorX,
   // anchorZ), not to origin: the weights' float rounding then depends on the
@@ -196,6 +220,10 @@ float farAnchorZ(const FarFieldGrid &grid);
 // The finest level cell (x, z) of the grid stores (farfield.glsl
 // farFinestLevel).
 uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, int32_t z);
+// The rect of level's column table (farColumnIndex) in a grid of cellsX x
+// cellsZ cells with these bands (a fine band clamped to the grid).
+FarRect farColumnRect(const int32_t (&bands)[kFarLevels - 1][4], uint32_t cellsX,
+                      uint32_t cellsZ, uint32_t level);
 
 // The splat's stages, shared with farfield_splat.comp operation for
 // operation. Occupancy: the global columns [x0, x1] x [z0, z1] an instance's
@@ -212,7 +240,8 @@ FarFootprint farFootprint(const FarFieldGrid &grid, uint32_t level, const FarTem
 // to columns with consecutive bricks; adds their bricks to brickTotal.
 std::vector<BrickColumn> farBrickColumns(std::span<const uint32_t> loHi, uint32_t level,
                                          uint32_t &brickTotal);
-// The splat runs in slices of placement cell rows [rows[i], rows[i + 1]) so
+// The splat runs in slices of cell rows [rows[i], rows[i + 1]) of the
+// level's rect (cellsX x cellsZ its size) so
 // one slice's accumulators (kBrickVoxels x kFarChannels u32 per brick) stay
 // within maxBricks bricks (a single row over it is its own slice). Returns
 // the boundaries, 0 and columns.size() / columns per row at the ends.
@@ -254,7 +283,7 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
 // distance (from the map's near plane) of the first point where the opacity
 // of the bricks along the sun reaches 0.5, 16-bit (kFarShadowEmpty: none).
 // Must match farfield.glsl.
-constexpr uint32_t kFarShadowLevel = 1;
+constexpr uint32_t kFarShadowLevel = kFarFineLevels + 1; // 8 m
 constexpr float kFarShadowOpticalDepth = 0.6931472f; // -ln(1 - 0.5)
 constexpr float kFarShadowTexel = 8.0f;
 // The map's texels at most (16 MiB per map), the box limited to the L1

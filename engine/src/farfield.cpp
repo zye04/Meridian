@@ -401,6 +401,17 @@ uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, in
   return kFarLevels - 1;
 }
 
+FarRect farColumnRect(const int32_t (&bands)[kFarLevels - 1][4], uint32_t cellsX,
+                      uint32_t cellsZ, uint32_t level) {
+  const auto x = static_cast<int32_t>(cellsX), z = static_cast<int32_t>(cellsZ);
+  if (level >= kFarFineLevels) {
+    return {0, 0, x, z};
+  }
+  const int32_t *b = bands[level];
+  const int32_t x0 = std::clamp(b[0], 0, x), z0 = std::clamp(b[1], 0, z);
+  return {x0, z0, std::clamp(b[2], x0, x), std::clamp(b[3], z0, z)};
+}
+
 float farAnchorX(const FarFieldGrid &grid) {
   return grid.originX + static_cast<float>(grid.anchorX) * kCellSize;
 }
@@ -519,6 +530,9 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     const float v = kFarVoxelSize[level], inverseV = 1.0f / v;
     const float scale = fixedScale[level];
     const uint32_t columnsX = grid.cellsX * n, columnsZ = grid.cellsZ * n;
+    const FarRect rect = farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, level);
+    const auto rectX = static_cast<uint32_t>(rect[2] - rect[0]);
+    const auto rectZ = static_cast<uint32_t>(rect[3] - rect[1]);
     const float anchorX = farAnchorX(grid), anchorZ = farAnchorZ(grid);
     const int32_t offsetX = grid.anchorX * static_cast<int32_t>(n * kBrickEdge);
     const int32_t offsetZ = grid.anchorZ * static_cast<int32_t>(n * kBrickEdge);
@@ -537,7 +551,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     };
 
     // Occupancy.
-    std::vector<uint32_t> loHi(size_t{2} * columnsX * columnsZ);
+    std::vector<uint32_t> loHi(size_t{2} * rectX * rectZ * n * n);
     for (size_t c = 0; c < loHi.size(); c += 2) {
       loHi[c] = UINT32_MAX;
       loHi[c + 1] = 0;
@@ -553,7 +567,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
           if (!stored(x, z)) {
             continue;
           }
-          const size_t c = farColumnIndex(grid.cellsX, level, x, z);
+          const size_t c = farColumnIndex(rect, level, x, z);
           loHi[2 * c] = std::min(loHi[2 * c], fp.lo);
           loHi[2 * c + 1] = std::max(loHi[2 * c + 1], fp.hi);
         }
@@ -565,7 +579,8 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     field.columns[level] = farBrickColumns(loHi, level, bricks);
     for (size_t c = 0; c < field.columns[level].size(); ++c) {
       if (loHi[2 * c] != UINT32_MAX) {
-        const size_t cell = c / (n * n);
+        const size_t local = c / (n * n);
+        const size_t cell = (local / rectX + rect[1]) * grid.cellsX + local % rectX + rect[0];
         field.cellBottom[cell] =
             std::min(field.cellBottom[cell], grid.heightBase + loHi[2 * c] * kFarHeightUnit);
         field.cellTop[cell] =
@@ -577,9 +592,9 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     // rows only (they are consecutive: bricks follow the columns' order),
     // deposits outside the slice clipped. Integer sums are order
     // independent, so the pool is the same for any slicing.
-    const size_t columnsPerRow = size_t{grid.cellsX} * n * n;
-    std::vector<uint32_t> rowFirstBrick(size_t{grid.cellsZ} + 1, 0);
-    for (uint32_t z = 0; z < grid.cellsZ; ++z) {
+    const size_t columnsPerRow = size_t{rectX} * n * n;
+    std::vector<uint32_t> rowFirstBrick(size_t{rectZ} + 1, 0);
+    for (uint32_t z = 0; z < rectZ; ++z) {
       rowFirstBrick[z + 1] = rowFirstBrick[z];
       for (size_t c = z * columnsPerRow; c < (z + 1) * columnsPerRow; ++c) {
         rowFirstBrick[z + 1] += columnBrickCount(field.columns[level][c]);
@@ -589,8 +604,8 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     field.voxels[level].assign(size_t{bricks} * kBrickHeaderWords, 0);
     int64_t largest = 0;
     double sum = 0.0;
-    for (uint32_t r0 = 0; r0 < grid.cellsZ; r0 += sliceRows ? sliceRows : grid.cellsZ) {
-      const uint32_t r1 = std::min(r0 + (sliceRows ? sliceRows : grid.cellsZ), grid.cellsZ);
+    for (uint32_t r0 = 0; r0 < rectZ; r0 += sliceRows ? sliceRows : rectZ) {
+      const uint32_t r1 = std::min(r0 + (sliceRows ? sliceRows : rectZ), rectZ);
       const uint32_t b0 = rowFirstBrick[r0], b1 = rowFirstBrick[r1];
       // Accumulation: each template voxel's extinction (times scale^3, the
       // density a scaled copy keeps) goes trilinearly to the 8 nearest world
@@ -622,12 +637,13 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
                   j >= int32_t(columnsZ * kBrickEdge)) {
                 continue;
               }
-              const auto row = static_cast<uint32_t>(j) / (n * kBrickEdge);
+              const auto row =
+                  static_cast<uint32_t>(static_cast<int32_t>(j / (n * kBrickEdge)) - rect[1]);
               if (row < r0 || row >= r1 || !stored(i / 4, j / 4)) {
                 continue;
               }
               const BrickColumn &column =
-                  field.columns[level][farColumnIndex(grid.cellsX, level, i / 4, j / 4)];
+                  field.columns[level][farColumnIndex(rect, level, i / 4, j / 4)];
               const float base = grid.heightBase + columnBaseHeight(column) * kFarHeightUnit;
               const float fy = (p.y - base) * inverseV - 0.5f;
               const float ky = std::floor(fy);
@@ -708,8 +724,13 @@ float farFieldExtinction(const FarFieldCpu &field, uint32_t level, Vec3 position
     return 0.0f;
   }
   const auto i = static_cast<int32_t>(fx), j = static_cast<int32_t>(fz);
-  const BrickColumn &column =
-      field.columns[level][farColumnIndex(field.cellsX, level, i / 4, j / 4)];
+  const FarRect rect = farColumnRect(field.bands, field.cellsX, field.cellsZ, level);
+  const int32_t cellVoxels = static_cast<int32_t>(farColumnsPerCell(level) * kBrickEdge);
+  if (i / cellVoxels < rect[0] || j / cellVoxels < rect[1] || i / cellVoxels >= rect[2] ||
+      j / cellVoxels >= rect[3]) {
+    return 0.0f;
+  }
+  const BrickColumn &column = field.columns[level][farColumnIndex(rect, level, i / 4, j / 4)];
   const float base = field.heightBase + columnBaseHeight(column) * kFarHeightUnit;
   const float k = std::floor((position.y - base) / v);
   if (k < 0.0f || k >= static_cast<float>(columnBrickCount(column) * kBrickEdge)) {
@@ -769,6 +790,7 @@ double levelDepth(const FarFieldCpu &field, uint32_t level, Vec3 origin, Vec3 di
   const uint32_t n = farColumnsPerCell(level);
   const auto voxelsX = static_cast<int64_t>(field.cellsX * n * kBrickEdge);
   const auto voxelsZ = static_cast<int64_t>(field.cellsZ * n * kBrickEdge);
+  const FarRect rect = farColumnRect(field.bands, field.cellsX, field.cellsZ, level);
   const double ox = (origin.x - field.origin.x) / v, oz = (origin.z - field.origin.z) / v;
   const double dx = direction.x / v, dz = direction.z / v;
   const auto cellOf = [](double coordinate, double d) {
@@ -784,14 +806,16 @@ double levelDepth(const FarFieldCpu &field, uint32_t level, Vec3 origin, Vec3 di
   while (t < end) {
     const double tx = boundary(ox, dx, i), tz = boundary(oz, dz, j);
     const double t1 = std::min(std::min(tx, tz), end);
-    if (t1 > t && i >= 0 && j >= 0 && i < voxelsX && j < voxelsZ) {
-      const size_t c = farColumnIndex(field.cellsX, level, static_cast<uint32_t>(i / 4),
+    const int64_t cellVoxels = n * kBrickEdge;
+    if (t1 > t && i >= 0 && j >= 0 && i < voxelsX && j < voxelsZ &&
+        i / cellVoxels >= rect[0] && j / cellVoxels >= rect[1] && i / cellVoxels < rect[2] &&
+        j / cellVoxels < rect[3]) {
+      const size_t c = farColumnIndex(rect, level, static_cast<uint32_t>(i / 4),
                                       static_cast<uint32_t>(j / 4));
-      const size_t cell = c / (n * n);
+      const auto cx = static_cast<int32_t>(i / cellVoxels), cz = static_cast<int32_t>(j / cellVoxels);
+      const size_t cell = size_t(cz) * field.cellsX + size_t(cx);
       const BrickColumn &column = field.columns[level][c];
-      const uint32_t drawn = std::max(
-          requested, farFinestLevel(field.bands, static_cast<int32_t>(cell % field.cellsX),
-                                    static_cast<int32_t>(cell / field.cellsX)));
+      const uint32_t drawn = std::max(requested, farFinestLevel(field.bands, cx, cz));
       if (drawn == level && columnBrickCount(column) > 0 &&
           !(cellInTlas && (*cellInTlas)[cell])) {
         depth += voxelColumnDepth(field, level, column, static_cast<int32_t>(i),
@@ -818,8 +842,9 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
                                float max, const std::vector<uint8_t> *cellInTlas) {
   double depth = 0.0;
   double levelStart = 0.0;
-  for (uint32_t level = 0; level < kFarLevels; ++level) {
-    const double levelEnd = level + 1 < kFarLevels ? kFarRayLevelEnd[level] : 1e300;
+  for (uint32_t level = kFarFineLevels; level < kFarLevels; ++level) {
+    const double levelEnd =
+        level + 1 < kFarLevels ? kFarRayLevelEnd[level - kFarFineLevels] : 1e300;
     const double a = std::max<double>(start, levelStart), b = std::min<double>(max, levelEnd);
     if (a < b && !field.columns[level].empty()) {
       depth += levelDepth(field, level, origin, direction, a, b, cellInTlas, level);

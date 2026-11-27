@@ -63,8 +63,8 @@ void main() {
 #endif
     FarFieldBuffer farField = scene.farField;
     FarField field = farField.field;
-    uint index = inEntry & 0x3FFFFFFFu;
-    uint level = inEntry >> 30u;
+    uint index = inEntry & kFarEntryCellMask;
+    uint level = inEntry >> kFarEntryLevelShift;
     uvec2 cell = uvec2(index % field.cellsX, index / field.cellsX);
     FarCell far = field.cells.cells[index];
 
@@ -151,12 +151,17 @@ void main() {
     // depths.x: up, depths.y: toward the sun (also what an in-crown fill
     // toward the sun, crown-light lane, would read).
     vec2 depths = vec2(0.0);
+    // The fine levels shade from the 4 m volume: their own marches cost the
+    // far pass 11.7 ms at a1 and darkened the lit side below the cluster
+    // voxels (ledger, stage 2).
+    uint shadeLevel = max(level, kFarFineLevels);
     for (uint ray = 0u; ray < (sunUp ? 2u : 1u); ++ray) {
         bool sky = ray == 0u;
         float depth = 0.0;
         uint unused;
-        farMarchCell(farField, cell, level, hitField, sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
-                     sky ? 0.0 : farVoxelSize(level),
+        farMarchCell(farField, cell, shadeLevel, hitField,
+                     sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
+                     sky ? 0.0 : farVoxelSize(shadeLevel),
                      sky ? min(kTileSkyDistance, boxHi.y - hitField.y) : sunEnd, kFarOpaqueDepth,
                      depth, unused);
         depths[ray] = depth;

@@ -1,4 +1,4 @@
-// Far-field forests: brick columns of 4^3 voxels per 64 m cell at three
+// Far-field forests: brick columns of 4^3 voxels per 64 m cell at five
 // levels (farfield.h, renderer_farfield.cpp). Layouts must match the C++
 // declarations named below.
 #ifndef FARFIELD_GLSL
@@ -7,14 +7,19 @@
 #extension GL_EXT_buffer_reference : require
 
 // Must match farfield.h.
-const uint kFarLevels = 3u;
+const uint kFarLevels = 5u;
+const uint kFarFineLevels = 2u;
+// The far cell list's entry: cell | level << kFarEntryLevelShift (3 bits
+// for five levels; cells below 2^29). Must match farfield.h.
+const uint kFarEntryLevelShift = 29u;
+const uint kFarEntryCellMask = (1u << kFarEntryLevelShift) - 1u;
 const uint kBrickEdge = 4u;
 const uint kBrickVoxels = 64u;
 const float kFarHeightUnit = 0.25;
 const uint kFarChannels = 7u;
 
 float farVoxelSize(uint level) {
-    return 4.0 * float(1u << level);
+    return float(1u << level);
 }
 
 // How far a level's voxels reach past FarCell.bottom/top: the extent bounds
@@ -26,7 +31,7 @@ float farCanopyPad(uint level) {
 }
 
 uint farColumnsPerCell(uint level) {
-    return 4u >> level;
+    return 16u >> level;
 }
 
 // BrickColumn: (firstBrick, baseHeight | brickCount << 16).
@@ -42,11 +47,23 @@ uint columnBrickCount(uvec2 column) {
     return column.y >> 16u;
 }
 
-// Global column (x, z) of a level: cell-major, then row-major in the cell.
-uint farColumnIndex(uint cellsX, uint level, uint x, uint z) {
+// Global column (x, z) of a level: cell-major over the level's column rect
+// (x0, z0, x1, z1 cells: farColumnRect), then row-major in the cell.
+uint farColumnIndex(ivec4 rect, uint level, uint x, uint z) {
     uint n = farColumnsPerCell(level);
-    uint cell = (z / n) * cellsX + x / n;
+    uint cell = (z / n - uint(rect.y)) * uint(rect.z - rect.x) + x / n - uint(rect.x);
     return cell * n * n + (z % n) * n + x % n;
+}
+
+// farColumnRect in farfield.cpp: a fine level's band (clamped to the grid),
+// else the grid.
+ivec4 farColumnRect(ivec4 band, uint cellsX, uint cellsZ, uint level) {
+    ivec2 size = ivec2(cellsX, cellsZ);
+    if (level >= kFarFineLevels) {
+        return ivec4(0, 0, size);
+    }
+    ivec2 lo = clamp(band.xy, ivec2(0), size);
+    return ivec4(lo, clamp(band.zw, lo, size));
 }
 
 // Voxel x, layer k, z inside its brick.
@@ -87,8 +104,8 @@ layout(buffer_reference, std430) readonly buffer FarPaletteBuffer {
 
 // Must match GpuFarField in gpu_types.h.
 struct FarField {
-    BrickColumnBuffer columns[3];
-    FarVoxelBuffer voxels[3];
+    BrickColumnBuffer columns[5];
+    FarVoxelBuffer voxels[5];
     FarCellBuffer cells;
     // Canopy top max over 2^k x 2^k cells, level k (1..pyramidLevels) from
     // pyramidOffsets[k].
@@ -105,12 +122,12 @@ struct FarField {
     uint pyramidOffsets[16];
     // Per level but the coarsest: the cells [x0, x1) x [z0, z1) that store
     // it (FarFieldGrid::bands).
-    int bands[8];
+    int bands[16];
     // The placement grid's first cell in this grid's cells.
     uint placedOffsetX;
     uint placedOffsetZ;
     // Per level: the templates' mean leaf alignment (FarTemplate::alignment).
-    float alignment[4];
+    float alignment[5];
 };
 
 layout(buffer_reference, std430) readonly buffer FarFieldBuffer {
@@ -118,7 +135,7 @@ layout(buffer_reference, std430) readonly buffer FarFieldBuffer {
 };
 
 // farFinestLevel in farfield.cpp.
-uint farFinestLevel(int bands[8], ivec2 cell) {
+uint farFinestLevel(int bands[16], ivec2 cell) {
     for (uint level = 0u; level + 1u < kFarLevels; ++level) {
         uint b = 4u * level;
         if (cell.x >= bands[b] && cell.y >= bands[b + 1u] && cell.x < bands[b + 2u] &&
@@ -127,6 +144,14 @@ uint farFinestLevel(int bands[8], ivec2 cell) {
         }
     }
     return kFarLevels - 1u;
+}
+
+// The level's column rect in the field (farColumnRect).
+ivec4 farLevelRect(FarFieldBuffer farField, uint level) {
+    uint b = 4u * min(level, kFarFineLevels - 1u);
+    ivec4 band = ivec4(farField.field.bands[b], farField.field.bands[b + 1u],
+                       farField.field.bands[b + 2u], farField.field.bands[b + 3u]);
+    return farColumnRect(band, farField.field.cellsX, farField.field.cellsZ, level);
 }
 
 // Voxel `local` (brickVoxelIndex) of a brick; 0 where unoccupied.
@@ -146,9 +171,9 @@ uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) 
 }
 
 // The far switch (cell_cull.comp): a cell draws its voxels instead of its
-// trees once its tallest tree projects under scene.farSwitchPixels
-// (kFarSwitchPixels in renderer.h by default), at the coarsest level whose
-// voxel projects to at most kFarLevelPixels.
+// trees once its finest built level's voxel projects to at most
+// scene.farSwitchPixels (kFarSwitchPixels in renderer.h, this by default),
+// and draws the coarsest level whose voxel projects to at most this.
 const float kFarLevelPixels = 1.0;
 
 // One occupied template voxel. Must match FarTemplateVoxel in farfield.h.
@@ -239,6 +264,7 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
                        inout FarScatterSum scatter) {
     float v = farVoxelSize(level);
     int n = int(kBrickEdge * farColumnsPerCell(level));
+    ivec4 rect = farLevelRect(farField, level);
     ivec2 lo = ivec2(cell) * n;
     ivec2 voxel = clamp(ivec2(floor((origin.xz + direction.xz * tStart) / v)), lo, lo + n - 1);
     ivec2 stepXZ = ivec2(direction.x >= 0.0 ? 1 : -1, direction.z >= 0.0 ? 1 : -1);
@@ -262,7 +288,7 @@ float farMarchCellImpl(FarFieldBuffer farField, uvec2 cell, uint level, vec3 ori
         float columnEnd = min(min(tMax.x, tMax.y), tEnd);
         if (newColumn) {
             uvec2 column = farField.field.columns[level].columns[farColumnIndex(
-                farField.field.cellsX, level, uint(voxel.x) / kBrickEdge,
+                rect, level, uint(voxel.x) / kBrickEdge,
                 uint(voxel.y) / kBrickEdge)];
             firstBrick = column.x;
             layers = int(columnBrickCount(column) * kBrickEdge);
@@ -329,7 +355,8 @@ float farMarchCell(FarFieldBuffer farField, uvec2 cell, uint level, vec3 origin,
                             opticalDepth, hitVoxel, false, unused);
 }
 
-// Rays march L0 for their first 256 m, L1 to 1 km, L2 beyond. Must match
+// Rays march the first static level (4 m) for their first 256 m, the next
+// to 1 km, the coarsest beyond. Must match
 // kFarRayLevelEnd in farfield.h.
 const float kFarRayLevelEnd0 = 256.0;
 const float kFarRayLevelEnd1 = 1000.0;
@@ -338,7 +365,7 @@ const float kFarOpaqueDepth = 13.815511;
 const uint kFarMaxRaySteps = 1024u;
 
 // Transmittance through the far field along worldOrigin + t direction (unit),
-// t in [startDistance, maxDistance] (startDistance one L0 voxel for rays
+// t in [startDistance, maxDistance] (startDistance one 4 m voxel for rays
 // from voxel surfaces, so they don't shadow themselves); the CPU replica is
 // farFieldTransmittanceCpu. A DDA over the 64 m cells with the canopy top
 // pyramid (Tevs 2008, as terrainOccludes): a block of 2^k cells whose
@@ -398,9 +425,9 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
         float tExit = min(min(axisExit.x, axisExit.y), tEnd);
         float y0 = origin.y + direction.y * t;
         float y1 = origin.y + direction.y * tExit;
-        float pad = farCanopyPad(tExit < kFarRayLevelEnd0 ? 0u
-                                 : tExit < kFarRayLevelEnd1 ? 1u
-                                                            : 2u);
+        float pad = farCanopyPad(kFarFineLevels + (tExit < kFarRayLevelEnd0   ? 0u
+                                                   : tExit < kFarRayLevelEnd1 ? 1u
+                                                                              : 2u));
         bool below = blockTop + pad <= min(y0, y1);
         if (!below) {
             if (k > 0u) {
@@ -411,9 +438,10 @@ float farFieldMarch(FarFieldBuffer farField, vec3 worldOrigin, vec3 direction,
                 // One level per march (a single call site, as the march is
                 // inlined); a cell the level changes in is revisited from
                 // the change on.
-                uint level = t < kFarRayLevelEnd0 ? 0u : t < kFarRayLevelEnd1 ? 1u : 2u;
-                float levelEnd = level == 0u ? kFarRayLevelEnd0
-                                 : level == 1u ? kFarRayLevelEnd1
+                uint level = kFarFineLevels +
+                             (t < kFarRayLevelEnd0 ? 0u : t < kFarRayLevelEnd1 ? 1u : 2u);
+                float levelEnd = level == kFarFineLevels        ? kFarRayLevelEnd0
+                                 : level == kFarFineLevels + 1u ? kFarRayLevelEnd1
                                                : tExit;
                 float b = min(tExit, levelEnd);
                 uint voxel;
@@ -475,7 +503,7 @@ float farFieldTransmittanceScatter(FarFieldBuffer farField, vec3 worldOrigin, ve
 
 // ------------------------------------------------------------ Sun shadow map
 // Must match farfield.h.
-const uint kFarShadowLevel = 1u;
+const uint kFarShadowLevel = kFarFineLevels + 1u;
 const float kFarShadowOpticalDepth = 0.6931472;
 const uint kFarShadowEmpty = 0xFFFFu;
 const uint kFarShadowStepCap = 0xFFFEu;

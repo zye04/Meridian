@@ -15,7 +15,7 @@ layout(triangles, max_vertices = 8, max_primitives = 12) out;
 
 // Relative to the camera, as displayed.
 layout(location = 0) out vec3 outDisplayed[];
-// The far list entry: cell | level << 30.
+// The far list entry: cell | level << kFarEntryLevelShift.
 layout(location = 1) flat out uint outEntry[];
 layout(location = 2) flat out float outDrop[];
 
@@ -27,10 +27,10 @@ const uint kFaces[24] = uint[24](1, 3, 7, 5, 0, 4, 6, 2, 2, 6, 7, 3,
 void main() {
     SceneBuffer scene = pc.scene;
     uint entry = scene.farCellList.entries[gl_WorkGroupID.x];
-    uint index = entry & 0x3FFFFFFFu;
+    uint index = entry & kFarEntryCellMask;
     FarField field = scene.farField.field;
     FarCell far = field.cells.cells[index];
-    float pad = farCanopyPad(entry >> 30u);
+    float pad = farCanopyPad(entry >> kFarEntryLevelShift);
     uvec2 cell = uvec2(index % field.cellsX, index / field.cellsX);
     vec2 lo = vec2(field.originX, field.originZ) + vec2(cell) * kCellSize;
     vec3 boxLo = vec3(lo.x, far.bottom - pad, lo.y) - scene.cameraPosition;

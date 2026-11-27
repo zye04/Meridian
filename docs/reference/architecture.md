@@ -66,8 +66,11 @@ engine/src/render/         renderer internals:
                            the far-field layers placed again in row
                            chunks (placement.comp, mirrored beyond the
                            placement grid), transient, never stored;
-                           levels by band (L0 to 2 km past the grid, L1
-                           to 6 km, L2 over all, FarFieldGrid::bands)
+                           levels by band (1 and 2 m in the --far-fine
+                           window inside the placement grid, 4 m to 2 km
+                           past the grid, 8 m to 6 km, 16 m over all,
+                           FarFieldGrid::bands; a fine level's columns
+                           cover its band only, farColumnRect)
                            (farfield_splat.comp), column map, Debug checks
                            against the CPU replica (farfield.h/.cpp)
   renderer_shadows.cpp     sun shadow cascades: which re-render, their
@@ -249,8 +252,9 @@ one workgroup per (slot, streamed layer)) -> cull cells (cell_cull.comp
 phase 0: placement cells and streamed slot records visible
 last frame, frustum (displayed box) and the layers' draw distance; emits
 chunks of up to 64 consecutive instance ids; the hand-placed instances
-are chunks too; with the far field, a cell whose 4 m voxel is under
-~1 px skips its tree-layer chunks and joins the far list with its level)
+are chunks too; with the far field, a cell whose finest built level's
+voxel is at most 1 px skips its tree-layer chunks and joins the far list
+with its level, cell | level << 29)
 -> early cull (cull.comp, one workgroup per chunk, phase
 0: instances visible last frame, frustum test (placed: the prototype's
 sphere and draw distance) only, seeding (instance, level root) for each

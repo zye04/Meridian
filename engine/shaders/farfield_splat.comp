@@ -69,6 +69,12 @@ ivec2 anchorVoxels() {
     return ivec2(pc.anchorX, pc.anchorZ) * int(farColumnsPerCell(pc.level) * kBrickEdge);
 }
 
+// The level's column table rect (farColumnRect).
+ivec4 columnRect() {
+    return farColumnRect(ivec4(pc.bandX0, pc.bandZ0, pc.bandX1, pc.bandZ1), pc.cellsX, pc.cellsZ,
+                         pc.level);
+}
+
 // Whether brick column (x, z) of this level lies in a cell that stores it.
 bool storedColumn(int x, int z) {
     int n = int(farColumnsPerCell(pc.level));
@@ -130,12 +136,12 @@ void main() {
             if (!storedColumn(x, z)) {
                 continue;
             }
-            uint column = farColumnIndex(pc.cellsX, pc.level, uint(x), uint(z));
+            uint column = farColumnIndex(columnRect(), pc.level, uint(x), uint(z));
             atomicMin(pc.columns.columns[column].x, low);
             atomicMin(pc.columns.columns[column].y, ~high);
         }
     }
-    if (pc.level == 0u) {
+    if (pc.level == kFarFineLevels) {
         ivec2 cell = ivec2(floor((position.xz - vec2(pc.originX, pc.originZ)) / kCellSize)) +
                      ivec2(pc.anchorX, pc.anchorZ);
         cell = clamp(cell, ivec2(0), ivec2(pc.cellsX, pc.cellsZ) - 1);
@@ -185,7 +191,7 @@ void main() {
                     !storedColumn(i / 4, j / 4)) {
                     continue;
                 }
-                uvec2 column = pc.columns.columns[farColumnIndex(pc.cellsX, pc.level,
+                uvec2 column = pc.columns.columns[farColumnIndex(columnRect(), pc.level,
                                                                  uint(i) / 4u, uint(j) / 4u)];
                 precise float base = pc.heightBase + float(columnBaseHeight(column)) *
                                                          kFarHeightUnit;

@@ -109,8 +109,9 @@ struct TerrainLayer {
 constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 
 // The far switch's default: a far-field cell's trees give way to its voxels
-// once the tallest projects under 6 px (archive plan 2026-11-19-forests).
-constexpr float kFarSwitchPixels = 6.0f;
+// once the finest level it has built projects to at most 1 px (far tile
+// tier spec, decision 4; farfield.glsl kFarLevelPixels).
+constexpr float kFarSwitchPixels = 1.0f;
 // The far field reaches this far (m) from the crop's centre by default:
 // placement's fixed-point range (kPlacementCellRange cells of 64 m).
 constexpr float kFarExtent = 16384.0f;
@@ -427,13 +428,19 @@ public:
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
   void setVoxelNear(float meters);
-  // A far-field cell draws its voxels instead of its trees once its tallest
-  // tree projects under this many pixels (kFarSwitchPixels by default).
+  // A far-field cell draws its voxels instead of its trees once the voxel of
+  // the finest level it has built projects to at most this many pixels
+  // (kFarSwitchPixels by default).
   void setFarSwitchPixels(float pixels);
   // The far field's forest reaches this far (m) from the crop's centre
   // (kFarExtent by default, at most that), beyond the crop by the placement
   // rule on the mirrored terrain. Takes effect at the next setPlacement.
   void setFarExtent(float meters);
+  // The far field's fine levels (1 and 2 m voxels) over a static window:
+  // the 1 m level within halfSize (m) of (x, z), the 2 m level within twice
+  // that, each inside the 4 m level's band (0: no fine levels, the default).
+  // Takes effect at the next setPlacement.
+  void setFarFineWindow(float x, float z, float halfSize);
   // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
   // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);

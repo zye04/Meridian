@@ -31,7 +31,7 @@ double msSince(Clock::time_point start) {
 constexpr double kMiB = 1.0 / (1 << 20);
 // Column bases count from this far below the heightfield's minimum: a
 // tree's lowest voxels can reach below its origin by half a voxel (8 m at
-// L2) plus its sink depth.
+// 16 m) plus its sink depth.
 constexpr float kFarBaseMargin = 32.0f;
 // A splat slice's accumulators stay within this many bytes.
 // 256 MiB, not 1 GiB: the splat's transient buffers set the startup memory
@@ -47,10 +47,11 @@ constexpr VkDeviceSize kFarPlacementChunkBytes = VkDeviceSize{1} << 26;
 // square band per level, kFarBandMeters past the grid's edge): from a view
 // at the crop's centre (2 km from its edge at the relief patch), a band's
 // outer edge is about kFarBandMeters + 2 km away, where the next coarser
-// level's voxel is 8 m / 4 km = 3.7 px (L1 past the L0 band) and 16 m /
-// 8 km = 3.7 px (L2 past the L1 band) at 1440p and 70 degrees; finer
-// levels everywhere would cost about 4x memory per halving.
-constexpr float kFarBandMeters[kFarLevels - 1] = {2000.0f, 6000.0f};
+// level's voxel is 8 m / 4 km = 3.7 px (8 m past the 4 m band) and 16 m /
+// 8 km = 3.7 px (16 m past the 8 m band) at 1440p and 70 degrees; finer
+// levels everywhere would cost about 4x memory per halving. The fine
+// levels' bands are the camera window instead (farFineHalf).
+constexpr float kFarBandMeters[kFarLevels - 1 - kFarFineLevels] = {2000.0f, 6000.0f};
 
 // Dispatch dimensions for `groups` workgroups (x at most 65535).
 std::array<uint32_t, 2> groups2d(uint64_t groups) {
@@ -104,13 +105,18 @@ void checkFarField(const FarFieldGrid &grid, uint32_t ring,
       }
     };
     for (uint32_t level = 0; level < kFarLevels; ++level) {
+      if (farFinestLevel(grid.bands, static_cast<int32_t>(cx), static_cast<int32_t>(cz)) > level) {
+        continue;
+      }
       const uint32_t n = farColumnsPerCell(level);
+      const FarRect gridRect = farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, level);
+      const FarRect windowRect = farColumnRect(window.bands, window.cellsX, window.cellsZ, level);
       for (uint32_t lz = 0; lz < n; ++lz) {
         for (uint32_t lx = 0; lx < n; ++lx) {
           const BrickColumn &g =
-              columns[level][farColumnIndex(grid.cellsX, level, cx * n + lx, cz * n + lz)];
+              columns[level][farColumnIndex(gridRect, level, cx * n + lx, cz * n + lz)];
           const BrickColumn &c = cpu.columns[level][farColumnIndex(
-              window.cellsX, level, (cx - x0) * n + lx, (cz - z0) * n + lz)];
+              windowRect, level, (cx - x0) * n + lx, (cz - z0) * n + lz)];
           if (g.heightAndCount != c.heightAndCount) {
             report(level, "column");
             continue;
@@ -290,10 +296,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     }
     FarTemplates &t = templates[p];
     t = filterFarTemplate(bakes[p], farColors.reflected);
-    std::printf("Far field template: prototype %u, %ux%ux%u m; %zu/%zu/%zu template voxels "
-                "L0/L1/L2\n",
+    std::printf("Far field template: prototype %u, %ux%ux%u m; %zu/%zu/%zu/%zu/%zu template "
+                "voxels 1/2/4/8/16 m\n",
                 p, bakes[p].size[0], bakes[p].size[1], bakes[p].size[2], t[0].voxels.size(),
-                t[1].voxels.size(), t[2].voxels.size());
+                t[1].voxels.size(), t[2].voxels.size(), t[3].voxels.size(), t[4].voxels.size());
   }
   bakes.clear();
   const double bakeMs = msSince(bakeStart);
@@ -382,8 +388,9 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   const auto offsetZ = static_cast<uint32_t>(pg.firstZ - firstZ);
   grid.anchorX = static_cast<int32_t>(offsetX);
   grid.anchorZ = static_cast<int32_t>(offsetZ);
-  for (uint32_t level = 0; level + 1 < kFarLevels; ++level) {
-    const auto margin = static_cast<int32_t>(std::ceil(kFarBandMeters[level] / kCellSize));
+  for (uint32_t level = kFarFineLevels; level + 1 < kFarLevels; ++level) {
+    const auto margin =
+        static_cast<int32_t>(std::ceil(kFarBandMeters[level - kFarFineLevels] / kCellSize));
     grid.bands[level][0] = std::max(static_cast<int32_t>(offsetX) - margin, 0);
     grid.bands[level][1] = std::max(static_cast<int32_t>(offsetZ) - margin, 0);
     grid.bands[level][2] =
@@ -391,7 +398,37 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     grid.bands[level][3] =
         std::min(static_cast<int32_t>(offsetZ + pg.rows) + margin, static_cast<int32_t>(cellsZ));
   }
+  // The fine levels over the static window: farFineHalf (1 m) and twice
+  // that (2 m) around farFineCenter, inside the placement grid: they exist
+  // for the switch, which only cells with trees have (outside the grid the
+  // static levels draw as before; at the measured 0.25 MiB per cell at 1 m
+  // the mirrored forest around the crop would not fit).
+  const int32_t placed[4] = {static_cast<int32_t>(offsetX), static_cast<int32_t>(offsetZ),
+                             static_cast<int32_t>(offsetX + pg.columns),
+                             static_cast<int32_t>(offsetZ + pg.rows)};
+  for (uint32_t level = kFarFineLevels; level-- > 0;) {
+    int32_t *b = grid.bands[level];
+    if (farFineHalf <= 0.0f) {
+      std::fill(b, b + 4, 0);
+      continue;
+    }
+    const float half = farFineHalf * static_cast<float>(1u << level);
+    const int32_t *outer = level + 1 < kFarFineLevels ? grid.bands[level + 1] : placed;
+    const auto cell = [&](float world, float origin) {
+      return static_cast<int32_t>(std::floor((world - origin) / kCellSize));
+    };
+    b[0] = std::max(cell(farFineCenter[0] - half, grid.originX), outer[0]);
+    b[1] = std::max(cell(farFineCenter[1] - half, grid.originZ), outer[1]);
+    b[2] = std::max(std::min(cell(farFineCenter[0] + half, grid.originX) + 1, outer[2]), b[0]);
+    b[3] = std::max(std::min(cell(farFineCenter[1] + half, grid.originZ) + 1, outer[3]), b[1]);
+  }
   const uint32_t cellCount = grid.cellsX * grid.cellsZ;
+  const auto levelColumnRect = [&](uint32_t level) {
+    return farColumnRect(grid.bands, grid.cellsX, grid.cellsZ, level);
+  };
+  const auto rectCells = [](const FarRect &r) {
+    return static_cast<uint32_t>((r[2] - r[0]) * (r[3] - r[1]));
+  };
 
   Buffer templateBuffer = uploadStorage(infos.data(), infos.size() * sizeof(infos[0]));
   Buffer templateVoxelBuffer =
@@ -403,8 +440,13 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   // Per cell: the tallest tree (float bits); then the lost-deposit count.
   const VkDeviceSize cellDataBytes = (VkDeviceSize{cellCount} + 1) * sizeof(uint32_t);
   Buffer cellData = createBuffer(cellDataBytes, kUsage, 0);
-  const VkDeviceSize maxOccupancyBytes =
-      VkDeviceSize{cellCount} * farColumnsPerCell(0) * farColumnsPerCell(0) * 2 * sizeof(uint32_t);
+  VkDeviceSize maxOccupancyBytes = 0;
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    maxOccupancyBytes =
+        std::max<VkDeviceSize>(maxOccupancyBytes, VkDeviceSize{rectCells(levelColumnRect(level))} *
+                                                      farColumnsPerCell(level) *
+                                                      farColumnsPerCell(level) * 2 * sizeof(uint32_t));
+  }
   Buffer readback =
       createBuffer(maxOccupancyBytes + cellDataBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
@@ -546,10 +588,25 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                                       cellData.size + readback.size + chunkInstances.size +
                                       chunkCounts.size + chunkCells.size;
   const auto *mapped = static_cast<const uint32_t *>(readback.mapped);
+  submitNow([&](VkCommandBuffer cmd) {
+    vkCmdFillBuffer(cmd, cellData.buffer, 0, VK_WHOLE_SIZE, 0);
+    memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+  });
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     const auto start = Clock::now();
     const uint32_t n = farColumnsPerCell(level);
-    const size_t columnCount = size_t{cellCount} * n * n;
+    const FarRect rect = levelColumnRect(level);
+    const auto rectX = static_cast<uint32_t>(rect[2] - rect[0]);
+    const auto rectZ = static_cast<uint32_t>(rect[3] - rect[1]);
+    const size_t columnCount = size_t{rectX} * rectZ * n * n;
+    if (columnCount == 0) {
+      // A fine level outside the window: never read (no cell's finest).
+      farColumns[level] = createBuffer(sizeof(BrickColumn), kUsage, 0);
+      farVoxels[level] = createBuffer(sizeof(uint32_t), kUsage, 0);
+      continue;
+    }
     const VkDeviceSize occupancyBytes = columnCount * 2 * sizeof(uint32_t);
     Buffer occupancy = createBuffer(occupancyBytes, kUsage, 0);
     constants.columns = occupancy.address;
@@ -559,9 +616,6 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     std::copy(band.begin(), band.end(), constants.band);
     submitNow([&](VkCommandBuffer cmd) {
       vkCmdFillBuffer(cmd, occupancy.buffer, 0, VK_WHOLE_SIZE, 0xFFFFFFFFu);
-      if (level == 0) {
-        vkCmdFillBuffer(cmd, cellData.buffer, 0, VK_WHOLE_SIZE, 0);
-      }
       memoryBarrier(cmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
@@ -595,7 +649,8 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       loHi[2 * c] = mapped[2 * c];
       loHi[2 * c + 1] = ~mapped[2 * c + 1];
       if (loHi[2 * c] != UINT32_MAX) {
-        const size_t cell = c / (n * n);
+        const size_t local = c / (n * n);
+        const size_t cell = (local / rectX + rect[1]) * grid.cellsX + local % rectX + rect[0];
         cellBottom[cell] =
             std::min(cellBottom[cell], grid.heightBase + loHi[2 * c] * kFarHeightUnit);
         cellTop[cell] = std::max(cellTop[cell], grid.heightBase + loHi[2 * c + 1] * kFarHeightUnit);
@@ -610,9 +665,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
         uploadStorage(columns[level].data(), columns[level].size() * sizeof(BrickColumn));
 
     // Slices of cell rows, each with its own accumulators.
+    // Rows of the level's rect.
     const std::vector<uint32_t> rows =
-        farSliceRows(columns[level], level, grid.cellsX, grid.cellsZ, kFarSliceBricks);
-    const size_t columnsPerRow = size_t{grid.cellsX} * n * n;
+        farSliceRows(columns[level], level, rectX, rectZ, kFarSliceBricks);
+    const size_t columnsPerRow = size_t{rectX} * n * n;
     std::vector<uint32_t> sliceBricks(rows.size() - 1, 0);
     uint32_t maxSliceBricks = 0;
     for (size_t sl = 0; sl + 1 < rows.size(); ++sl) {
@@ -651,13 +707,13 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
         continue;
       }
       constants.firstBrick = firstBrick;
-      constants.rowBegin = rows[sl];
-      constants.rowEnd = rows[sl + 1];
+      constants.rowBegin = rows[sl] + static_cast<uint32_t>(rect[1]);
+      constants.rowEnd = rows[sl + 1] + static_cast<uint32_t>(rect[1]);
       // The instances within reach of the slice's rows (one more row as
       // margin), inside the level's rect.
       CellRect reach = levelRect(level);
-      reach.z0 = std::max(reach.z0, rows[sl] > ring + 1 ? rows[sl] - ring - 1 : 0);
-      reach.z1 = std::min(reach.z1, rows[sl + 1] + ring + 1);
+      reach.z0 = std::max(reach.z0, constants.rowBegin > ring + 1 ? constants.rowBegin - ring - 1 : 0);
+      reach.z1 = std::min(reach.z1, constants.rowEnd + ring + 1);
       FarSplatConstants perBrick = constants;
       perBrick.count = count;
       samplePeak(fixedTransient + accumulators.size + headers.size + chunkBytes);
@@ -865,8 +921,9 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     }
     info.alignment[level] = weight > 0.0 ? static_cast<float>(sum / weight) : 1.0f / 3.0f;
   }
-  std::printf("Far field: leaf alignment L0/L1/L2 %.3f/%.3f/%.3f\n", info.alignment[0],
-              info.alignment[1], info.alignment[2]);
+  std::printf("Far field: leaf alignment 1/2/4/8/16 m %.3f/%.3f/%.3f/%.3f/%.3f\n",
+              info.alignment[0], info.alignment[1], info.alignment[2], info.alignment[3],
+              info.alignment[4]);
   std::memcpy(info.bands, grid.bands, sizeof(info.bands));
   info.placedOffset[0] = offsetX;
   info.placedOffset[1] = offsetZ;
@@ -882,31 +939,38 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   for (uint32_t level = 0; level < kFarLevels; ++level) {
     resident += farColumns[level].size + farVoxels[level].size;
   }
-  const double splatTotal = splatMs[0] + splatMs[1] + splatMs[2];
+  double splatTotal = 0.0;
+  for (double ms : splatMs) {
+    splatTotal += ms;
+  }
   const auto voxelsIn = [&](uint32_t level) {
     return static_cast<unsigned long long>(poolWords[level] -
                                            uint64_t{brickCounts[level]} * kBrickHeaderWords);
   };
-  std::printf("Far field grid: %ux%u cells from cell (%d, %d), L0/L1 bands %dx%d/%dx%d cells; "
-              "transient placement %llu instances in %.0f ms (chunks of %u rows)\n",
-              cellsX, cellsZ, firstX, firstZ, grid.bands[0][2] - grid.bands[0][0],
-              grid.bands[0][3] - grid.bands[0][1], grid.bands[1][2] - grid.bands[1][0],
-              grid.bands[1][3] - grid.bands[1][1], static_cast<unsigned long long>(transientPlaced),
-              placeMs, chunkRows);
-  std::printf("Far field: bricks L0/L1/L2 %u/%u/%u (occupied voxels %llu/%llu/%llu) in "
-              "%u/%u/%u columns, %u cells with trees, splat slices %u/%u/%u; resident "
-              "%.0f MiB "
-              "(bricks %.0f/%.0f/%.0f, columns %.0f/%.0f/%.0f); peak transient %.0f "
-              "MiB, "
-              "device memory allocated at peak %.0f MiB (all heaps %.0f MiB); templates %.0f ms, splat %.0f ms "
-              "(L0/L1/L2 %.0f/%.0f/%.0f), total %.0f ms; %u lost deposits\n",
-              brickCounts[0], brickCounts[1], brickCounts[2], voxelsIn(0), voxelsIn(1), voxelsIn(2),
-              occupiedColumns[0], occupiedColumns[1], occupiedColumns[2], treeCells, sliceCounts[0],
-              sliceCounts[1], sliceCounts[2], resident * kMiB, farVoxels[0].size * kMiB,
-              farVoxels[1].size * kMiB, farVoxels[2].size * kMiB, farColumns[0].size * kMiB,
-              farColumns[1].size * kMiB, farColumns[2].size * kMiB, peakTransient * kMiB,
-              peakAllocated * kMiB, peakAll * kMiB, bakeMs, splatTotal, splatMs[0], splatMs[1], splatMs[2],
-              msSince(loadStart), lostDeposits);
+  const auto bandSize = [&](uint32_t level) {
+    const FarRect r = levelColumnRect(level);
+    return std::pair{r[2] - r[0], r[3] - r[1]};
+  };
+  std::printf("Far field grid: %ux%u cells from cell (%d, %d), 1/2/4/8 m bands "
+              "%dx%d/%dx%d/%dx%d/%dx%d cells; transient placement %llu instances in %.0f ms "
+              "(chunks of %u rows)\n",
+              cellsX, cellsZ, firstX, firstZ, bandSize(0).first, bandSize(0).second,
+              bandSize(1).first, bandSize(1).second,
+              grid.bands[2][2] - grid.bands[2][0], grid.bands[2][3] - grid.bands[2][1],
+              grid.bands[3][2] - grid.bands[3][0], grid.bands[3][3] - grid.bands[3][1],
+              static_cast<unsigned long long>(transientPlaced), placeMs, chunkRows);
+  std::printf("Far field: resident %.0f MiB; peak transient %.0f MiB, device memory allocated "
+              "at peak %.0f MiB (all heaps %.0f MiB); %u cells with trees; templates %.0f ms, "
+              "splat %.0f ms, total %.0f ms; %u lost deposits\n",
+              resident * kMiB, peakTransient * kMiB, peakAllocated * kMiB, peakAll * kMiB,
+              treeCells, bakeMs, splatTotal, msSince(loadStart), lostDeposits);
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    std::printf("Far field %.0f m: %u bricks (%llu occupied voxels) in %u columns, %u slices; "
+                "bricks %.1f MiB, columns %.1f MiB; splat %.0f ms\n",
+                kFarVoxelSize[level], brickCounts[level], voxelsIn(level), occupiedColumns[level],
+                sliceCounts[level], farVoxels[level].size * kMiB, farColumns[level].size * kMiB,
+                splatMs[level]);
+  }
 
   destroyBuffer(templateBuffer);
   destroyBuffer(templateVoxelBuffer);
@@ -935,18 +999,22 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     vmaInvalidateAllocation(allocator, check.allocation, 0, VK_WHOLE_SIZE);
     const auto *bytes = static_cast<const uint8_t *>(check.mapped);
     std::array<const uint32_t *, kFarLevels> voxels{};
-    uint64_t hash = 0xcbf29ce484222325ull;
+    // The static levels' hash compares with commits before the fine levels.
+    uint64_t hash = 0xcbf29ce484222325ull, fineHash = hash;
     VkDeviceSize at = 0;
     for (uint32_t level = 0; level < kFarLevels; ++level) {
       voxels[level] = reinterpret_cast<const uint32_t *>(bytes + at);
-      hash = fnv1a(hash, columns[level].data(), columns[level].size() * sizeof(BrickColumn));
-      hash = fnv1a(hash, bytes + at, farVoxels[level].size);
+      if (!columns[level].empty()) {
+        uint64_t &h = level < kFarFineLevels ? fineHash : hash;
+        h = fnv1a(h, columns[level].data(), columns[level].size() * sizeof(BrickColumn));
+        h = fnv1a(h, bytes + at, farVoxels[level].size);
+      }
       at += farVoxels[level].size;
     }
     // The placement grid's cells only, by value (column extent, then every
     // voxel), so it compares across far grids of any extent.
     uint64_t cropHash = 0xcbf29ce484222325ull;
-    for (uint32_t level = 0; level < kFarLevels; ++level) {
+    for (uint32_t level = kFarFineLevels; level < kFarLevels; ++level) {
       const uint32_t n = farColumnsPerCell(level);
       for (uint32_t z = 0; z < pg.rows * n; ++z) {
         for (uint32_t x = 0; x < pg.columns * n; ++x) {
@@ -956,7 +1024,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
             continue;
           }
           const BrickColumn &column = columns[level][farColumnIndex(
-              grid.cellsX, level, offsetX * n + x, offsetZ * n + z)];
+              levelColumnRect(level), level, offsetX * n + x, offsetZ * n + z)];
           cropHash = fnv1a(cropHash, &column.heightAndCount, sizeof(uint32_t));
           for (uint32_t i = 0; i < columnBrickCount(column) * kBrickVoxels; ++i) {
             const uint32_t voxel = farBrickVoxel(voxels[level], column.firstBrick + i / kBrickVoxels,
@@ -966,8 +1034,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
         }
       }
     }
-    std::printf("far field hash 0x%016llx, placement grid inside its outer ring+1 cells 0x%016llx\n",
-                static_cast<unsigned long long>(hash), static_cast<unsigned long long>(cropHash));
+    std::printf("far field hash 0x%016llx, placement grid inside its outer ring+1 cells 0x%016llx "
+                "(static levels); fine levels 0x%016llx\n",
+                static_cast<unsigned long long>(hash), static_cast<unsigned long long>(cropHash),
+                static_cast<unsigned long long>(fineHash));
     // What the brick count holds: bricks with no occupied voxel are
     // footprint slack (the rotated hull's AABB plus the trilinear margin).
     std::printf("far field bricks (empty, occupied voxels per brick):");
@@ -987,16 +1057,18 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     std::printf("\n");
     // Sample cells: in the placement grid, and outside it per band (the
     // finest level the cell stores), three each.
+    // Inside it, three more per fine level.
     std::vector<uint32_t> samples = {offsetZ * cellsX + offsetX};
-    std::array<uint32_t, kFarLevels + 1> found{};
-    for (uint32_t s = 0; s < 1u << 20 && samples.size() < 1 + 3 * (kFarLevels + 1); ++s) {
+    std::array<uint32_t, kFarLevels + 1 + kFarFineLevels> found{};
+    for (uint32_t s = 0; s < 1u << 20 && samples.size() < 1 + 3 * found.size(); ++s) {
       const uint32_t cell = placementHash(s, 0x6661, 0) % cellCount;
       const uint32_t x = cell % cellsX - offsetX, z = cell / cellsX - offsetZ;
       const bool placed = x < pg.columns && z < pg.rows;
-      const uint32_t kind =
-          placed ? kFarLevels
-                 : farFinestLevel(grid.bands, static_cast<int32_t>(cell % cellsX),
-                                  static_cast<int32_t>(cell / cellsX));
+      const uint32_t finest = farFinestLevel(grid.bands, static_cast<int32_t>(cell % cellsX),
+                                             static_cast<int32_t>(cell / cellsX));
+      const uint32_t kind = !placed                    ? finest
+                            : finest < kFarFineLevels ? kFarLevels + 1 + finest
+                                                      : kFarLevels;
       if (found[kind] < 3 && farCellData[cell].bottom <= farCellData[cell].top &&
           (!placed || farCellData[cell].treeCount > 0)) {
         ++found[kind];

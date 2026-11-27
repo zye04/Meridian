@@ -582,6 +582,11 @@ void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setFarSwitchPixels(float pixels) { impl_->farSwitchPixels = pixels; }
 void Renderer::setFarExtent(float meters) { impl_->farExtent = std::min(meters, kFarExtent); }
+void Renderer::setFarFineWindow(float x, float z, float halfSize) {
+  impl_->farFineCenter[0] = x;
+  impl_->farFineCenter[1] = z;
+  impl_->farFineHalf = halfSize;
+}
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {

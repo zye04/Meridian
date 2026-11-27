@@ -6054,3 +6054,44 @@ sky occlusion.
   (0.304 / 0.168); every gap closes (lit moves toward the voxels too), h1
   shaded stays 0.018 above. Far pass at 41 px 12.06 -> 12.21 ms.
 
+
+## Far tile tier stage 2, part 1: fine levels over a static window and the switch by built voxel (far lane, 2026-11-27)
+
+Part 1 of the plan's split (director's brief): the 1 and 2 m levels built
+at load over a fixed window (`--far-fine M`), the new switch rule, and the
+measured need, before any per-frame streaming.
+
+- Level index: the fine levels come first (0 = 1 m, 1 = 2 m, then the
+  static 4 / 8 / 16 m). Every formula is monotone in the index (voxel
+  edge `1 << level`, columns per cell `16 >> level`, the switch's log2,
+  band nesting in `farFinestLevel`, the canopy pad); fine levels last
+  would have needed a mapping at each of them. Static code that named a
+  level now names it from `kFarFineLevels` (ray march levels, the shadow
+  map's 8 m level, the splat's tree heights). The far list entry packs
+  the level in 3 bits: `cell | level << kFarEntryLevelShift` (29).
+- Column tables: a fine level's columns cover only its band
+  (`farColumnRect`, `farColumnIndex(rect, ...)`, C++ and GLSL), as the 1
+  m table over the 512^2 far grid would take 512 MiB; static levels keep
+  the whole grid, so their tables, bricks and both hash lines are
+  unchanged (the hashes now cover the static levels; the fine levels get
+  their own hash).
+- Fine bands lie inside the placement grid: they exist for the switch,
+  which only cells with trees have. Measured at a1: 0.29 MiB per crop
+  cell at 1 m (whole crop, 64 x 64 cells: 11.46M bricks, 281M voxels,
+  1204 MiB), 0.05 MiB at 2 m (209 MiB); the mirrored forest outside the
+  crop would not fit at 1 m.
+- Switch (spec decision 4, `farSwitch`): a cell draws its bricks once the
+  voxel of the finest level it has built projects to at most
+  `kFarSwitchPixels` (now 1 px; the 6 px tallest-tree rule is gone); a
+  cell without it keeps its trees, outside the crop every cell draws as
+  before. Without fine levels the crop's finest is 4 m (switch ~7.3 km).
+  Shadow views unchanged (only the coarsest cascade takes far cells, all
+  of them).
+- Shading level: a fine tile marches sun and sky through the 4 m volume
+  (`shadeLevel`), not its own. Own level: far pass at a1 20.9 ms and lit L
+  0.354 vs the cluster voxels' 0.381 (a1), 0.276 vs 0.306 (h1); from 4 m:
+  16.5 ms, a1 lit / shaded 0.369 / 0.266 vs 0.381 / 0.267, h1 0.291 /
+  0.189 vs 0.306 / 0.175.
+- Not yet decided (part 2): the streamed window, its pools and the
+  per-frame budget; the load splat's occupancy readback would stall a
+  frame, so streaming needs a GPU-side bound or a late readback.

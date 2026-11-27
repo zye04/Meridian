@@ -386,8 +386,8 @@ std::optional<PixelPick> Renderer::pick(uint32_t x, uint32_t y) {
       pick.mesh = r.clusterMeshes[id[1]];
     }
   } else if (pick.kind == PickKind::FarCell) {
-    pick.farCell = id[1] & 0x3FFFFFFFu;
-    pick.lodLevel = id[1] >> 30;
+    pick.farCell = id[1] & ((1u << kFarEntryLevelShift) - 1);
+    pick.lodLevel = id[1] >> kFarEntryLevelShift;
   }
   if (pick.mesh) {
     pick.material = id[3] != ~0u ? id[3] : r.meshes[*pick.mesh].materialIndex;

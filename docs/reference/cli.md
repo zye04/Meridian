@@ -420,10 +420,18 @@ Every run prints `Loaded: resident N MiB device memory allocated (all heaps
 M MiB)` once at the first draw, after everything loaded: the VRAM gate's
 resident figure. `--far-field off` draws
 every tree as clusters instead of distant forest cells as voxels (A/B).
-`--far-switch-px N` (default 6, `kFarSwitchPixels`): a far-field cell
-draws its voxels instead of its trees once its tallest tree projects under
-N pixels from the nearest point of its canopy box (cell_cull.comp
-`farSwitch`); larger N moves the switch nearer (far tile tier stage 0).
+`--far-switch-px N` (default 1, `kFarSwitchPixels`): a far-field cell
+draws its voxels instead of its trees once the voxel of the finest level
+it has built projects to at most N pixels from the nearest point of its
+canopy box (cell_cull.comp `farSwitch`; far tile tier decision 4); larger
+N moves the switch nearer. Without `--far-fine` the finest level in the
+crop is 4 m (switch at about 7.3 km at 1440p, 70 degrees).
+`--far-fine M` (default 0, none): the far field's fine levels (1 and 2 m
+voxels) over a static window inside the placement grid, the 1 m level
+within M meters of the `--camera` position (x, z), the 2 m level within
+2M; with them the switch sits where the 1 m voxel is 1 px (about 1.8 km).
+Startup prints `Far field 1 m:` / `2 m:` (bricks, MiB); 0.29 MiB per crop
+cell at 1 m. Far tile tier stage 2 before the streamed window.
 `--far-extent KM` (default and at most 16.384, placement's fixed-point
 range): the far field's forest reaches this far from the crop's centre;
 beyond the crop the forest layers' rule runs on the mirrored terrain

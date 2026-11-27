@@ -540,7 +540,7 @@ struct SceneData {
   // std430 aligns Clouds (vec3 members) to 16 bytes.
   alignas(16) GpuClouds clouds;
   // The far field (GpuFarField) and the list of far cells the cell cull
-  // appends for voxel.mesh (cell | level << 30, one per cell).
+  // appends for voxel.mesh (cell | level << kFarEntryLevelShift, one per cell).
   VkDeviceAddress farField = 0;
   VkDeviceAddress farCellList = 0;
   // Whether receivers beyond kFarShadowDistance (lighting.glsl) trace the
@@ -976,9 +976,9 @@ struct GpuFarField {
   uint32_t placedOffset[2] = {};
   // Per level: the far templates' extinction-weighted mean leaf alignment
   // (FarTemplate::alignment), the aligned share of the tile shading.
-  float alignment[4] = {};
+  float alignment[kFarLevels] = {};
 };
-static_assert(sizeof(GpuFarField) == 224);
+static_assert(sizeof(GpuFarField) == 296);
 
 // Must match FarTemplateInfo in farfield.glsl; one per (prototype, level).
 struct FarTemplateInfo {

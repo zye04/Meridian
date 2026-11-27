@@ -899,6 +899,9 @@ struct Options {
   float voxelNear = 0.0f;
   float farSwitchPixels = meridian::kFarSwitchPixels;
   float farExtent = meridian::kFarExtent;
+  // The far field's fine levels over a static window around --camera: the 1
+  // m level's half size (m; 0: none).
+  float farFine = 0.0f;
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
   bool occlusion = true;
   bool shadowRefresh = false;
@@ -1216,6 +1219,11 @@ Options parseOptions(int argc, char **argv) {
       if (!(options.farExtent >= 0.0f)) {
         throw std::runtime_error("--far-extent takes km >= 0");
       }
+    } else if (arg == "--far-fine" && i + 1 < argc) {
+      options.farFine = std::stof(argv[++i]);
+      if (!(options.farFine >= 0.0f)) {
+        throw std::runtime_error("--far-fine takes meters >= 0");
+      }
     } else if (arg == "--far-switch-px" && i + 1 < argc) {
       options.farSwitchPixels = std::stof(argv[++i]);
       if (!(options.farSwitchPixels > 0.0f)) {
@@ -1280,7 +1288,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --tree-palette name, --scenery broadleaf, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, --far-switch-px n, --far-extent km, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, --far-switch-px n, --far-extent km, --far-fine m, "
                                "--voxel-coverage hash|area-pixel-phase, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -1553,6 +1561,8 @@ int main(int argc, char **argv) {
   renderer.setVoxelNear(options.voxelNear);
   renderer.setFarSwitchPixels(options.farSwitchPixels);
   renderer.setFarExtent(options.farExtent);
+  const meridian::Vec3 fineCenter = options.camera ? options.camera->position : meridian::Vec3{};
+  renderer.setFarFineWindow(fineCenter.x, fineCenter.z, options.farFine);
   renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);

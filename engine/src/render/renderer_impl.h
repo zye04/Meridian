@@ -439,6 +439,10 @@ struct Renderer::Impl {
   float voxelNear = 0.0f;
   float farSwitchPixels = kFarSwitchPixels;
   float farExtent = kFarExtent;
+  // The fine levels' static window (setFarFineWindow): half size of the 1 m
+  // level (m, 0: none) and its centre (world x, z).
+  float farFineHalf = 0.0f;
+  float farFineCenter[2] = {};
   // The far field's cells (0: none): cell_cull's threads past the
   // hand-placed chunks.
   uint32_t farGridCells = 0;
