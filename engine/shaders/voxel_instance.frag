@@ -39,22 +39,6 @@ layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
-// Crown light, crown sun (Renderer::setCrownLight): Depth passes the sun
-// through the voxel's own crown (its optical depth toward the sun), Normal
-// also bends the lobe toward the crown-scale normal, the direction the
-// model is thinnest in from the voxel (its axis depths), by this much.
-const uint kCrownSunDepth = 1u;
-const uint kCrownSunNormal = 2u;
-const float kCrownNormalBlend = 0.5;
-
-// Mesh space, pointing out of the model: the depth falls toward the outside.
-vec3 crownNormal(uint axisWord) {
-    vec3 out_ = vec3(voxelBoxDepth(axisWord, vec3(-1.0, 0.0, 0.0)) - voxelBoxDepth(axisWord, vec3(1.0, 0.0, 0.0)),
-                     voxelBoxDepth(axisWord, vec3(0.0, -1.0, 0.0)) - voxelBoxDepth(axisWord, vec3(0.0, 1.0, 0.0)),
-                     voxelBoxDepth(axisWord, vec3(0.0, 0.0, -1.0)) - voxelBoxDepth(axisWord, vec3(0.0, 0.0, 1.0)));
-    return dot(out_, out_) > 1e-6 ? normalize(out_) : vec3(0.0, 1.0, 0.0);
-}
-
 void main() {
     SceneBuffer scene = pc.scene;
     LoadedInstance instance = loadInstance(scene, inInfo.x);
@@ -104,11 +88,6 @@ void main() {
     if (dot(s.normal, relative) > 0.0) {
         s.normal = -s.normal;
     }
-    uint crownSun = (scene.crownLight >> 8) & 0xFFu;
-    if (crownSun >= kCrownSunNormal) {
-        vec3 blended = mix(s.normal, normalize(linear * crownNormal(axisWord)), kCrownNormalBlend);
-        s.normal = dot(blended, blended) > 1e-6 ? normalize(blended) : s.normal;
-    }
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
@@ -122,10 +101,6 @@ void main() {
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
                                               origin - scene.cameraPosition, rayDirection);
         visibility *= float(inInfo.y);
-        if (crownSun >= kCrownSunDepth) {
-            float crown = exp(-voxelBoxDepth(axisWord, normalize(toLocal * sh.L)));
-            visibility *= mix(1.0, crown, scene.microShadowStrength);
-        }
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);
         }
