@@ -48,11 +48,11 @@ const float kTileSunMarch = 32.0;
 const float kVoxelPerceptualRoughness = 0.8;
 // Sky occlusion from the cell's own bricks, in the canopy-sky form of the
 // crown-light lane (lighting.glsl canopySkyVisibility, branch crown-light,
-// kCanopySkyDistance / kCanopySkyStartFoliage): the transmittance straight
-// up over 64 m, from one L0 voxel above the hit so the hit's own voxel
-// doesn't count.
+// kCanopySkyDistance): the transmittance straight up over 64 m from the hit.
+// Unlike that lane's foliage start (4 m), the hit's own voxel counts: the
+// hit lies inside the medium, and the cluster voxels' crown occlusion counts
+// the model from the voxel too.
 const float kTileSkyDistance = 64.0;
-const float kTileSkyStart = 4.0;
 
 void main() {
     SceneBuffer scene = pc.scene;
@@ -156,7 +156,7 @@ void main() {
         float depth = 0.0;
         uint unused;
         farMarchCell(farField, cell, level, hitField, sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
-                     sky ? kTileSkyStart : farVoxelSize(level),
+                     sky ? 0.0 : farVoxelSize(level),
                      sky ? min(kTileSkyDistance, boxHi.y - hitField.y) : sunEnd, kFarOpaqueDepth,
                      depth, unused);
         depths[ray] = depth;

@@ -188,6 +188,8 @@ by one Otsu threshold on the default run's sun view. Mean OKLab L / C / h:
 | 336e429 sun march (from the hit: 0.377 / 0.303, lit share 130k vs 160k, dropped) | 0.403 / 0.042 / 221 | 0.304 / 0.071 / 248 | 0.307 / 0.035 / 216 | 0.201 / 0.055 / 250 | 12.05 (14.58 with two call sites) |
 | 892b979 palette | 0.405 / 0.039 / 227 | 0.304 / 0.071 / 249 | 0.315 / 0.030 / 221 | 0.201 / 0.055 / 251 | 12.06 |
 
+| sky from the hit (director ruling (a), `measure.sh skyhit`) | 0.386 / 0.039 / 227 | 0.280 / 0.072 / 250 | 0.303 / 0.030 / 222 | 0.186 / 0.055 / 253 | 12.21 |
+
 Noise: two launches of 892b979 (`palette`, `pal-full`) give the same tile means to 1e-4;
 cluster-voxel side of the switch line across launches 0.3745-0.3764 lit (a1).
 Debug split on the same pixels, a1 (`split.py`): base L 0.341 h 128 voxels, tiles 0.309 h 139

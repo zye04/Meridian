@@ -6048,4 +6048,9 @@ sky occlusion.
   voxels); the slot means flattened it. a1 base colour on the same pixels
   L 0.309 h 139 -> 0.330 h 131 (cluster voxels 0.341 h 128); final lit /
   shaded L 0.405 / 0.304, h1 0.315 / 0.201. Splat at load 255 -> 279 ms.
+- Sky march from the hit (director's ruling (a)): the up march starts at
+  the hit instead of 4 m above it. Tiles at the 41 px switch, lit / shaded
+  L: a1 0.386 / 0.280 (cluster voxels 0.382 / 0.268), h1 0.303 / 0.186
+  (0.304 / 0.168); every gap closes (lit moves toward the voxels too), h1
+  shaded stays 0.018 above. Far pass at 41 px 12.06 -> 12.21 ms.
 
