@@ -5906,7 +5906,8 @@ worktree `.superpowers/fill/`):
   a1 27.07 / 27.01 -> 28.85 / 28.67; m2 24.72 / 24.55 -> 26.59 / 26.71; ground view h2
   28.77 -> 30.68; main at s1 27.92 / 28.29, a1 26.85 / 26.73, m2 23.61 / 24.04. The rise is
   in "voxel trees" (m2 7.83 -> 9.75). With `--shadows rt` the fill costs 48.98 -> 56.79 ms
-  at s1 (the gate becomes a ray query per fragment).
+  at s1 (the gate becomes a ray query per fragment; one run, not repeated, and the gate is
+  unverified in that mode).
 
 Cost attribution: with `crownTopSun` returning 1 (no lookup, measurement only) on equals
 main (a1 27.12 / 26.73, m2 24.29 / 24.23), so the fill math is about free and the cost is
@@ -5916,4 +5917,13 @@ the terrain shadow map but no march (s1 31.40 / 31.52, a1 28.51 / 28.70, m2 26.5
 and the same without the `traceSunVisibility` fallback (no gain; in rt mode it gates by
 terrain only). Both held the gate (0.06 vs 16.81) and the look, and saved about 0.2 ms, in
 the noise, so crown-light's lookup ships unchanged. The lookup's presence also costs with
-the fill off: s1 +0.8-1.2 ms over main, "scene early" 5.41 -> 6.35 (backlog row).
+the fill off: s1 29.40 vs main 28.14 ms (main vs main 28.14 / 28.13, one run each), "scene
+early" 5.46 -> 6.39. Removing the location 15 varying (packed into location 12) did not
+change it (29.38), so the varying is not the cause; suspected is register pressure from the
+second inlined `traceSunVisibility` (backlog row). Shipped as is.
+
+Motion (motion-clarity.sh's method, frame 120 vs 121, jitter = mean |difference| 0-255, off
+-> on): forest_still 0.454 -> 0.495, forest_side5 4.03 -> 4.24, forest_side30 4.79 -> 5.02,
+forest_turn1 2.00 -> 2.13, near_still 0.997 -> 0.977, near_side5 5.37 -> 5.18, s1 still
+0.630 -> 0.611, s1 side5 2.49 -> 2.44, m2 still 0.731 -> 0.745, m2 side5 3.51 -> 3.57. No
+pop; forest rows rise 5-9 % with the brighter shaded crowns (not separated from flicker).
