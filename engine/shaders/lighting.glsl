@@ -503,14 +503,16 @@ void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunD
     sh.diffuseLight += albedo / kPi * sh.sunAtSurface * (beam * scattered);
 }
 
-// The sun that reaches a crown, for its fill: the visibility at the crown's
-// top centre (crownSun), one lookup through the surfaces' sun path
-// (cascades, far shadow map, terrain), the same for every leaf of the crown:
-// the fill is light scattered through the whole crown, not along one ray. A
-// per-point lookup where the point's own sun ray enters the crown cut the
-// fill wherever a neighbour shades that ray (decisions.md "Crown fill
-// gate"). The point moves a little toward the sun so that the crown's own
-// leaves above its bounds' top don't shadow it.
+// The sun that reaches a crown, for its fill: the visibility on the crown's
+// top plane straight above the point (crownSun), one lookup through the
+// surfaces' sun path (cascades, far shadow map, terrain): the fill is light
+// scattered through the crown from where the beam enters its top, not along
+// the point's own ray. A per-point lookup where that ray enters the crown
+// cut the fill wherever a neighbour shades that one ray, and one lookup at
+// the top centre switched whole crowns as a shadow edge passed it
+// (decisions.md "Crown fill gate"); above the point, an edge sweeps across
+// the crown. The point moves a little toward the sun so that the crown's
+// own leaves above its bounds' top don't shadow it.
 const float kCrownTopBias = 1.0;
 float crownTopSun(vec3 top, vec3 L) {
     vec3 entry = top + L * kCrownTopBias;

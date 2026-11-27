@@ -455,9 +455,10 @@ diffuse fill growing with the crown's optical depth toward the sun
 through the mesh's crown ellipsoid (common.glsl `crownSun`; triangle
 leaves and leaf voxels alike, not bark), capped at what direct sun on a
 sunward leaf gives (lighting.glsl `addCrownFill`), times the sun's
-visibility at the crown's top centre (`crownTopSun`: one lookup through
-cascades, far shadow map and terrain, 1 m toward the sun), so a crown in
-another's or a hill's shadow gets none.
+visibility on the crown's top plane straight above the point
+(`crownTopSun`: one lookup through cascades, far shadow map and terrain,
+1 m toward the sun), so a crown in another's or a hill's shadow gets none
+and a passing shadow edge sweeps across a crown instead of switching it.
 `--foliage-specular-aa off|on` (default off; development A/B, leaf lane
 crown-light): leaves widen their specular lobe by the normal variation a
 pixel covers (lighting.glsl `specularAaRoughness`, Tokuyoshi-Kaplanyan):

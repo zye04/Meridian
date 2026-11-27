@@ -6050,3 +6050,29 @@ No variant: the try removed the dots and s1's sparkle is already below the refer
 wider lobe would only move away from it.
 At s1 the crown fill does what round 2 aimed for: shaded/lit 0.091 off -> 0.114 gated
 (reference 0.133), canopy L < 0.15 4.0 % -> 2.6 % (reference 2.4 %).
+
+## Crown fill gate above the point (leaf lane round 4, 2026-11-27)
+
+Ruling on round 3: crown fill stays a flag for the user's eye; prove it stable and cheap.
+- Pops: one lookup at the crown's top centre switched whole crowns. Test (m2, the sun turned
+  by 0.25 degrees per step so that shadow edges move about 2 m, `.superpowers/crown-light/r4/
+  blocks.py`: fill = ambient view on - off, 16 px blocks, a "pop" block's fill moves by more
+  than 25 % in one step): centre gate 450-529 pop blocks per step (of ~11 400 with fill), max
+  |dfill| 11.7-17.6 against a mean fill of 26.4 (1e-3 exposed), the change image shows whole
+  crown discs. Neighbouring crowns' shadow edges do it in the sunlit part too.
+- Try (kept): the lookup on the crown's top plane straight above the point (common.glsl
+  `crownSun` offset, one lookup per fragment as before): 170-198 pop blocks, max 7.9-10.7,
+  mean |dfill| 0.32 (centre 0.45-0.53); the change image is leaf-scale speckle like the
+  direct sun's own change, no crown discs: an edge sweeps across the crown. s1 keeps the look:
+  shaded/lit 0.112 (centre 0.114, reference 0.133), canopy L < 0.15 2.9 % (2.6 %, reference
+  2.4 %). GPU same as the centre gate: a1 21.28 -> 22.68 ms, m2 22.48 -> 24.46 ms (off ->
+  fill, two runs each; the rise is in "voxel trees", +1.4 and +1.75).
+- Also tried for pops: the mean of five top points (centre and four at 0.6 of the half
+  extents) looked up in the mesh shaders, once per cluster (mesh.mesh) and once per voxel
+  (voxel_instance.mesh), which was also the per-instance evaluation of the backlog row: 72-101
+  pop blocks, but a1 21.3 -> 45.6 ms ("voxel trees" 7.30 -> 29.11: the drawn voxels outnumber
+  the pixels they cover; "scene early" +1.0 per cluster). Reverted
+  (`.superpowers/crown-light/r4/try-mesh-stage-gate.patch`). A per-instance value can't be
+  softer than one value per crown anyway, which is what popped.
+- `--shadows rt` (centre gate, s1): fill on lit canopy 19.4 against 15.8 raster, so the
+  top point does not shadow itself through the TLAS; 0 validation errors.
