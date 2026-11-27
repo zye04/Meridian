@@ -316,3 +316,44 @@ Debug H1 (`.superpowers/far/cap.sh build/game/game H1`, `review/debug-h1.log`): 
 
 Release after (`lines/final/run.log`): x4000 `GPU 22.11 ms` far field 11.76; a1 `GPU 34.31 ms` far field 12.64; h1 `GPU 34.39 ms` far field 12.31
 (hardening: a1 9.05, h1 9.10): the marches across cells cost ~3.4 ms at a1; task 2 next.
+
+## Far pass cost after the border fix (2026-11-27; commit 4504403)
+
+Probes: `.superpowers/far/cost2/` (`voxel.frag` + `lighting.glsl` copies with `PROBE_*` defines, `probe.sh NAME DEFINES...`
+compiles into build-dev and captures a1 + H1; `probe-engine.sh` the same from engine/shaders). Base = 2df00e8's shader.
+Far field ms a1 / H1 (each from the run's `GPU passes:` line; every run `0 validation errors`, `Render 2560x1440`):
+
+| probe | a1 | H1 |
+|---|---|---|
+| base / base2 (repeat) | 12.58 / 12.63 | 15.08 (outlier) / 12.38 |
+| no carried march (PROBE_NOPREFIX) | 10.98 | 11.14 |
+| no shading at all (PROBE_NOSHADE: march, raster, discard) | 5.10 | 4.77 |
+| no sky / sun marches | 8.69 | 8.63 |
+| no sun lookup (traceSunVisibility) | 13.93 | 10.00 (noisy) |
+| no ambient | 10.22 | 9.87 |
+| no dead fallback march in traceSunVisibility | 12.60 | 12.40 |
+| carry 2 voxels | 11.81 | 11.67 |
+| sky 16 m, sun 8 m | 11.68 | 11.68 |
+| skip sun march where the lookup is 0 | 11.50 | 11.22 |
+| skip + carry 2 + sky 16 / sun 8 | 9.71 | 9.79 |
+| skip + carry 2 + sky 8 m / sun 4 m | 10.47 | 10.48 |
+| skip + carry 2 + sky 4 m / sun 8 m | 10.06 | 10.06 |
+| one march for view, sky, sun (`try/unified.diff`) | 17.78 | 16.58 |
+| surface after the marches | 12.65 | 12.40 |
+
+Frame diff vs base2 (`tools/image-gates.py diff`; noise base vs base2: a1 0.2427, H1 0.1966): skip a1 0.2433 / H1 0.1962;
+carry2 0.2504 / 0.2264; sky16/sun8 0.2852 / 0.4424 (region means within 0.3%); sky8 0.2686 / 0.3003; sun8 0.2667 / 0.3227.
+
+Kept (skip + carry 2), build-release, `cost2/final`: a1 `GPU 31.91 ms` far field 10.64, H1 `GPU 32.44 ms` far field 10.62,
+x4000 `GPU 21.16 ms` far field 10.64. Diff vs `lines/final` (2df00e8): a1 0.2718, H1 0.2321. Border profile x4000:
+`cost2/final/x4000.png 1.00 1.00 1.00 1.00 1.00 1.00 0.99 0.98 0.99 0.99 0.99 0.99 1.00 1.00 1.00 0.99 0.99`.
+Sky march in the view loop (`try/sky-in-view-loop.diff`): 10.43 / 10.49, diff 0.2431 / 0.1966: dropped (noise-level gain).
+
+Tile table at the forced switch (`--far-switch-px 4`, `cost2/sw-final` vs `cost2/sw-base`, `canopy.py cost2/default ...`), L lit / shaded:
+a1 tiles 0.3836 / 0.2790 (base 0.3843 / 0.2797), voxels 0.3811 / 0.2669; switch line tile side 0.3758 / 0.2737 (base 0.3768 / 0.2749);
+H1 tiles 0.3050 / 0.1938 (base 0.3058 / 0.1941), voxels 0.3149 / 0.1818; line 0.3114 / 0.1968 (base 0.3123 / 0.1974).
+
+Fly-through (`$SCENE --benchmark 50 cost2/fly/fly.csv --route .superpowers/far/fly/fly.route`):
+`Recorded 2108 frames: AVG 42.1, 0.1% low 24.3, 1% low 27.4, 5% low 30.6, MAX 50.0 FPS`;
+bench-route `core 734 36.7 26.0 27.23 far_field 13.60`, `beyond-edge 1373 45.8 37.5 21.86 far_field 11.42`, `route 2107 42.1 27.4 23.73 far_field 12.18`;
+maxima `far_field: max 25.32 at frame 512 t 14.14s, mean 12.18, p99 23.26`, `gpu_ms: max 43.43 at frame 514 t 14.22s, mean 23.67`.
