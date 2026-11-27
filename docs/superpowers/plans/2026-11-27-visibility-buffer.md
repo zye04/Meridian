@@ -1,6 +1,19 @@
 # Visibility Buffer Implementation Plan
 
-Status: draft (2026-11-27), waiting for the director's read. Branch
+Status: in progress. Done: T1 (c03b527), T2 (14e0dde), T3 (494efe0), T4
+(9e3f0c6); stopped before T5 for the director. Notes from doing them:
+- T2 put forward back to bit-exact with main at `--placement off`; the
+  0.169/255 start-view "textureGrad gap" T1 measured was T1's own
+  run-to-run noise, since gone.
+- `precise` on the cluster position math moves from T2 to T6: T2 is a
+  pure refactor, and `precise` can change gl_Position bits.
+- crown-fill (lighting.glsl, mesh.frag, mesh.vert, voxel_instance.frag,
+  common.glsl) wasn't on main when T2 landed: port its edits into
+  cluster_shading.glsl / voxel_shading.glsl at the next rebase.
+- `--rr on` runs aren't repeatable even with `--placement off` (the
+  pre-exposed sun buffer ~0.4%), so T8's guide gate compares sun against a
+  floor run.
+Original status: draft (2026-11-27), waiting for the director's read. Branch
 `visibility-buffer` from main a43f627. Stage 0 is done (go):
 `docs/superpowers/research/2026-11-27-vb-stage0.md`.
 
