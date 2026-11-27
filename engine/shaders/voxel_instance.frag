@@ -128,6 +128,21 @@ void main() {
                                                        mix(1.0, crownR, scene.microShadowStrength);
     }
     addTransmittedAmbient(sh, transmitted, s.occlusion);
+    // Crown fill: the triangles' crown (mesh.mesh) at the voxel's centre, or
+    // with Axis the model's own depths toward the sun and out of it.
+    if (scene.crownFill != 0u) {
+        vec3 meshSun = normalize(toLocal * sh.L);
+        float sunDepth = voxelBoxDepth(axisWord, meshSun);
+        float escape = 0.5 * (up + sides);
+        MeshInfo crown;
+        if (scene.crownFill == 1u &&
+            findCrown(scene, scene.meshes.meshes[cluster.mesh], instance, crown)) {
+            vec3 meshPosition = toLocal * (world - instance.transform[3].xyz);
+            sunDepth = crownSunDepth(crown, meshPosition, meshSun);
+            escape = crownVisibility(crown, meshPosition, normalize(toLocal * s.normal));
+        }
+        addCrownFill(sh, sh.diffuseColor, transmitted, sunDepth, escape);
+    }
     if (scene.giMode != 0u) {
         sh.diffuseLight = diffuseBeforeAmbient +
                           (sh.diffuseLight - diffuseBeforeAmbient) *

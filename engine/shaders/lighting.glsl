@@ -460,6 +460,33 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
     sh.diffuseLight += transmitted / kPi * sh.sunAtSurface * (backNoL * visibility);
 }
 
+// Crown fill (Renderer::setCrownFill): sun light scattered between a crown's
+// leaves. The beam loses 1 - exp(-depth) of itself on the way in from the
+// crown's sunward edge; leaves scatter `albedo` (reflected + transmitted) of
+// what they intercept, which recollides inside the crown with the chance it
+// doesn't escape (spectral invariant, as the probes' leaf hits in
+// gi_probes.comp), so the fill is greener than one bounce. A leaf facing
+// every way sees it on both sides. Energy: the factor is capped at 1, so the
+// fill never exceeds what direct sun on a sunward leaf gives (albedo / pi x
+// sunAtSurface). It reaches the shaded side: added light, the lit side is
+// left as it is. GI probes don't resolve it: their columns (2-32 m) and the
+// far field's 4 m voxels are as large as a crown.
+// Leaves facing every way intercept half the beam per unit area (G = 0.5).
+const float kCrownFillProjection = 0.5;
+// As the probes' leaf recollision cap: some light always escapes.
+const float kCrownFillMaxRecollision = 0.95;
+void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunDepth, float escape) {
+    if (pc.scene.crownFill == 0u || sh.L.y <= 0.0) {
+        return;
+    }
+    vec3 albedo = reflected + transmitted;
+    float recollision = min(1.0 - escape, kCrownFillMaxRecollision);
+    vec3 scattered = min(kCrownFillProjection * (1.0 - exp(-sunDepth)) * albedo /
+                             (1.0 - recollision * albedo),
+                         vec3(1.0));
+    sh.diffuseLight += albedo / kPi * sh.sunAtSurface * scattered;
+}
+
 // After addAmbientLight: a thin surface's two sides read the same probes, so
 // its sample serves the back direction too.
 void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) {
