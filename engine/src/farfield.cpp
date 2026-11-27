@@ -237,6 +237,14 @@ uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, in
   return kFarLevels - 1;
 }
 
+float farAnchorX(const FarFieldGrid &grid) {
+  return grid.originX + static_cast<float>(grid.anchorX) * kCellSize;
+}
+
+float farAnchorZ(const FarFieldGrid &grid) {
+  return grid.originZ + static_cast<float>(grid.anchorZ) * kCellSize;
+}
+
 FarFootprint farFootprint(const FarFieldGrid &grid, uint32_t level, const FarTemplate &tmpl,
                           const DecodedInstance &instance) {
   // A deposit's x/z may round past the corners' hull by a few ulps. Past
@@ -255,15 +263,18 @@ FarFootprint farFootprint(const FarFieldGrid &grid, uint32_t level, const FarTem
     lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
     hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
   }
+  const float ax = farAnchorX(grid), az = farAnchorZ(grid);
+  const int32_t cellVoxels = static_cast<int32_t>(farColumnsPerCell(level) * kBrickEdge);
+  const int32_t offsetX = grid.anchorX * cellVoxels, offsetZ = grid.anchorZ * cellVoxels;
   FarFootprint out;
-  out.x0 =
-      floorDiv4(static_cast<int32_t>(std::floor((lo.x - kPad - grid.originX) * inverseV - 0.5f)));
-  out.z0 =
-      floorDiv4(static_cast<int32_t>(std::floor((lo.z - kPad - grid.originZ) * inverseV - 0.5f)));
-  out.x1 = floorDiv4(
-      static_cast<int32_t>(std::floor((hi.x + kPad - grid.originX) * inverseV - 0.5f)) + 1);
-  out.z1 = floorDiv4(
-      static_cast<int32_t>(std::floor((hi.z + kPad - grid.originZ) * inverseV - 0.5f)) + 1);
+  out.x0 = floorDiv4(static_cast<int32_t>(std::floor((lo.x - kPad - ax) * inverseV - 0.5f)) +
+                     offsetX);
+  out.z0 = floorDiv4(static_cast<int32_t>(std::floor((lo.z - kPad - az) * inverseV - 0.5f)) +
+                     offsetZ);
+  out.x1 = floorDiv4(static_cast<int32_t>(std::floor((hi.x + kPad - ax) * inverseV - 0.5f)) +
+                     offsetX + 1);
+  out.z1 = floorDiv4(static_cast<int32_t>(std::floor((hi.z + kPad - az) * inverseV - 0.5f)) +
+                     offsetZ + 1);
   const float bottom = std::floor((lo.y - 0.5f * v - grid.heightBase) * inverseUnit);
   const float top = std::ceil((hi.y + 0.5f * v - grid.heightBase) * inverseUnit);
   out.lo = static_cast<uint32_t>(std::max(bottom, 0.0f));
@@ -344,6 +355,9 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     const float v = kFarVoxelSize[level], inverseV = 1.0f / v;
     const float scale = fixedScale[level];
     const uint32_t columnsX = grid.cellsX * n, columnsZ = grid.cellsZ * n;
+    const float anchorX = farAnchorX(grid), anchorZ = farAnchorZ(grid);
+    const int32_t offsetX = grid.anchorX * static_cast<int32_t>(n * kBrickEdge);
+    const int32_t offsetZ = grid.anchorZ * static_cast<int32_t>(n * kBrickEdge);
     // Only the cells whose finest stored level is this one or finer get
     // this level's bricks; deposits elsewhere are dropped.
     const auto stored = [&](int32_t columnX, int32_t columnZ) {
@@ -431,14 +445,15 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
           const float value = tv.extinction * (s * s * s);
           const Vec3 normal = rotateByQuaternion(instance.rotation, tv.normal);
           const Vec3 albedo = palette[tv.albedo];
-          const float fx = (p.x - grid.originX) * inverseV - 0.5f;
-          const float fz = (p.z - grid.originZ) * inverseV - 0.5f;
+          const float fx = (p.x - anchorX) * inverseV - 0.5f;
+          const float fz = (p.z - anchorZ) * inverseV - 0.5f;
           const float ix = std::floor(fx), iz = std::floor(fz);
           const float wx = fx - ix, wz = fz - iz;
           for (int32_t dz = 0; dz < 2; ++dz) {
             for (int32_t dx = 0; dx < 2; ++dx) {
               const float wh = (dx ? wx : 1.0f - wx) * (dz ? wz : 1.0f - wz);
-              const int32_t i = static_cast<int32_t>(ix) + dx, j = static_cast<int32_t>(iz) + dz;
+              const int32_t i = static_cast<int32_t>(ix) + offsetX + dx;
+              const int32_t j = static_cast<int32_t>(iz) + offsetZ + dz;
               if (wh <= 0.0f || i < 0 || j < 0 || i >= int32_t(columnsX * kBrickEdge) ||
                   j >= int32_t(columnsZ * kBrickEdge)) {
                 continue;

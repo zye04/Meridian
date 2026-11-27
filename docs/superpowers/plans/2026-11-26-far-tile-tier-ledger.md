@@ -84,3 +84,54 @@ line. The present tier cannot take over at 1.8 km without stage 3.
 
 Saving: at a1, N=41 takes 1.64 ms off the voxel pass and 1.35 ms off
 cluster culling, but the far march costs 2.71 ms: net 0.7 ms GPU.
+
+## Stage 1 — 6bd5aed
+
+Debug (`./build/game/game`, a1, `--frames 4`, `.superpowers/far/s1/a1-debug.log`):
+- `Far field grid: 512x512 cells from cell (-256, -256), L0/L1 bands 128x128/252x252 cells; transient placement 23372110 instances in 19 ms (chunks of 101 rows)`
+- `far field check: 13 cells, 35072 voxels (18650 occupied) compared with the CPU replica, 0 mismatches`
+- `far placement check: 6318 points (3575 kept) in the sample windows compared with the CPU reference, 0 mismatches`
+- `far shadow map check: 8192 texels (3996 with a hit) ... max difference 0.383 m (0 over 1 m), 0 hit/empty mismatches, 0 texels out of steps`
+- `far field ray check: 256 rays (53 partly transmitted) ... max difference 8.7e-07`
+- `Rendered 4 frames, ... far cells 60050, ... 0 dropped by full cull lists ..., 0 validation errors`
+- Crop bricks against main: the whole placement grid's hash differs
+  (0x2761... vs base 0x2f14...): crowns of mirrored trees just past the
+  crop reach the border cells (expected). Interior (outer ring + 1 cells
+  excluded), Debug a1 `--frames 2`:
+  - 6bd5aed + hash: `far field hash 0x772f31c1e61717ba, placement grid inside its outer ring+1 cells 0xd57ea4627115d02a`
+  - base ffc505b + hash: `far field hash 0x749bf067eb98cd52, placement grid inside its outer ring+1 cells 0x35d39cce445d2399`
+  - Cause, from a per-column dump of both (`.superpowers/far/s1/dump-{far,base}.txt`:
+    level, column, heightAndCount, content hash): 68491 of 75600 interior
+    columns differ, only 14 in height/count; heightBase equal (817.991394).
+    A global input: the splat took the trilinear weights relative to the
+    far grid's corner (now ~24 km from crop positions instead of <= 15),
+    so they round differently and fixed-point deposits move by a unit.
+    Unit test (CPU splat, an 8x8 grid vs the same inside 150 cells more
+    on each side): 17 voxels differ without the anchor, 0 with.
+  - Fix: `FarFieldGrid::anchorX/Z`, positions relative to the placement
+    grid's corner, the cell offset added as an integer (CPU, GPU, replica
+    windows). Rerun (Debug a1 `--frames 2`, `.superpowers/far/s1/a1-debug4.log`):
+    `far field hash 0x0897cc326a99f158, placement grid inside its outer ring+1 cells 0x35d39cce445d2399`
+    = base. Replica checks 0 mismatches; `0 validation errors`.
+
+Release (`.superpowers/far/cap.sh ./build-release/game/game A1|H2|H1 .superpowers/far/s1/<v>.png`, every log `Render 2560x1440, display 2560x1440 ... DLSS`, 0 dropped in all 8 cull list lines, cascades included):
+- `Far field: bricks L0/L1/L2 1073100/731635/579831 ... resident 424 MiB (bricks 151/109/85, columns 32/8/2); peak transient 487 MiB, device memory allocated at peak 10306 MiB (all heaps 10403 MiB); templates 9 ms, splat 251 ms (L0/L1/L2 104/71/76), total 271 ms; 0 lost deposits`
+- `Loaded: resident 9927 MiB` (stage 0: 9586; +341 MiB; gate 12288)
+- `Far shadow map: box 32768 x 642 x 32768 m, up to 8388608 texels (16.0 MiB per map, 2 maps), 16 m texels at the default sun`
+
+| view | far cells | far field ms | voxel trees ms | GPU ms | GPU ms stage 0 default |
+|---|---|---|---|---|---|
+| a1 | 60050 | 18.24 | 6.04 | 39.47 | 21.90 |
+| H2 | 58012 | 5.94 | 6.83 | 31.55 | — |
+| H1 | 49983 | 19.18 | 6.30 | 41.44 | 22.31 |
+
+Look: `.superpowers/far/s1/sheet-stage1.png` (a1/H2/H1, the stage-0 a1
+and H1 below, 5.jpg and 7.jpg as the reference row),
+`.superpowers/far/s1/crop-h1.png` (1:1 horizon canopy at H1, before and
+after, beside 7.jpg's far forest at 1:1). The bare mirrored hills are
+forested to the horizon; the far canopy is stippled 4-16 m blocks,
+bluer/greyer than 7.jpg (no shading work yet, as the director ruled).
+
+Cost: the far pass is 18-19 ms at a1 and H1 (60k / 50k cells). Not yet
+measured why (director's candidate: overlapping boxes marched empty per
+pixel, no front-to-back early-out across cells): next step.

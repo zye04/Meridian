@@ -1004,8 +1004,9 @@ struct FarSplatConstants {
   // The cells that store this level (FarFieldGrid::bands; the coarsest
   // level: all), x0 z0 x1 z1: deposits elsewhere are dropped.
   int32_t band[4] = {};
+  int32_t anchorX = 0, anchorZ = 0;
 };
-static_assert(sizeof(FarSplatConstants) == 136);
+static_assert(sizeof(FarSplatConstants) == 144);
 
 // Must match the push constants in farfield_shadow.comp: builds texels
 // [2 firstWord, 2 (firstWord + wordCount)) of the map, two per word.

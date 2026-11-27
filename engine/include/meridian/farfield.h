@@ -157,7 +157,15 @@ struct FarFieldGrid {
   uint32_t cellsX = 0, cellsZ = 0;
   int32_t bands[kFarLevels - 1][4] = {{INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
                                       {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
+  // The splat takes positions relative to the corner of grid cell (anchorX,
+  // anchorZ), not to origin: the weights' float rounding then depends on the
+  // anchor alone, so the far grid's extent leaves the crop's bricks bit-equal
+  // and a replica window rounds like the whole grid.
+  int32_t anchorX = 0, anchorZ = 0;
 };
+// The anchor's world x and z (exact: cell corners are integers in float).
+float farAnchorX(const FarFieldGrid &grid);
+float farAnchorZ(const FarFieldGrid &grid);
 // The finest level cell (x, z) of the grid stores (farfield.glsl
 // farFinestLevel).
 uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, int32_t z);

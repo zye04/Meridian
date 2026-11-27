@@ -218,6 +218,49 @@ TEST_CASE("The splat conserves extinction under rotation and scale") {
   }
 }
 
+TEST_CASE("A larger far grid anchored at the inner grid splats its cells bit-equal") {
+  const FarTemplates tree = filterFarTemplate(treeGrid());
+  const FarFieldGrid inner{-256.0f, -256.0f, 400.0f, 8, 8};
+  // 150 cells out the origin is ~9.9 km away: positions relative to it
+  // would round 32x coarser.
+  const uint32_t margin = 150;
+  FarFieldGrid outer{inner.originX - margin * kCellSize, inner.originZ - margin * kCellSize,
+                     inner.heightBase, inner.cellsX + 2 * margin, inner.cellsZ + 2 * margin};
+  outer.anchorX = outer.anchorZ = static_cast<int32_t>(margin);
+  const std::array<float, kFarLevels> scale = {65536.0f, 65536.0f, 65536.0f};
+  std::vector<DecodedInstance> instances;
+  for (int i = 0; i < 6; ++i) {
+    instances.push_back(instanceAt({-150.3f + 61.7f * i, 437.9f + 0.37f * i, 140.1f - 53.3f * i},
+                                   {0.3f, 0.8f, 0.5f}, 0.4f * i, 0.9f + 0.05f * i));
+  }
+  const FarFieldCpu a = splatFarField(inner, {&tree, 1}, kPalette, instances, scale);
+  const FarFieldCpu b = splatFarField(outer, {&tree, 1}, kPalette, instances, scale);
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    const uint32_t n = farColumnsPerCell(level);
+    uint32_t occupied = 0;
+    for (uint32_t z = 0; z < inner.cellsZ * n; ++z) {
+      for (uint32_t x = 0; x < inner.cellsX * n; ++x) {
+        const BrickColumn &ca = a.columns[level][farColumnIndex(inner.cellsX, level, x, z)];
+        const BrickColumn &cb = b.columns[level][farColumnIndex(outer.cellsX, level,
+                                                                x + margin * n, z + margin * n)];
+        CAPTURE(level);
+        CAPTURE(x);
+        CAPTURE(z);
+        REQUIRE(ca.heightAndCount == cb.heightAndCount);
+        for (uint32_t i = 0; i < columnBrickCount(ca) * kBrickVoxels; ++i) {
+          const uint32_t va =
+              farBrickVoxel(a.voxels[level].data(), ca.firstBrick + i / kBrickVoxels, i % kBrickVoxels);
+          const uint32_t vb =
+              farBrickVoxel(b.voxels[level].data(), cb.firstBrick + i / kBrickVoxels, i % kBrickVoxels);
+          CHECK(va == vb);
+          occupied += va != 0 ? 1 : 0;
+        }
+      }
+    }
+    CHECK(occupied > 0);
+  }
+}
+
 namespace {
 
 // A 1 m grid with one voxel at each lattice index given.

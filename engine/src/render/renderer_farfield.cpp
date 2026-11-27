@@ -93,6 +93,8 @@ void checkFarField(const FarFieldGrid &grid, uint32_t ring,
       window.bands[level][2] = b[2] - x;
       window.bands[level][3] = b[3] - z;
     }
+    window.anchorX = grid.anchorX - static_cast<int32_t>(x0);
+    window.anchorZ = grid.anchorZ - static_cast<int32_t>(z0);
     const std::vector<DecodedInstance> decoded = windowInstances(x0, z0, x1, z1);
     const FarFieldCpu cpu = splatFarField(window, templates, palette, decoded, scales);
     const auto report = [&](uint32_t level, const char *what) {
@@ -377,6 +379,8 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                     heightfield.minHeight - kFarBaseMargin, cellsX, cellsZ};
   const auto offsetX = static_cast<uint32_t>(pg.firstX - firstX);
   const auto offsetZ = static_cast<uint32_t>(pg.firstZ - firstZ);
+  grid.anchorX = static_cast<int32_t>(offsetX);
+  grid.anchorZ = static_cast<int32_t>(offsetZ);
   for (uint32_t level = 0; level + 1 < kFarLevels; ++level) {
     const auto margin = static_cast<int32_t>(std::ceil(kFarBandMeters[level] / kCellSize));
     grid.bands[level][0] = std::max(static_cast<int32_t>(offsetX) - margin, 0);
@@ -416,8 +420,10 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   constants.templateVoxels = templateVoxelBuffer.address;
   constants.palette = farPalette.address;
   constants.cellData = cellData.address;
-  constants.originX = grid.originX;
-  constants.originZ = grid.originZ;
+  constants.originX = farAnchorX(grid);
+  constants.originZ = farAnchorZ(grid);
+  constants.anchorX = grid.anchorX;
+  constants.anchorZ = grid.anchorZ;
   constants.heightBase = grid.heightBase;
   constants.cellsX = grid.cellsX;
   constants.cellsZ = grid.cellsZ;
@@ -933,6 +939,11 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       const uint32_t n = farColumnsPerCell(level);
       for (uint32_t z = 0; z < pg.rows * n; ++z) {
         for (uint32_t x = 0; x < pg.columns * n; ++x) {
+          // Crowns from mirrored trees past the crop reach the outer ring.
+          const uint32_t cx = x / n, cz = z / n, m = ring + 1;
+          if (cx < m || cz < m || cx + m >= pg.columns || cz + m >= pg.rows) {
+            continue;
+          }
           const BrickColumn &column = columns[level][farColumnIndex(
               grid.cellsX, level, offsetX * n + x, offsetZ * n + z)];
           cropHash = fnv1a(cropHash, &column.heightAndCount, sizeof(uint32_t));
@@ -944,7 +955,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
         }
       }
     }
-    std::printf("far field hash 0x%016llx, placement grid 0x%016llx\n",
+    std::printf("far field hash 0x%016llx, placement grid inside its outer ring+1 cells 0x%016llx\n",
                 static_cast<unsigned long long>(hash), static_cast<unsigned long long>(cropHash));
     // What the brick count holds: bricks with no occupied voxel are
     // footprint slack (the rotated hull's AABB plus the trilinear margin).

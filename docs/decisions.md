@@ -5884,7 +5884,14 @@ cached shadow pages are invalidated.
   (64 MiB worst case each) feeding the splat's occupancy and accumulate,
   then is discarded; nothing reaches the placed table, the cell table or
   the TLAS. Inside the placement grid the same pass reproduces the placed
-  table, so the crop's bricks are unchanged.
+  table, so the crop's bricks are unchanged: the splat takes positions
+  relative to the placement grid's corner (`FarFieldGrid::anchorX/Z`) and
+  adds the whole-cell offset as an integer. Relative to the far grid's
+  corner (up to ~24 km away instead of 15) the trilinear weights round
+  differently and moved 90% of the crop's columns by a fixed-point unit.
+  Debug a1: bricks inside the placement grid's outer ring + 1 cells hash
+  equal to main's (0x35d3...); the ring itself takes crowns of mirrored
+  trees past the crop.
 - Levels by band (`FarFieldGrid::bands`, `kFarBandMeters`): L0 to 2 km
   past the placement grid, L1 to 6 km, L2 over the extent; a cell draws
   at least its finest stored level, and the far shadow map marches at

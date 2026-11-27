@@ -60,7 +60,14 @@ layout(push_constant) uniform FarSplatConstants {
     uint rowEnd;
     // The cells that store this level, x0 z0 x1 z1.
     int bandX0, bandZ0, bandX1, bandZ1;
+    // FarFieldGrid's anchor cell: originX/Z are its corner (farAnchorX/Z).
+    int anchorX, anchorZ;
 } pc;
+
+// The anchor cell's offset in this level's voxels.
+ivec2 anchorVoxels() {
+    return ivec2(pc.anchorX, pc.anchorZ) * int(farColumnsPerCell(pc.level) * kBrickEdge);
+}
 
 // Whether brick column (x, z) of this level lies in a cell that stores it.
 bool storedColumn(int x, int z) {
@@ -115,8 +122,8 @@ void main() {
     uint low = uint(max(bottom, 0.0));
     uint high = uint(max(top, 0.0));
     // Voxel indices to columns (4 voxels wide), floored.
-    ivec2 first = ivec2(x0, z0) >> 2;
-    ivec2 last = (ivec2(x1, z1) + 1) >> 2;
+    ivec2 first = (ivec2(x0, z0) + anchorVoxels()) >> 2;
+    ivec2 last = (ivec2(x1, z1) + anchorVoxels() + 1) >> 2;
     ivec2 columns = ivec2(pc.cellsX, pc.cellsZ) * int(farColumnsPerCell(pc.level));
     for (int z = max(first.y, 0); z <= min(last.y, columns.y - 1); ++z) {
         for (int x = max(first.x, 0); x <= min(last.x, columns.x - 1); ++x) {
@@ -129,7 +136,8 @@ void main() {
         }
     }
     if (pc.level == 0u) {
-        ivec2 cell = ivec2(floor((position.xz - vec2(pc.originX, pc.originZ)) / kCellSize));
+        ivec2 cell = ivec2(floor((position.xz - vec2(pc.originX, pc.originZ)) / kCellSize)) +
+                     ivec2(pc.anchorX, pc.anchorZ);
         cell = clamp(cell, ivec2(0), ivec2(pc.cellsX, pc.cellsZ) - 1);
         float height = s * (info.centerMax.y + 0.5 * v);
         atomicMax(pc.cellData.values[uint(cell.y) * pc.cellsX + uint(cell.x)],
@@ -167,8 +175,8 @@ void main() {
         for (int dz = 0; dz < 2; ++dz) {
             for (int dx = 0; dx < 2; ++dx) {
                 precise float wh = (dx != 0 ? wx : 1.0 - wx) * (dz != 0 ? wz : 1.0 - wz);
-                int i = int(ix) + dx;
-                int j = int(iz) + dz;
+                int i = int(ix) + anchorVoxels().x + dx;
+                int j = int(iz) + anchorVoxels().y + dz;
                 if (wh <= 0.0 || i < 0 || j < 0 || i >= voxelsXZ.x || j >= voxelsXZ.y) {
                     continue;
                 }
