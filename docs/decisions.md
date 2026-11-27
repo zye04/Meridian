@@ -6181,3 +6181,6 @@ in the ledger's "Review fixes" section.
   trees: the far field's static-level hash changes, the interior crop
   hash (which skips the outer ring of cells) does not. PlacementConstants
   loses its mirror flag and placed-grid rect (136 bytes).
+- `placementField` throws for a crop over 16 km: `placementFold` adds its
+  period (2 x size x spacing, fixed point) to a remainder below it in
+  uint32, which wraps once the period passes 2^31 (Napf: 15 km, fits).

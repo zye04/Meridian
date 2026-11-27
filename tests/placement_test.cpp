@@ -439,6 +439,15 @@ TEST_CASE("the grid's edge cells forest their strip past the crop") {
   CHECK(strip > 0);
 }
 
+TEST_CASE("the placement fold's period fits a uint32 sum: crops up to 16 km") {
+  Heightfield field; // no samples needed
+  field.spacing = 2.0f;
+  field.width = field.height = 8192; // period 2 x 8192 x 2 m = 2^15 m = 2^31 fixed
+  CHECK_NOTHROW(placementField(field));
+  field.width = 8193;
+  CHECK_THROWS(placementField(field));
+}
+
 TEST_CASE("streamKeepFraction thins by distance squared and fades out") {
   CHECK(streamKeepFraction(0.0f, 40.0f, 200.0f) == 1.0f);
   CHECK(streamKeepFraction(40.0f, 40.0f, 200.0f) == 1.0f);

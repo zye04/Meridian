@@ -440,6 +440,11 @@ PlacementField placementField(const Heightfield &heights) {
   if (extentX >= (1ull << 31) || extentZ >= (1ull << 31)) {
     throw std::runtime_error("heightfield too large for fixed-point placement");
   }
+  // placementFold adds its period to a remainder below it in uint32.
+  if (uint64_t{2} * heights.width * spacing > (1ull << 31) ||
+      uint64_t{2} * heights.height * spacing > (1ull << 31)) {
+    throw std::runtime_error("heightfield too large for the placement fold (crop over 16 km)");
+  }
   return {-static_cast<int32_t>(extentX / 2), -static_cast<int32_t>(extentZ / 2), spacing,
           heights.width, heights.height};
 }
