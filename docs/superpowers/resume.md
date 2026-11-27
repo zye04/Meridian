@@ -1,87 +1,95 @@
-# Resume here (entry point; updated 2026-11-27)
+# Resume here (entry point; updated 2026-11-27 night)
 
 Read this file first, ask the open questions below, and update the file
 before ending the session. It holds current truth only: open questions,
-running lanes, the ordered next steps, the gates, and the state of main.
-Session history lives in git (`git log -- docs/superpowers/resume.md`) and
-in `docs/decisions.md`.
+branches, the order of work, the gates, and the state of main. Session
+history lives in git (`git log -- docs/superpowers/resume.md`) and in
+`docs/decisions.md`. Known issues: `docs/backlog.md`.
 
 ## Open questions for the user
 
 At most three, each answered in chat (the user opens no documents); the
-agent writes the answer into the spec or here.
+agent writes the answer into the spec or here. Images are in the main
+checkout under `.superpowers/fable-review/img/` (git-ignored).
 
-1. Tree structure: the reference crowns are separate round domes, ours a
-   continuous mat of open crowns. Denser, rounder tree assets, or keep the
-   current Megaplants variants? Image (main checkout, under
-   `.superpowers/fable-review/img/morning-2026-11-27/`): `crown-s1-final.jpg`.
-2. Crown fill (`--crown-fill crown`) on by default at +1.4 to 2.0 ms?
-   Image: `crown-whole-off-vs-aa-fill.jpg` (same directory).
-3. Far tile tier: keep the forest to the horizon at its current cost while
-   the visibility buffer is built, or hold the branch? Image:
-   `far-final-sheet.png` (same directory).
+1. Crown colour: greens x1, no hue shift, white balance 6504 K gives the
+   reference's crown colour at o4 (top 5 % 0.529 / 0.035 / 133 against
+   1.jpg 0.527 / 0.033 / 133) but dulls the meadow (chroma 0.078 -> 0.049,
+   reference 0.086). Keep the working look or take the neutral greens?
+   Source: `../meridian-light/.superpowers/light/REPORT-r5.md`.
+2. Trees (reopened): the evidence says clumped crowns (sub-crown masses),
+   not denser ones (`../meridian-trees/.superpowers/trees/dense/REPORT.md`).
+   Free one-tree premise test, buy a pack, or leave? Re-ask after the
+   path-traced targets lane. Tools must be script-driven (SpeedTree was
+   rejected because the agent could not drive its GUI).
 
-No spec waits for approval: the broadleaf forest floor spec is decided
-and sequenced, the GTAO spec is superseded (rewrite after the visibility
-buffer), the DAG voxel design is approved.
+Decided today (2026-11-27): working look by eye is EV -0.85, offset 0.006,
+palette light1, white balance 7500 K (`../meridian-light/.superpowers/light/grades/wb7500.json`);
+leaf light B in and on by default. Parked, not for raising unprompted:
+DLSS 5 NR via Optiscaler as a look reference (never a shipping path); the
+Unreal comparison.
 
-## Lanes running
+## The lighting target
 
-| Branch | Window / worktree | State |
+Our own `--reference` path tracer, on our trees at the same camera, gives
+the reference's kind of image: dark, crisp crowns over dark gaps. At the
+same exposure the path tracer's crowns are about 3x darker with 2-3x the
+brightness-normalised pixel contrast (backlog "Raster over-lights crown
+interiors"). The raster over-lights crown interiors and gaps, so the
+look gap is lighting and needs engine work. The path tracer is the
+same-scene target for lighting. Open: what it does with haze and far
+trees, noise at 16 spp (1.8 %), the exposure-matched comparison.
+
+User's criterion: forms read as solid at every distance ("structure, not
+busy"); measure with `tools/band-contrast.sh` plus a squint pair. Ours
+is soft at pixel size (o4 2 / 6 px 5.5 / 7.3 against 10.1 / 11.2) and
+equal at crown size.
+
+## Branches (2026-11-27 night; all pushed unless noted)
+
+| Branch | Worktree | State |
 |---|---|---|
-| `g1` | main checkout (`~/Projects/dev/meridian`) | merged into main 2026-11-24 (fd3df78); the checkout stays on `g1` (the director works here) |
-| `main` | `../meridian-main` | main's worktree (housekeeping and merges) |
-| `voxel-coverage` | `../meridian-leaf` | leaf lane: coverage stage 2 merged (8be2e9d); crown-specular (voxel crowns occlude their ambient by the crown with GI on) merged 2026-11-27 (363096d); stage 3 on hold; next: see the `crown-light` row |
-| `far-tier` | `../meridian-far` | at 1deda3b (pushed): far tile tier per `specs/2026-11-26-far-tile-tier-design.md` and `plans/2026-11-26-far-tile-tier.md` (both on that branch, not on main): forest beyond the heightfield crop out to 16 km from the mirrored placement rule (transient placement feeding the far-field splat), far cells shaded through the cluster voxels' functions, `--far-fine` 1 m / 2 m levels (off; streaming deferred: 1 m tiles cost more than the trees they replace), `--far-extent`, `--far-switch-px`. Independent review plus two fix checks: the two major findings fixed and verified; residuals recorded as backlog rows on the branch; they close before any merge. Cost: far pass about 10.8 ms at the scene views, fly-through average 23.7 ms vs 10.2 ms with `--far-extent 0`. Waits for the user's eye; no merge |
-| `crown-light` | `../meridian-leaf` | at e1639df (pushed): `--canopy-sky up` (sky ambient outside the GI clipmap attenuated through the far-field bricks, off), `--crown-fill crown` (multiple-scattering fill inside crowns, gated by the sun above each point on the crown's top plane, off, +1.4 to 2.0 ms), plus the specular AA that already merged separately. Carries a merge of `scene-broadleaf`, so it cannot merge as a whole. Waits for the user's eye on the fill |
-| `scene-broadleaf` | `../meridian-scene` | at 97bd2ef (pushed): broadleaf scenery, tree palette, ground colours toward the meadow (round 2c), main 363096d merged in. Parked |
-| `foliage-specular-aa` | `../meridian-aa` | merged 2026-11-27 (d8440c4: foliage specular antialiasing, on by default, `--foliage-specular-aa off` for A/B); worktree removable |
-| `voxel-crown-9` | `../meridian-crown` | parked: rule A for root wood groups; waits for the leaf lane's trunk view |
-| `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
-| `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
+| `main` a43f627 | `../meridian-main` | the visibility buffer spec is the only merge of the day. The main checkout stays on `g1` |
+| `crown-fill` 505eb84 | `../meridian-fill` | port done, NOT merged. Review: merge after fixes F1-F4 (backlog row); on costs +2.6 ms (approved 1.4-2.0). Held until compared with the path tracer: it adds light inside crowns. Report `.superpowers/fill/REPORT.md` |
+| `visibility-buffer` a10ba99 | `../meridian-vb` | stage 1 and stage 2 partial behind `--visibility`. Frame ms off -> on: edge 28.78 -> 22.35, start 23.90 -> 19.99, meadow 15.37 -> 12.57, overview 27.86 -> 26.86, s1 24.49 -> 24.01; look within floor + 0.3; +30 MiB. Owed before T9: motion gates on (`.superpowers/vb/t8/gates-rest.sh`, ~1.5 h), a Debug capture with the resolve, then the midpoint review. Report `.superpowers/vb/REPORT.md` |
+| `far-light` cab5d52 | `../meridian-light` | closed. Far-field rays: no effect; tone closes the black level; softness is not the upscaler; leaf light B kept (port: commit 5d03ce6 only, notes in `REPORT-r5.md`; unchecked with GI off). Reports `.superpowers/light/REPORT-r3.md`, `-r4.md`, `-r5.md`, `LEDGER.md` |
+| `trees-dense` 5f9872a | `../meridian-trees` | closed. 2x leaves closes a lone crown, not the forest's read; found the voxel hidden cut (backlog). Report `.superpowers/trees/dense/REPORT.md` |
+| `pt-targets`, `port-b-look` | `../meridian-light`, a port worktree | started 2026-11-27 night (path-traced targets; leaf light B and the working look to main); state not recorded here, read their `.superpowers/` reports |
+| `far-tier` 1deda3b | `../meridian-far` | far tile tier per `specs/2026-11-26-far-tile-tier-design.md` (on that branch); waits for the user's verdict and the visibility buffer; residuals are backlog rows on the branch; no merge |
+| `scene-broadleaf`, `crown-light`, `voxel-crown-9`, `fix-light-temporal`, `canopy-backlit`, `vb-stage0`, `trees-domes` | see Workspace | done or parked; detail in `.superpowers/fable-review/handover-2026-11-27-midday.md` |
 
-Lane report shape (every lane ends its report with these five, numbers
-at 2560x1440): done, measured, look (image paths), needs from the user,
-next. The user relays between windows by pasting them.
+Run-to-run floor with placement on: 0.2-0.6/255; only `--placement off`
+is exact. Lane report shape: see CLAUDE.md.
 
-## Ordered next steps (updated 2026-11-27)
+## Ordered next steps (updated 2026-11-27 night)
 
-Steps 4 onward come from the assessment of 2026-11-24.
-
-The assessment is `.superpowers/fable-review/architecture-assessment.md`
-in the main checkout (git-ignored); decisions.md holds the three entries
-that came out of it ("Performance gate restated", "Visibility buffer is
-unconditional", "VRAM budget").
-
-1. Leaf voxel look per `specs/2026-11-26-voxel-leaf-coverage-design.md`
-   (leaf lane, `voxel-coverage`). The crown-scale light gap was measured:
-   shaded/lit luminance in crowns is 11x below the reference inside the GI
-   clipmap; the gated crown fill closes most of it at a sunlit view (0.114
-   vs 0.133). What remains at crown scale is tree structure and leaf
-   colour, a content question for the user (open question 1).
-2. Bark material lane: specular per material, import channels, EON A/B.
-3. Far wood triangle cost: crown round 9, rule A, rootless models
-   (`voxel-crown-9`).
-4. Visibility buffer: spec, then build (structural: spec and plan).
-5. Ambient occlusion respecified on the resolve: GTAO or the visibility
-   bitmask, chosen in that spec.
-6. Forest floor: cook (independent of the renderer, once memory headroom
-   exists), then placement and the contact look (after AO).
-7. Far tile tier: spec decided and stages 0, 1, 3 and stage 2 part 1 built
-   on `far-tier` (2026-11-27); open: the user's verdict, the review
-   residuals, the far pass cost (needs shade-once pixels: the visibility
-   buffer), streamed 2 m level and a mirrored margin of real trees past
-   the crop edge.
-8. Wind on trees and grass with the static-plus-dynamic shadow split.
-9. Frame pacing, HDR output (before the final grade is tuned, on a real
-    HDR monitor), then the final grade.
-10. Water (river; planar reflections plus screen-space).
-11. Ambient sound.
+1. Leaf light B and the working look to main (port lane), a ground
+   walking view in every look sheet.
+2. Path-traced targets beside it (one session, must end in one named fix):
+   `--reference` at 64+ spp at o4, s1, h2 and the lone tree,
+   exposure-matched; whole frames reference | raster | path traced;
+   `tools/reference-compare.py` per region and per light term; what the
+   tracer does with haze and far trees. Command: `REPORT-r5.md`.
+3. Build the lighting fix item 2 names (likely per-pixel occlusion on the
+   visibility buffer's resolve). Then re-judge crown fill and the trees'
+   form under correct light.
+4. Visibility buffer behind it: owed gates, midpoint review, merge stages
+   1-2 (flag off by default), then stage 3 (voxels, where the aerial views
+   gain). GPU runs queue on one lock: one GPU-heavy lane at a time
+   while the look lanes run.
+5. Crown fill fixes F1-F4 only if item 3 keeps it. Shadowed haze lane
+   (`prompts/haze-lane.md`, main checkout) after item 2 reports on haze.
+   Voxel hidden-cut fix after the buffer's voxel stage.
+6. Trees: the user's pending choice (open question 2).
+7. Later (unchanged): bark material lane; far wood triangle cost; AO
+   respecified on the resolve; forest floor; far tile tier verdict; wind on
+   trees and grass; frame pacing, HDR output, final grade; water; sound.
 
 Ceremony by size: structural changes (visibility buffer, far tile tier,
 wind) get a spec and a plan; everything else gets a backlog row, the
 change and a decisions.md entry. Spec status values: draft, decided,
-in progress, done.
+in progress, done. Unverified on main: long Debug run, route gates, 1 %
+lows (backlog).
 
 ## Gates
 
@@ -95,15 +103,8 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
   (first draw, far field included); transient peak <= 14 GiB (14336 MiB),
   the `TLAS:` and `Far field:` lines' peaks; device-local, at the showcase
   views, printed by every capture run; every spec states its VRAM delta.
-  Main at eb10736 (forest edge, `--trees`): resident 13988 MiB at the end
-  of the run (over the gate; the `Loaded:` line reads 13956, the frames
-  allocate 32 MiB more; the `TLAS:` line's 13282 predates the far field's
-  731 MiB), peak 14160
-  MiB at the far field, on the 16 GB card. Main at 3d51440 meets the
-  gate at the forest edge (`--trees`): resident 11998 MiB (`Loaded:`),
-  peak 13086 MiB (models loading; far field 12411), 290 MiB of resident
-  headroom. Main at d8440c4 loads the default scene (`--trees`) at 11370
-  MiB resident; `far-tier` loads it at 12033 MiB (255 MiB under the gate).
+  Main at d8440c4 loads the default scene (`--trees`) at 11370 MiB
+  resident; `far-tier` loads it at 12033 MiB (255 MiB under the gate).
 - VRAM figures predate vertex compression; the next GPU lane updates them
   from its `Loaded: resident` line.
 - "Done" is judged by the user's eye on a showcase core of about 4 x 4 km
@@ -112,113 +113,40 @@ Measured on the benchmark route, 2560x1440 native DLAA, GI on:
 
 ## Voxel foliage (G1, merged 2026-11-24)
 
-Plan, ledger (every ruling, command and raw number) and decisions:
-`plans/2026-11-24-dag-voxel-foliage.md`, its ledger, decisions.md "Voxels
-inside the cluster DAG", "Cull list caps from measured need", "Voxel
-clusters cast into the cascades", "Caster LOD of one texel in every
-cascade".
+Plan, ledger and decisions: `plans/2026-11-24-dag-voxel-foliage.md` and its
+ledger; decisions.md "Voxels inside the cluster DAG", "Voxel-look" entries,
+"Caster LOD of one texel in every cascade". The user's bar: voxels are not
+noticeable in gameplay; the switch cannot be pointed at on foot or in
+flight. Known gaps are backlog rows (crown coverage at the overview, hidden
+cut, thin structure).
 
-- The user's bar (2026-11-24): voxels are not noticeable in gameplay; the
-  user cannot point at the switch on foot or in flight.
-- Known gap: at the overview the voxel crowns cover more of the clearings
-  than triangle crowns (crown 25.5% of the clearing mask against 11.5% in
-  main ray traced; backlog row).
-- Voxel-look fixes merged 2026-11-25 (`--voxel-lod near` reference
-  flag; voxels take the sun from the cascades at every distance; solid
-  parts of a voxelizing model take its finest voxel; `--shadows rt` voxels
-  trace from themselves). Findings: decisions.md "Voxel-look" entries;
-  backlog rows for the crown sun-diffuse design, the far-crown cascade
-  offset and small-model solid parts. The walk across a hornbeam's switch
-  (instance 1621093) is no worse than main b6c1b3b in any segment.
-- Next: the trunk close-up fix merged (9944513); the open voxel work is in "Ordered next steps" above and the backlog.
+## State of main (a43f627)
 
-## State of main (2026-11-27, d8440c4)
-
-Native 1440p; DLSS Super Resolution DLAA default (own stable TAA = fallback,
-Ray Reconstruction an A/B); raster cascaded sun shadows default; `--fov` 70
-deg horizontal; GI probes default (ground cache, material albedo, foliage
-lit where the ray meets it); reference path tracer (`--reference SPP`);
-Megascans Trees (alder, beech, hornbeam, 30 variants, traced opaque leaves,
-leaf transmission per KHR) under `--trees`; voxel levels inside the trees'
-cluster DAGs (G1), casting into sun cascades 0-3, and the far field from
-the same voxelizer;
-volumetric clouds (outline off by default); valley-anchored haze; geo
-channels and causal placement (forest follows land use, scree layer).
-Landed since the g1 merge: `--capture-views FILE DIR` (many views in
-one launch), `--voxel-near M` (voxel switch distance floor, default 0),
-cluster vertices 48 -> 20 B, wood voxels folded into the leaf voxel of
-their cell, crown round 7 (bark stays triangles until thinner than its
-voxel edge) and round 8 (held-back wood groups join the voxels at the
-next power of two, voxelizer 16).
-Merged 2026-11-27: crown-specular (363096d) and foliage specular
-antialiasing (d8440c4, on by default); neither has had a long Debug run.
-Parity route baseline 27.9 fps with the causal forest (accepted; the
-performance lane takes it, backlog "Forest render cost after causal
+Native 1440p; DLSS Super Resolution DLAA default (own stable TAA =
+fallback, Ray Reconstruction an A/B); raster cascaded sun shadows default;
+GI probes default; reference path tracer (`--reference SPP`); Megascans
+Trees under `--trees`; voxel levels inside the trees' cluster DAGs (G1),
+casting into sun cascades 0-3, far field from the same voxelizer; volumetric
+clouds; valley-anchored haze; geo channels and causal placement;
+crown-specular and foliage specular antialiasing (on by default); the
+visibility buffer design (spec only). Parity route baseline 27.9 fps with
+the causal forest (accepted; backlog "Forest render cost after causal
 placement").
 
 ## Workspace
 
-- Worktrees: the main checkout (branch `g1`), `../meridian-main` (`main`),
-  `../meridian-leaf` (`voxel-coverage`), `../meridian-spec-leaf`
-  (`spec-voxel-coverage`), `../meridian-crown` (`voxel-crown-9`),
-  `../meridian-lane-b`, `../meridian-canopy`. `../meridian-voxel-look`
-  removed 2026-11-26; its `.superpowers/` is in
-  `.superpowers/archive/voxel-look/` (main checkout, git-ignored).
+- Worktrees: `git worktree list` (table above names the live ones; remove
+  one once its branch is merged).
 - Parked branches (unmerged, on origin; finish or drop when the area comes up):
   - `clouds-25d`, `clouds-25d-mip`: paused 2.5D clouds (volumetric kept).
   - origin only: `ground2` (natural terrain transitions WIP),
     `ground2-cliffs` (non-repeating cliffs WIP); both wait for the forest
     floor work to decide them.
-- Archive tags `archive/trunk-fix`, `archive/voxel-crown`, `-2`, `-4`, `-6`,
-  `-6-trunk`, `-7-wood`, `-8-wait` (none existed on origin), and
-  `archive/voxel-look`, `archive/debug-tools`, `archive/debug-tools-2`,
-  `archive/step4-rt-memory` (deleted locally and on origin): branches fully
-  merged into main, deleted 2026-11-26; tags pushed.
-- Archive tags for the five branches deleted on 2026-11-24 (locally and on
-  origin); `git checkout archive/<name>` to read one:
-  - `archive/far-c`: far-cell raster with two-phase Hi-Z, slower than main
-    (the visibility buffer replaces its purpose).
-  - `archive/far-m-shadow2`: voxel trees cast into cascades 0-3 (G1 Task 8
-    does it).
-  - `archive/farm-cpuvox`: CPU voxelizer prototype (tools/cpuvox), absorbed
-    by g1.
-  - `archive/clouds`: pre-rebase clouds lane, superseded.
-  - `archive/meadow-y`: far-field grass match WIP (redone after G1).
-- Old lane notes and tools (next.md, RESUME.md, progress ledgers, capture
-  scripts) from the 55 removed worktrees: `.superpowers/archive/<worktree>/`
-  in the main checkout (git-ignored). The G7 lane helpers (cap.sh, rgb.py,
-  oklab-stats.py, forest-clarity.sh, albedo-cap.sh) are in
-  `.superpowers/archive/g7/g7/tools/`; the paused `cloudpop` investigation
-  in `.superpowers/archive/cloudpop/cloudpop/RESUME.md`.
+- Archive tags `archive/*` hold merged or superseded branches (`git tag -l
+  'archive/*'`; `git checkout archive/<name>` to read one).
+- Old lane notes and tools from removed worktrees: `.superpowers/archive/<worktree>/`
+  in the main checkout (git-ignored).
 - Board: https://github.com/users/zye04/projects/1 (issues #1-#13, #16-#32).
-
-## Area notes (detail behind the ordered steps; agreed order within each)
-
-- Canopy lighting (user 2026-11-23): interior sun-path ablation on the new
-  terrain (backlog "Forest interior floor"), then front-lit residuals
-  (canopy-edge GI sky term, silvery leaves), then the screen-space
-  visibility-bitmask pass (GI plan Tasks 6-8; structural: short plan, ask
-  first; radius <= 1.5 m, sector-masked probe fill, ~1 ms).
-- Lighting after that: G5 (#5) contact/micro shadows tuned on the GI image;
-  #30 remainder (intra-crown sun from the prototype voxels, recollision).
-- Voxels and leaves (user priority 2026-11-23): seamless voxel switch (G1):
-  a seam gate first, then the band with opaque leaves, then the voxels'
-  grey speckle; leaf shading: still-camera jitter 1.02 -> 1.35 with traced
-  leaves, G18 specular AA, G13 back faces, G15 roughness.
-- Terrain: step 4 (fine relief synthesis against the 0.5 m patch) or the
-  0.5 m height clipmap (`research/2026-11-23-terrain-triage.md`).
-  Deferred minors: no maxPushConstantsSize check (placement push constants
-  144 B); the forest-floor bake sits half a sample off its texel centre.
-- Image stability, G19 (#22): re-run preset M vs K from scratch
-  (`tools/motion-clarity.sh build-release .superpowers/motion/preset-M
-  --dlss-preset M`, same for K); then the cloud small-detail smear A/B list
-  in `research/2026-11-22-neon-triage.md`. Paused `cloudpop` (sky pops on a
-  still camera; suspects: the outline's contrast term, the composite's
-  binary motion switch) is archived, see Workspace.
-- Performance: parity route (`--benchmark 60 out.csv --route
-  tools/routes/parity.route --trees`, `python3 -I tools/bench-route.py`)
-  at 27.9 fps against the restated gate (see Gates); G10 (#10) forest
-  edge cost.
 
 ## Unreal
 
@@ -230,13 +158,12 @@ from Unreal".
 
 ## How work runs
 
-Pro account (user, 2026-11-23): work inline in the main thread, no lane
-sub-orchestrators or fan-out, lighter workflow (draft, self-review, direct
-write; full SDD only for structural changes, after asking), subagents only
-when clearly worth it at the lowest tier, fewest GPU runs. The user may run
-parallel Claude Code terminals themselves. Ask which account if unclear;
-on a larger plan, lanes come back (brief template:
-`.superpowers/orch/common-brief.md`, git-ignored; update its dates first).
+Since 2026-11-27 the director session drives up to four lane windows by
+cross-session messages (no pasting between windows); at most two are
+GPU-heavy at once, the others do CPU work (ports, reviews, docs, cooks).
+Lanes are started from `.superpowers/fable-review/prompts/*.md` (main
+checkout, git-ignored) and report by a report file plus a message. Reviews
+go to a lane window that did not write the code. Never Fable.
 
 The user's rules:
 
@@ -254,8 +181,8 @@ The user's rules:
   pass comes later; costs are still reported (user, 2026-11-26).
 - Stability over sharpness; judge clarity in motion at user speeds.
 - Reports: "status" = running and waiting work only; "overview" = done.
-- Usage: the user reports the 5-hour and weekly %; Sonnet for mechanical
-  work, Opus for look judgment and risky reviews; never Fable.
+- Sonnet for mechanical work, Opus for look judgment and risky reviews;
+  never Fable.
 
 Every worktree or parallel run: no AI attribution in commits; commit
 messages and temp files inside the worktree (`.superpowers/`), never a
