@@ -6009,3 +6009,12 @@ sky occlusion.
   broadleaf scenery), the rest through the spherical-leaf phase; the
   roughness spreads with it as the cluster voxels' (Toksvig). a1 lit /
   shaded L 0.445 / 0.337, h1 0.339 / 0.205.
+- Sky occlusion (3.3): the transmittance straight up through the cell's
+  own bricks at its drawn level, 64 m from 4 m above the hit (the
+  crown-light lane's `--canopy-sky up` form and constants, 63c3751, so
+  tiles and cluster voxels agree when both land), as the crown occlusion
+  of `addVoxelFoliageAmbient` (whole ambient without GI, the share outside
+  the clipmap with it). a1 lit / shaded L 0.428 / 0.313, h1 0.328 / 0.191;
+  far pass at a1 with the switch at 41 px 7.77 -> 9.02 ms. Variant, the
+  cluster voxels' 0.5 (up + four sides inside the cell): a1 0.419 / 0.302,
+  far pass 14.74 ms; dropped (-0.01 L for +5.7 ms).

@@ -43,6 +43,13 @@ const float kHitOpticalDepth = 0.69314718;
 // shadow the surface with its own crown.
 const float kVoxelRayStart = 4.0;
 const float kVoxelPerceptualRoughness = 0.8;
+// Sky occlusion from the cell's own bricks, in the canopy-sky form of the
+// crown-light lane (lighting.glsl canopySkyVisibility, branch crown-light,
+// kCanopySkyDistance / kCanopySkyStartFoliage): the transmittance straight
+// up over 64 m, from one L0 voxel above the hit so the hit's own voxel
+// doesn't count.
+const float kTileSkyDistance = 64.0;
+const float kTileSkyStart = 4.0;
 
 void main() {
     SceneBuffer scene = pc.scene;
@@ -127,6 +134,14 @@ void main() {
         s.normal = -s.normal;
     }
 
+    // Up stays in the cell's column, so the cell's march covers it.
+    vec3 hitField = origin + direction * t;
+    float skyDepth = 0.0;
+    uint skyVoxel;
+    farMarchCell(farField, cell, level, hitField, vec3(0.0, 1.0, 0.0), kTileSkyStart,
+                 min(kTileSkyDistance, boxHi.y - hitField.y), kFarOpaqueDepth, skyDepth, skyVoxel);
+    float occlusion = mix(1.0, exp(-skyDepth), scene.microShadowStrength);
+
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
@@ -143,7 +158,7 @@ void main() {
     vec3 debugSunDiffuse = sh.diffuseLight;
     vec3 debugSunSpecular = sh.specularLight;
 #endif
-    addVoxelFoliageAmbient(sh, transmitted, s.occlusion, 1.0);
+    addVoxelFoliageAmbient(sh, transmitted, occlusion, occlusion);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);
