@@ -184,6 +184,24 @@ bool placementInsideCrop(PlacementField field, ivec2 p) {
          p.y <= -field.originZ;
 }
 
+// placementFold (placement.cpp): mirrored repeat into the crop, in uint
+// arithmetic that wraps as the C++ does.
+int placementFoldAxis(int x, int origin, uint spacing, uint size) {
+  uint period = 2u * size * spacing;
+  const uint kBias = 1u << 30u;
+  uint u = uint(x) - uint(origin) + spacing / 2u + kBias;
+  uint m = (u % period + period - kBias % period) % period;
+  if (m >= period / 2u) {
+    m = period - 1u - m;
+  }
+  return int(uint(origin) + m - spacing / 2u);
+}
+
+ivec2 placementFold(PlacementField field, ivec2 p) {
+  return ivec2(placementFoldAxis(p.x, field.originX, field.spacing, field.width),
+               placementFoldAxis(p.y, field.originZ, field.spacing, field.height));
+}
+
 uint placementNearestIndex(int x, int origin, uint spacing, uint size) {
   x = clamp(x, origin, -origin);
   uint i = (uint(x) - uint(origin) + spacing / 2u) / spacing;

@@ -43,64 +43,6 @@ std::array<float, 4> prototypeSphere(const Prototype &prototype,
   return {center.x, center.y, center.z, radius};
 }
 
-// Mismatch counters of the Debug checks; label names the check in its
-// messages.
-struct RunStats {
-  const char *label;
-  uint32_t evaluated = 0, kept = 0, mismatches = 0;
-  float worstHeight = 0.0f;
-  // Point UINT32_MAX: the run as a whole; layer UINT32_MAX: the cell record.
-  void report(int32_t cellX, int32_t cellZ, uint32_t layer, uint32_t point) {
-    if (mismatches++ == 0) {
-      std::printf("%s: first mismatch at cell (%d, %d), layer %d, point %d\n", label, cellX,
-                  cellZ, static_cast<int>(layer), static_cast<int>(point));
-    }
-  }
-};
-
-// One (cell, layer) run of GPU instances against evaluatePoint: keep
-// decisions, prototypes and x/z exactly (order included), the float
-// attributes within tolerance. tags (optional, streamed runs): the dither
-// thresholds, which must equal the pattern's with the layer index above.
-void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
-                const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
-                uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
-                const uint32_t *tags, RunStats &stats) {
-  uint32_t next = 0;
-  for (uint32_t p = 0; p < pattern.points.size(); ++p, ++stats.evaluated) {
-    const auto point = evaluatePoint(field, geo, layer, pattern, seed, cellX, cellZ, p);
-    if (!point) {
-      continue;
-    }
-    ++stats.kept;
-    if (next >= count) {
-      stats.report(cellX, cellZ, layerIndex, p);
-      continue;
-    }
-    const PlacedInstance expected = encodePlacedInstance(*point);
-    const PlacedInstance &gpu = run[next];
-    stats.worstHeight =
-        std::max(stats.worstHeight, std::abs(gpu.position[1] - expected.position[1]));
-    bool same = gpu.prototype == expected.prototype && gpu.position[0] == expected.position[0] &&
-                gpu.position[2] == expected.position[2] &&
-                std::abs(gpu.position[1] - expected.position[1]) <= 1e-3f &&
-                std::abs(gpu.scaleHalf - expected.scaleHalf) <= 1;
-    for (int i = 0; i < 3; ++i) {
-      same = same && std::abs(gpu.rotation[i] - expected.rotation[i]) <= 2;
-    }
-    if (tags) {
-      same = same && tags[next] == (pattern.thresholds[p] | layerIndex << 16);
-    }
-    ++next;
-    if (!same) {
-      stats.report(cellX, cellZ, layerIndex, p);
-    }
-  }
-  if (count > next) { // the GPU kept points the CPU rejected
-    stats.report(cellX, cellZ, layerIndex, UINT32_MAX);
-  }
-}
-
 // The height range of instances' bounding spheres, as placement.comp
 // computes it: (0, 0) for none.
 std::pair<float, float> instanceHeights(const PlacedInstance *instances, uint32_t count,
@@ -227,6 +169,49 @@ PlacementTables buildTables(const Heightfield &field, std::span<const PlacementL
 }
 
 } // namespace
+
+// One (cell, layer) run of GPU instances against evaluatePoint: keep
+// decisions, prototypes and x/z exactly (order included), the float
+// attributes within tolerance. tags (optional, streamed runs): the dither
+// thresholds, which must equal the pattern's with the layer index above.
+void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
+                const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
+                uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
+                const uint32_t *tags, RunStats &stats, bool mirrored) {
+  uint32_t next = 0;
+  for (uint32_t p = 0; p < pattern.points.size(); ++p, ++stats.evaluated) {
+    const auto point = evaluatePoint(field, geo, layer, pattern, seed, cellX, cellZ, p, mirrored);
+    if (!point) {
+      continue;
+    }
+    ++stats.kept;
+    if (next >= count) {
+      stats.report(cellX, cellZ, layerIndex, p);
+      continue;
+    }
+    const PlacedInstance expected = encodePlacedInstance(*point);
+    const PlacedInstance &gpu = run[next];
+    stats.worstHeight =
+        std::max(stats.worstHeight, std::abs(gpu.position[1] - expected.position[1]));
+    bool same = gpu.prototype == expected.prototype && gpu.position[0] == expected.position[0] &&
+                gpu.position[2] == expected.position[2] &&
+                std::abs(gpu.position[1] - expected.position[1]) <= 1e-3f &&
+                std::abs(gpu.scaleHalf - expected.scaleHalf) <= 1;
+    for (int i = 0; i < 3; ++i) {
+      same = same && std::abs(gpu.rotation[i] - expected.rotation[i]) <= 2;
+    }
+    if (tags) {
+      same = same && tags[next] == (pattern.thresholds[p] | layerIndex << 16);
+    }
+    ++next;
+    if (!same) {
+      stats.report(cellX, cellZ, layerIndex, p);
+    }
+  }
+  if (count > next) { // the GPU kept points the CPU rejected
+    stats.report(cellX, cellZ, layerIndex, UINT32_MAX);
+  }
+}
 
 void Renderer::setPlacement(std::span<const Prototype> prototypes,
                             std::span<const PlacementLayer> allLayers, uint32_t seed,
@@ -573,8 +558,6 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     r.terrain.forestEnabled = 1;
   }
 
-  releaseTemporaries(r.stream.active());
-
   r.placementGrid = grid;
   r.placedCount = total;
   std::printf("Placed %u instances in %.0f ms (layer id: count", total, ms);
@@ -623,7 +606,21 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     r.destroyBuffer(readback);
   }
 
-  r.buildFarField(prototypes, layers, offsets);
+  FarPlacement far;
+  far.constants = constants;
+  far.countPipeline = countPipeline;
+  far.writePipeline = writePipeline;
+  far.scanPipeline = scanPipeline;
+  far.placementLayout = placementLayout;
+  far.scanLayout = scanLayout;
+  far.seed = seed;
+  far.patterns = patterns;
+  while (far.layerCount < layerCount && layers[far.layerCount].farField) {
+    far.pointsPerCell += static_cast<uint32_t>(patterns[far.layerCount].points.size());
+    ++far.layerCount;
+  }
+  r.buildFarField(prototypes, layers, offsets, far);
+  releaseTemporaries(r.stream.active());
 }
 
 // Each prototype's BLAS and PrototypeInfo, the cells' reach and draw

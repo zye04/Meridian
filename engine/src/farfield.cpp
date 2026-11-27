@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -226,6 +227,16 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
   return templates;
 }
 
+uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, int32_t z) {
+  for (uint32_t level = 0; level + 1 < kFarLevels; ++level) {
+    const int32_t *b = bands[level];
+    if (x >= b[0] && z >= b[1] && x < b[2] && z < b[3]) {
+      return level;
+    }
+  }
+  return kFarLevels - 1;
+}
+
 FarFootprint farFootprint(const FarFieldGrid &grid, uint32_t level, const FarTemplate &tmpl,
                           const DecodedInstance &instance) {
   // A deposit's x/z may round past the corners' hull by a few ulps. Past
@@ -323,6 +334,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
   field.cellsX = grid.cellsX;
   field.cellsZ = grid.cellsZ;
   field.heightBase = grid.heightBase;
+  std::memcpy(field.bands, grid.bands, sizeof(grid.bands));
   const size_t cellCount = size_t{grid.cellsX} * grid.cellsZ;
   field.cellBottom.assign(cellCount, std::numeric_limits<float>::max());
   field.cellTop.assign(cellCount, -std::numeric_limits<float>::max());
@@ -332,6 +344,12 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
     const float v = kFarVoxelSize[level], inverseV = 1.0f / v;
     const float scale = fixedScale[level];
     const uint32_t columnsX = grid.cellsX * n, columnsZ = grid.cellsZ * n;
+    // Only the cells whose finest stored level is this one or finer get
+    // this level's bricks; deposits elsewhere are dropped.
+    const auto stored = [&](int32_t columnX, int32_t columnZ) {
+      return farFinestLevel(grid.bands, columnX / static_cast<int32_t>(n),
+                            columnZ / static_cast<int32_t>(n)) <= level;
+    };
     const auto levelTemplate = [&](const DecodedInstance &instance) -> const FarTemplate * {
       if (instance.prototype >= templates.size() ||
           templates[instance.prototype][level].voxels.empty()) {
@@ -354,6 +372,9 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
       const FarFootprint fp = farFootprint(grid, level, *tmpl, instance);
       for (int32_t z = std::max(fp.z0, 0); z <= std::min(fp.z1, int32_t(columnsZ) - 1); ++z) {
         for (int32_t x = std::max(fp.x0, 0); x <= std::min(fp.x1, int32_t(columnsX) - 1); ++x) {
+          if (!stored(x, z)) {
+            continue;
+          }
           const size_t c = farColumnIndex(grid.cellsX, level, x, z);
           loHi[2 * c] = std::min(loHi[2 * c], fp.lo);
           loHi[2 * c + 1] = std::max(loHi[2 * c + 1], fp.hi);
@@ -423,7 +444,7 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
                 continue;
               }
               const auto row = static_cast<uint32_t>(j) / (n * kBrickEdge);
-              if (row < r0 || row >= r1) {
+              if (row < r0 || row >= r1 || !stored(i / 4, j / 4)) {
                 continue;
               }
               const BrickColumn &column =
@@ -567,9 +588,12 @@ double voxelColumnDepth(const FarFieldCpu &field, uint32_t level, const BrickCol
   return depth;
 }
 
-// Amanatides and Woo (1987): a DDA over the level's x/z voxel lattice.
+// Amanatides and Woo (1987): a DDA over the level's x/z voxel lattice, in
+// the cells where max(requested, the cell's finest stored level) is this
+// level (requested = level: every cell that stores it).
 double levelDepth(const FarFieldCpu &field, uint32_t level, Vec3 origin, Vec3 direction,
-                  double start, double end, const std::vector<uint8_t> *cellInTlas) {
+                  double start, double end, const std::vector<uint8_t> *cellInTlas,
+                  uint32_t requested) {
   const double v = field.voxelSize[level];
   const uint32_t n = farColumnsPerCell(level);
   const auto voxelsX = static_cast<int64_t>(field.cellsX * n * kBrickEdge);
@@ -594,7 +618,11 @@ double levelDepth(const FarFieldCpu &field, uint32_t level, Vec3 origin, Vec3 di
                                       static_cast<uint32_t>(j / 4));
       const size_t cell = c / (n * n);
       const BrickColumn &column = field.columns[level][c];
-      if (columnBrickCount(column) > 0 && !(cellInTlas && (*cellInTlas)[cell])) {
+      const uint32_t drawn = std::max(
+          requested, farFinestLevel(field.bands, static_cast<int32_t>(cell % field.cellsX),
+                                    static_cast<int32_t>(cell / field.cellsX)));
+      if (drawn == level && columnBrickCount(column) > 0 &&
+          !(cellInTlas && (*cellInTlas)[cell])) {
         depth += voxelColumnDepth(field, level, column, static_cast<int32_t>(i),
                                   static_cast<int32_t>(j), origin, direction, t, t1);
       }
@@ -623,7 +651,7 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
     const double levelEnd = level + 1 < kFarLevels ? kFarRayLevelEnd[level] : 1e300;
     const double a = std::max<double>(start, levelStart), b = std::min<double>(max, levelEnd);
     if (a < b && !field.columns[level].empty()) {
-      depth += levelDepth(field, level, origin, direction, a, b, cellInTlas);
+      depth += levelDepth(field, level, origin, direction, a, b, cellInTlas, level);
     }
     levelStart = levelEnd;
   }
@@ -690,7 +718,13 @@ float dequantizeFarShadow(uint32_t value, float depth) {
 float farFieldShadowDistanceCpu(const FarFieldCpu &field, uint32_t level, Vec3 origin,
                                 Vec3 direction, float max) {
   const auto depthTo = [&](double t) {
-    return levelDepth(field, level, origin, direction, 0.0, t, nullptr);
+    double depth = 0.0;
+    for (uint32_t drawn = level; drawn < kFarLevels; ++drawn) {
+      if (!field.columns[drawn].empty()) {
+        depth += levelDepth(field, drawn, origin, direction, 0.0, t, nullptr, level);
+      }
+    }
+    return depth;
   };
   if (field.columns[level].empty() || depthTo(max) < kFarShadowOpticalDepth) {
     return -1.0f;

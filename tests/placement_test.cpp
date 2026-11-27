@@ -249,6 +249,86 @@ TEST_CASE("evaluatePoint is deterministic and stays inside the crop") {
   CHECK(kept < total);
 }
 
+TEST_CASE("placementFold is the identity on the crop and mirrors like the heightfield") {
+  // Odd and even sample counts, so a crop edge lands on and off a cell edge.
+  for (const uint32_t size : {101u, 100u}) {
+    const Heightfield field = planeField(size, 2.0f, 10.0f);
+    const PlacementField f = placementField(field);
+    const auto nearest = [&](int32_t x) {
+      return static_cast<int64_t>(std::floor((static_cast<double>(x) - f.originX) / f.spacing + 0.5));
+    };
+    const auto mirror = [&](int64_t i) {
+      const int64_t n = size, m = ((i % (2 * n)) + 2 * n) % (2 * n);
+      return m < n ? m : 2 * n - 1 - m;
+    };
+    for (int32_t x = f.originX; x <= -f.originX; x += 12345) {
+      CHECK(placementFold(x, f.originX, f.spacing, size) == x);
+    }
+    CHECK(placementFold(-f.originX, f.originX, f.spacing, size) == -f.originX);
+    // Every 1/7 m out to 16 km, and the fixed-point lattice right at the
+    // mirror planes: the folded point's nearest sample is the mirror of
+    // the point's, folding twice changes nothing, and the terrain height
+    // there matches.
+    std::vector<int32_t> xs;
+    for (int64_t x = -(int64_t{1} << 30) + 1; x < (int64_t{1} << 30); x += 65536 / 7 * 997) {
+      xs.push_back(static_cast<int32_t>(x));
+    }
+    for (int32_t k = -3; k <= 3; ++k) {
+      const int32_t plane = static_cast<int32_t>(-f.originX + f.spacing / 2);
+      for (int32_t d = -2; d <= 2; ++d) {
+        xs.push_back(plane + k * static_cast<int32_t>(2 * size * f.spacing) + d);
+        xs.push_back(f.originX - static_cast<int32_t>(f.spacing / 2) +
+                     k * static_cast<int32_t>(2 * size * f.spacing) + d);
+      }
+    }
+    for (const int32_t x : xs) {
+      const int32_t folded = placementFold(x, f.originX, f.spacing, size);
+      REQUIRE(folded >= f.originX - static_cast<int32_t>(f.spacing / 2));
+      REQUIRE(folded < -f.originX + static_cast<int32_t>(f.spacing / 2));
+      CHECK(placementFold(folded, f.originX, f.spacing, size) == folded);
+      const int64_t i = nearest(folded);
+      CHECK(std::clamp<int64_t>(i, 0, size - 1) == mirror(nearest(x)));
+      const float a = field.heightAt(static_cast<float>(x) / 65536.0f, 0.0f);
+      const float b = field.heightAt(static_cast<float>(folded) / 65536.0f, 0.0f);
+      CHECK(std::abs(a - b) < 0.05f);
+    }
+  }
+}
+
+TEST_CASE("a mirrored point outside the crop reads the rule at its fold") {
+  const Heightfield field = planeField(101, 2.0f, 10.0f); // crop is +-100 m
+  const PlacementLayer layer = makeLayer(openRule());
+  const DitherPattern pattern = makeDitherPattern(2, ditherPointCount(layer.footprint));
+  uint32_t outside = 0;
+  for (int32_t cz = -6; cz <= 5; ++cz) {
+    for (int32_t cx = -6; cx <= 5; ++cx) {
+      for (uint32_t p = 0; p < pattern.points.size(); ++p) {
+        const auto plain = evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p);
+        const auto mirrored = evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p, true);
+        if (plain) {
+          // Inside the crop nothing changes.
+          REQUIRE(mirrored);
+          CHECK(plain->position == mirrored->position);
+          CHECK(plain->scale == mirrored->scale);
+          continue;
+        }
+        if (!mirrored) {
+          continue;
+        }
+        const bool inside = std::abs(mirrored->position.x) <= 100.0f &&
+                            std::abs(mirrored->position.z) <= 100.0f;
+        CHECK_FALSE(inside);
+        ++outside;
+        CHECK(mirrored->position.y ==
+              doctest::Approx(field.heightAt(mirrored->position.x, mirrored->position.z) -
+                              layer.sinkDepth)
+                  .epsilon(1e-4));
+      }
+    }
+  }
+  CHECK(outside > 0);
+}
+
 TEST_CASE("an all-reject layer keeps nothing") {
   const Heightfield field = planeField(101, 2.0f, 10.0f);
   DensityRule rule = openRule();

@@ -58,7 +58,16 @@ layout(push_constant) uniform FarSplatConstants {
     uint firstBrick;
     uint rowBegin;
     uint rowEnd;
+    // The cells that store this level, x0 z0 x1 z1.
+    int bandX0, bandZ0, bandX1, bandZ1;
 } pc;
+
+// Whether brick column (x, z) of this level lies in a cell that stores it.
+bool storedColumn(int x, int z) {
+    int n = int(farColumnsPerCell(pc.level));
+    int cx = x / n, cz = z / n;
+    return cx >= pc.bandX0 && cz >= pc.bandZ0 && cx < pc.bandX1 && cz < pc.bandZ1;
+}
 
 vec3 rotated(vec4 q, vec3 v) {
     precise vec3 inner = cross(q.xyz, v) + q.w * v;
@@ -111,6 +120,9 @@ void main() {
     ivec2 columns = ivec2(pc.cellsX, pc.cellsZ) * int(farColumnsPerCell(pc.level));
     for (int z = max(first.y, 0); z <= min(last.y, columns.y - 1); ++z) {
         for (int x = max(first.x, 0); x <= min(last.x, columns.x - 1); ++x) {
+            if (!storedColumn(x, z)) {
+                continue;
+            }
             uint column = farColumnIndex(pc.cellsX, pc.level, uint(x), uint(z));
             atomicMin(pc.columns.columns[column].x, low);
             atomicMin(pc.columns.columns[column].y, ~high);
@@ -161,7 +173,8 @@ void main() {
                     continue;
                 }
                 if (uint(j) / (farColumnsPerCell(pc.level) * kBrickEdge) < pc.rowBegin ||
-                    uint(j) / (farColumnsPerCell(pc.level) * kBrickEdge) >= pc.rowEnd) {
+                    uint(j) / (farColumnsPerCell(pc.level) * kBrickEdge) >= pc.rowEnd ||
+                    !storedColumn(i / 4, j / 4)) {
                     continue;
                 }
                 uvec2 column = pc.columns.columns[farColumnIndex(pc.cellsX, pc.level,

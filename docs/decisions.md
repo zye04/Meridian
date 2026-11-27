@@ -5868,3 +5868,35 @@ cached shadow pages are invalidated.
 - Still open: at 1:1 against 1.jpg (crown scale ~40 px) the crowns read as
   fine speckle, not round domes; the crown-scale light/dark ratio already
   matches (1.67 against 1.70).
+
+## Far tile tier stage 1: forest beyond the crop (far lane, 2026-11-27)
+
+- Spec `superpowers/specs/2026-11-26-far-tile-tier-design.md`, ledger
+  `superpowers/plans/2026-11-26-far-tile-tier-ledger.md`.
+- Choice: the far field's grid grows to +-`farExtent` (default 16.384 km,
+  placement's fixed-point range; `--far-extent`) around the crop. Beyond
+  the placement grid the far-field layers' rule runs on the mirrored
+  terrain: the point keeps its own position and noise, its heights and
+  geo channels are read at the point folded into the crop
+  (`placementFold`, integer, the heightfield's own mirror; CPU
+  `evaluatePoint(..., mirrored)` and placement.comp `mirror`). Those
+  instances are transient: placement.comp runs again in row chunks
+  (64 MiB worst case each) feeding the splat's occupancy and accumulate,
+  then is discarded; nothing reaches the placed table, the cell table or
+  the TLAS. Inside the placement grid the same pass reproduces the placed
+  table, so the crop's bricks are unchanged.
+- Levels by band (`FarFieldGrid::bands`, `kFarBandMeters`): L0 to 2 km
+  past the placement grid, L1 to 6 km, L2 over the extent; a cell draws
+  at least its finest stored level, and the far shadow map marches at
+  least it. Columns stay whole-grid per level (32/8/2 MiB, mostly empty
+  outside a band): simpler than per-level rects, which would save ~36 MiB.
+- Cells outside the placement grid always draw (cell_cull's threads past
+  the hand-placed chunks), in the main view's phase 0 and cascade 4.
+- The far shadow map is capped at 2^23 texels (`kFarShadowMaxTexels`):
+  over 32 km its texel is 16 m (was 8 m over the crop).
+- Measured (Debug a1, `Render 2560x1440`): far field resident 424 MiB
+  (bricks 151/109/85, columns 32/8/2; was 47), `Loaded: resident` 9927
+  MiB (9586 before), 23.4M transient instances placed in 19 ms, splat
+  598 ms at load, far cells drawn 60050; replica checks 0 mismatches
+  (13 cells across the bands, 6318 mirrored points, shadow map, rays).
+  Release figures in the ledger.

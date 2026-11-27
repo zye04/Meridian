@@ -96,6 +96,8 @@ struct FarFieldCpu {
   std::vector<uint32_t> voxels[kFarLevels];
   uint32_t brickCount[kFarLevels] = {};
   std::vector<float> cellTop, cellBottom;
+  int32_t bands[kFarLevels - 1][4] = {{INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
+                                      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
 };
 
 // One occupied voxel of a prototype's template at one level, in prototype
@@ -146,10 +148,19 @@ struct FarSlotColor {
 FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t paletteBase,
                                   std::span<FarSlotColor> colors);
 
+// bands[l]: the cells [x0, x1) x [z0, z1) (grid cells, x0 z0 x1 z1) that
+// store level l (< kFarLevels - 1); the coarsest level covers the grid. A
+// cell's finest stored level is the first band holding it; finer levels
+// nest inside coarser ones. The default band holds every cell.
 struct FarFieldGrid {
   float originX = 0.0f, originZ = 0.0f, heightBase = 0.0f;
   uint32_t cellsX = 0, cellsZ = 0;
+  int32_t bands[kFarLevels - 1][4] = {{INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX},
+                                      {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
 };
+// The finest level cell (x, z) of the grid stores (farfield.glsl
+// farFinestLevel).
+uint32_t farFinestLevel(const int32_t (&bands)[kFarLevels - 1][4], int32_t x, int32_t z);
 
 // The splat's stages, shared with farfield_splat.comp operation for
 // operation. Occupancy: the global columns [x0, x1] x [z0, z1] an instance's
@@ -196,8 +207,9 @@ FarFieldCpu splatFarField(const FarFieldGrid &grid, std::span<const FarTemplates
 // Extinction (1/m) at a world position, at one level; 0 outside the bricks.
 float farFieldExtinction(const FarFieldCpu &field, uint32_t level, Vec3 position);
 // Transmittance along origin + t direction (unit), t in [start, max], level
-// by distance (kFarRayLevelEnd), voxels constant inside. Cells flagged in
-// cellInTlas are skipped (M2b; nullptr in M2a).
+// by distance (kFarRayLevelEnd), voxels constant inside; a cell that does
+// not store that level adds nothing. Cells flagged in cellInTlas are
+// skipped (M2b; nullptr in M2a).
 float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direction, float start,
                                float max, const std::vector<uint8_t> *cellInTlas);
 
@@ -210,6 +222,10 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
 constexpr uint32_t kFarShadowLevel = 1;
 constexpr float kFarShadowOpticalDepth = 0.6931472f; // -ln(1 - 0.5)
 constexpr float kFarShadowTexel = 8.0f;
+// The map's texels at most (16 MiB per map): over the far field's 32 km
+// the texel doubles to 16 m rather than the two maps taking 74 MiB and a
+// rebuild 140 frames.
+constexpr uint32_t kFarShadowMaxTexels = 1u << 23;
 constexpr uint32_t kFarShadowEmpty = 0xFFFF;
 // A texel whose march ran out of steps (a bug if any; treated as lit).
 constexpr uint32_t kFarShadowStepCap = 0xFFFE;
@@ -250,9 +266,10 @@ uint32_t farShadowMaxTexels(const FarShadowBox &box);
 uint32_t quantizeFarShadow(float distance, float depth);
 float dequantizeFarShadow(uint32_t value, float depth);
 
-// Where the opacity of the level's voxels along origin + t direction
-// reaches kFarShadowOpticalDepth (t in [0, max]), or -1 (CPU twin of
-// farFieldShadowDistance in farfield.glsl).
+// Where the opacity of the level's voxels (in each cell at least its finest
+// stored level) along origin + t direction reaches kFarShadowOpticalDepth
+// (t in [0, max]), or -1 (CPU twin of farFieldShadowDistance in
+// farfield.glsl).
 float farFieldShadowDistanceCpu(const FarFieldCpu &field, uint32_t level, Vec3 origin,
                                 Vec3 direction, float max);
 

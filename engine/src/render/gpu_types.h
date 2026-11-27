@@ -880,9 +880,14 @@ struct PlacementConstants {
   float heightScale = 0.0f;
   float spacing = 0.0f;
   uint32_t geoSize[3] = {}; // width, height, ratio
-  uint32_t pad = 0;
+  // The far field's transient placement (renderer_farfield.cpp): nonzero
+  // mirrors the rule beyond the crop (evaluatePoint's mirrored) in cells
+  // outside the placement grid, (placedFirst, placedSize) in cells.
+  uint32_t mirror = 0;
+  int32_t placedFirst[2] = {};
+  uint32_t placedSize[2] = {};
 };
-static_assert(sizeof(PlacementConstants) == 144);
+static_assert(sizeof(PlacementConstants) == 160);
 
 // One slot's new cell for placement.comp's PLACEMENT_STREAM variant.
 struct StreamUpdate {
@@ -959,8 +964,10 @@ struct GpuFarField {
   uint32_t paletteSize = 0;
   uint32_t pad = 0;
   uint32_t pyramidOffsets[16] = {};
+  int32_t bands[kFarLevels - 1][4] = {};
+  uint32_t placedOffset[2] = {};
 };
-static_assert(sizeof(GpuFarField) == 168);
+static_assert(sizeof(GpuFarField) == 208);
 
 // Must match FarTemplateInfo in farfield.glsl; one per (prototype, level).
 struct FarTemplateInfo {
@@ -994,8 +1001,11 @@ struct FarSplatConstants {
   uint32_t firstBrick = 0;
   uint32_t rowBegin = 0;
   uint32_t rowEnd = 0;
+  // The cells that store this level (FarFieldGrid::bands; the coarsest
+  // level: all), x0 z0 x1 z1: deposits elsewhere are dropped.
+  int32_t band[4] = {};
 };
-static_assert(sizeof(FarSplatConstants) == 120);
+static_assert(sizeof(FarSplatConstants) == 136);
 
 // Must match the push constants in farfield_shadow.comp: builds texels
 // [2 firstWord, 2 (firstWord + wordCount)) of the map, two per word.

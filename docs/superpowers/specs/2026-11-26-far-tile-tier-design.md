@@ -22,7 +22,7 @@ Meridian today:
 - Nothing grows beyond the heightfield crop. The showcase core is the 4 x 4
   km relief patch, so from the scene views the forest ends 0.7 to 3.4 km
   away and the mirrored terrain behind it is bare.
-- Every tree out to about 5 km is drawn as its own voxel clusters (26.6M to
+- Every tree in the crop is drawn as its own voxel clusters (26.6M to
   37.2M voxel quads at the overviews for 3.7M pixels; voxel pass 10.24 ms
   at Part B; decisions.md "Caster LOD of one texel in every cascade").
 - A patch proxy already exists: the far field (`farfield.h`,
@@ -30,7 +30,11 @@ Meridian today:
   of 4, 8 and 16 m voxels splatted on the GPU from the placed instances and
   the prototypes' 1 m templates, ray-marched per pixel inside the cell's
   box (`voxel.frag`). It takes over only where a cell's tallest tree is
-  under 6 px (about 5 km), covers only the crop, is built once at load, and
+  under 6 px: 12.5 km for the broadleaf scenery's 41 m tallest trees per
+  cell (1828 px per meter at 1 km, 2560x1440, 70 degrees), beyond every
+  crop cell, so at the scene views it draws nothing (stage 0, ledger; the
+  spec first said about 5 km, true only for ~17 m trees). It covers only
+  the crop, is built once at load, and
   shades with one palette colour per mesh slot and no occlusion.
 
 The tier is the far field grown into its intended role, not a new system.

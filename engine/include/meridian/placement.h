@@ -175,12 +175,26 @@ struct PlacedPoint {
   float scale;
   uint32_t prototype;
 };
+// Fixed-point x folded into the crop [origin, -origin + spacing / 2) of
+// `size` samples by mirrored repeat, as the heightfield's samples mirror
+// (Heightfield::sample): period 2 size samples, mirror planes half a sample
+// past the edge samples, the reflection integer (period - 1 - m), so a
+// folded point's nearest sample is the mirror of the original's nearest.
+// The identity inside the crop.
+int32_t placementFold(int32_t x, int32_t origin, uint32_t spacing, uint32_t size);
+// Placement cells lie in -kPlacementCellRange..kPlacementCellRange - 1 on
+// each axis (16.16 fixed-point positions within 16 km).
+constexpr int32_t kPlacementCellRange = 256;
 // The C++ reference of one pattern point of one cell; nullopt if rejected
-// or outside the heightfield crop.
+// or outside the heightfield crop. mirrored (the far field beyond the
+// placement grid): a point outside the crop is not rejected; its heights
+// and channels are read at the point folded into the crop (placementFold),
+// its noise at the point itself, and its height is the terrain's there.
 std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChannels *geo,
                                          const PlacementLayer &layer,
                                          const DitherPattern &pattern, uint32_t seed,
-                                         int32_t cellX, int32_t cellZ, uint32_t point);
+                                         int32_t cellX, int32_t cellZ, uint32_t point,
+                                         bool mirrored = false);
 
 // The cells holding the crop: cell (firstX + column, firstZ + row), rows
 // from the north-west corner (min x, min z). Placement's cell table and

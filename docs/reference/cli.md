@@ -422,6 +422,13 @@ every tree as clusters instead of distant forest cells as voxels (A/B).
 draws its voxels instead of its trees once its tallest tree projects under
 N pixels from the nearest point of its canopy box (cell_cull.comp
 `farSwitch`); larger N moves the switch nearer (far tile tier stage 0).
+`--far-extent KM` (default and at most 16.384, placement's fixed-point
+range): the far field's forest reaches this far from the crop's centre;
+beyond the crop the forest layers' rule runs on the mirrored terrain
+(transient instances, splatted at load, no trees or TLAS records), so the
+hills past the crop are forested; `--far-extent 0` keeps the far grid to
+the placement grid (main's extent). Startup prints `Far field grid:`
+(cells, band sizes, transient instances and their placement ms).
 `--voxel-lod on|off|near` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
 mesh over 4 m tall) replace their triangles where the LOD cut picks them,

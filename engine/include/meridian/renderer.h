@@ -111,6 +111,9 @@ constexpr float kRockNormalY[2] = {0.530f, 0.669f};
 // The far switch's default: a far-field cell's trees give way to its voxels
 // once the tallest projects under 6 px (archive plan 2026-11-19-forests).
 constexpr float kFarSwitchPixels = 6.0f;
+// The far field reaches this far (m) from the crop's centre by default:
+// placement's fixed-point range (kPlacementCellRange cells of 64 m).
+constexpr float kFarExtent = 16384.0f;
 
 // Where each terrain layer goes (mesh.frag, terrainSurface): meadow grass
 // on open ground; clover in damp flat hollows; mud in valley bottoms; worn
@@ -427,6 +430,10 @@ public:
   // A far-field cell draws its voxels instead of its trees once its tallest
   // tree projects under this many pixels (kFarSwitchPixels by default).
   void setFarSwitchPixels(float pixels);
+  // The far field's forest reaches this far (m) from the crop's centre
+  // (kFarExtent by default, at most that), beyond the crop by the placement
+  // rule on the mirrored terrain. Takes effect at the next setPlacement.
+  void setFarExtent(float meters);
   // The main view's voxel coverage rule (voxel_shape.h; AreaPixelPhase by
   // default, Hash for A/B); the cascades keep the hash.
   void setVoxelCoverage(VoxelCoverage rule);

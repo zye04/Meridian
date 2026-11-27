@@ -103,11 +103,29 @@ struct FarField {
     uint paletteSize;
     uint pad;
     uint pyramidOffsets[16];
+    // Per level but the coarsest: the cells [x0, x1) x [z0, z1) that store
+    // it (FarFieldGrid::bands).
+    int bands[8];
+    // The placement grid's first cell in this grid's cells.
+    uint placedOffsetX;
+    uint placedOffsetZ;
 };
 
 layout(buffer_reference, std430) readonly buffer FarFieldBuffer {
     FarField field;
 };
+
+// farFinestLevel in farfield.cpp.
+uint farFinestLevel(int bands[8], ivec2 cell) {
+    for (uint level = 0u; level + 1u < kFarLevels; ++level) {
+        uint b = 4u * level;
+        if (cell.x >= bands[b] && cell.y >= bands[b + 1u] && cell.x < bands[b + 2u] &&
+            cell.y < bands[b + 3u]) {
+            return level;
+        }
+    }
+    return kFarLevels - 1u;
+}
 
 // Voxel `local` (brickVoxelIndex) of a brick; 0 where unoccupied.
 uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) {
@@ -460,8 +478,9 @@ const float kFarShadowOpticalDepth = 0.6931472;
 const uint kFarShadowEmpty = 0xFFFFu;
 const uint kFarShadowStepCap = 0xFFFEu;
 
-// Where the opacity of the kFarShadowLevel voxels along worldOrigin + t
-// direction (unit) reaches kFarShadowOpticalDepth, t in [0, maxDistance], or
+// Where the opacity of the kFarShadowLevel voxels (in a cell that stores
+// only coarser ones, its finest) along worldOrigin + t direction (unit)
+// reaches kFarShadowOpticalDepth, t in [0, maxDistance], or
 // -1; the CPU twin is farFieldShadowDistanceCpu. farFieldTransmittance's
 // cell DDA and canopy pyramid at one level, which builds the map
 // (farfield_shadow.comp).
@@ -473,7 +492,9 @@ float farFieldShadowDistance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dir
     float top = (levels > 0u ? farField.field.pyramid.tops[farField.field.pyramidOffsets[levels]]
                              : farField.field.cells.cells[0].top) -
                 heightBase;
-    float pad = farCanopyPad(kFarShadowLevel);
+    // The coarsest level's pad: cells that store no shadow level march a
+    // coarser one.
+    float pad = farCanopyPad(kFarLevels - 1u);
     float tEnd = maxDistance;
     if (direction.y > 0.0) {
         tEnd = min(tEnd, (top + pad - origin.y) / direction.y);
@@ -523,8 +544,9 @@ float farFieldShadowDistance(FarFieldBuffer farField, vec3 worldOrigin, vec3 dir
             }
             if (far.bottom - heightBase - pad < max(y0, y1)) {
                 uint voxel;
-                float hit = farMarchCell(farField, uvec2(cell), kFarShadowLevel, origin, direction,
-                                         t, tExit, kFarShadowOpticalDepth, opticalDepth, voxel);
+                uint level = max(kFarShadowLevel, farFinestLevel(farField.field.bands, cell));
+                float hit = farMarchCell(farField, uvec2(cell), level, origin, direction, t, tExit,
+                                         kFarShadowOpticalDepth, opticalDepth, voxel);
                 if (hit >= 0.0) {
                     return hit;
                 }

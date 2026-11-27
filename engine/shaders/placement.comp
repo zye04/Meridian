@@ -134,6 +134,11 @@ layout(push_constant) uniform PlacementConstants {
     float heightScale;
     float spacing;
     uint geoWidth, geoHeight, geoRatio;
+    // Nonzero: cells outside the placement grid (placedFirst, placedSize)
+    // mirror the rule beyond the crop (evaluatePoint's mirrored).
+    uint mirror;
+    int placedFirstX, placedFirstZ;
+    uint placedColumns, placedRows;
 } pc;
 #endif
 
@@ -168,16 +173,34 @@ float heightAt(float x, float z) {
 
 uint layerDensity(PlacementLayer layer, uint layerSeed, ivec2 p, uvec2 s, out uint mask);
 
+// Whether points of `cell` outside the crop mirror into it (evaluatePoint's
+// mirrored).
+bool mirroredCell(ivec2 cell) {
+#ifdef PLACEMENT_STREAM
+    return false;
+#else
+    ivec2 local = cell - ivec2(pc.placedFirstX, pc.placedFirstZ);
+    return pc.mirror != 0u && (local.x < 0 || local.y < 0 || uint(local.x) >= pc.placedColumns ||
+                               uint(local.y) >= pc.placedRows);
+#endif
+}
+
+// sampleP: p, or p folded into the crop where it mirrors (heights and
+// channels read there).
 bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, uint point,
-              out ivec2 p, out uint mask) {
+              out ivec2 p, out ivec2 sampleP, out uint mask) {
     mask = 0u;
     uvec2 pattern = pc.points.points[layer.firstPoint + point];
     p = placementPointPosition(cell, cellHash, pattern.x);
+    sampleP = p;
     if (!placementInsideCrop(pc.field, p)) {
-        return false;
+        if (!mirroredCell(cell)) {
+            return false;
+        }
+        sampleP = placementFold(pc.field, p);
     }
     return placementKeep(pattern.y, layerDensity(layer, layerSeed, p,
-                                                 placementNearestSample(pc.field, p), mask));
+                                                 placementNearestSample(pc.field, sampleP), mask));
 }
 
 // The layer's density (with its parent) at fixed-point p, whose nearest
@@ -247,7 +270,7 @@ float unitFloat(uint bits) { return float(bits & 0xFFFFu) / 65535.0; }
 
 // evaluatePoint's attributes; the scale shrinks toward the mask's edge.
 PlacedInstance placeInstance(PlacementLayer layer, uint cellHash, uint point, ivec2 p,
-                             uint mask) {
+                             ivec2 sampleP, uint mask) {
     const float kTwoPi = 6.2831855;
     uint pointHash = placementPointHash(cellHash, point);
     uint pick = layer.firstPrototype;
@@ -255,7 +278,7 @@ PlacedInstance placeInstance(PlacementLayer layer, uint cellHash, uint point, iv
         ++pick;
     }
     vec3 position = vec3(float(p.x) / 65536.0, 0.0, float(p.y) / 65536.0);
-    position.y = heightAt(position.x, position.z) - layer.sinkDepth;
+    position.y = heightAt(float(sampleP.x) / 65536.0, float(sampleP.y) / 65536.0) - layer.sinkDepth;
     float edge = 0.5 + 0.5 * float(mask) / 65535.0;
     float scale =
         (layer.scaleMin + (layer.scaleMax - layer.scaleMin) * unitFloat(pointHash >> 16u)) * edge;
@@ -294,9 +317,10 @@ uint placeRun(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
     for (uint base = 0u; base < layer.pointCount; base += 64u) {
         uint point = base + thread;
         ivec2 p;
+        ivec2 sampleP;
         uint mask;
         bool keep = point < layer.pointCount &&
-                    evaluate(layer, layerSeed, cell, cellHash, point, p, mask);
+                    evaluate(layer, layerSeed, cell, cellHash, point, p, sampleP, mask);
         keptFlags[thread] = keep ? 1u : 0u;
         barrier();
         uint before = 0u;
@@ -306,7 +330,7 @@ uint placeRun(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
             total += keptFlags[t];
         }
         if (keep) {
-            PlacedInstance instance = placeInstance(layer, cellHash, point, p, mask);
+            PlacedInstance instance = placeInstance(layer, cellHash, point, p, sampleP, mask);
             pc.instances.placed[next + before] = instance;
 #ifdef PLACEMENT_STREAM
             pc.thresholds.thresholds[next + before - pc.staticCount] =
@@ -398,8 +422,9 @@ void main() {
         uint kept = 0u;
         for (uint point = thread; point < layer.pointCount; point += 64u) {
             ivec2 p;
+            ivec2 sampleP;
             uint mask;
-            kept += evaluate(layer, layerSeed, cell, cellHash, point, p, mask) ? 1u : 0u;
+            kept += evaluate(layer, layerSeed, cell, cellHash, point, p, sampleP, mask) ? 1u : 0u;
         }
         atomicAdd(keptCount, kept);
         barrier();

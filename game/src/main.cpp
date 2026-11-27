@@ -889,6 +889,7 @@ struct Options {
   // Instances nearer than this keep their triangles in the main view.
   float voxelNear = 0.0f;
   float farSwitchPixels = meridian::kFarSwitchPixels;
+  float farExtent = meridian::kFarExtent;
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
   bool occlusion = true;
   bool shadowRefresh = false;
@@ -1201,6 +1202,11 @@ Options parseOptions(int argc, char **argv) {
       if (!(options.voxelNear >= 0.0f)) {
         throw std::runtime_error("--voxel-near takes meters >= 0");
       }
+    } else if (arg == "--far-extent" && i + 1 < argc) {
+      options.farExtent = 1000.0f * std::stof(argv[++i]);
+      if (!(options.farExtent >= 0.0f)) {
+        throw std::runtime_error("--far-extent takes km >= 0");
+      }
     } else if (arg == "--far-switch-px" && i + 1 < argc) {
       options.farSwitchPixels = std::stof(argv[++i]);
       if (!(options.farSwitchPixels > 0.0f)) {
@@ -1265,7 +1271,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --tree-palette name, --scenery broadleaf, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, --far-switch-px n, "
+                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, --far-switch-px n, --far-extent km, "
                                "--voxel-coverage hash|area-pixel-phase, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -1537,6 +1543,7 @@ int main(int argc, char **argv) {
   renderer.setVoxelLod(options.voxelLod);
   renderer.setVoxelNear(options.voxelNear);
   renderer.setFarSwitchPixels(options.farSwitchPixels);
+  renderer.setFarExtent(options.farExtent);
   renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);

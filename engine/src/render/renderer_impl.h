@@ -26,6 +26,45 @@
 
 namespace meridian {
 
+// Mismatch counters of the Debug checks; label names the check in its
+// messages.
+struct RunStats {
+  const char *label;
+  uint32_t evaluated = 0, kept = 0, mismatches = 0;
+  float worstHeight = 0.0f;
+  // Point UINT32_MAX: the run as a whole; layer UINT32_MAX: the cell record.
+  void report(int32_t cellX, int32_t cellZ, uint32_t layer, uint32_t point) {
+    if (mismatches++ == 0) {
+      std::printf("%s: first mismatch at cell (%d, %d), layer %d, point %d\n", label, cellX,
+                  cellZ, static_cast<int>(layer), static_cast<int>(point));
+    }
+  }
+};
+
+// One (cell, layer) run of GPU instances against evaluatePoint (mirrored
+// passed through): keep decisions, prototypes and x/z exactly (order
+// included), the float attributes within tolerance. tags (optional, streamed
+// runs): the dither thresholds, which must equal the pattern's with the
+// layer index above.
+void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
+                const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
+                uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
+                const uint32_t *tags, RunStats &stats, bool mirrored = false);
+
+// setPlacement's GPU placement inputs, kept for the far field's transient
+// placement (buildFarField): constants has the inputs set (grid, counts,
+// instances and cells are per dispatch); the far-field layers are the first
+// layerCount, pointsPerCell their pattern points per cell.
+struct FarPlacement {
+  PlacementConstants constants;
+  VkPipeline countPipeline = VK_NULL_HANDLE, writePipeline = VK_NULL_HANDLE,
+             scanPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout placementLayout = VK_NULL_HANDLE, scanLayout = VK_NULL_HANDLE;
+  uint32_t layerCount = 0, pointsPerCell = 0, seed = 0;
+  std::span<const DitherPattern> patterns;
+};
+
+
 struct Renderer::Impl {
   GLFWwindow *window = nullptr;
   const Window *windowSize = nullptr;
@@ -399,6 +438,10 @@ struct Renderer::Impl {
   VoxelLod voxelLod = VoxelLod::On;
   float voxelNear = 0.0f;
   float farSwitchPixels = kFarSwitchPixels;
+  float farExtent = kFarExtent;
+  // The far field's cells (0: none): cell_cull's threads past the
+  // hand-placed chunks.
+  uint32_t farGridCells = 0;
   VoxelCoverage voxelCoverage = VoxelCoverage::AreaPixelPhase;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
@@ -630,10 +673,12 @@ struct Renderer::Impl {
                        std::span<const PlacementLayer> layers,
                        const std::vector<std::array<float, 4>> &bounds);
   // The far field of the current placement: prototype templates, then the
-  // splat over the placed table (offsets: setPlacement's per (cell, layer)).
+  // splat of the far-field layers over the far grid, from transient
+  // instances placed again (beyond the crop mirrored) slice by slice
+  // (offsets: setPlacement's per (cell, layer), for the trees per cell).
   void buildFarField(std::span<const Prototype> prototypes,
                      std::span<const PlacementLayer> layers,
-                     const std::vector<uint32_t> &offsets);
+                     const std::vector<uint32_t> &offsets, const FarPlacement &placement);
   void destroyFarField();
   // Returns the maps' bytes (0: no forest).
   VkDeviceSize createFarShadow(const FarFieldGrid &grid, const std::vector<FarCell> &farCells);

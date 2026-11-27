@@ -24,7 +24,7 @@ constexpr uint32_t kClusterSalt = 0x636c7374u;
 constexpr uint32_t kMaskOctaves = 4;
 constexpr uint32_t kClusterOctaves = 2;
 constexpr int32_t kOpen = 1 << 30;
-constexpr int32_t kMaxCell = 256;
+constexpr int32_t kMaxCell = kPlacementCellRange;
 
 uint32_t mul16(uint32_t a, uint32_t b) { return (a * b + 0xFFFFu) >> 16; }
 
@@ -162,12 +162,14 @@ uint32_t nearestIndex(int32_t x, int32_t origin, uint32_t spacing, uint32_t size
   return std::min(i, size - 1);
 }
 
+// The noise reads (x, z); the heights and channels the sample nearest to
+// (sampleX, sampleZ), which differs only for a point mirrored into the crop.
 Factors densityAtFixed(const Heightfield &heights, const GeoChannels *geo,
                        const PlacementField &field, const PlacementRule &rule,
                        const PlacementParent &parent, uint32_t seed, uint32_t layerSeed, int32_t x,
-                       int32_t z) {
-  const uint32_t i = nearestIndex(x, field.originX, field.spacing, field.width);
-  const uint32_t j = nearestIndex(z, field.originZ, field.spacing, field.height);
+                       int32_t z, int32_t sampleX, int32_t sampleZ) {
+  const uint32_t i = nearestIndex(sampleX, field.originX, field.spacing, field.width);
+  const uint32_t j = nearestIndex(sampleZ, field.originZ, field.spacing, field.height);
   const auto at = [&](uint32_t a, uint32_t b) {
     return static_cast<int32_t>(heights.samples[static_cast<size_t>(b) * field.width + a]);
   };
@@ -568,14 +570,28 @@ uint16_t densityAt(const Heightfield &field, const GeoChannels *geo, const Place
                                               placementRule(field, layer.rule),
                                               placementParent(field, layer, seed), seed,
                                               layerSeed(layer.id, seed), narrow(xFixed),
-                                              narrow(zFixed))
+                                              narrow(zFixed), narrow(xFixed), narrow(zFixed))
                                    .density);
+}
+
+int32_t placementFold(int32_t x, int32_t origin, uint32_t spacing, uint32_t size) {
+  const uint32_t period = 2 * size * spacing;
+  // x - origin + spacing / 2 lies in (-2^30, 3 2^30): offset by 2^30 it is
+  // a uint32, and (2^30 mod period) is taken back out after the reduction.
+  constexpr uint32_t kBias = 1u << 30;
+  const uint32_t u = static_cast<uint32_t>(x) - static_cast<uint32_t>(origin) + spacing / 2 + kBias;
+  uint32_t m = (u % period + period - kBias % period) % period;
+  if (m >= period / 2) {
+    m = period - 1 - m;
+  }
+  return static_cast<int32_t>(static_cast<uint32_t>(origin) + m - spacing / 2);
 }
 
 std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChannels *geo,
                                          const PlacementLayer &layer,
                                          const DitherPattern &pattern, uint32_t seed,
-                                         int32_t cellX, int32_t cellZ, uint32_t point) {
+                                         int32_t cellX, int32_t cellZ, uint32_t point,
+                                         bool mirrored) {
   checkGeo(field, geo, layer);
   const std::vector<uint32_t> thresholds = prototypeThresholds(layer);
   if (point >= pattern.points.size() || !cellInRange(cellX, cellZ)) {
@@ -586,12 +602,17 @@ std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChan
   const uint32_t cell = cellHash(cellX, cellZ, layerHash);
   int32_t x = 0, z = 0;
   pointPosition(cellX, cellZ, cell, pattern.points[point], x, z);
+  int32_t sx = x, sz = z;
   if (!insideCrop(fixedField, x, z)) {
-    return std::nullopt;
+    if (!mirrored) {
+      return std::nullopt;
+    }
+    sx = placementFold(x, fixedField.originX, fixedField.spacing, fixedField.width);
+    sz = placementFold(z, fixedField.originZ, fixedField.spacing, fixedField.height);
   }
   const Factors factors =
       densityAtFixed(field, geo, fixedField, placementRule(field, layer.rule),
-                     placementParent(field, layer, seed), seed, layerHash, x, z);
+                     placementParent(field, layer, seed), seed, layerHash, x, z, sx, sz);
   if (pattern.thresholds[point] >= factors.density) {
     return std::nullopt;
   }
@@ -607,7 +628,9 @@ std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChan
   PlacedPoint out{};
   out.position.x = static_cast<float>(x) / 65536.0f;
   out.position.z = static_cast<float>(z) / 65536.0f;
-  out.position.y = field.heightAt(out.position.x, out.position.z) - layer.sinkDepth;
+  out.position.y = field.heightAt(static_cast<float>(sx) / 65536.0f,
+                                  static_cast<float>(sz) / 65536.0f) -
+                   layer.sinkDepth;
   out.prototype = layer.prototypes[pick].first;
   const float edge = 0.5f + 0.5f * static_cast<float>(factors.mask) / 65535.0f;
   out.scale = (layer.scaleMin + (layer.scaleMax - layer.scaleMin) * unit(pointHash >> 16)) * edge;

@@ -61,7 +61,13 @@ engine/src/render/         renderer internals:
                            (tlas_fill.comp) + build
   renderer_farfield.cpp    far field at setPlacement: prototype templates
                            from the meshes' 1 m voxels (cluster cache),
-                           splat of the placed table into world bricks
+                           splat into world bricks over the far grid
+                           (+-farExtent, default 16 km, around the crop):
+                           the far-field layers placed again in row
+                           chunks (placement.comp, mirrored beyond the
+                           placement grid), transient, never stored;
+                           levels by band (L0 to 2 km past the grid, L1
+                           to 6 km, L2 over all, FarFieldGrid::bands)
                            (farfield_splat.comp), column map, Debug checks
                            against the CPU replica (farfield.h/.cpp)
   renderer_shadows.cpp     sun shadow cascades: which re-render, their
@@ -317,7 +323,9 @@ distance: from the cascades, where cascades 0-3 hold voxel casters and
 cascade 4 the far cells' bricks (with `--shadows rt`, the ray meeting the
 model's triangles); no discard,
 so early depth holds); then
-the far field pass: voxel.mesh emits each far cell's
+the far field pass (cell_cull appends far cells: placement cells past
+the switch, and every far-grid cell outside the placement grid, at
+least at its finest stored level): voxel.mesh emits each far cell's
 canopy box, voxel.frag marches its bricks (farfield.glsl) to opacity 0.5
 and writes the hit's depth (conservative, depth_less), motion and the
 same attachments) -> depth pyramid (depth_pyramid.comp, min-reduced R32F) -> late

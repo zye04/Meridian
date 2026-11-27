@@ -238,7 +238,7 @@ void Renderer::Impl::cullCells(VkCommandBuffer cmd, const FrameData &frame, uint
   vkCmdPushConstants(cmd, cullLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants),
                      &constants);
   const uint32_t threads = placementGrid.columns * placementGrid.rows + stream.recordCount +
-                           (static_cast<uint32_t>(instances.size()) + 63) / 64;
+                           (static_cast<uint32_t>(instances.size()) + 63) / 64 + farGridCells;
   vkCmdDispatch(cmd, std::max(1u, (threads + 63) / 64), 1, 1);
   memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -581,6 +581,7 @@ void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabl
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setFarSwitchPixels(float pixels) { impl_->farSwitchPixels = pixels; }
+void Renderer::setFarExtent(float meters) { impl_->farExtent = std::min(meters, kFarExtent); }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
 
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {

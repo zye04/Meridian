@@ -42,7 +42,7 @@ VkDeviceSize Renderer::Impl::createFarShadow(const FarFieldGrid &grid,
     return 0;
   }
   farShadowBox = {lo, hi};
-  farShadowCapacity = farShadowMaxTexels(farShadowBox);
+  farShadowCapacity = std::min(farShadowMaxTexels(farShadowBox), kFarShadowMaxTexels);
   for (Buffer &map : farShadowMaps) {
     map = createBuffer(VkDeviceSize{farShadowCapacity} * 2,
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |

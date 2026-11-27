@@ -17,6 +17,9 @@
 // instances the same way.
 // Grid cells past the far switch skip their trees (the start of their run)
 // and, in phase 0, append themselves to the far cell list for voxel.mesh.
+// Threads past the hand-placed chunks take the far field's cells outside
+// the placement grid (no trees: always far, in phase 0 and the coarsest
+// cascade).
 
 layout(local_size_x = 64) in;
 
@@ -35,17 +38,20 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
 // scene.farSwitchPixels from the nearest point of its canopy box. A cell with
 // bricks but no trees (crowns reaching in from a neighbor) uses the box's
 // height. Returns how many instances to skip: its trees if far, else 0.
-// Phase 0 appends a far cell in the frustum to the far list with its level.
-// In the coarsest cascade (shadowFarCells) every cell is far: a texel there
-// is about an L0 voxel, and casting a million trees as clusters cost a 51 ms
-// re-render at the forest edge.
-uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
+// Phase 0 appends a far cell in the frustum to the far list with its level,
+// never finer than the finest it stores. In the coarsest cascade
+// (shadowFarCells) every cell is far: a texel there is about an L0 voxel,
+// and casting a million trees as clusters cost a 51 ms re-render at the
+// forest edge. index: the far field's cell; always: no switch test (a cell
+// outside the placement grid).
+uint farSwitch(SceneBuffer scene, uint index, bool always) {
     FarField field = scene.farField.field;
     FarCell far = field.cells.cells[index];
     if (far.top < far.bottom) {
         return 0u;
     }
-    vec2 lo = vec2(ivec2(gridIndex) + scene.cellGrid) * kCellSize;
+    ivec2 farCell = ivec2(index % field.cellsX, index / field.cellsX);
+    vec2 lo = vec2(field.originX, field.originZ) + vec2(farCell) * kCellSize;
     vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
     vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
     bool shadow = scene.shadowView != 0u;
@@ -54,7 +60,7 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
         shadow ? scene.orthoPixelsPerMeter
                : abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
     float height = far.treeCount > 0u ? far.treeHeight : far.top - far.bottom;
-    if (!shadow && height * pixelsPerMeter >= scene.farSwitchPixels) {
+    if (!always && !shadow && height * pixelsPerMeter >= scene.farSwitchPixels) {
         return 0u;
     }
     // The drawn box (voxel.mesh) reaches up to the coarsest level's pad past
@@ -65,6 +71,7 @@ uint farSwitch(SceneBuffer scene, uint index, uvec2 gridIndex) {
         float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
         uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
                                 float(kFarLevels - 1u)));
+        level = max(level, farFinestLevel(field.bands, farCell));
         uint slot = atomicAdd(cull.counters.counters[kCounterFarTasks], 1u);
         scene.farCellList.entries[slot] = index | level << 30u;
     }
@@ -82,6 +89,21 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     uint gridCells = scene.cellGridSize.x * scene.cellGridSize.y;
     uint cellCount = gridCells + scene.streamRecordCount;
+    uint farBase = cellCount + (scene.instanceCount + 63u) / 64u;
+    if (index >= farBase) {
+        if (scene.farFieldEnabled == 0u || (shadow && scene.shadowFarCells == 0u)) {
+            return;
+        }
+        FarField field = scene.farField.field;
+        uint farIndex = index - farBase;
+        uvec2 local = uvec2(farIndex % field.cellsX, farIndex / field.cellsX) -
+                      uvec2(field.placedOffsetX, field.placedOffsetZ);
+        if (farIndex < field.cellsX * field.cellsZ &&
+            (local.x >= scene.cellGridSize.x || local.y >= scene.cellGridSize.y)) {
+            farSwitch(scene, farIndex, true);
+        }
+        return;
+    }
     if (index >= cellCount) {
         uint first = (index - cellCount) * 64u;
         // Phase 0 is skipped without occlusion culling (see cull.comp).
@@ -95,10 +117,13 @@ void main() {
     }
     Cell cell = scene.cells.cells[index];
     uvec2 gridIndex = uvec2(index % scene.cellGridSize.x, index / scene.cellGridSize.x);
-    uint skipped = (!shadow || scene.shadowFarCells != 0u) && scene.farFieldEnabled != 0u &&
-                           index < gridCells
-                       ? farSwitch(scene, index, gridIndex)
-                       : 0u;
+    uint skipped = 0u;
+    if ((!shadow || scene.shadowFarCells != 0u) && scene.farFieldEnabled != 0u &&
+        index < gridCells) {
+        FarField field = scene.farField.field;
+        uvec2 farCell = gridIndex + uvec2(field.placedOffsetX, field.placedOffsetZ);
+        skipped = farSwitch(scene, farCell.y * field.cellsX + farCell.x, false);
+    }
     // Cell bits follow the instance ids' (static and ring) in the visibility
     // buffer.
     uint visibilityIndex = kPlacedBase + scene.placedCount + scene.ringCount + index;
