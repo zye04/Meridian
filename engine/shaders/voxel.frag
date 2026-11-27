@@ -39,6 +39,12 @@ layout(depth_less) out float gl_FragDepth;
 
 // Optical depth at opacity 0.5.
 const float kHitOpticalDepth = 0.69314718;
+// How far back into the cell a ray comes from the view march starts, in that
+// cell's voxels: the canopy just before the border is what moves the hits
+// next to it (a ray that crosses more of that cell without reaching opacity
+// 0.5 has passed through sparse canopy); marching all of it cost the far
+// pass 0.8 ms more at a1.
+const float kTileCarryVoxels = 2.0;
 // The sun through the forest's volume: the optical depth from the hit
 // toward the sun over this far, marched through the bricks at the drawn
 // level (farFieldMarch, into the neighbouring cells); the shadow maps and the terrain
@@ -99,7 +105,8 @@ void main() {
 #endif
     // A ray entering through a side face first gathers the optical depth of
     // the cell it comes from (at this level, or that cell's finest stored
-    // one), from that cell's box on; a hit there is that cell's fragment's.
+    // one), over its last kTileCarryVoxels; a hit there is that cell's
+    // fragment's.
     // Restarting at zero put the hits next to every cell border deeper into
     // the canopy: a dark line along each border.
     vec3 tNear = min(t0, t1);
@@ -134,6 +141,7 @@ void main() {
 #else
             a = max(max(max(near.x, near.y), near.z), 0.0);
 #endif
+            a = max(a, tEntry - kTileCarryVoxels * farVoxelSize(marchLevel));
             b = tEntry;
         }
         t = farMarchCell(farField, marchCell, marchLevel, origin, direction, a, b,
@@ -195,7 +203,24 @@ void main() {
     // far pass 11.7 ms at a1 and darkened the lit side below the cluster
     // voxels (ledger, stage 2).
     uint shadeLevel = max(level, kFarFineLevels);
-    for (uint ray = 0u; ray < (sunUp ? 2u : 1u); ++ray) {
+    // The shadow maps and the terrain past the march, looked up first: where
+    // they shadow the hit, the sun march is skipped.
+    float sunLookup = 0.0;
+    if (sunUp) {
+        // The shadow maps' receiver offset along the normal (here the sun:
+        // farShadowVisibility moves it a far shadow texel and its bias
+        // toward the sun) would skip that much canopy past the march's
+        // end; the lookup starts that much short of it instead (cascade
+        // receivers, nearer than kFarShadowDistance, shift a little less).
+        vec3 sunStart =
+            world + rayDirection * (kTileSunMarch - scene.farShadowTexel - kFarShadowBias);
+        vec3 marchOrigin = sunStart;
+        marchOrigin.y = max(marchOrigin.y,
+                            terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
+        sunLookup = traceSunVisibility(sunStart, marchOrigin, rayDirection, 0.0, true,
+                                       sunStart - scene.cameraPosition, rayDirection);
+    }
+    for (uint ray = 0u; ray < (sunLookup > 0.0 ? 2u : 1u); ++ray) {
         bool sky = ray == 0u;
         FarScatterSum unused = FarScatterSum(vec3(0.0), vec3(0.0), 0.0);
         float transmittance =
@@ -210,19 +235,7 @@ void main() {
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
     if (sunUp) {
-        // The shadow maps' receiver offset along the normal (here the sun:
-        // farShadowVisibility moves it a far shadow texel and its bias
-        // toward the sun) would skip that much canopy past the march's
-        // end; the lookup starts that much short of it instead (cascade
-        // receivers, nearer than kFarShadowDistance, shift a little less).
-        vec3 sunStart =
-            world + rayDirection * (kTileSunMarch - scene.farShadowTexel - kFarShadowBias);
-        vec3 marchOrigin = sunStart;
-        marchOrigin.y = max(marchOrigin.y,
-                            terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
-        float visibility = exp(-depths.y) *
-                           traceSunVisibility(sunStart, marchOrigin, rayDirection, 0.0, true,
-                                              sunStart - scene.cameraPosition, rayDirection);
+        float visibility = exp(-depths.y) * sunLookup;
         addVoxelFoliageSun(sh, s.baseColor, transmitted, aligned, visibility);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }

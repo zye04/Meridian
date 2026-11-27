@@ -6184,3 +6184,17 @@ in the ledger's "Review fixes" section.
 - `placementField` throws for a crop over 16 km: `placementFold` adds its
   period (2 x size x spacing, fixed point) to a remainder below it in
   uint32, which wraps once the period passes 2^31 (Napf: 15 km, fits).
+- Far pass cost after the border fix (director's task 2): 12.6 ms at a1
+  and 12.4 at H1 with the marches crossing cells. Split by disabling one
+  term at a time (a1): view march and raster 5.1 ms (the carried march
+  into the previous cell 1.6 of it), sky and sun marches 3.9, ambient 2.4,
+  sun lookup and the rest ~1.2. Kept, image unchanged: the sun lookup
+  (shadow maps, terrain) goes first and the sun march is skipped where it
+  shadows the hit (-1.1 ms, exact), and the carried march covers only
+  the last two voxels before the border (-0.8 ms; border profile dip
+  0.98, was 0.90 before the fix). Now 10.64 / 10.62 ms; fly-through far
+  field mean 12.2 ms (route GPU 23.7). Dropped: one march for all three
+  rays (17.8 ms), surface after the marches, the dead fallback march,
+  the sky in the view loop (-0.2, noise), coarser sun / sky levels
+  (-0.9 ms but above the frame-diff noise at H1). The < 5 ms target needs
+  shading once per pixel, which waits for the visibility buffer (backlog).
