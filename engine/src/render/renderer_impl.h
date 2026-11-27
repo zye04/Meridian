@@ -548,7 +548,8 @@ struct Renderer::Impl {
   std::vector<MeshFarVoxels> meshFarVoxels;
 
   std::optional<std::filesystem::path> capturePath;
-  std::optional<std::filesystem::path> albedoCapturePath;
+  // Per CaptureSource after Display.
+  std::array<std::optional<std::filesystem::path>, kAttachmentCaptures> attachmentCapturePaths;
   bool albedoCapture = false;
 
   void createSwapchain();

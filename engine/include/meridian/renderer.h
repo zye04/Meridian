@@ -119,9 +119,12 @@ enum class GiMode { Off, Probes };
 enum class VoxelLod { Off, On };
 
 // What requestCapture saves: the displayed frame (PNG, or the linear HDR
-// image the tonemap read for a .pfm path), or the linear diffuse albedo the
-// shading used (render-sized .pfm; needs enableAlbedoCapture).
-enum class CaptureSource { Display, DiffuseAlbedo };
+// image the tonemap read for a .pfm path), or a scene attachment as the
+// frame left it (render-sized .pfm): the diffuse albedo (needs
+// enableAlbedoCapture), motion (r, g), specular albedo and normal +
+// roughness (only when the upscaler wants guides), the sun light.
+enum class CaptureSource { Display, DiffuseAlbedo, Motion, SpecularAlbedo, NormalRoughness, SunLight };
+constexpr size_t kAttachmentCaptures = 5;
 
 enum class TerrainRole { Grass, Clover, Mud, Soil, ForestPath, ForestFloor, Gravel, Scree, Rock, Count };
 constexpr int kMaxTerrainLayers = 16;
