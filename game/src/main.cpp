@@ -291,6 +291,15 @@ struct BroadleafForest {
       {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
   }};
 };
+// With the broadleaf scenery, the terrain's own colour targets for the
+// roles seen from the air (linear RGB): the grass toward the streamed meadow
+// as rendered beside it (OKLCh hue, chroma and lightness moved by the
+// rendered meadow over the rendered far clearing at H2/a1), the forest
+// floor darker so the ground between crowns reads as shade, not khaki.
+struct BroadleafGround {
+  static constexpr meridian::Vec3 kGrassTarget{0.0061f, 0.0493f, 0.0005f};
+  static constexpr meridian::Vec3 kForestFloorTarget{0.025f, 0.025f, 0.008f};
+};
 // Flat ground rocks breaking through the turf where the soil is thin: on
 // convex ground (ridges, knolls) in the open the forest leaves.
 struct ClearingStones {
@@ -1578,7 +1587,7 @@ int main(int argc, char **argv) {
     };
     std::vector<Variant> variants;
   };
-  const Role roles[] = {
+  Role roles[] = {
       // Matched to the streamed grass mat's mean as rendered, so the mat
       // thins into a terrain of the same brightness (decisions.md).
       {TerrainRole::Grass,
@@ -1606,6 +1615,15 @@ int main(int argc, char **argv) {
        {{"forest_european_broadleaf_rock_coarse_xlnjefr", 2.0f, 0.0876f},
         {"forest_european_broadleaf_rock_moss_xlpmei3", 2.0f, 0.1433f}}},
   };
+  if (options.broadleafScenery) {
+    for (Role &role : roles) {
+      if (role.role == TerrainRole::Grass) {
+        role.target = BroadleafGround::kGrassTarget;
+      } else if (role.role == TerrainRole::ForestFloor) {
+        role.target = BroadleafGround::kForestFloorTarget;
+      }
+    }
+  }
   meridian::TerrainMaterial material;
   if (options.trees) {
     material.forestLayerId = kForestLayerId;

@@ -5868,3 +5868,20 @@ cached shadow pages are invalidated.
 - Still open: at 1:1 against 1.jpg (crown scale ~40 px) the crowns read as
   fine speckle, not round domes; the crown-scale light/dark ratio already
   matches (1.67 against 1.70).
+
+## Broadleaf terrain colour toward the meadow (scene lane round 2c, 2026-11-27)
+
+- With `--scenery broadleaf` the Grass and ForestFloor roles' colour
+  targets come from `BroadleafGround` (main.cpp). Grass: the old target
+  (OKLCh L 0.364 C 0.067 h 125.0) moved by the rendered meadow over the
+  rendered far clearing (h +12.7, C x1.58, L x0.886; clamped to gamut).
+  Forest floor: half the old linear target.
+- a1 far clearing (sunlit half): L 0.544 C 0.067 h 112.7 -> 0.507 / 0.096 /
+  129.9; the meadow at H2 is 0.484 / 0.107 / 125.6. The ground between
+  crowns barely moves (L 0.273 -> 0.263, h 238): it is lit by blue sky
+  light, not shown by its albedo (lighting item).
+- Meadow tree shadows (H2): the grass blades are shadowed (sun view and
+  report pixel 0 sun where the tree shadow falls), but the tall blades
+  hide the dark terrain under them and the sunlit blade tops face the
+  camera; ray-traced shadows give the same picture, so the cascades are
+  not the cause. No flag or parameter fix.
