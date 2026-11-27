@@ -476,6 +476,8 @@ the canopy ambient: where the crown hides the sky (triangles: the crown sky
 visibility; voxels: the model's depth up and sideways, and along R) the leaf
 sees its neighbours, omega x the ambient (one scattering); `b2`: with
 recollision omega / (1 - p omega).
+`--voxel-sun-specular S` (default 1; throwaway probe, light lane round 4,
+never merged): scales the leaf voxels' sun specular (voxel_instance.frag).
 `--foliage-specular-aa off|on` (default on; `off` for A/B): leaves widen their specular lobe by the normal variation a
 pixel covers (lighting.glsl `specularAaRoughness`, Tokuyoshi-Kaplanyan):
 triangle leaves by the shading normal's screen derivatives, voxels by

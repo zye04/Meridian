@@ -449,6 +449,9 @@ public:
   // leaves (single scattering), CanopyRecollision with recollision.
   enum class LeafLight : uint32_t { Off, Sun, AllSpecular, Canopy, CanopyRecollision };
   void setLeafLight(LeafLight mode);
+  // Throwaway probe (light lane round 4): scales the leaf voxels' sun
+  // specular (1 = as shaded).
+  void setVoxelSunSpecular(float scale);
   // Specular antialiasing for foliage (on by default, off for A/B):
   // leaves widen their specular lobe by the normal variation inside a pixel
   // (triangles: the shading normal's screen derivatives; voxels: the

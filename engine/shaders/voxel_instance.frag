@@ -107,6 +107,7 @@ void main() {
     if (isLeafMesh(scene, scene.meshes.meshes[cluster.mesh])) {
         float leafCrownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * reflect(-sh.V, sh.N))));
         setLeafLight(sh, albedo + transmitted, occlusion, leafCrownR);
+        sh.leafSunSpecular *= scene.voxelSunSpecular;
     }
     vec3 sunRadiance = vec3(0.0);
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
