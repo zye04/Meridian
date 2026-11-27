@@ -14,6 +14,8 @@ layout(location = 8) out float outHeight;
 layout(location = 9) flat out vec3 outTint;
 layout(location = 10) flat out float outStreamFade;
 layout(location = 12) out float outCrownVisibility;
+// No crown fill here (mesh.mesh crownSun).
+layout(location = 15) out vec4 outCrownSun;
 
 void main() {
     // Blended draws set firstInstance to the instance's index; the indexed
@@ -36,6 +38,7 @@ void main() {
     outLodError = 0.0;
     outHeight = 1.0;
     outCrownVisibility = 1.0;
+    outCrownSun = vec4(0.0);
     outTint = vec3(1.0);
     outStreamFade = instance.fade;
     // Static geometry for now: only the camera moves between frames.
