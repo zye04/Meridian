@@ -1,6 +1,9 @@
-# Far lane: resume point (2026-11-27 late, review fixes + cost task done; waiting on the director)
+# Far lane: resume point (2026-11-27 late, lane stopped; all director tasks done)
 
-Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (5d91824 + this RESUME commit).
+Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (d6bd0b6 + this RESUME commit).
+Director ruled: far pass 10.6 ms accepted, < 5 ms withdrawn (shade-once / box rasterization, backlog row); coarser sun/sky levels not taken.
+Final checks d6bd0b6: default Napf resident 12033 MiB, peak 12460, placed 3398673 (was 3364956), 0 errors, 0 dropped;
+fly spike (25 ms blocks at t 14-16 s) not reproduced still (14.03 ms at 1414 1500 0): backlog row. A fresh reviewer checks the fix commits.
 
 ## Latest (this session)
 - Director tasks after the hardening report and the independent review of f98f774, all committed:
@@ -17,7 +20,7 @@ Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (5d918
   debug_view.frag, before/after1/after2/final, sheet-lines.png), `.superpowers/far/review/` (edge, far6k, leak, debug-h1.log),
   `.superpowers/far/cost2/` (probe copies + probe.sh/probe-engine.sh/msw.sh/default.sh, probe dirs, try/*.diff, fly/).
 - build-dev's voxel.frag.spv was overwritten by probes: rebuild (touch engine/shaders/voxel.frag) before using build-dev.
-- Open: fly-through far_field max 25.3 ms at t 14.1 s (x ~1410, core) not explained; < 5 ms needs shade-once (visibility buffer).
+- Open: the fly spike (backlog row); next lane work waits on the director / the merge decision.
 
 ## State
 - Stage 0 and stage 1 are done and accepted. Plan boxes 1.x are still unticked: tick 1.1-1.7 when stage 2 lands.
