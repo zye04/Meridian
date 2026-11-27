@@ -12,6 +12,11 @@
 
 namespace meridian {
 
+// mesh.mesh's max_primitives and max_vertices; clodDefaultConfig caps
+// clusters at them too. The visibility id packs a triangle in 7 bits.
+constexpr size_t kMaxClusterTriangles = 128;
+constexpr size_t kMaxClusterVertices = 128;
+
 struct MeshData;
 
 // A bounding sphere with the simplification error of the geometry inside it,

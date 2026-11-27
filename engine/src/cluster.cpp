@@ -22,9 +22,6 @@ namespace meridian {
 
 namespace {
 
-constexpr size_t kMaxClusterTriangles = 128;
-// mesh.mesh's max_vertices; clodDefaultConfig caps clusters at it too.
-constexpr size_t kMaxClusterVertices = 128;
 constexpr char kCacheMagic[4] = {'M', 'C', 'L', 'D'};
 // Bump the high half when the build settings or Cluster's layout change; the
 // low half follows the meshoptimizer pin, whose output may change.
