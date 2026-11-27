@@ -1,4 +1,4 @@
-# Far lane: resume point (2026-11-27, after stage 3 tile shading)
+# Far lane: resume point (2026-11-27, stage 2 part 1 done, waiting on the director)
 
 Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (merge ed758d8 + this RESUME commit).
 Read: CLAUDE.md, spec `docs/superpowers/specs/2026-11-26-far-tile-tier-design.md`,
@@ -33,6 +33,22 @@ plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
 - Measurement kit: `.superpowers/far/s3/{views.sh,measure.sh,canopy.py,split.py,regions.py}`;
   default reference frames `.superpowers/far/s3/premise/default`.
 - `.superpowers/far/stage1`: local worktree at c607a93 with build-release (before frames).
+
+## Stage 2 part 1 (de862ea, ledger ebe80cf; reported to the director)
+- Fine levels 1 m / 2 m first in the level index (kFarFineLevels = 2), entry `cell | level << 29`,
+  fine column tables over their band only (farColumnRect). Static hashes unchanged
+  (0x18e4df10c8f99dce / 0x95b68fb05960ae2d), fine hash 0xc0a1e97bc3a0eee6, replica check 0 mismatches.
+- `--far-fine M`: static window inside the placement grid around --camera. Switch = finest built
+  voxel <= kFarSwitchPixels (1 px); default without fine levels switches at 4 m (~7.3 km).
+- Fine tiles shade sun/sky from the 4 m volume (shadeLevel in voxel.frag).
+- Premise problem reported: 1 m = 0.29 MiB per crop cell (1204 MiB whole crop); far pass a1
+  9.0 -> 16.5 ms, GPU 30.15 -> 34.67 (h1 30.58 -> 33.23): tiles cost more than the trees they replace.
+  Waiting for the director's choice (options in the report: faster 1 m march via empty-space skip
+  from the 4 m level; switch at the 2 m level; streamed annulus only).
+- Artifacts: `.superpowers/far/s2/` (fine, fine-shade4, crop-switch-a1.png, sheet-fine.png, a1-debug.log);
+  stage 3b sheet `.superpowers/far/s3/final/sheet-stage3b.png`.
+- Note: `rtk grep -h` over several files reorders output; grep files one at a time for per-view numbers.
+- measure.sh's `--far-switch-px 41` is stale (the flag now means voxel px); call views.sh directly.
 
 ## Next
 1. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
