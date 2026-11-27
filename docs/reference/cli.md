@@ -434,6 +434,14 @@ their specular lobe by the normal variation a pixel covers (lighting.glsl
 `specularAaRoughness`, Tokuyoshi-Kaplanyan): triangle leaves by the shading
 normal's screen derivatives, voxels by `kVoxelNeighbourNormalChange` over
 the voxel's size in pixels (voxel_instance.frag).
+`--leaf-light off|on` (default on; `off` for A/B): leaf triangles and leaf
+voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
+ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of
+the normal toward the viewer (measured tree leaves: the abaxial face is
+diffuse); where the crown hides the sky (triangles: the crown sky
+visibility; voxels: the model's depth up and sideways, and along R) the leaf
+sees its neighbours, omega x the ambient (one scattering), in place of the
+crown occlusion, with GI on or off.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

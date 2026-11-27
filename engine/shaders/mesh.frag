@@ -202,6 +202,7 @@ void main() {
         }
         transmitted = transmissionColor * (material.diffuseTransmission * (1.0 - s.metallic));
         sh.diffuseColor *= 1.0 - material.diffuseTransmission;
+        setLeafLight(sh, sh.diffuseColor + transmitted, inCrownVisibility, inCrownVisibility);
     }
 #endif
 
@@ -262,7 +263,10 @@ void main() {
 #endif
 
 #ifndef TERRAIN
-    s.occlusion *= crownOcclusion();
+    // The leaf light's canopy ambient holds the crown itself.
+    if (sh.leafVisibility < 0.0) {
+        s.occlusion *= crownOcclusion();
+    }
 #endif
 #ifdef DEBUG_ID
     vec3 debugSunDiffuse = sh.diffuseLight;

@@ -702,7 +702,13 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint voxelCoverage;
     // Renderer::setFoliageSpecularAa (lighting.glsl specularAaRoughness).
     uint foliageSpecularAa;
+    // Renderer::setLeafLight (lighting.glsl setLeafLight).
+    uint leafLight;
 };
+
+bool isLeafMesh(SceneBuffer scene, MeshInfo mesh) {
+    return scene.materials.materials[mesh.materialIndex].diffuseTransmission > 0.0;
+}
 
 // Largest axis scale of a transform: a conservative bound under
 // non-uniform scale.

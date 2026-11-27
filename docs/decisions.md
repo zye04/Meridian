@@ -5870,3 +5870,44 @@ Measured on branch crown-light:
   21.6 % and 25.1 -> 24.3 %, so leaves don't go dull; no footprint fade needed.
 - GPU within noise (s1 25.40 -> 25.34 ms, m2 24.28 -> 24.43 ms).
 No wider variant: s1's sparkle is already below the reference.
+
+## Leaf light: adaxial-only specular and the canopy ambient (light lane round 3, 2026-11-27)
+
+Leaves lit their back (abaxial) face with the front's specular lobe and reflected open sky
+from inside a crown. Measured tree leaves disagree: Bousquet, Jacquemoud and Moya, "Leaf
+BRDF and BTDF measurements and model" (ISPMSRS 2005; adaxial beech: Lambert plus
+Cook-Torrance, sigma ~0.35, n ~1.5, white specular, the BTDF near Lambertian) and Habel et
+al., "Physically based real-time translucency for leaves" (EGSR 2007: "the front of a leaf
+has broad specularity whereas the back of a leaf is diffuse. This is mostly true for tree
+leaves"). Our per-leaf parameters already match the measurement (texture roughness ~0.61,
+alpha 0.37; f0 0.04); only the two cases above were wrong. Inside a canopy, spectral
+invariants (Knyazikhin, Huang; already gi_probes.comp's foliage model) say a leaf sees, in
+the directions its crown hides, other leaves of radiance ~omega x the light reaching them:
+green and dim, not sky. No public engine text on foliage specular occlusion inside crowns
+was found (Ghost of Tsushima, Horizon, SpeedTree docs).
+
+`--leaf-light on` (default; lighting.glsl `setLeafLight`, mesh.frag, voxel_instance.frag):
+- The sun highlight and the ambient specular scale by the share of the seen face that is
+  adaxial, 0.5 + kLeafAdaxialUp x N.y (0.5) with N toward the viewer: blades turn their
+  adaxial face to the sky, and a voxel's lobe axis has no sign, so triangles and voxels
+  take the same rule.
+- Ambient diffuse, specular along R and the transmitted (back) ambient: the occluded share
+  1 - V sees neighbours, omega x the ambient reaching the point (omega = reflected +
+  transmitted albedo, one scattering). V is the crown sky visibility for triangles, the
+  model's visibility 0.5 (up + sides) for voxels, exp(-depth along R) for the reflection.
+  This term holds the crown, so the crown occlusion it replaces is skipped for leaves:
+  crownOcclusion() for triangles (GI off; with GI on it is 1 anyway) and, for voxels, the
+  model occlusion (GI off) and the crownR / multi-bounce adjustments (GI on). The prototype
+  (branch far-light 5d03ce6, mode b) kept the GI-off crown occlusion on top, which applied
+  the crown twice; the port fixes that.
+- Recollision (omega / (1 - p omega), the prototype's b2) and the partial modes a, a2 are
+  dropped: b2's mean |diff| from off stayed within 0.02 /255 of b's at every view.
+
+Chosen by the user by eye (B, light lane round 3). Measured on far-light, grade wb7500,
+palette light1, crown fill on, summer haze (2560x1440): mean |diff| vs off h2 3.76, s1 2.49,
+leaf view 9.23 /255 (floor 0.42, 0.30, 0.42); shaded crown specular share h2 32.0 -> 21.8 %;
+white dots per 1e4 crown px h2 51.7 -> 44.2; motion (h2 at 5 m/s) dots 21.7 -> 19.3,
+frame-to-frame |dL| 0.0371 -> 0.0346; triangle/voxel seam at equal distance (lone
+hornbeam) voxel/triangle Y near 0.735 -> 0.823 vs 0.670 -> 0.791, i.e. B narrows the
+switch; GPU o4 30.69 -> 30.87, h2 32.86 -> 33.02 ms. Main has no crown fill, so the port's
+look differs from the one judged; the port proof compares main against the branch.

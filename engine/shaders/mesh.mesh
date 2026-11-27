@@ -50,10 +50,6 @@ layout(location = 13) flat out uvec2 outDebugId[];
 const float kCrownMinHalfHeight = 2.0;
 const float kCrownDensity = 2.5;
 
-bool isLeafMesh(SceneBuffer scene, MeshInfo mesh) {
-    return scene.materials.materials[mesh.materialIndex].diffuseTransmission > 0.0;
-}
-
 // The path length inside the unit sphere along q + t w, t >= 0.
 float crownExit(vec3 q, vec3 w) {
     float b = dot(q, w);

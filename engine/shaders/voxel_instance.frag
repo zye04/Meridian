@@ -105,6 +105,14 @@ void main() {
     }
 
     Shading sh = beginShading(s, relative);
+    if (isLeafMesh(scene, scene.meshes.meshes[cluster.mesh])) {
+        float leafCrownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * reflect(-sh.V, sh.N))));
+        setLeafLight(sh, albedo + transmitted, occlusion, leafCrownR);
+    }
+    // The leaf light's canopy ambient holds the crown itself, GI on or off.
+    if (sh.leafVisibility >= 0.0) {
+        s.occlusion = 1.0;
+    }
     vec3 sunRadiance = vec3(0.0);
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
     vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
@@ -135,14 +143,14 @@ void main() {
     // With GI the probes stand for the crown in the diffuse term, but the sky
     // reflected along R still passes through the model: occlude it by the
     // model's optical depth along R.
-    if (scene.giMode != 0u) {
+    if (scene.giMode != 0u && sh.leafVisibility < 0.0) {
         vec3 R = reflect(-sh.V, sh.N);
         float crownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * R)));
         sh.specularLight = specularBeforeAmbient + (sh.specularLight - specularBeforeAmbient) *
                                                        mix(1.0, crownR, scene.microShadowStrength);
     }
     addTransmittedAmbient(sh, transmitted, s.occlusion);
-    if (scene.giMode != 0u) {
+    if (scene.giMode != 0u && sh.leafVisibility < 0.0) {
         sh.diffuseLight = diffuseBeforeAmbient +
                           (sh.diffuseLight - diffuseBeforeAmbient) *
                               mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);

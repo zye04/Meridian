@@ -581,6 +581,7 @@ void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabl
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
+void Renderer::setLeafLight(LeafLight mode) { impl_->leafLight = static_cast<uint32_t>(mode); }
 void Renderer::setFoliageSpecularAa(FoliageSpecularAa mode) {
   impl_->foliageSpecularAa = static_cast<uint32_t>(mode);
 }
@@ -1014,6 +1015,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        : 0;
   scene.voxelNear = impl_->voxelNear;
   scene.foliageSpecularAa = impl_->foliageSpecularAa;
+  scene.leafLight = impl_->leafLight;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |
                         static_cast<uint32_t>((impl_->frameNumber - impl_->cutFrame) % voxelPhases) << 8 |

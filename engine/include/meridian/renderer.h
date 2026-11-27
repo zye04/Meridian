@@ -430,6 +430,13 @@ public:
   // sparkle.
   enum class FoliageSpecularAa : uint32_t { Off, On };
   void setFoliageSpecularAa(FoliageSpecularAa mode);
+  // Leaf light (on by default, off for A/B): leaves keep the sun highlight
+  // and the ambient specular on the face seen as adaxial only (measured
+  // leaves: the abaxial face is diffuse), and where the crown hides the sky
+  // a leaf sees its neighbouring leaves (single scattering of the ambient)
+  // instead of the crown occluding it; triangle leaves and leaf voxels alike.
+  enum class LeafLight : uint32_t { Off, On };
+  void setLeafLight(LeafLight mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the
   // next frame. Identity by default.
