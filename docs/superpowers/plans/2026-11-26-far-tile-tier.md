@@ -1,6 +1,6 @@
 # Far tile tier — plan
 
-Status: in progress (stage 0 next). Spec:
+Status: in progress (stage 1). Spec:
 `specs/2026-11-26-far-tile-tier-design.md`. Branch `far-tier`, worktree
 `../meridian-far`. No merge to main: the user judges the result by eye.
 
@@ -28,18 +28,18 @@ docs in the same commit as the change.
 
 ## Stage 0: premise (no structural change)
 
-- [ ] 0.1 Read `cell_cull.comp` `farSwitch`, `farfield.glsl` (switch
+- [x] 0.1 Read `cell_cull.comp` `farSwitch`, `farfield.glsl` (switch
   constants, `farMarchCell`), `voxel.frag`, `renderer_farfield.cpp`
   `buildFarField`. Note in the ledger anything that contradicts the spec's
   "Meridian today".
-- [ ] 0.2 `--far-switch-px N`: the run's value for `kFarSwitchPixels`
+- [x] 0.2 `--far-switch-px N`: the run's value for `kFarSwitchPixels`
   (scene field, default unchanged). cli.md line.
   Verify: default run's frame equals main's (mean difference about 1e-6).
-- [ ] 0.3 a1 and H1 at the default, and with N chosen so the switch sits
+- [x] 0.3 a1 and H1 at the default, and with N chosen so the switch sits
   where the 4 m level is 1 px and 2 px. Record voxel quads, voxel pass ms,
   far pass ms, `far cells N`. Sheet: the three frames per view beside
   7.jpg, plus one 1:1 crop of the switch band.
-- [ ] 0.4 Report to the director: saving available, look gap at the
+- [x] 0.4 Report to the director: saving available, look gap at the
   switch, anything false in the spec. Continue with stage 1 without
   waiting unless a premise failed.
 
