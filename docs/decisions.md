@@ -6018,3 +6018,21 @@ sky occlusion.
   far pass at a1 with the switch at 41 px 7.77 -> 9.02 ms. Variant, the
   cluster voxels' 0.5 (up + four sides inside the cell): a1 0.419 / 0.302,
   far pass 14.74 ms; dropped (-0.01 L for +5.7 ms).
+- Sun through the volume (3.2): the optical depth from the hit toward the
+  sun through the cell's bricks (from one voxel of the drawn level out, as
+  a cluster voxel's ray starts one voxel out, to the cell's box or
+  `kTileSunMarch` = 32 m), then the cascades, the far shadow map and the
+  terrain from where that march ends, with the sun as the normal-offset
+  direction (as the cluster voxels). The fixed 4 m ray start
+  (`kVoxelRayStart`) is gone, and with it the double self-shadow of the
+  backlog row "Cascade 4 casts placed trees as far-cell voxels" (removed):
+  a tile's crown shadows it once, its cascade 4 / far map copy lies behind
+  the march end; cluster voxels' self-shadow already came only from the
+  cascades since the voxel-look seam fix. a1 lit / shaded L 0.403 / 0.304
+  (cluster voxels 0.382 / 0.268), lit share 149k of 234k pixels (cluster
+  voxels 160k); h1 0.307 / 0.201 (0.304 / 0.168). Variant from the hit
+  itself: a1 0.377 / 0.303 but lit share 130k, too few lit pixels; kept
+  one voxel out. Cost: the sky and sun marches share one call site (each
+  inlined copy of the march costs ~3 ms in registers alone, a zero-length
+  probe showed): far pass with the switch at 41 px 9.02 -> 12.05 ms
+  (14.58 with two call sites; 16 m instead of 32 m saves ~1 ms).

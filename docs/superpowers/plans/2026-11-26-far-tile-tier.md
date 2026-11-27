@@ -131,7 +131,7 @@ beside the 7.jpg crop, before (stage 1) and after; far pass ms and VRAM.
   cell's bricks from the hit (optical depth, named step count), replacing
   the fixed `kVoxelRayStart` offset; then the cascade or far shadow map
   with the matching bias. Removes the double self-shadow (backlog row
-  "Cascade 4 casts placed trees as far-cell voxels").
+  "Cascade 4 casts placed trees as far-cell voxels"; done, 3.2 commit).
 - [ ] 3.3 Sky occlusion from the volume for the ambient (today
   `s.occlusion = 1.0`): the same form as the crown-light lane's
   `--canopy-sky up` (branch `crown-light` 63c3751, not merged): the

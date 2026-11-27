@@ -39,9 +39,12 @@ layout(depth_less) out float gl_FragDepth;
 
 // Optical depth at opacity 0.5.
 const float kHitOpticalDepth = 0.69314718;
-// Shadow rays from a voxel surface start one L0 voxel out, so they don't
-// shadow the surface with its own crown.
-const float kVoxelRayStart = 4.0;
+// The sun through the cell's own volume: the optical depth from the hit
+// toward the sun over at most this far (and inside the cell's box), marched
+// through the bricks at the drawn level; the shadow maps and the terrain
+// take over where that march ends, so the crown shadows the hit once (its
+// copy in cascade 4 or the far shadow map lies behind the march's end).
+const float kTileSunMarch = 32.0;
 const float kVoxelPerceptualRoughness = 0.8;
 // Sky occlusion from the cell's own bricks, in the canopy-sky form of the
 // crown-light lane (lighting.glsl canopySkyVisibility, branch crown-light,
@@ -134,23 +137,42 @@ void main() {
         s.normal = -s.normal;
     }
 
-    // Up stays in the cell's column, so the cell's march covers it.
+    // Two short marches through the cell's own bricks from the hit, at one
+    // call site (each inlined copy of the march costs registers): up for the
+    // sky (it stays in the cell's column) and toward the sun, out of the
+    // hit's voxel, to the cell's box or kTileSunMarch.
     vec3 hitField = origin + direction * t;
-    float skyDepth = 0.0;
-    uint skyVoxel;
-    farMarchCell(farField, cell, level, hitField, vec3(0.0, 1.0, 0.0), kTileSkyStart,
-                 min(kTileSkyDistance, boxHi.y - hitField.y), kFarOpaqueDepth, skyDepth, skyVoxel);
-    float occlusion = mix(1.0, exp(-skyDepth), scene.microShadowStrength);
+    vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
+    bool sunUp = rayDirection.y > -sin(scene.sunAngularRadius);
+    vec3 inverseSun = 1.0 / mix(vec3(1e-12), rayDirection,
+                                greaterThan(abs(rayDirection), vec3(1e-12)));
+    vec3 sunExit = max((boxLo - hitField) * inverseSun, (boxHi - hitField) * inverseSun);
+    float sunEnd = clamp(min(min(sunExit.x, sunExit.y), sunExit.z), 0.0, kTileSunMarch);
+    // depths.x: up, depths.y: toward the sun (also what an in-crown fill
+    // toward the sun, crown-light lane, would read).
+    vec2 depths = vec2(0.0);
+    for (uint ray = 0u; ray < (sunUp ? 2u : 1u); ++ray) {
+        bool sky = ray == 0u;
+        float depth = 0.0;
+        uint unused;
+        farMarchCell(farField, cell, level, hitField, sky ? vec3(0.0, 1.0, 0.0) : rayDirection,
+                     sky ? kTileSkyStart : farVoxelSize(level),
+                     sky ? min(kTileSkyDistance, boxHi.y - hitField.y) : sunEnd, kFarOpaqueDepth,
+                     depth, unused);
+        depths[ray] = depth;
+    }
+    float occlusion = mix(1.0, exp(-depths.x), scene.microShadowStrength);
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
-    vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
-    if (rayDirection.y > -sin(scene.sunAngularRadius)) {
-        vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
+    if (sunUp) {
+        vec3 sunStart = world + rayDirection * sunEnd;
+        vec3 marchOrigin = sunStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
-        float visibility = traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart,
-                                              true, relative, sh.NoL > 0.0 ? s.normal : -s.normal);
+        float visibility = exp(-depths.y) *
+                           traceSunVisibility(sunStart, marchOrigin, rayDirection, 0.0, true,
+                                              sunStart - scene.cameraPosition, rayDirection);
         addVoxelFoliageSun(sh, s.baseColor, transmitted, aligned, visibility);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }
