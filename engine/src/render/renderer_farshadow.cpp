@@ -27,7 +27,7 @@ constexpr float kBoxPad = 16.0f;
 
 VkDeviceSize Renderer::Impl::createFarShadow(const FarFieldGrid &grid,
                                              const std::vector<FarCell> &farCells) {
-  // The box holds the cells that store the map's level (the L1 band, 6 km
+  // The box holds the cells that store the map's level (the 8 m band, 6 km
   // past the placement grid), so its texel stays kFarShadowTexel within
   // kFarShadowMaxTexels; receivers past it take terrain shadows only (a tree's
   // 8 m shadow is about a pixel there).

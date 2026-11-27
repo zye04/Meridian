@@ -1,7 +1,7 @@
 // The far field at load (setPlacement): each far-field prototype's 1 m
 // template comes from its meshes' far voxels (the cluster build voxelized
 // them, ClusterLod::farBricks; farBakeGridFromVoxels), filtered on the CPU
-// to the three levels (filterFarTemplate). farfield_splat.comp then
+// to each level (filterFarTemplate). farfield_splat.comp then
 // splats the placed table level by level: occupancy (read back; the CPU
 // allocates the brick columns), fixed-point accumulation into transient
 // buffers, pack. Debug builds compare sample cells with the CPU replica

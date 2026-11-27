@@ -41,7 +41,7 @@ void emitChunks(uint firstId, uint count, bool cellWasVisible) {
 // trees if far, else 0.
 // Phase 0 appends a far cell in the frustum to the far list with its level,
 // never finer than the finest it stores. In the coarsest cascade
-// (shadowFarCells) every cell is far: a texel there is about an L0 voxel,
+// (shadowFarCells) every cell is far: a texel there is about a 4 m voxel,
 // and casting a million trees as clusters cost a 51 ms re-render at the
 // forest edge. index: the far field's cell; always: no switch test (a cell
 // outside the placement grid).

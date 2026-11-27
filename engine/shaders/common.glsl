@@ -700,8 +700,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The main view's voxel coverage rule, jitter phase and phases per
     // cycle (voxel_lod.glsl voxelDrawsWhole).
     uint voxelCoverage;
-    // A far cell draws its voxels once its tallest tree projects under
-    // this many pixels (cell_cull.comp farSwitch).
+    // A far cell draws its voxels once the voxel of the finest level it
+    // has built projects to at most this many pixels (cell_cull.comp
+    // farSwitch).
     float farSwitchPixels;
     // The far window of the shadow-height map (same axes and penumbra):
     // texels, origin, texel meters, size.

@@ -286,7 +286,7 @@ float farFieldTransmittanceCpu(const FarFieldCpu &field, Vec3 origin, Vec3 direc
 constexpr uint32_t kFarShadowLevel = kFarFineLevels + 1; // 8 m
 constexpr float kFarShadowOpticalDepth = 0.6931472f; // -ln(1 - 0.5)
 constexpr float kFarShadowTexel = 8.0f;
-// The map's texels at most (16 MiB per map), the box limited to the L1
+// The map's texels at most (16 MiB per map), the box limited to the 8 m
 // band (createFarShadow): over the far field's 32 km the texel doubled to
 // 16 m rather than the two maps taking 74 MiB and a rebuild 140 frames.
 constexpr uint32_t kFarShadowMaxTexels = 1u << 23;

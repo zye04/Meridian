@@ -1,8 +1,8 @@
 # Far tile tier (forest patch proxies) — design
 
-Status: in progress (stage 2 part 1 done, streaming deferred, 2026-11-27; decided by the director 2026-11-26 night; the user chose "far forest as
+Status: in progress (stage 2 part 1 done, streaming deferred; hardening done, review next, 2026-11-27; decided by the director 2026-11-26 night; the user chose "far forest as
 patch proxies" and delegated the technical design). Look gates stay the
-user's by eye. Not started. Plan: `plans/2026-11-26-far-tile-tier.md`.
+user's by eye. Plan: `plans/2026-11-26-far-tile-tier.md`.
 
 Covers resume.md step 7, the backlog rows "Far tile tier" and "Cascade 4
 casts placed trees as far-cell voxels", baseline F4 and F22, and the

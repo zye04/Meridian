@@ -26,6 +26,7 @@ buffer), the DAG voxel design is approved.
 | `voxel-coverage` | `../meridian-leaf` | leaf lane: coverage stage 2 merged (8be2e9d); crown-specular (voxel crowns occlude their ambient by the crown with GI on) merged 2026-11-27; stage 3 on hold; next: `crown-light` premise round (crown-scale sun and sky darkening; RESUME in `.superpowers/crown-light/` of that worktree) |
 | `voxel-crown-9` | `../meridian-crown` | parked: rule A for root wood groups; waits for the leaf lane's trunk view |
 | `fix-light-temporal` | `../meridian-lane-b` | paused, `RESUME.md` in that worktree |
+| `far-tier` | `../meridian-far` | far lane: far tile tier stages 0, 1, 3 and 2 part 1 done (forest to `--far-extent` beyond the crop; fine levels are the `--far-fine` A/B, streaming deferred, director ruling C); hardening a-e done 2026-11-27; next: the director's independent review, then the user's merge decision; RESUME in `.superpowers/far/` of that worktree |
 | `canopy-backlit` | `../meridian-canopy` | merged; kept for its 1024 spp references and scripts in `.superpowers/spike-backlit/` |
 
 Lane report shape (every lane ends its report with these five, numbers
@@ -51,7 +52,9 @@ unconditional", "VRAM budget").
    bitmask, chosen in that spec.
 6. Forest floor: cook (independent of the renderer, once memory headroom
    exists), then placement and the contact look (after AO).
-7. Far tile tier spec (instance-less aggregates past ~1 km; aerial gate).
+7. Far tile tier (spec `specs/2026-11-26-far-tile-tier-design.md`, branch
+   `far-tier`): forest beyond the crop done; aggregates inside the crop at
+   ~1 km deferred (ruling C); review and merge decision next.
 8. Wind on trees and grass with the static-plus-dynamic shadow split.
 9. Frame pacing, HDR output (before the final grade is tuned, on a real
     HDR monitor), then the final grade.

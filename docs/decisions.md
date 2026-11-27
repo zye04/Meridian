@@ -998,6 +998,8 @@ foliage that survives simplification).
 
 *To be superseded by the DAG voxel foliage plan (branch `g1`, ray-query bake removed) once it merges; until then this entry holds.*
 
+*Far field since the far tile tier (entries "Far tile tier stage 1" to "stage 2, part 1", 2026-11-27): the templates come from the meshes' 1 m cluster voxels (`farBakeGridFromVoxels`), not ray queries; the switch is the finest built level's voxel at most `kFarSwitchPixels` (1 px; 4 m at about 7.3 km at 1440p), not the tallest tree; the grid reaches `--far-extent` (16.384 km) around the crop, with 4 / 8 / 16 m levels by band (1 and 2 m only with `--far-fine`); resident 424 MiB at a1. The numbers below are this entry's own.*
+
 - **Chosen (user, 2026-11-20): voxels, no impostors, in three tiers**,
   as Chlorophyll Engine describes its own: near trees are clusters of
   their LOD DAG; from where a tree's triangles go sub-pixel it is drawn as
@@ -5893,8 +5895,8 @@ cached shadow pages are invalidated.
   Debug a1: bricks inside the placement grid's outer ring + 1 cells hash
   equal to main's (0x35d3...); the ring itself takes crowns of mirrored
   trees past the crop.
-- Levels by band (`FarFieldGrid::bands`, `kFarBandMeters`): L0 to 2 km
-  past the placement grid, L1 to 6 km, L2 over the extent; a cell draws
+- Levels by band (`FarFieldGrid::bands`, `kFarBandMeters`): 4 m to 2 km
+  past the placement grid, 8 m to 6 km, 16 m over the extent; a cell draws
   at least its finest stored level, and the far shadow map marches at
   least it. Columns stay whole-grid per level (32/8/2 MiB, mostly empty
   outside a band): simpler than per-level rects, which would save ~36 MiB.
@@ -5902,7 +5904,7 @@ cached shadow pages are invalidated.
   the hand-placed chunks), in the main view's phase 0 and cascade 4.
 - The far shadow map is capped at 2^23 texels (`kFarShadowMaxTexels`):
   over 32 km its texel was 16 m (8 m over the crop). Director's ruling
-  (2026-11-27): its box holds only the L1 band's cells (6 km past the
+  (2026-11-27): its box holds only the 8 m band's cells (6 km past the
   placement grid), so the texel stays 8 m (9.3 MiB of the map used at the
   default sun); receivers past it take terrain shadows only.
 - Measured (Debug a1, `Render 2560x1440`): far field resident 424 MiB
@@ -6006,7 +6008,7 @@ sky occlusion.
   voxel.frag calls them. A far voxel has no bits for its own alignment, so
   the aligned share comes from the level's mean (`GpuFarField::alignment`,
   the far templates' extinction-weighted `NormalLobe` alignment of the
-  summed 1 m moments: 0.52 / 0.50 / 0.50 for L0 / L1 / L2 with the
+  summed 1 m moments: 0.52 / 0.50 / 0.50 for 4 / 8 / 16 m with the
   broadleaf scenery), the rest through the spherical-leaf phase; the
   roughness spreads with it as the cluster voxels' (Toksvig). a1 lit /
   shaded L 0.445 / 0.337, h1 0.339 / 0.205.

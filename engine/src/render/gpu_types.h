@@ -611,8 +611,9 @@ struct SceneData {
   // | phases per cycle << 16 (voxel_lod.glsl), the cycle at most
   // kMaxVoxelCoveragePhases.
   uint32_t voxelCoverage = 0;
-  // A far cell draws its voxels once its tallest tree projects under this
-  // many pixels (cell_cull.comp farSwitch; Renderer::setFarSwitchPixels).
+  // A far cell draws its voxels once the voxel of the finest level it has
+  // built projects to at most this many pixels (cell_cull.comp farSwitch;
+  // Renderer::setFarSwitchPixels).
   float farSwitchPixels = 0.0f;
   // The far window of the shadow-height map (same axes and penumbra; size
   // 0: none): texels, origin, texel meters, size.
