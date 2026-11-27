@@ -22,7 +22,10 @@ names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
 `haze`, `fovDegrees`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
 startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
 `--grade FILE` loads a grade file in any run (A/B captures of a tuned
-look); `--overlay grade|perf` opens a panel at startup (it is in captures;
+look); the built-in look (`kStartingGrade`, main.cpp) is the working look:
+white balance 7500 K, grade EV -0.85, offset 0.006, contrast 1.4, greens
+-10 degrees x1.5; `--grade tools/grades/starting-2026-11-21.json` gives the
+previous one (6504 K, EV 0, no offset) for A/B; `--overlay grade|perf` opens a panel at startup (it is in captures;
 repeat the flag for both).
 `F3` toggles the performance overlay (passive, top right, the cursor stays
 captured): FPS, frame / CPU / GPU ms, per-pass GPU ms, a 5 s frame-time

@@ -5963,3 +5963,26 @@ the meadow into the forest (8 m/s, 600 frames, every 5th saved): median Y' rises
 start's adaptation to a plateau of 80 and falls smoothly to 67 (main 114 to 66), one turn,
 largest 5-frame step 5.6 (main 8.4): no pumping.
 
+## Working look as the starting grade (light lane round 2, 2026-11-27)
+
+The light lane matched o4 (`--camera -1090.3 1254.6 1245.4 0.2 -0.24 --sun 0.020 0.643
+-0.766`) to Chlorophyll's 1.jpg by display-luma percentiles (p5/25/50/75/95, OKLab, per
+region). On the built-in grade the near forest sat at the black level (p5 6.4 vs 20.6, p25
+13.8 vs 30.4), its median at 30.2 vs 44.1. Ladder: grade EV -0.75 put the median and the sky
+on the reference (44.8 / 224.5 vs 44.1 / 224.5); lowering contrast to lift the blacks
+dragged the sky (1.2: p5 23.5, sky 214.7), an offset lifted them without touching it (0.006:
+p5 21.9, sky 224.6); EV -0.85 + offset 0.006 gave near 20.1 29.8 48.0 67.9 87.1 (reference
+20.6 30.4 44.1 64.5 93.4). White balance 7500 K then took the shaded crowns' blue cast off
+(C 0.039 -> 0.027 at h 242, reference 0.030 h 241) and the near and forest hues toward the
+references (o4 153 -> 134, reference 146; h2 162 -> 138, reference 148), at a cost: the far
+ridge loses its blue (C 0.028 -> 0.017 h 208, reference 0.029 h 243) and the near p95 drops
+94.6 -> 81.9. The user chose this "working look" (grades/wb7500.json on far-light) by eye.
+
+`kStartingGrade` gains those three fields; contrast 1.4 and the greens band stay. With the
+shade bound on the displayed image (entry above), the EV darkens the open and aerial views
+it was matched on and leaves forest interiors held at the bound as main shows them. The leaf
+palette (light1) and crown fill the lane also ran with are not part of it. Interactive runs
+still load the user's grade file over the built-in one, and captures ignore it, so captures
+and the panel's Reset take the new look. The previous built-in stays reachable as
+`tools/grades/starting-2026-11-21.json` (a partial file: the three fields at their old
+identity values, the rest from the built-in).

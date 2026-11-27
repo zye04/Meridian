@@ -49,8 +49,13 @@ constexpr float kEyeHeight = 1.7f;
 // A starting look toward the Chlorophyll Engine frames
 // (assets/reference/chlorophyll): AgX alone is flat, its inset desaturates
 // daylight foliage and the cooked leaf colour leans blue; the sky already
-// matches their chroma, so only the greens get more.
+// matches their chroma, so only the greens get more. Exposure, offset and
+// white balance: the light lane's working look against 1.jpg (decisions.md
+// "Working look as the starting grade").
 const meridian::Grade kStartingGrade{
+    .temperatureKelvin = 7500.0f,
+    .exposureEv = -0.85f,
+    .offset = {0.006f, 0.006f, 0.006f},
     .contrast = 1.4f,
     .greens = {.hueShiftDegrees = -10.0f, .saturation = 1.5f}};
 
