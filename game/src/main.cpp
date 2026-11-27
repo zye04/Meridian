@@ -297,6 +297,13 @@ struct BroadleafForest {
       {"europeanhornbeam", "EuropeanHornbeam", {"Field_01"}},
       {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
   }};
+  // Round 2: the domes plus alder Field_03, cooked apart in blackalder-extra-<palette>
+  // so the lone-tree layer (every Field variant in blackalder-<palette>) stays unchanged.
+  static constexpr std::array<Pick, 3> kDomeF3Picks{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01", "extra:Field_03"}},
+  }};
   // Variant: the domes plus the small round crowns, for size variety.
   static constexpr std::array<Pick, 3> kDomeAndSmallPicks{{
       {"europeanbeech", "EuropeanBeech", {"Field_01"}},
@@ -309,6 +316,7 @@ struct BroadleafForest {
 struct ForestLevers {
   bool domes = false;
   bool small = false; // --forest-picks domes+small
+  bool f3 = false;    // --forest-picks domes+f3
   float footprint = BroadleafForest::kFootprint;
   float scale = 1.0f;
 };
@@ -397,15 +405,20 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   constexpr float kBeechShare = 0.6f, kHornbeamShare = 0.25f, kAlderShare = 0.15f;
   if (trees && broadleaf) {
     const std::array<float, 3> shares{kBeechShare, kHornbeamShare, kAlderShare};
-    const auto &picks = levers.small   ? BroadleafForest::kDomeAndSmallPicks
+    const auto &picks = levers.f3      ? BroadleafForest::kDomeF3Picks
+                        : levers.small ? BroadleafForest::kDomeAndSmallPicks
                         : levers.domes ? BroadleafForest::kDomePicks
                                        : BroadleafForest::kPicks;
     for (size_t s = 0; s < picks.size(); ++s) {
       const auto &pick = picks[s];
       std::vector<uint32_t> ids;
-      for (const char *variant : pick.variants) {
+      for (const char *entry : pick.variants) {
+        constexpr std::string_view kExtra = "extra:";
+        const bool extra = std::string_view(entry).starts_with(kExtra);
+        const char *variant = extra ? entry + kExtra.size() : entry;
+        const std::string species = std::string(pick.species) + (extra ? "-extra" : "");
         const std::string directory =
-            treePalette.empty() ? std::string(pick.species) : pick.species + ("-" + treePalette);
+            treePalette.empty() ? species : species + ("-" + treePalette);
         const std::string name = std::string("SM_") + pick.pack + "_" + variant;
         const std::string path = "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
         if (std::filesystem::exists(std::filesystem::path(MERIDIAN_ASSET_DIR) / path)) {
@@ -885,6 +898,12 @@ struct Options {
   // --scenery broadleaf: place the broadleaf pack's small and medium pieces.
   bool broadleafScenery = false;
   ForestLevers forestLevers;
+  // --lone-tree PATH X Z (trees lane, throwaway): one model from assets/ on the ground.
+  struct LoneTree {
+    std::string path;
+    float x, z;
+  };
+  std::optional<LoneTree> loneTree;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -1175,6 +1194,11 @@ Options parseOptions(int argc, char **argv) {
       const std::string picks = argv[++i];
       options.forestLevers.domes = picks.starts_with("domes");
       options.forestLevers.small = picks == "domes+small";
+      options.forestLevers.f3 = picks == "domes+f3";
+    } else if (arg == "--lone-tree" && i + 3 < argc) {
+      const std::string path = argv[++i];
+      const float x = std::stof(argv[++i]);
+      options.loneTree = Options::LoneTree{path, x, std::stof(argv[++i])};
     } else if (arg == "--forest-footprint" && i + 1 < argc) {
       options.forestLevers.footprint = std::stof(argv[++i]);
     } else if (arg == "--forest-scale" && i + 1 < argc) {
@@ -1728,6 +1752,15 @@ int main(int argc, char **argv) {
   }
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
+  }
+  // Trees lane (throwaway): one model on the ground, unrotated, scale 1.
+  if (options.loneTree) {
+    if (auto model = loadModel(renderer, options.loneTree->path.c_str())) {
+      const float x = options.loneTree->x, z = options.loneTree->z;
+      const float y = terrain.heightAt(x, z) - 0.05f;
+      addModel(renderer, *model, meridian::translation({x, y, z}));
+      std::printf("Lone tree at %.2f %.2f %.2f\n", x, y, z);
+    }
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
