@@ -134,11 +134,6 @@ layout(push_constant) uniform PlacementConstants {
     float heightScale;
     float spacing;
     uint geoWidth, geoHeight, geoRatio;
-    // Nonzero: cells outside the placement grid (placedFirst, placedSize)
-    // mirror the rule beyond the crop (evaluatePoint's mirrored).
-    uint mirror;
-    int placedFirstX, placedFirstZ;
-    uint placedColumns, placedRows;
 } pc;
 #endif
 
@@ -173,17 +168,15 @@ float heightAt(float x, float z) {
 
 uint layerDensity(PlacementLayer layer, uint layerSeed, ivec2 p, uvec2 s, out uint mask);
 
-// Whether points of `cell` outside the crop mirror into it (evaluatePoint's
-// mirrored).
-bool mirroredCell(ivec2 cell) {
+// Whether points outside the crop mirror into it (evaluatePoint's mirrored):
+// static placement does, so the placement grid's edge cells (which reach
+// past the crop) and the far field's cells beyond the grid grow the same
+// mirrored forest; streamed layers stay inside the crop.
 #ifdef PLACEMENT_STREAM
-    return false;
+const bool kMirrored = false;
 #else
-    ivec2 local = cell - ivec2(pc.placedFirstX, pc.placedFirstZ);
-    return pc.mirror != 0u && (local.x < 0 || local.y < 0 || uint(local.x) >= pc.placedColumns ||
-                               uint(local.y) >= pc.placedRows);
+const bool kMirrored = true;
 #endif
-}
 
 // sampleP: p, or p folded into the crop where it mirrors (heights and
 // channels read there).
@@ -194,7 +187,7 @@ bool evaluate(PlacementLayer layer, uint layerSeed, ivec2 cell, uint cellHash, u
     p = placementPointPosition(cell, cellHash, pattern.x);
     sampleP = p;
     if (!placementInsideCrop(pc.field, p)) {
-        if (!mirroredCell(cell)) {
+        if (!kMirrored) {
             return false;
         }
         sampleP = placementFold(pc.field, p);

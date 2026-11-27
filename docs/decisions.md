@@ -6169,3 +6169,15 @@ in the ledger's "Review fixes" section.
   at x4000 0.959x, H1 at a 5 degree sun 0.993x (whole frame). Fix
   (free): the lookup moves back by that offset instead. Cascade
   receivers (within 4 km) offset by 1.5 cascade texels, a little less.
+- The placement grid's edge strip is forested. The grid's edge cells
+  reach past the crop (relief: +-2048 m against +-2000 m, a 48 m strip;
+  Napf 53 m), but only cells outside the grid mirrored their points, so
+  the strip grew neither trees nor tiles: a bare line along the crop
+  edge (`.superpowers/far/review/{before,after}/edge*.png`). Chosen:
+  static placement mirrors every point outside the crop (stored table and
+  the far field's transient one alike; streamed layers stay inside the
+  crop), so the trees stay continuous across the edge and a cell's tiles
+  match its trees at the switch. The stored table gains the strip's
+  trees: the far field's static-level hash changes, the interior crop
+  hash (which skips the outer ring of cells) does not. PlacementConstants
+  loses its mirror flag and placed-grid rect (136 bytes).

@@ -474,7 +474,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   const auto layerCount = static_cast<uint32_t>(layers.size());
 
   // The far-field layers placed again over a rect [x0, x1) x [z0, z1) of far
-  // cells, mirrored beyond the placement grid, in chunks of rows; each
+  // cells, mirrored beyond the crop, in chunks of rows; each
   // chunk's instances go to use(address, count, first row, rows), its
   // offsets per (cell, layer) stay in chunkCounts. Inside the placement grid
   // they equal the placed table's.
@@ -508,11 +508,6 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       c.gridFirst[1] = firstZ + static_cast<int32_t>(z);
       c.gridColumns = columns;
       c.layerCount = placement.layerCount;
-      c.mirror = 1;
-      c.placedFirst[0] = pg.firstX;
-      c.placedFirst[1] = pg.firstZ;
-      c.placedSize[0] = pg.columns;
-      c.placedSize[1] = pg.rows;
       const uint32_t entries = columns * rows * placement.layerCount;
       submitNow([&](VkCommandBuffer cmd) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, placement.countPipeline);
@@ -1076,7 +1071,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
       }
     }
     // The GPU's transient instances of a window against evaluatePoint
-    // (mirrored outside the placement grid), run by run.
+    // (mirrored outside the crop), run by run.
     RunStats stats{"far placement check"};
     const GeoChannels *geoChannels = geo ? &*geo : nullptr;
     const auto windowInstances = [&](uint32_t x0, uint32_t z0, uint32_t x1, uint32_t z1) {
@@ -1105,15 +1100,12 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                 for (uint32_t x = 0; x < columnsInRect; ++x) {
                   const int32_t cellX = firstX + static_cast<int32_t>(x0 + x);
                   const int32_t cellZ = firstZ + static_cast<int32_t>(zFirst + r);
-                  const bool mirrored = cellX < pg.firstX || cellZ < pg.firstZ ||
-                                        cellX >= pg.firstX + static_cast<int32_t>(pg.columns) ||
-                                        cellZ >= pg.firstZ + static_cast<int32_t>(pg.rows);
                   for (uint32_t l = 0; l < layersHere; ++l) {
                     const uint32_t entry = (r * columnsInRect + x) * layersHere + l;
                     const uint32_t first = counts[entry];
                     compareRun(heightfield, geoChannels, layers[l], placement.patterns[l],
                                placement.seed, cellX, cellZ, l, instances + first,
-                               counts[entry + 1] - first, nullptr, stats, mirrored);
+                               counts[entry + 1] - first, nullptr, stats, true);
                   }
                 }
               }

@@ -186,8 +186,10 @@ int32_t placementFold(int32_t x, int32_t origin, uint32_t spacing, uint32_t size
 // each axis (16.16 fixed-point positions within 16 km).
 constexpr int32_t kPlacementCellRange = 256;
 // The C++ reference of one pattern point of one cell; nullopt if rejected
-// or outside the heightfield crop. mirrored (the far field beyond the
-// placement grid): a point outside the crop is not rejected; its heights
+// or outside the heightfield crop. mirrored (static placement: the
+// placement grid's edge cells reach past the crop, the far field's cells
+// lie beyond it; streamed layers are not): a point outside the crop is not
+// rejected; its heights
 // and channels are read at the point folded into the crop (placementFold),
 // its noise at the point itself, and its height is the terrain's there.
 std::optional<PlacedPoint> evaluatePoint(const Heightfield &field, const GeoChannels *geo,

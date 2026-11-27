@@ -889,14 +889,8 @@ struct PlacementConstants {
   float heightScale = 0.0f;
   float spacing = 0.0f;
   uint32_t geoSize[3] = {}; // width, height, ratio
-  // The far field's transient placement (renderer_farfield.cpp): nonzero
-  // mirrors the rule beyond the crop (evaluatePoint's mirrored) in cells
-  // outside the placement grid, (placedFirst, placedSize) in cells.
-  uint32_t mirror = 0;
-  int32_t placedFirst[2] = {};
-  uint32_t placedSize[2] = {};
 };
-static_assert(sizeof(PlacementConstants) == 160);
+static_assert(sizeof(PlacementConstants) == 136);
 
 // One slot's new cell for placement.comp's PLACEMENT_STREAM variant.
 struct StreamUpdate {

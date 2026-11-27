@@ -90,7 +90,7 @@ void checkPlacement(const Heightfield &field, const GeoChannels *geo,
     const int32_t cellZ = grid.firstZ + static_cast<int32_t>(cell / grid.columns);
     const uint32_t first = offsets[cell * layerCount + l];
     compareRun(field, geo, layers[l], patterns[l], seed, cellX, cellZ, l, instances + first,
-               offsets[cell * layerCount + l + 1] - first, nullptr, stats);
+               offsets[cell * layerCount + l + 1] - first, nullptr, stats, true);
     const Cell &c = cells[cell];
     bool cellOk = c.firstInstance == offsets[cell * layerCount] &&
                   c.instanceCount == offsets[(cell + 1) * layerCount] - c.firstInstance;

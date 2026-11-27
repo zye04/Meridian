@@ -65,7 +65,7 @@ engine/src/render/         renderer internals:
                            (+-farExtent, default 16 km, around the crop):
                            the far-field layers placed again in row
                            chunks (placement.comp, mirrored beyond the
-                           placement grid), transient, never stored;
+                           crop), transient, never stored;
                            levels by band (1 and 2 m in the --far-fine
                            window inside the placement grid, 4 m to 2 km
                            past the grid, 8 m to 6 km, 16 m over all,
