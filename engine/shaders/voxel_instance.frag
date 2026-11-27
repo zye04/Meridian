@@ -39,6 +39,11 @@ layout(location = 4) out vec4 outSpecularAlbedo;
 layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
+// |N1 - N2|^2 between neighbouring voxels' lobe axes, for specular AA: a
+// crown's leaves face every way, so neighbours' axes are about 60 degrees
+// apart (|N1 - N2|^2 = 2 - 2 cos).
+const float kVoxelNeighbourNormalChange = 1.0;
+
 void main() {
     SceneBuffer scene = pc.scene;
     LoadedInstance instance = loadInstance(scene, inInfo.x);
@@ -79,6 +84,15 @@ void main() {
     float alpha = voxelRoughness(voxel) * voxelRoughness(voxel);
     float spread = 2.0 * (1.0 - voxelAlignment(voxel));
     s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + spread, 1.0)));
+    // Specular AA: a pixel's normals change by the change between
+    // neighbouring voxels' lobe axes over the voxel's size on screen.
+    if (scene.foliageSpecularAa != 0u) {
+        float voxelPixels = cluster.voxelEdge * scale * abs(scene.projectionScale.y) * 0.5 /
+                            (scene.inverseResolution.y * length(relative));
+        s.perceptualRoughness =
+            specularAaRoughness(s.perceptualRoughness,
+                                kVoxelNeighbourNormalChange / max(voxelPixels * voxelPixels, 1.0));
+    }
     s.occlusion = scene.giMode == 0u ? occlusion : 1.0;
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;

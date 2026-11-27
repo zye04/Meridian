@@ -700,6 +700,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     // The main view's voxel coverage rule, jitter phase and phases per
     // cycle (voxel_lod.glsl voxelDrawsWhole).
     uint voxelCoverage;
+    // Renderer::setFoliageSpecularAa (lighting.glsl specularAaRoughness).
+    uint foliageSpecularAa;
 };
 
 // Largest axis scale of a transform: a conservative bound under

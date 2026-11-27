@@ -429,6 +429,11 @@ fractional part of P p by its hash, placed at a stable-hash point inside
 the full quad; wood draws whole quads by the hash (chance f, always at
 f >= 0.5). hash (A/B, main's rule): every voxel draws its whole quad with
 chance f, wood also always at f >= 0.5. The cascades always take hash.
+`--foliage-specular-aa off|on` (default on; `off` for A/B): leaves widen
+their specular lobe by the normal variation a pixel covers (lighting.glsl
+`specularAaRoughness`, Tokuyoshi-Kaplanyan): triangle leaves by the shading
+normal's screen derivatives, voxels by `kVoxelNeighbourNormalChange` over
+the voxel's size in pixels (voxel_instance.frag).
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
