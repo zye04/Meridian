@@ -1,4 +1,4 @@
-# Far lane: resume point (2026-11-27, after the far-pass cost fix)
+# Far lane: resume point (2026-11-27, after stage 3 tile shading)
 
 Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (merge ed758d8 + this RESUME commit).
 Read: CLAUDE.md, spec `docs/superpowers/specs/2026-11-26-far-tile-tier-design.md`,
@@ -15,18 +15,30 @@ plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
 - ed758d8: merged origin/scene-broadleaf 97bd2ef (main 363096d crown-specular, round-2c ground colours). Only decisions.md conflicted (both kept). Release a1 after the merge (`.superpowers/far/cost/merge-a1.log`): `Render 2560x1440 ... DLSS`, `far field 6.50`, far cells 60050, 0 dropped, 0 validation errors, `Loaded: resident 9927 MiB`.
 - The remaining far pass cost is ~2.5 ms march/raster and ~3.9 ms shading (backlog row).
 
+## Stage 3 (done, reported to the director; director had moved it before stage 2)
+- c607a93 plan order; 0ca091c pure move of the cluster voxels' sun/ambient into
+  lighting.glsl `addVoxelFoliageSun` / `addVoxelFoliageAmbient` (kept separate for the
+  crown-light lane's hand merge: it adds an in-crown fill to voxel_instance.frag; the tile
+  needs that fill too once it lands, from `depths.y` in voxel.frag, do not invent one);
+  01e57f2 leaf lobe (per-level mean alignment, GpuFarField::alignment); 08ea239 sky up 64 m
+  through the cell's bricks (canopy-sky form); 336e429 sun march one voxel out to 32 m, then
+  maps from the march end (backlog double self-shadow row removed); 892b979 per-voxel
+  palette (256, median cut); 0a41b69 ledger; fe1d694 backlog.
+- Remaining gap at the 41 px switch: shaded canopy brighter (a1 0.304 vs 0.268, h1 0.201 vs
+  0.168): the ambient term (debug ambient 0.325 vs 0.245). Untried: sky march from the hit
+  (start 0) instead of 4 m. Far pass 6.46 -> 8.95 ms at a1 (default switch).
+- Measurement kit: `.superpowers/far/s3/{views.sh,measure.sh,canopy.py,split.py,regions.py}`;
+  default reference frames `.superpowers/far/s3/premise/default`.
+- `.superpowers/far/stage1`: local worktree at c607a93 with build-release (before frames).
+
 ## Next
-1. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
-2. Then stage 3.1-3.3 without waiting. Director's target: at the switch band, tiles match the cluster voxels of the same trees in the same frame. Measure mean luminance and colour of lit and shaded canopy separately on clean regions, plus a 1:1 crop beside a 7.jpg crop. The tile's ambient and sun terms go through the same shading functions the cluster voxels call. The far canopy is greyer and lighter than the trees today.
-3. Report after stage 2 and after stage 3 (SendMessage to main, five-part shape).
-4. Stage 2 report must include:
-   - fixed pools sized from the measured need; a cell always has something to draw;
-   - a 1:1 crop of the switch band (tiles at the 1 m level against cluster voxels) beside a 7.jpg crop;
-   - whole frames a1/H2/H1;
-   - true resident VRAM: `Loaded:` plus the 72 MiB far window, which `Loaded:` misses;
-   - frame-time maxima over a fly-through from the core across the crop edge;
-   - stream pass ms;
-   - in the fly-through, also the far window rebuild cost on a moving camera and a low-sun run (the far-pass report did not check these).
+1. Director's ruling on the stage 3 report (ambient gap, cost).
+2. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
+   Report must include: fixed pools sized from the measured need; a cell always has something
+   to draw; 1:1 crop of the switch band beside 7.jpg; whole frames a1/H2/H1; true resident
+   VRAM (`Loaded:` + 72 MiB far window); frame-time maxima over a fly-through from the core
+   across the crop edge; stream pass ms; the far window rebuild cost on a moving camera and a
+   low-sun run.
 
 ## Tools
 - `.superpowers/far/cap.sh BIN VIEW OUT.png [flags]` (flock inside; views A1 H2 H1 in flags.sh).
