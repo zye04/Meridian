@@ -122,23 +122,23 @@ lit and of shaded canopy measured separately, noise floor stated. Then
 whole frames a1/H2/H1 beside 5.jpg and 7.jpg and the 1:1 H1 horizon crop
 beside the 7.jpg crop, before (stage 1) and after; far pass ms and VRAM.
 
-- [ ] 3.1 Colour: the palette holds every colour the templates carry (per
+- [x] 3.1 Colour: the palette holds every colour the templates carry (per
   template voxel: its dominant material's mean colour at 1 m, as the
   cluster voxels have it), not one entry per mesh slot; premise: compare a
   tile crop against the same trees as cluster voxels in the views'
   base-colour debug view.
-- [ ] 3.2 Sun through the volume: a short march toward the sun through the
+- [x] 3.2 Sun through the volume: a short march toward the sun through the
   cell's bricks from the hit (optical depth, named step count), replacing
   the fixed `kVoxelRayStart` offset; then the cascade or far shadow map
   with the matching bias. Removes the double self-shadow (backlog row
   "Cascade 4 casts placed trees as far-cell voxels"; done, 3.2 commit).
-- [ ] 3.3 Sky occlusion from the volume for the ambient (today
+- [x] 3.3 Sky occlusion from the volume for the ambient (today
   `s.occlusion = 1.0`): the same form as the crown-light lane's
   `--canopy-sky up` (branch `crown-light` 63c3751, not merged): the
   transmittance straight up over 64 m of the cell's bricks, applied to the
   ambient's out-of-clipmap share, so tiles and cluster voxels agree once
   both land.
-- [ ] 3.4 Sheet beside the reference at the switch band and whole frame.
+- [x] 3.4 Sheet beside the reference at the switch band and whole frame.
   Report.
 
 ## Stage 4: close-out

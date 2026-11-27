@@ -168,3 +168,41 @@ Final (far window 3072 x 16 m, far shadow box limited to the L1 band), `.superpo
 - Debug a1 `--frames 2`: replica checks 0 mismatches (`far shadow map check: 8192 texels (6860 with a hit) ... max difference 0.248 m (0 over 1 m), 0 hit/empty mismatches`), `0 validation errors`.
 - Look: whole-frame mean difference to stage 1 (tools/image-gates.py diff) a1 0.2659, H2 0.4640, H1 0.2265;
   noise (two runs, same look) a1 0.2559, H1 0.1980. Sheet `.superpowers/far/cost/sheet-farcost.png`.
+
+## Stage 3: tile shading (director's order 2026-11-27: before stage 2)
+
+All Release `build-release`, every log `Render 2560x1440, display 2560x1440 ... DLSS`,
+0 dropped, 0 validation errors. Tile vs cluster voxels: `.superpowers/far/s3/views.sh
+build-release/game/game <dir> --far-switch-px 41` (a1/h1 plain, lod, sun, base-color,
+ambient in one launch; `measure.sh` for plain/lod/sun), table by `.superpowers/far/s3/canopy.py
+premise/default <dir> a1|h1`: same-tree pixels = far-cell pixels of the 41 px run that the
+default run (5642630 code, `premise/default`) draws as voxel trees, 2 px eroded; lit/shaded
+by one Otsu threshold on the default run's sun view. Mean OKLab L / C / h:
+
+| commit | a1 lit | a1 shaded | h1 lit | h1 shaded | far field ms (a1, 41 px) |
+|---|---|---|---|---|---|
+| cluster voxels (default run) | 0.382 / 0.033 / 220 | 0.268 / 0.069 / 250 | 0.304 / 0.023 / 209 | 0.168 / 0.049 / 254 | — |
+| tiles before (5642630) | 0.509 / 0.033 / 204 | 0.372 / 0.072 / 248 | 0.382 / 0.029 / 198 | 0.230 / 0.056 / 249 | 8.72 |
+| 01e57f2 leaf lobe | 0.445 / 0.039 / 209 | 0.337 / 0.075 / 248 | 0.339 / 0.033 / 202 | 0.205 / 0.056 / 250 | 7.77 |
+| 08ea239 sky up (sides variant: 0.419 / 0.302 a1, 14.74 ms, dropped) | 0.428 / 0.038 / 209 | 0.313 / 0.076 / 249 | 0.328 / 0.032 / 202 | 0.191 / 0.056 / 252 | 9.02 |
+| 336e429 sun march (from the hit: 0.377 / 0.303, lit share 130k vs 160k, dropped) | 0.403 / 0.042 / 221 | 0.304 / 0.071 / 248 | 0.307 / 0.035 / 216 | 0.201 / 0.055 / 250 | 12.05 (14.58 with two call sites) |
+| 892b979 palette | 0.405 / 0.039 / 227 | 0.304 / 0.071 / 249 | 0.315 / 0.030 / 221 | 0.201 / 0.055 / 251 | 12.06 |
+
+Noise: two launches of 892b979 (`palette`, `pal-full`) give the same tile means to 1e-4;
+cluster-voxel side of the switch line across launches 0.3745-0.3764 lit (a1).
+Debug split on the same pixels, a1 (`split.py`): base L 0.341 h 128 voxels, tiles 0.309 h 139
+before -> 0.330 h 131; sun 0.316 voxels, 0.421 -> 0.289; ambient 0.245 voxels, 0.412 -> 0.325
+(h1 alike). Pure-move check 0ca091c: a1 default vs pre-move, voxel-tree L 0.28832 / 0.28833,
+largest 4x4 |dL| 0.00004, whole-frame diff 0.2444.
+
+Default switch, `.superpowers/far/cap.sh <bin> A1|H2|H1 .superpowers/far/s3/final/<v>.png`,
+after = build-release 892b979, before = `.superpowers/far/stage1` worktree at c607a93:
+- a1: `... voxel trees 5.77, far field 8.95, ...`, `Rendered 120 frames, GPU 29.98 ms` (before: far field 6.46, GPU 27.38)
+- H2: `voxel trees 6.64, far field 3.08`, `GPU 28.69 ms` (before 2.20, 27.72)
+- H1: `voxel trees 6.06, far field 8.99`, `GPU 30.66 ms` (before 6.56, 28.16)
+- `Loaded: resident 9927 MiB` all six (+72 MiB far window = 9999 MiB); palette 256 x 32 B.
+- Whole-frame diff before/after: a1 0.507, H2 0.482, H1 2.835 (noise a1 0.24).
+- Debug a1 `--frames 2` (`final/a1-debug.log`): `far field hash 0x18e4df10c8f99dce, placement grid inside its outer ring+1 cells 0x95b68fb05960ae2d` (albedo bytes changed by the palette, format unchanged), `far field check: 13 cells, 35072 voxels (18650 occupied) ... 0 mismatches`, far placement / shadow map / ray checks as before, `0 validation errors`.
+- Load: `templates 13 ms, splat 279 ms` (was 9 / 255).
+Look: `.superpowers/far/s3/final/sheet-stage3.png`, `.superpowers/far/s3/final/crop-h1.png`,
+`.superpowers/far/s3/premise/crops.png` (41 px switch, before).
