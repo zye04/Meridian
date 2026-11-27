@@ -1,8 +1,11 @@
 # Visibility buffer — design
 
-Status: decided (director, 2026-11-27; technical calls delegated by the
-user). Stage 0 is a premise measurement with a go/no-go; nothing is built
-before it reports. No plan yet.
+Status: in progress (decided by the director 2026-11-27, technical calls
+delegated by the user). Stage 0 done: go
+(`docs/superpowers/research/2026-11-27-vb-stage0.md`). Plan:
+`docs/superpowers/plans/2026-11-27-visibility-buffer.md`, whose "Spec
+premises found false" section corrects the id layout below (it does not
+fit as written) and the gates' tool assumptions.
 
 Decision behind it: decisions.md "Visibility buffer is unconditional"
 (2026-11-24). Resume step 5. Reference: Chlorophyll baseline F17 (the
