@@ -974,8 +974,11 @@ struct GpuFarField {
   uint32_t pyramidOffsets[16] = {};
   int32_t bands[kFarLevels - 1][4] = {};
   uint32_t placedOffset[2] = {};
+  // Per level: the far templates' extinction-weighted mean leaf alignment
+  // (FarTemplate::alignment), the aligned share of the tile shading.
+  float alignment[4] = {};
 };
-static_assert(sizeof(GpuFarField) == 208);
+static_assert(sizeof(GpuFarField) == 224);
 
 // Must match FarTemplateInfo in farfield.glsl; one per (prototype, level).
 struct FarTemplateInfo {

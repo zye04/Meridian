@@ -114,6 +114,11 @@ struct FarTemplate {
   std::vector<FarTemplateVoxel> voxels;
   // Bounds of the voxel centers.
   Vec3 centerMin, centerMax;
+  // Extinction-weighted mean alignment of the voxels' normal lobes
+  // (NormalLobe::alignment of the leaves' moment summed over the voxel),
+  // and the extinction sum it is weighted by.
+  float alignment = 1.0f / 3.0f;
+  double extinctionSum = 0.0;
 };
 using FarTemplates = std::array<FarTemplate, kFarLevels>;
 
@@ -123,11 +128,13 @@ struct FarBakeGrid {
   uint32_t size[3] = {};
   std::vector<float> extinction;
   std::vector<Vec3> normal; // unit, or zero where empty
+  // The leaves' normal moment (VoxelPayload::moment over its trace).
+  std::vector<std::array<float, 6>> moment;
   std::vector<uint8_t> albedo;
 };
 // Box-filters the 1 m template to each level: mean extinction (which keeps
-// the optical mass), extinction-weighted normal, the albedo entry with the
-// most extinction.
+// the optical mass), extinction-weighted normal and moment (the alignment),
+// the albedo entry with the most extinction.
 FarTemplates filterFarTemplate(const FarBakeGrid &grid);
 
 // Per palette slot: coverage-weighted sums of its voxels' reflected and

@@ -108,9 +108,15 @@ void main() {
     Surface s;
     s.baseColor = field.palette.albedo[voxelAlbedo(voxel)].rgb;
     vec3 transmitted = field.palette.albedo[field.paletteSize + voxelAlbedo(voxel)].rgb;
+    // The leaves' lobe, as a cluster voxel's (voxel_instance.frag), from the
+    // level's mean alignment: the aligned share shades as one leaf, the
+    // highlight spreads with the rest (Toksvig).
+    float alignment = field.alignment[level];
+    float aligned = clamp((3.0 * alignment - 1.0) * 0.5, 0.0, 1.0);
+    float alpha = kVoxelPerceptualRoughness * kVoxelPerceptualRoughness;
     s.alpha = 1.0;
     s.metallic = 0.0;
-    s.perceptualRoughness = kVoxelPerceptualRoughness;
+    s.perceptualRoughness = sqrt(sqrt(min(alpha * alpha + 2.0 * (1.0 - alignment), 1.0)));
     s.occlusion = 1.0;
     s.microOcclusion = 1.0;
     s.sunShadow = 1.0;
@@ -123,27 +129,21 @@ void main() {
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
-    float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
-    bool backLit = backNoL > 0.0 && any(greaterThan(transmitted, vec3(0.0)));
-    if (sh.NoL > 0.0 || backLit) {
-        vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
+    vec3 rayDirection = sampleSunDirection(pc.scene, gl_FragCoord.xy);
+    if (rayDirection.y > -sin(scene.sunAngularRadius)) {
         vec3 marchOrigin = world + rayDirection * kVoxelRayStart;
         marchOrigin.y = max(marchOrigin.y,
                             terrainHeight(scene.terrain, marchOrigin.xz) + kShadowRayBias);
         float visibility = traceSunVisibility(world, marchOrigin, rayDirection, kVoxelRayStart,
-                                              true, relative, backLit ? -s.normal : s.normal);
-        if (sh.NoL > 0.0) {
-            addSunLight(sh, visibility, 1.0);
-            sunRadiance = sh.diffuseLight + sh.specularLight;
-        }
-        addTransmittedSun(sh, transmitted, backNoL, visibility);
+                                              true, relative, sh.NoL > 0.0 ? s.normal : -s.normal);
+        addVoxelFoliageSun(sh, s.baseColor, transmitted, aligned, visibility);
+        sunRadiance = sh.diffuseLight + sh.specularLight;
     }
 #ifdef DEBUG_ID
     vec3 debugSunDiffuse = sh.diffuseLight;
     vec3 debugSunSpecular = sh.specularLight;
 #endif
-    addAmbientLight(sh, s.occlusion);
-    addTransmittedAmbient(sh, transmitted, s.occlusion);
+    addVoxelFoliageAmbient(sh, transmitted, s.occlusion, 1.0);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);

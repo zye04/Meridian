@@ -856,6 +856,16 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   info.cellsX = grid.cellsX;
   info.cellsZ = grid.cellsZ;
   info.paletteSize = paletteSize;
+  for (uint32_t level = 0; level < kFarLevels; ++level) {
+    double sum = 0.0, weight = 0.0;
+    for (const FarTemplates &t : templates) {
+      sum += double{t[level].alignment} * t[level].extinctionSum;
+      weight += t[level].extinctionSum;
+    }
+    info.alignment[level] = weight > 0.0 ? static_cast<float>(sum / weight) : 1.0f / 3.0f;
+  }
+  std::printf("Far field: leaf alignment L0/L1/L2 %.3f/%.3f/%.3f\n", info.alignment[0],
+              info.alignment[1], info.alignment[2]);
   std::memcpy(info.bands, grid.bands, sizeof(info.bands));
   info.placedOffset[0] = offsetX;
   info.placedOffset[1] = offsetZ;

@@ -5989,3 +5989,23 @@ cached shadow pages are invalidated.
   moving 7.01 / 7.12, still 1.08 / 1.14: no added jitter.
 - Not done: triangle leaves have the same fault (backlog); haze and
   palette are the scene lane's.
+
+## Far tile tier stage 3: tiles shade like the cluster voxels (far lane, 2026-11-27)
+
+Premise (`--far-switch-px 41`, tiles from about 1.8 km, against the
+default run's cluster voxels on the same pixels, mean OKLab L lit /
+shaded): a1 0.509 / 0.372 tiles vs 0.382 / 0.268 voxels, h1 0.382 /
+0.230 vs 0.304 / 0.168. Base colour was close (0.309 vs 0.341); the
+ambient debug term (0.412 vs 0.245) and the sun (0.421 vs 0.316) made the
+gap. A far cell shaded every hit as one Lambert leaf, roughness 0.8, no
+sky occlusion.
+
+- Leaf lobe: the cluster voxels' sun and ambient moved unchanged into
+  `addVoxelFoliageSun` / `addVoxelFoliageAmbient` (lighting.glsl), and
+  voxel.frag calls them. A far voxel has no bits for its own alignment, so
+  the aligned share comes from the level's mean (`GpuFarField::alignment`,
+  the far templates' extinction-weighted `NormalLobe` alignment of the
+  summed 1 m moments: 0.52 / 0.50 / 0.50 for L0 / L1 / L2 with the
+  broadleaf scenery), the rest through the spherical-leaf phase; the
+  roughness spreads with it as the cluster voxels' (Toksvig). a1 lit /
+  shaded L 0.445 / 0.337, h1 0.339 / 0.205.

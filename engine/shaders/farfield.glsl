@@ -109,6 +109,8 @@ struct FarField {
     // The placement grid's first cell in this grid's cells.
     uint placedOffsetX;
     uint placedOffsetZ;
+    // Per level: the templates' mean leaf alignment (FarTemplate::alignment).
+    float alignment[4];
 };
 
 layout(buffer_reference, std430) readonly buffer FarFieldBuffer {

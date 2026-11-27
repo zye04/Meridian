@@ -141,6 +141,7 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
   };
   grid.extinction.assign(count, 0.0f);
   grid.normal.assign(count, Vec3{});
+  grid.moment.assign(count, {});
   grid.albedo.assign(count, paletteBase);
   std::vector<float> best(count, -1.0f);
   for (size_t s = 0; s < slots.size(); ++s) {
@@ -172,6 +173,12 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
         // doesn't cancel opposite signs of the same axis.
         const Vec3 axis = normalLobe(v).axis;
         grid.normal[at] = dot(axis, Vec3{0.3f, 1.0f, 0.2f}) < 0.0f ? axis * -1.0f : axis;
+        const float trace = v.moment[0] + v.moment[1] + v.moment[2];
+        if (trace > 0.0f) {
+          for (int k = 0; k < 6; ++k) {
+            grid.moment[at][k] = v.moment[k] / trace;
+          }
+        }
       }
     }
   }
@@ -185,6 +192,7 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
     FarTemplate &out = templates[level];
     out.centerMin = {1e30f, 1e30f, 1e30f};
     out.centerMax = {-1e30f, -1e30f, -1e30f};
+    double alignmentSum = 0.0;
     const uint32_t size[3] = {(grid.size[0] + f - 1) / f, (grid.size[1] + f - 1) / f,
                               (grid.size[2] + f - 1) / f};
     for (uint32_t z = 0; z < size[2]; ++z) {
@@ -192,6 +200,7 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
         for (uint32_t x = 0; x < size[0]; ++x) {
           double sum = 0.0;
           Vec3 normal;
+          VoxelPayload moment;
           std::array<float, 256> albedo{};
           for (uint32_t cz = z * f; cz < std::min((z + 1) * f, grid.size[2]); ++cz) {
             for (uint32_t cy = y * f; cy < std::min((y + 1) * f, grid.size[1]); ++cy) {
@@ -200,6 +209,9 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
                 const float e = grid.extinction[i];
                 sum += e;
                 normal = normal + grid.normal[i] * e;
+                for (int k = 0; k < 6; ++k) {
+                  moment.moment[k] += grid.moment[i][k] * e;
+                }
                 albedo[grid.albedo[i]] += e;
               }
             }
@@ -215,6 +227,8 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
           voxel.albedo = static_cast<uint32_t>(std::max_element(albedo.begin(), albedo.end()) -
                                                albedo.begin());
           out.voxels.push_back(voxel);
+          alignmentSum += normalLobe(moment).alignment * sum;
+          out.extinctionSum += sum;
           const Vec3 c = voxel.center;
           out.centerMin = {std::min(out.centerMin.x, c.x), std::min(out.centerMin.y, c.y),
                            std::min(out.centerMin.z, c.z)};
@@ -222,6 +236,9 @@ FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
                            std::max(out.centerMax.z, c.z)};
         }
       }
+    }
+    if (out.extinctionSum > 0.0) {
+      out.alignment = static_cast<float>(alignmentSum / out.extinctionSum);
     }
   }
   return templates;
