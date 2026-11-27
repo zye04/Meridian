@@ -6229,3 +6229,21 @@ An independent check of 18f280e failed three items; proof frames in
   strip test now evaluates both kinds through it, so it fails if static
   placement stops mirroring or streamed placement starts (checked by
   flipping the function each way). Hashes unchanged.
+- Pinholes from the carried march (real; fixed). A view ray entering a
+  cell through a side face marches the last two voxels of the cell it
+  came from; a hit there was always discarded as that cell's fragment,
+  but that cell draws the pixel only if it draws its voxels at the same
+  level (its own march covers those voxels from further back). Where it
+  draws its trees (the switch line) or another level (the band borders)
+  nothing drew the pixel. `farCellLevel` (farfield.glsl) is now the far
+  switch's single answer (cell_cull.comp's `farSwitch` calls it), and
+  voxel.frag discards a carried hit only where it equals the marched
+  level; otherwise the hit is shaded with this box's face depth (at most
+  two voxels behind it; depth_less allows nothing nearer). Holes in the
+  lod view (a 1 px closing of the canopy) at the forced switch: at the
+  switch line a1 1245 -> 161 (no carry 193), h1 893 -> 438 (501); at far
+  cell borders x4000 54 -> 4 (no carry 3), x5000 67 -> 7 (28).
+- The SHADOW variant keeps the carried march (same rule): the same
+  canopy casts, and restarting would put the cascade's depths deeper at
+  every border. Debug H1: far shadow map replica max difference 0.248 m,
+  0 over 1 m.

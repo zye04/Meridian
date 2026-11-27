@@ -105,10 +105,11 @@ void main() {
 #endif
     // A ray entering through a side face first gathers the optical depth of
     // the cell it comes from (at this level, or that cell's finest stored
-    // one), over its last kTileCarryVoxels; a hit there is that cell's
-    // fragment's.
+    // one), over its last kTileCarryVoxels.
     // Restarting at zero put the hits next to every cell border deeper into
-    // the canopy: a dark line along each border.
+    // the canopy: a dark line along each border. The SHADOW variant carries
+    // too: the same canopy casts, and restarting would put the cascade's
+    // depths deeper at every border (a lit line in the shadow).
     vec3 tNear = min(t0, t1);
     float tEntry = max(max(tNear.x, tNear.y), tNear.z);
     ivec2 from = ivec2(cell);
@@ -121,9 +122,10 @@ void main() {
                    all(lessThan(from, ivec2(field.cellsX, field.cellsZ)));
     float t = -1.0;
     uint pass = carried ? 0u : 1u;
+    uint marchLevel = level;
     for (; pass < 2u; ++pass) {
         uvec2 marchCell = cell;
-        uint marchLevel = level;
+        marchLevel = level;
         float a = tStart;
         float b = tEnd;
         if (pass == 0u) {
@@ -150,7 +152,17 @@ void main() {
             break;
         }
     }
-    if (t < 0.0 || pass == 0u) {
+    // A hit in the carried march is the other cell's fragment where that
+    // cell draws its voxels at the level marched here: its own march covers
+    // the same voxels from further back and stops there or nearer.
+    // Elsewhere (it draws its trees, or another level, which can miss that
+    // canopy) the hit is shaded here; discarded, nothing drew the pixel:
+    // pinholes along the switch line and the level bands. Its depth stays
+    // this box's face (depth_less writes nothing nearer), at most a carry's
+    // length behind the hit.
+    if (t < 0.0 ||
+        (pass == 0u &&
+         farCellLevel(scene, uint(from.y) * field.cellsX + uint(from.x)) == marchLevel)) {
         discard;
     }
 #ifdef SHADOW

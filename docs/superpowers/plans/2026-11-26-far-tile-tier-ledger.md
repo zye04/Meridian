@@ -390,3 +390,27 @@ Debug H1 (`.superpowers/far/cap.sh build/game/game H1 .superpowers/far/fix2/fina
 (unchanged), `placement check: 5425 points (762 kept) compared with the CPU reference, 0 mismatches (height within 0 m)`,
 `far field hash 0x944195d140d56146, placement grid inside its outer ring+1 cells 0x95b68fb05960ae2d (static levels)` (unchanged),
 `far placement check: 6318 points (3661 kept) in the sample windows compared with the CPU reference, 0 mismatches`.
+
+Pinholes (item 3). Holes = non-canopy lod pixels a 1 px closing of the canopy fills
+(`python3 -I .superpowers/far/fix2/holes.py <A> <B> a1-lod h1-lod x4000-lod x5000-lod`; columns holes, at far cell border (3 px),
+at switch line (3 px of both tile and tree), tile px, tree px):
+```
+a1-lod     nocarry   178382        65       193   424705  2239702
+a1-lod     before    179724        72      1245   422690  2239880
+a1-lod     after     178015        52       161   426205  2239341
+h1-lod     nocarry    77114       160       501   598831  1639335
+h1-lod     before     77214       251       893   599503  1639380
+h1-lod     after      76469       117       438   600650  1639120
+x4000-lod  nocarry     1618         3         0  2265350       40
+x4000-lod  before       887        54         0  2273301       40
+x4000-lod  after        822         4         0  2273432       40
+x5000-lod  nocarry     1490        28         0  2312325       40
+x5000-lod  before      1074        67         0  2316205       40
+x5000-lod  after        955         7         0  2316722       40
+```
+The carry's discard made them (before > nocarry at the switch line and borders); after is at or below nocarry everywhere, and
+keeps the carry's lower total at x4000 / x5000 (the border lines). a1 visible tree cells 2177 -> 2151 (nocarry 2151): the filled
+holes occlude a few more cells; far cells equal (61811 / 50845 / 26493 / 22464 in every run).
+Item 4 (SHADOW carries): Debug H1 `far shadow map check: 8192 texels (6863 with a hit) compared with the CPU replica, max difference
+0.248 m (0 over 1 m), 0 hit/empty mismatches, 0 texels out of steps`, `far field check: 13 cells, 36864 voxels (20864 occupied)
+compared with the CPU replica, 0 mismatches`, `far field ray check: 256 rays (52 partly transmitted) ... max difference 8.7e-07`.

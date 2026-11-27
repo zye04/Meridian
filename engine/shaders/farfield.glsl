@@ -176,6 +176,40 @@ uint farBrickVoxel(FarFieldBuffer farField, uint level, uint brick, uint local) 
 // and draws the coarsest level whose voxel projects to at most this.
 const float kFarLevelPixels = 1.0;
 
+// The far switch's answer for far cell index in this view: the level its
+// voxels draw at, never finer than the finest it stores, or kFarLevels where
+// it draws its trees instead (or is empty). The projection is taken at the
+// nearest point of its canopy box. A cell outside the placement grid has no
+// trees to keep, and in a shadow cascade (orthoPixelsPerMeter) every cell is
+// far.
+uint farCellLevel(SceneBuffer scene, uint index) {
+    FarField field = scene.farField.field;
+    FarCell far = field.cells.cells[index];
+    if (far.top < far.bottom) {
+        return kFarLevels;
+    }
+    ivec2 farCell = ivec2(index % field.cellsX, index / field.cellsX);
+    vec2 lo = vec2(field.originX, field.originZ) + vec2(farCell) * kCellSize;
+    vec3 boxLo = vec3(lo.x, far.bottom, lo.y) - scene.cameraPosition;
+    vec3 boxHi = vec3(lo.x + kCellSize, far.top, lo.y + kCellSize) - scene.cameraPosition;
+    bool shadow = scene.shadowView != 0u;
+    float distance = max(length(max(max(boxLo, -boxHi), vec3(0.0))), scene.nearPlane);
+    float pixelsPerMeter =
+        shadow ? scene.orthoPixelsPerMeter
+               : abs(scene.projectionScale.y) * 0.5 / scene.inverseResolution.y / distance;
+    uint finest = farFinestLevel(field.bands, farCell);
+    uvec2 local = uvec2(farCell) - uvec2(field.placedOffsetX, field.placedOffsetZ);
+    bool placed = all(lessThan(local, scene.cellGridSize));
+    if (placed && !shadow && farVoxelSize(finest) * pixelsPerMeter > scene.farSwitchPixels) {
+        return kFarLevels;
+    }
+    // The coarsest level whose voxel projects to at most kFarLevelPixels.
+    float voxelPixels = farVoxelSize(0u) * pixelsPerMeter;
+    uint level = uint(clamp(floor(log2(kFarLevelPixels / voxelPixels)), 0.0,
+                            float(kFarLevels - 1u)));
+    return max(level, finest);
+}
+
 // One occupied template voxel. Must match FarTemplateVoxel in farfield.h.
 struct FarTemplateVoxel {
     vec3 center;

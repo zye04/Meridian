@@ -423,7 +423,7 @@ every tree as clusters instead of distant forest cells as voxels (A/B).
 `--far-switch-px N` (default 1, `kFarSwitchPixels`): a far-field cell
 draws its voxels instead of its trees once the voxel of the finest level
 it has built projects to at most N pixels from the nearest point of its
-canopy box (cell_cull.comp `farSwitch`; far tile tier decision 4); larger
+canopy box (farfield.glsl `farCellLevel`; far tile tier decision 4); larger
 N moves the switch nearer. Without `--far-fine` the finest level in the
 crop is 4 m (switch at about 7.3 km at 1440p, 70 degrees).
 `--far-fine M` (default 0, none): the far field's fine levels (1 and 2 m
