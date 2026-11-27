@@ -5953,3 +5953,38 @@ voxels' sky with GI on (crownOcclusion() = 1).
 - At m2 (1:1 beside a 1.jpg crop) the gap to the reference is crown structure, not light:
   reference crowns are dense convex clumps with mid-green shaded sides; ours are open, with
   near-black interior gaps.
+
+## Crown fill: multiple scattering inside tree crowns (leaf lane round 2, 2026-11-27)
+
+Measured first, at m2 against the 1.jpg crop (`.superpowers/crown-light/cd.py`; ours' canopy
+from the lod view, all voxel crowns there; the reference canopy is the crop minus meadow):
+- C (fill): the shaded/lit Y (darkest/brightest canopy quartile) is 0.133 in the reference
+  and 0.012 in ours. The shaded crowns' ambient is sky blue (b/g of the light 1.69). The GI
+  probes do light far-field foliage hits (gi_probes.comp: sun, sky, recollision), but at m2
+  they are 4-8 m apart and sample 4 m far-field voxels: a 10-15 m crown is a sub-probe
+  light field, so they cannot hold the light scattered between its leaves.
+- D (sparkle): on the lit half of the canopy, |3x3 Laplacian|/L is 0.251 in the reference and
+  0.430 in ours. White dots (L > 0.85): 0 against 5.7 per 1e4 px. C, the larger gap, went first.
+
+`--crown-fill crown` (try; lighting.glsl `addCrownFill`): the beam loses 1 - exp(-depth)
+from the crown's sunward edge to the point. The leaves scatter albedo (r + t) of it, which
+recollides inside the crown (spectral invariant with the crown's sky escape, as the probes'
+leaf hits do); half of it is intercepted per unit area (G = 0.5). It is added as diffuse
+light, `albedo / pi x sunAtSurface x min(factor, 1)`: capped at what direct sun gives a
+sunward leaf, and it never dims anything. Depth and escape come from the same crown
+ellipsoid (`crownSunDepth`, `crownVisibility`, now in common.glsl) for triangle leaves (per
+vertex) and voxels (at the voxel centre), so the switch stays even.
+- m2: shaded/lit 0.012 -> 0.050 (ref 0.133). Canopy L < 0.10: 1.7 % -> 0.0 % (ref 0.0 %).
+  Shaded crown ambient Y 19.0 -> 59.7, its b/g 1.69 -> 0.77 (green). Shaded crown final
+  L 0.158 C 0.028 h 233 -> L 0.240 C 0.042 h 160. Lit L 0.441 -> 0.501. Sparkle
+  |lap|/L 0.430 -> 0.336 (the fill lowers relative contrast; white dots unchanged at 6.1).
+  GPU 22.05 -> 22.23 ms (m2 off ran 21.62 and 22.05: noise about 0.4 ms).
+- a1: the shaded crown ambient goes 12.7 -> 17.8, b/g 2.10 -> 1.58; final shaded crown
+  L 0.164 -> 0.175, lit 0.346 -> 0.360. Haze still dominates there. GPU 21.15 -> 21.42 ms.
+- Switch (pair.sh, lone beech tri/vox): off 0.3880/0.3886 (0.998), crown 0.3938/0.3938 (1.000).
+`--crown-fill axis` (variant): voxels take their baked axis depths toward the sun instead.
+At m2 it gives shaded/lit 0.052, shaded ambient 62.1, b/g 0.75. Switch 0.3938/0.3937
+(1.000). The two variants are within noise of each other, so crown (one model on both
+sides) is the one to keep.
+Noise floor: a repeat m2 off capture differs by MAE 0.43/255. The cd.py numbers repeat to
+the third digit.
