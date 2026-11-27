@@ -1,9 +1,13 @@
-# Far lane: resume point (2026-11-27 late, lane stopped; all director tasks done)
+# Far lane: resume point (2026-11-27 night, fix check items done; second fix check next, not started by the lane)
 
-Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (d6bd0b6 + this RESUME commit).
-Director ruled: far pass 10.6 ms accepted, < 5 ms withdrawn (shade-once / box rasterization, backlog row); coarser sun/sky levels not taken.
-Final checks d6bd0b6: default Napf resident 12033 MiB, peak 12460, placed 3398673 (was 3364956), 0 errors, 0 dropped;
-fly spike (25 ms blocks at t 14-16 s) not reproduced still (14.03 ms at 1414 1500 0): backlog row. A fresh reviewer checks the fix commits.
+Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed.
+Fix check of 18f280e (independent reviewer) answered: 7f1b029 sun hand-off per lookup path (`sunLookupOffset`, lighting.glsl);
+5c08bd2 `placementMirrors(PlacementKind)` (placement.h) drives placement.comp's spec constant + compareRun, test fails on either flip;
+2331820 carried hits shaded unless the other cell draws the same level (`farCellLevel`, farfield.glsl; cell_cull's farSwitch uses it),
+SHADOW carry kept with a why-comment; e634821 backlog row (no forest floor past the crop); d9afccd ledger finish.
+Numbers: ledger "Fix check of the review fixes". Far pass a1/H1/x4000 10.76/10.76/10.78 ms. Artifacts `.superpowers/far/fix2/`
+(views.txt, holes.py, sunmean.py, before/after/nocarry, final/ incl. debug-h1.log).
+Note: build-dev's voxel.frag.spv / voxel_debug.frag.spv hold the no-carry probe: touch engine/shaders/voxel.frag before using build-dev.
 
 ## Latest (this session)
 - Director tasks after the hardening report and the independent review of f98f774, all committed:
