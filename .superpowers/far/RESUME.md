@@ -1,4 +1,4 @@
-# Far lane: resume point (2026-11-27, stage 2 part 1 done, waiting on the director)
+# Far lane: resume point (2026-11-27, stage 2 ruled (C); hardening next)
 
 Worktree `/home/zye/Projects/dev/meridian-far`, branch `far-tier`, pushed (merge ed758d8 + this RESUME commit).
 Read: CLAUDE.md, spec `docs/superpowers/specs/2026-11-26-far-tile-tier-design.md`,
@@ -43,14 +43,30 @@ plan `docs/superpowers/plans/2026-11-26-far-tile-tier.md`, ledger
 - Fine tiles shade sun/sky from the 4 m volume (shadeLevel in voxel.frag).
 - Premise problem reported: 1 m = 0.29 MiB per crop cell (1204 MiB whole crop); far pass a1
   9.0 -> 16.5 ms, GPU 30.15 -> 34.67 (h1 30.58 -> 33.23): tiles cost more than the trees they replace.
-  Waiting for the director's choice (options in the report: faster 1 m march via empty-space skip
-  from the 4 m level; switch at the 2 m level; streamed annulus only).
+  Director ruled (C): fine levels stay as the --far-fine A/B, default off, no streaming, no
+  empty-space-skip try. Done in 466a760: spec decisions 3/4 + VRAM table rewritten, plan stage 2
+  status, backlog row "Far forest past the crop edge", decisions.md ruling paragraph. Default a1
+  check: diff 0.244 vs 4772a79 (noise 0.26), quads equal, far 9.04 ms (ledger).
 - Artifacts: `.superpowers/far/s2/` (fine, fine-shade4, crop-switch-a1.png, sheet-fine.png, a1-debug.log);
   stage 3b sheet `.superpowers/far/s3/final/sheet-stage3b.png`.
 - Note: `rtk grep -h` over several files reorders output; grep files one at a time for per-view numbers.
 - measure.sh's `--far-switch-px 41` is stale (the flag now means voxel px); call views.sh directly.
 
-## Next
+## Next (director's order, 2026-11-27; stop and report after d if context is short)
+a. Fly-through from the core across the crop edge and 3 km past it (benchmark/route mechanism in
+   docs/reference/cli.md or a short custom route): frame-time maxima, far shadow-height window
+   rebuild cost while moving, holes/popping in the far forest; one run at low sun (5 degrees) at H1.
+b. Motion: tools/motion-clarity.sh (or motion-gates) with H1 and a1 poses, far-tier vs
+   main-equivalent (`--far-extent 0` if it reproduces main's far field, else the stage-0 commit).
+c. Default scene (no --scenery, napf.height, --trees): CLAUDE.md start view and cli.md "far horizon
+   from the summit" view; 0 validation errors, VRAM lines, far pass ms, frame vs main.
+d. Short Debug captures at H1 and H2 (replica checks, validation).
+e. Docs sweep (plan 4.1, 4.2): architecture.md far-field section, cli.md, decisions.md "Far tile tier"
+   stale statements (e.g. "L0/L1/L2" naming), backlog, resume.md lane row.
+Then the lane-shape report with the whole-frame sheet (a1/H2/H1 at the final commit beside the stage 0
+frames and the 5.jpg/7.jpg row). Do NOT start the independent review (director orders it).
+
+## Older next list (superseded)
 1. Stage 2 (plan 2.1-2.5): streamed 2 m and 1 m levels, the switch by voxel pixel size.
    Report must include: fixed pools sized from the measured need; a cell always has something
    to draw; 1:1 crop of the switch band beside 7.jpg; whole frames a1/H2/H1; true resident
