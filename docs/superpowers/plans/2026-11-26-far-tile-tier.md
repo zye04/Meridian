@@ -1,6 +1,8 @@
 # Far tile tier — plan
 
-Status: in progress (stage 1). Spec:
+Status: in progress (stage 3; order changed by the director 2026-11-27:
+stage 3 before stage 2, since the far canopy's flat, light, grey shading
+is the larger whole-frame gap and the smaller job). Spec:
 `specs/2026-11-26-far-tile-tier-design.md`. Branch `far-tier`, worktree
 `../meridian-far`. No merge to main: the user judges the result by eye.
 
@@ -83,7 +85,7 @@ docs in the same commit as the change.
   Debug: one short capture for validation and the replica check.
   Report to the director. This is the first frame pair for the user.
 
-## Stage 2: streamed fine levels and the switch
+## Stage 2: streamed fine levels and the switch (after stage 3)
 
 - [ ] 2.1 Levels 2 m and 1 m as streamed levels: `kFarLevels` grows to 5
   with the two fine levels first or last (choose by least churn; the level
@@ -111,7 +113,14 @@ docs in the same commit as the change.
   reference; motion run across the switch (`tools/motion-clarity.sh` with a
   view pair that straddles it). Report to the director.
 
-## Stage 3: tile shading and shadows (starts on the director's word)
+## Stage 3: tile shading and shadows (now; before stage 2)
+
+Proof (director 2026-11-27): with `--far-switch-px 41` (tiles from about
+1.8 km, 4 m level) at a1 and H1 the tiles match the cluster voxels of the
+same trees in a default-switch run of the same view: mean OKLCh L / C / h of
+lit and of shaded canopy measured separately, noise floor stated. Then
+whole frames a1/H2/H1 beside 5.jpg and 7.jpg and the 1:1 H1 horizon crop
+beside the 7.jpg crop, before (stage 1) and after; far pass ms and VRAM.
 
 - [ ] 3.1 Colour: the palette holds every colour the templates carry (per
   template voxel: its dominant material's mean colour at 1 m, as the
@@ -123,8 +132,12 @@ docs in the same commit as the change.
   the fixed `kVoxelRayStart` offset; then the cascade or far shadow map
   with the matching bias. Removes the double self-shadow (backlog row
   "Cascade 4 casts placed trees as far-cell voxels").
-- [ ] 3.3 Sky occlusion from the coarser level above the voxel, feeding the
-  same ambient term the cluster voxels use after `crown-light`.
+- [ ] 3.3 Sky occlusion from the volume for the ambient (today
+  `s.occlusion = 1.0`): the same form as the crown-light lane's
+  `--canopy-sky up` (branch `crown-light` 63c3751, not merged): the
+  transmittance straight up over 64 m of the cell's bricks, applied to the
+  ambient's out-of-clipmap share, so tiles and cluster voxels agree once
+  both land.
 - [ ] 3.4 Sheet beside the reference at the switch band and whole frame.
   Report.
 
