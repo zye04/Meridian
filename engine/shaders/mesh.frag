@@ -257,6 +257,7 @@ void main() {
 
 #ifndef TERRAIN
     s.occlusion *= crownOcclusion();
+    sh.canopyStart = kCanopySkyStartFoliage;
 #endif
 #ifdef DEBUG_ID
     vec3 debugSunDiffuse = sh.diffuseLight;

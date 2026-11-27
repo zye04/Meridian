@@ -898,6 +898,8 @@ struct Options {
   // Instances nearer than this keep their triangles in the main view.
   float voxelNear = 0.0f;
   meridian::VoxelCoverage voxelCoverage = meridian::VoxelCoverage::AreaPixelPhase;
+  meridian::Renderer::CanopySky canopySky = meridian::Renderer::CanopySky::Off;
+  meridian::Renderer::CrownSun crownSun = meridian::Renderer::CrownSun::Off;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -1217,6 +1219,22 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--voxel-coverage takes hash or area-pixel-phase");
       }
       options.voxelCoverage = static_cast<meridian::VoxelCoverage>(it - std::begin(names));
+    } else if (arg == "--canopy-sky" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      const char *names[] = {"off", "up", "cone"};
+      const auto it = std::find(std::begin(names), std::end(names), mode);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--canopy-sky takes off, up or cone");
+      }
+      options.canopySky = static_cast<meridian::Renderer::CanopySky>(it - std::begin(names));
+    } else if (arg == "--crown-sun" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      const char *names[] = {"off", "depth", "normal"};
+      const auto it = std::find(std::begin(names), std::end(names), mode);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--crown-sun takes off, depth or normal");
+      }
+      options.crownSun = static_cast<meridian::Renderer::CrownSun>(it - std::begin(names));
     } else if (arg == "--frames") {
       options.frames = static_cast<int>(number(i));
     } else if (arg == "--weather") {
@@ -1269,7 +1287,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --tree-palette name, --scenery broadleaf, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
-                               "--voxel-coverage hash|area-pixel-phase, "
+                               "--voxel-coverage hash|area-pixel-phase, --canopy-sky off|up|cone, --crown-sun off|depth|normal, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1540,6 +1558,7 @@ int main(int argc, char **argv) {
   renderer.setVoxelLod(options.voxelLod);
   renderer.setVoxelNear(options.voxelNear);
   renderer.setVoxelCoverage(options.voxelCoverage);
+  renderer.setCrownLight(options.canopySky, options.crownSun);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);
 

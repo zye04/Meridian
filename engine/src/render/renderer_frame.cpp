@@ -582,6 +582,10 @@ void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
 
+void Renderer::setCrownLight(CanopySky canopySky, CrownSun crownSun) {
+  impl_->crownLight = static_cast<uint32_t>(canopySky) | static_cast<uint32_t>(crownSun) << 8;
+}
+
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
@@ -1010,6 +1014,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        ? static_cast<uint32_t>(impl_->voxelLod)
                        : 0;
   scene.voxelNear = impl_->voxelNear;
+  scene.crownLight = impl_->crownLight;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |
                         static_cast<uint32_t>((impl_->frameNumber - impl_->cutFrame) % voxelPhases) << 8 |

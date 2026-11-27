@@ -5921,3 +5921,35 @@ cached shadow pages are invalidated.
   moving 7.01 / 7.12, still 1.08 / 1.14: no added jitter.
 - Not done: triangle leaves have the same fault (backlog); haze and
   palette are the scene lane's.
+
+## Crown light: canopy sky through the far field, crown sun through the crown (leaf lane, 2026-11-27)
+
+Item: from the air the forest floor and shaded crowns read blue, crowns read as
+leaf-scale speckle, with no lit side and dark side. Premise measured first (a1 with the
+scene flags, the debug light views per pixel class from the lod view, plus a measure-only
+build with no sky; `.superpowers/crown-light/split.py`). At a1 (0.8-2 km, outside the
+GI clipmap) shaded floor and shaded crowns get no sun. Their ambient is 86-93 % sky,
+because outside the clipmap it is the analytic open sky. Inside the clipmap the probes
+already make the floor about 4x darker (shaded floor ambient 3.8 against 16.0). Haze
+inscatter is about 2/3 of a shaded crown's final light at a1. Triangle crowns get 1.8x the
+voxels' sky with GI on (crownOcclusion() = 1).
+
+- `--canopy-sky up` (A, try): the sky part of the ambient's out-of-clipmap share
+  (`gi.remaining`; all of it with GI off) is multiplied by the far field's transmittance
+  straight up, 64 m, through 4 m bricks. Terrain, triangle foliage and voxel foliage all get
+  it; voxel.frag (far cells) does not. a1: shaded floor ambient 16.0 -> 4.8 (the probes'
+  level). Shaded crown ambient 12.7 -> 9.9. Final shaded-floor L 0.157 -> 0.127, h 254 -> 257.
+  The 1.jpg foliage-shadow region L goes 0.310 -> 0.300 (ref 0.257), because haze dominates
+  there. GPU 21.18 -> 23.62 ms.
+- `--canopy-sky cone` (A, variant): also a ray halfway between up and the normal. The
+  numbers match `up`, at 35.86 ms; the sideways march is long. Rejected.
+- `--crown-sun depth` (B, try): a voxel's sun times exp(-its axis depth toward the sun).
+  It dims lit crowns about uniformly (a1 lit-crown sun 116.7 -> 57.8). The lit region turns
+  blue (h 163 -> 227, sky share up) and shadow/sunlit goes 0.84 -> 1.00 (ref 0.64). At m2 no
+  sun side and far side appears. Rejected: the cascade already shadows the model, and at
+  the 4-bit axis-depth resolution the depth toward a 45 deg sun is large for most visible voxels.
+- `--crown-sun normal` (B, variant): depth plus the lobe bent halfway to the crown-scale
+  normal. Same verdict (lit h 226, shadow/sunlit 0.97).
+- At m2 (1:1 beside a 1.jpg crop) the gap to the reference is crown structure, not light:
+  reference crowns are dense convex clumps with mid-green shaded sides; ours are open, with
+  near-black interior gaps.

@@ -116,6 +116,7 @@ void main() {
 #endif
     vec3 specularBeforeAmbient = sh.specularLight;
     vec3 diffuseBeforeAmbient = sh.diffuseLight;
+    sh.canopyStart = kCanopySkyStartFoliage;
     addAmbientLight(sh, s.occlusion);
     // With GI the probes stand for the crown in the diffuse term, but the sky
     // reflected along R still passes through the model: occlude it by the

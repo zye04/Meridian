@@ -342,6 +342,9 @@ struct Shading {
     vec3 specularLight;
     // addAmbientLight's probe sample (GI on), reused by addTransmittedAmbient.
     GiSample gi;
+    // Where the canopy-sky march starts (kCanopySkyStartFoliage for a point
+    // inside a crown, so it doesn't count its own voxel).
+    float canopyStart;
 };
 
 // `relativePosition` is the flat world's, relative to the camera.
@@ -374,7 +377,34 @@ Shading beginShading(Surface s, vec3 relativePosition) {
     sh.diffuseLight = vec3(0.0);
     sh.specularLight = vec3(0.0);
     sh.NoL = clamp(dot(sh.N, sh.L), 0.0, 1.0);
+    sh.canopyStart = 0.0;
     return sh;
+}
+
+// Crown light, canopy sky (Renderer::setCrownLight): how much of the sky the
+// far field's forest lets through to the point, straight up, or the mean of
+// up and halfway between up and the normal (a two-ray cone). The far field's
+// first level (4 m voxels) is the forest's opacity at this scale.
+const float kCanopySkyDistance = 64.0;
+const float kCanopySkyStartFoliage = 4.0;
+const uint kCanopySkyUp = 1u;
+
+float canopySkyVisibility(Shading sh) {
+    uint mode = pc.scene.crownLight & 0xFFu;
+    if (mode == 0u || pc.scene.farFieldEnabled == 0u) {
+        return 1.0;
+    }
+    const vec3 up = vec3(0.0, 1.0, 0.0);
+    FarFieldBuffer farField = pc.scene.farField;
+    float visibility = farFieldTransmittance(farField, sh.worldPosition, up,
+                                             sh.canopyStart, kCanopySkyDistance, false);
+    if (mode == kCanopySkyUp) {
+        return visibility;
+    }
+    vec3 bent = sh.N + up;
+    bent = dot(bent, bent) > 1e-4 ? normalize(bent) : up;
+    return 0.5 * (visibility + farFieldTransmittance(farField, sh.worldPosition, bent,
+                                                     sh.canopyStart, kCanopySkyDistance, false));
 }
 
 // `surfaceShadow`: the surface's own sun occlusion on top of the ray's
@@ -400,18 +430,24 @@ void addAmbientLight(inout Shading sh, float occlusion) {
     vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
     vec3 groundIrradiance =
         kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
-    vec3 diffuseIrradiance = mix(groundIrradiance, skyIrradiance, sh.N.y * 0.5 + 0.5);
-    vec3 R = reflect(-sh.V, sh.N);
-    vec3 roughIrradiance = skyIrradiance;
     if (pc.scene.giMode != 0u) {
         sh.gi = giSample(sh.worldPosition, sh.N);
+    }
+    // The probes trace the canopy; the share they don't cover may take it
+    // from the far field instead.
+    float canopy = pc.scene.giMode == 0u || sh.gi.remaining > 0.0 ? canopySkyVisibility(sh) : 1.0;
+    vec3 openSky = skyIrradiance * canopy;
+    vec3 diffuseIrradiance = mix(groundIrradiance, openSky, sh.N.y * 0.5 + 0.5);
+    vec3 R = reflect(-sh.V, sh.N);
+    vec3 roughIrradiance = openSky;
+    if (pc.scene.giMode != 0u) {
         diffuseIrradiance = giIrradiance(sh.gi, sh.N, diffuseIrradiance);
-        roughIrradiance = giIrradiance(sh.gi, R, skyIrradiance);
+        roughIrradiance = giIrradiance(sh.gi, R, openSky);
     }
     vec4 cloudsInR = skyCaptureAt(R);
     // Where the probes see less than the open sky and ground would along R
     // (under a canopy), the sharp sky reflection is occluded as much.
-    float skyOcclusion = 1.0;
+    float skyOcclusion = canopy;
     if (pc.scene.giMode != 0u) {
         vec3 open = mix(groundIrradiance, skyIrradiance, R.y * 0.5 + 0.5);
         const vec3 kLuminance = vec3(0.2126, 0.7152, 0.0722);

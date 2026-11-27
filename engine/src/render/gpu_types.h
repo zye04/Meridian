@@ -522,7 +522,8 @@ struct SceneData {
   uint32_t ringCount = 0;
   uint32_t streamRecordCount = 0;
   float cutoutMipBias = 0.0f;
-  uint32_t pad5 = 0;
+  // Renderer::setCrownLight: CanopySky | CrownSun << 8.
+  uint32_t crownLight = 0;
   VkDeviceAddress streamLayers = 0;
   VkDeviceAddress streamThresholds = 0;
   VkDeviceAddress streamCoords = 0;
