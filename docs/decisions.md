@@ -5792,6 +5792,100 @@ cached shadow pages are invalidated.
   (0.33 vs 0.23); stages 3 to 5 of the spec; thin voxel trunks have no
   rule that reads solid (backlog).
 
+## Leaf palette at cook time, trees only (scene lane round 1d, 2026-11-26)
+
+- Choice: retint each species' leaf atlas toward one OKLCh target before
+  the tree cook (`tools/unreal/retint_leaves.py`, target in
+  `tools/unreal/leaf-palette.json`, `tools/unreal/cook_palette.sh`), cooked
+  beside the originals as `<species>-<name>/` and loaded with
+  `--tree-palette <name>`. The atlas's alpha-weighted mean moves to the
+  target (hue rotation, chroma scale, uniform linear scale), every texel
+  with it, so the texture's own variation stays. The Chlorophyll author
+  recolours from one shared palette; this is the leaf part of that, at
+  the cook, with the engine untouched. Geometry is byte-identical (30/30
+  variants' buffers).
+- Target derivation (1.jpg, lit crown tops = brightest 20% of a 200 px
+  canopy crop, OKLCh L 0.602 C 0.034 h 124.3): our transfer from the
+  cooked base colour (forest mix, beech 0.6 / hornbeam 0.25 / alder 0.15:
+  L 0.458 C 0.069 h 117.9, Y 0.0985) to our rendered tops (built-in grade,
+  exposure 0, clean haze, sun 18 deg: L 0.696 C 0.043 h 104.8, Y 0.3405)
+  is h -13.1, C x0.626, Y x3.458; run backwards from the reference tops it
+  gives a base colour of L 0.397 C 0.054 h 137.4 (Y 0.065, within measured
+  green-leaf reflectance).
+- The cook multiplies the leaf atlas by 1 + t (t = 1.1, transmitted over
+  reflected) into the base colour and returns t / (1 + t) as transmission,
+  so the transmission colour follows the base colour and the atlas target
+  is the base colour target / 1.28 in L and C: L 0.310 C 0.042 h 137.4.
+  The first try matched the base colour target at the atlas and cooked to
+  L 0.508 C 0.070.
+- Result (a1, built-in grade at exposure -1 EV, clean haze, sun
+  0.707 0.325 -0.707): crown tops h 105.1 -> 133.2 (reference 124.3),
+  C 0.045 -> 0.030 (0.034), L 0.546 -> 0.518 (0.602). The lit-canopy
+  region's mean hue goes 136.5 -> 192.9 (reference 155.0): with
+  low-chroma leaves the blue sky light in the crowns' shaded parts
+  dominates the region mean. That blue is a lighting item, not the
+  palette. Resident VRAM unchanged (9850 MiB); first load rebuilds the 30
+  trees' cluster caches (launch 6:36 against ~2:30 warm).
+
+## Broadleaf pack placement by the causal layers (scene lane round 2a, 2026-11-26)
+
+- Choice: `--scenery broadleaf` (opt-in, so the Napf scene, its views and
+  placement hash stay as they are until the scene flip) feeds the pack's
+  small and medium pieces through the existing causal layers: the
+  steep-ground rock layer (3) takes the medium rocks and the scree layer
+  (13) the small and clustered rocks, both with their rules unchanged and
+  without the sandstone cliff; two new layers read the forest density and
+  the .geo channels: forest-floor stones and roots (14) rising with the
+  forest's density, flat ground rocks (15) on knolls in the open
+  (landform position 0.5-3 m above the ~40 m mean, forest density
+  falling). Parameters are named in `ForestFloorScatter` and
+  `ClearingStones` (main.cpp). Cliffs, ledges, embankments and the large
+  rocks are not placed by rule (they must merge with the terrain).
+- Premise (forest floor, c1 and v3): footprint 6 m, cluster 0.6, forest
+  0.3-0.7 placed 61484 pieces and none showed in either view; footprint
+  3 m, cluster 0.3, forest 0.2-0.5 placed 368859 and shows stones and
+  roots under the canopy at c1 while the v3 clearing stays clear. Kept.
+- The pack's Fab glTFs needed their node chain baked at import (pieces
+  came out 100x too large as placement prototypes).
+- Measured (Release, `Render 2560x1440`, retinted trees, the 1d look):
+  resident 10598 MiB with the layers (10327 without), placed 721909
+  (layer 14: 368859, 15: 5101, 3: 4831, 13: 20303), 0 dropped in every
+  cull list of every view.
+
+## Broadleaf forest from open-crowned variants (scene lane round 2b, 2026-11-26)
+
+- Choice: with `--scenery broadleaf` the forest layer places only the
+  broad, dense, round-crowned variants (`BroadleafForest`, main.cpp: beech
+  Field_01 23 m crown / Forest_03 16 m, hornbeam Field_01 13 m / Forest_02
+  15 m, alder Field_02 16 m / Field_01 13 m; species shares 0.6 / 0.25 /
+  0.15 as before) at 9 m spacing. The forest-grown variants it drops are
+  mostly poles with 3-8 m crowns (beech Forest_06/08, alder Forest_06/08,
+  hornbeam Forest_10), which read as speckle from above.
+- Try 16 m (spacing = mean crown width): 40442 trees, crowns stand apart
+  and ground shows (the forest rule's density stays under 1). 9 m:
+  126735 trees (281999 before), closed canopy. a1 at sun 35 deg, -1.25 EV:
+  GPU 26.36 -> 21.35 ms, resident 10598 -> 9296 MiB, 0 dropped.
+- Still open: at 1:1 against 1.jpg (crown scale ~40 px) the crowns read as
+  fine speckle, not round domes; the crown-scale light/dark ratio already
+  matches (1.67 against 1.70).
+
+## Broadleaf terrain colour toward the meadow (scene lane round 2c, 2026-11-27)
+
+- With `--scenery broadleaf` the Grass and ForestFloor roles' colour
+  targets come from `BroadleafGround` (main.cpp). Grass: the old target
+  (OKLCh L 0.364 C 0.067 h 125.0) moved by the rendered meadow over the
+  rendered far clearing (h +12.7, C x1.58, L x0.886; clamped to gamut).
+  Forest floor: half the old linear target.
+- a1 far clearing (sunlit half): L 0.544 C 0.067 h 112.7 -> 0.507 / 0.096 /
+  129.9; the meadow at H2 is 0.484 / 0.107 / 125.6. The ground between
+  crowns barely moves (L 0.273 -> 0.263, h 238): it is lit by blue sky
+  light, not shown by its albedo (lighting item).
+- Meadow tree shadows (H2): the grass blades are shadowed (sun view and
+  report pixel 0 sun where the tree shadow falls), but the tall blades
+  hide the dark terrain under them and the sunlit blade tops face the
+  camera; ray-traced shadows give the same picture, so the cascades are
+  not the cause. No flag or parameter fix.
+
 ## Voxel crowns occlude their ambient by the crown with GI on (leaf lane, 2026-11-26)
 
 - Problem: under GI a voxel skipped its crown occlusion (the probes stand
