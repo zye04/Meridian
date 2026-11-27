@@ -91,7 +91,6 @@ void main() {
 
     Shading sh = beginShading(s, relative);
     vec3 sunRadiance = vec3(0.0);
-    float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
     vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
     if (rayDirection.y > -sin(scene.sunAngularRadius)) {
         // The cascades hold the voxels as casters up to cascade 3 and the far
@@ -101,37 +100,23 @@ void main() {
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
                                               origin - scene.cameraPosition, rayDirection);
         visibility *= float(inInfo.y);
-        if (sh.NoL > 0.0) {
-            addSunLight(sh, visibility * aligned, 1.0);
-        }
-        addTransmittedSun(sh, transmitted, backNoL, visibility * aligned);
-        // Light travels -L, scattered toward the camera travels -V.
-        sh.diffuseLight += sh.sunAtSurface * (visibility * (1.0 - aligned)) *
-                           leafPhase(-dot(sh.L, sh.V), albedo, transmitted);
+        addVoxelFoliageSun(sh, albedo, transmitted, aligned, visibility);
         sunRadiance = sh.diffuseLight + sh.specularLight;
     }
 #ifdef DEBUG_ID
     vec3 debugSunDiffuse = sh.diffuseLight;
     vec3 debugSunSpecular = sh.specularLight;
 #endif
-    vec3 specularBeforeAmbient = sh.specularLight;
-    vec3 diffuseBeforeAmbient = sh.diffuseLight;
-    addAmbientLight(sh, s.occlusion);
     // With GI the probes stand for the crown in the diffuse term, but the sky
     // reflected along R still passes through the model: occlude it by the
     // model's optical depth along R.
+    float crownR = 1.0;
     if (scene.giMode != 0u) {
         vec3 R = reflect(-sh.V, sh.N);
-        float crownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * R)));
-        sh.specularLight = specularBeforeAmbient + (sh.specularLight - specularBeforeAmbient) *
-                                                       mix(1.0, crownR, scene.microShadowStrength);
+        crownR = mix(1.0, exp(-voxelBoxDepth(axisWord, normalize(toLocal * R))),
+                     scene.microShadowStrength);
     }
-    addTransmittedAmbient(sh, transmitted, s.occlusion);
-    if (scene.giMode != 0u) {
-        sh.diffuseLight = diffuseBeforeAmbient +
-                          (sh.diffuseLight - diffuseBeforeAmbient) *
-                              mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
-    }
+    addVoxelFoliageAmbient(sh, transmitted, occlusion, crownR);
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
                                             hazeTransmittance);

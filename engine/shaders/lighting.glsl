@@ -449,6 +449,49 @@ void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) 
                        multiBounceOcclusion(occlusion, sh.diffuseColor);
 }
 
+// ---------------------------------------------------------- Voxel foliage
+// A voxel standing in for the leaves inside it (voxel_instance.frag's
+// cluster voxels; voxel.frag's far cells call the same two functions). The
+// aligned share of their normal lobe shades as one two-sided leaf through
+// the same lighting as the triangles, the rest as leaves facing every way
+// (the spherical-leaf phase, gi.glsl).
+
+// The sun at `visibility`, after beginShading on the voxel's lobe axis.
+void addVoxelFoliageSun(inout Shading sh, vec3 albedo, vec3 transmitted, float aligned,
+                        float visibility) {
+    float backNoL = clamp(-dot(sh.N, sh.L), 0.0, 1.0);
+    if (sh.NoL > 0.0) {
+        addSunLight(sh, visibility * aligned, 1.0);
+    }
+    addTransmittedSun(sh, transmitted, backNoL, visibility * aligned);
+    // Light travels -L, scattered toward the camera travels -V.
+    sh.diffuseLight += sh.sunAtSurface * (visibility * (1.0 - aligned)) *
+                       leafPhase(-dot(sh.L, sh.V), albedo, transmitted);
+}
+
+// The ambient. `occlusion`: the sky the crown leaves open around the voxel;
+// `reflectedOcclusion`: what the crown lets through along R. Without GI the
+// occlusion applies to the whole ambient; with GI the probes trace the
+// canopy inside their clipmap, so the crown applies only to the share
+// outside it (gi.remaining), and to the sky reflected along R.
+void addVoxelFoliageAmbient(inout Shading sh, vec3 transmitted, float occlusion,
+                            float reflectedOcclusion) {
+    float ambientOcclusion = pc.scene.giMode == 0u ? occlusion : 1.0;
+    vec3 specularBeforeAmbient = sh.specularLight;
+    vec3 diffuseBeforeAmbient = sh.diffuseLight;
+    addAmbientLight(sh, ambientOcclusion);
+    if (pc.scene.giMode != 0u) {
+        sh.specularLight = specularBeforeAmbient +
+                           (sh.specularLight - specularBeforeAmbient) * reflectedOcclusion;
+    }
+    addTransmittedAmbient(sh, transmitted, ambientOcclusion);
+    if (pc.scene.giMode != 0u) {
+        sh.diffuseLight = diffuseBeforeAmbient +
+                          (sh.diffuseLight - diffuseBeforeAmbient) *
+                              mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
+    }
+}
+
 // Aerial perspective: haze between the camera and the point as displayed
 // (`relativePosition` is the flat world's). `transmittance` is what the haze
 // lets through of the light from the point.
