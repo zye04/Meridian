@@ -203,6 +203,7 @@ void main() {
         }
         transmitted = transmissionColor * (material.diffuseTransmission * (1.0 - s.metallic));
         sh.diffuseColor *= 1.0 - material.diffuseTransmission;
+        setLeafLight(sh, sh.diffuseColor + transmitted, inCrownVisibility, inCrownVisibility);
     }
 #endif
 

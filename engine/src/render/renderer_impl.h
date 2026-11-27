@@ -402,6 +402,7 @@ struct Renderer::Impl {
   uint32_t canopySky = 0;
   uint32_t crownFill = 0;
   uint32_t farLight = 0;
+  uint32_t leafLight = 0;
   uint32_t foliageSpecularAa = 1;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;

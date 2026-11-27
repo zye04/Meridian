@@ -442,6 +442,13 @@ public:
   // ground the cones hit.
   enum class FarLight : uint32_t { Off, Sky, SkyAll, Bounce, BounceAll };
   void setFarLight(FarLight mode);
+  // Leaf light (development premise, off by default): Sun keeps the sun
+  // highlight on the leaf face seen as adaxial only (measured leaves: the
+  // abaxial face is diffuse), AllSpecular the ambient specular too; Canopy
+  // also replaces the sky a crown hides from a leaf by its neighbouring
+  // leaves (single scattering), CanopyRecollision with recollision.
+  enum class LeafLight : uint32_t { Off, Sun, AllSpecular, Canopy, CanopyRecollision };
+  void setLeafLight(LeafLight mode);
   // Specular antialiasing for foliage (on by default, off for A/B):
   // leaves widen their specular lobe by the normal variation inside a pixel
   // (triangles: the shading normal's screen derivatives; voxels: the

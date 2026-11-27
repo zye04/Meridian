@@ -348,6 +348,15 @@ struct Shading {
     // The far light's mean sky visibility over its cones (1 without it):
     // what the transmitted ambient's fallback share takes.
     float farVisibility;
+    // Leaf light (Renderer::setLeafLight): the sun highlight's and the
+    // ambient specular's scale (1 off a leaf), and for the canopy ambient
+    // the crown's sky visibility (diffuse, and along R; < 0 off a leaf) and
+    // the leaf's single-scattering albedo (reflected + transmitted).
+    float leafSunSpecular;
+    float leafAmbientSpecular;
+    float leafVisibility;
+    float leafVisibilityR;
+    vec3 leafAlbedo;
 };
 
 // `relativePosition` is the flat world's, relative to the camera.
@@ -395,6 +404,11 @@ Shading beginShading(Surface s, vec3 relativePosition) {
     sh.NoL = clamp(dot(sh.N, sh.L), 0.0, 1.0);
     sh.canopyStart = 0.0;
     sh.farVisibility = 1.0;
+    sh.leafSunSpecular = 1.0;
+    sh.leafAmbientSpecular = 1.0;
+    sh.leafVisibility = -1.0;
+    sh.leafVisibilityR = -1.0;
+    sh.leafAlbedo = vec3(0.0);
     return sh;
 }
 
@@ -503,6 +517,58 @@ vec3 farLightGather(inout Shading sh) {
     return irradiance * (kPi / float(kFarLightCones));
 }
 
+// Leaf light (Renderer::setLeafLight, a premise prototype). Measured leaf
+// BRDFs (Bousquet et al. 2005, beech: Cook-Torrance, sigma ~0.35, n ~1.5,
+// white) put the specular on the adaxial face; the abaxial face of tree
+// leaves is diffuse (Habel et al. 2007). Leaf blades turn their adaxial face
+// toward the light (sky), and a voxel's lobe axis has no sign, so triangles
+// and voxels alike take the face seen as adaxial with the share
+// 0.5 + kLeafAdaxialUp x N.y of the normal toward the viewer: a leaf seen
+// from above shows its adaxial face, from below its abaxial one.
+const float kLeafAdaxialUp = 0.5;
+const uint kLeafLightSun = 1u;
+const uint kLeafLightAllSpecular = 2u;
+const uint kLeafLightCanopy = 3u;
+const uint kLeafLightCanopyRecollision = 4u;
+// As the probes' and the crown fill's recollision cap.
+const float kLeafMaxRecollision = 0.95;
+
+float leafAdaxialShare(vec3 N) {
+    return clamp(0.5 + kLeafAdaxialUp * N.y, 0.0, 1.0);
+}
+
+// The leaf terms of a leaf surface (triangles or voxels): `visibility` the
+// crown's sky visibility at the point, `visibilityR` along the reflection.
+void setLeafLight(inout Shading sh, vec3 albedo, float visibility, float visibilityR) {
+    uint mode = pc.scene.leafLight;
+    if (mode == 0u) {
+        return;
+    }
+    float adaxial = leafAdaxialShare(sh.N);
+    sh.leafSunSpecular = adaxial;
+    if (mode >= kLeafLightAllSpecular) {
+        sh.leafAmbientSpecular = adaxial;
+    }
+    if (mode >= kLeafLightCanopy) {
+        sh.leafAmbientSpecular = adaxial;
+        sh.leafVisibility = clamp(visibility, 0.0, 1.0);
+        sh.leafVisibilityR = clamp(visibilityR, 0.0, 1.0);
+        sh.leafAlbedo = albedo;
+    }
+}
+
+// What a leaf inside a crown sees where the crown hides the sky: other
+// leaves, lit by the same ambient, scattering omega of it (spectral
+// invariants: omega / (1 - p omega) with recollision probability p = 1 - V,
+// as gi_probes.comp's foliage hits; without recollision, one scattering).
+vec3 leafNeighbourScatter(Shading sh, float visibility) {
+    vec3 omega = sh.leafAlbedo;
+    if (pc.scene.leafLight == kLeafLightCanopyRecollision) {
+        omega /= 1.0 - min(1.0 - visibility, kLeafMaxRecollision) * omega;
+    }
+    return omega;
+}
+
 // `surfaceShadow`: the surface's own sun occlusion on top of the ray's
 // `visibility` (micro shadow, parallax self-shadow); 1 where it has none.
 void addSunLight(inout Shading sh, float visibility, float surfaceShadow) {
@@ -515,7 +581,7 @@ void addSunLight(inout Shading sh, float visibility, float surfaceShadow) {
                     fresnelSchlick(sh.f0, LoH) * sh.energyCompensation;
     vec3 sunLight = sh.sunAtSurface * (sh.NoL * visibility * surfaceShadow);
     sh.diffuseLight = sh.diffuseColor / kPi * sunLight;
-    sh.specularLight = specular * sunLight;
+    sh.specularLight = specular * sunLight * sh.leafSunSpecular;
 }
 
 // Ambient from the sky (clouds included). Diffuse: sky irradiance from
@@ -565,12 +631,21 @@ void addAmbientLight(inout Shading sh, float occlusion) {
     }
     vec3 skyRadiance = mix((skyLuminance(sh.position, R) * cloudsInR.a + cloudsInR.rgb) * skyOcclusion,
                            roughIrradiance / kPi, sh.a);
+    if (sh.leafVisibility >= 0.0) {
+        // Where the crown hides the sky the leaf sees its neighbours, lit by
+        // the ambient that reaches this point (the probes' or the sky's).
+        vec3 open = diffuseIrradiance;
+        diffuseIrradiance = mix(leafNeighbourScatter(sh, sh.leafVisibility) * open, open,
+                                sh.leafVisibility);
+        skyRadiance = mix(leafNeighbourScatter(sh, sh.leafVisibilityR) * open / kPi, skyRadiance,
+                          sh.leafVisibilityR);
+    }
     vec3 specularReflectance = mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0) * sh.energyCompensation;
     float specularOcclusion = specularAmbientOcclusion(sh.NoV, occlusion, sh.a);
     sh.diffuseLight += sh.diffuseColor / kPi * diffuseIrradiance *
                        multiBounceOcclusion(occlusion, sh.diffuseColor);
     sh.specularLight += specularReflectance * skyRadiance *
-                        multiBounceOcclusion(specularOcclusion, sh.f0);
+                        multiBounceOcclusion(specularOcclusion, sh.f0) * sh.leafAmbientSpecular;
 }
 
 // Thin-surface diffuse transmission (KHR_materials_diffuse_transmission):
@@ -637,6 +712,10 @@ void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) 
     vec3 backIrradiance = mix(groundIrradiance, skyIrradiance * sh.farVisibility, -sh.N.y * 0.5 + 0.5);
     if (pc.scene.giMode != 0u) {
         backIrradiance = giIrradiance(sh.gi, -sh.N, backIrradiance);
+    }
+    if (sh.leafVisibility >= 0.0) {
+        backIrradiance = mix(leafNeighbourScatter(sh, sh.leafVisibility) * backIrradiance,
+                             backIrradiance, sh.leafVisibility);
     }
     sh.diffuseLight += transmitted / kPi * backIrradiance *
                        multiBounceOcclusion(occlusion, sh.diffuseColor);

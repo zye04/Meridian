@@ -585,6 +585,7 @@ void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rul
 void Renderer::setCanopySky(CanopySky mode) { impl_->canopySky = static_cast<uint32_t>(mode); }
 void Renderer::setCrownFill(CrownFill mode) { impl_->crownFill = static_cast<uint32_t>(mode); }
 void Renderer::setFarLight(FarLight mode) { impl_->farLight = static_cast<uint32_t>(mode); }
+void Renderer::setLeafLight(LeafLight mode) { impl_->leafLight = static_cast<uint32_t>(mode); }
 void Renderer::setFoliageSpecularAa(FoliageSpecularAa mode) {
   impl_->foliageSpecularAa = static_cast<uint32_t>(mode);
 }
@@ -1020,6 +1021,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.canopySky = impl_->canopySky;
   scene.crownFill = impl_->crownFill;
   scene.farLight = impl_->farLight;
+  scene.leafLight = impl_->leafLight;
   scene.foliageSpecularAa = impl_->foliageSpecularAa;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |

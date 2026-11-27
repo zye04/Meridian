@@ -467,6 +467,15 @@ clipmap (`sky`, `bounce`) or everywhere (`-all`; the probes keep the
 specular); `bounce` lights the voxels a ray crosses as a probe's foliage hit
 (lighting.glsl `farLightGather`). Forward shading runs it on every voxel
 quad fragment: o4 ~0.9-1.2 s per frame.
+`--leaf-light off|a|a2|b|b2` (default off; premise prototype, light lane
+round 3, never merged): leaf triangles and leaf voxels alike (lighting.glsl
+`setLeafLight`). `a`: the sun highlight only on the face seen as adaxial,
+share 0.5 + 0.5 N.y of the normal toward the viewer (measured tree leaves:
+the abaxial face is diffuse); `a2`: the ambient specular too; `b`: `a2` plus
+the canopy ambient: where the crown hides the sky (triangles: the crown sky
+visibility; voxels: the model's depth up and sideways, and along R) the leaf
+sees its neighbours, omega x the ambient (one scattering); `b2`: with
+recollision omega / (1 - p omega).
 `--foliage-specular-aa off|on` (default on; `off` for A/B): leaves widen their specular lobe by the normal variation a
 pixel covers (lighting.glsl `specularAaRoughness`, Tokuyoshi-Kaplanyan):
 triangle leaves by the shading normal's screen derivatives, voxels by
