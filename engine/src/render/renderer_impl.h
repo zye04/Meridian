@@ -42,14 +42,14 @@ struct RunStats {
 };
 
 // One (cell, layer) run of GPU instances against evaluatePoint (mirrored
-// passed through): keep decisions, prototypes and x/z exactly (order
+// as placementMirrors(kind)): keep decisions, prototypes and x/z exactly (order
 // included), the float attributes within tolerance. tags (optional, streamed
 // runs): the dither thresholds, which must equal the pattern's with the
 // layer index above.
 void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
                 const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
                 uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
-                const uint32_t *tags, RunStats &stats, bool mirrored = false);
+                const uint32_t *tags, RunStats &stats, PlacementKind kind);
 
 // setPlacement's GPU placement inputs, kept for the far field's transient
 // placement (buildFarField): constants has the inputs set (grid, counts,

@@ -66,6 +66,15 @@ std::pair<float, float> instanceHeights(const PlacedInstance *instances, uint32_
   return {minY, maxY};
 }
 
+// A placement.comp variant with kMirrored (constant_id 0) set for kind.
+VkPipeline placementPipeline(VkDevice device, const char *shader, VkPipelineLayout layout,
+                             PlacementKind kind) {
+  const VkBool32 mirrored = placementMirrors(kind) ? VK_TRUE : VK_FALSE;
+  const VkSpecializationMapEntry entry{0, 0, sizeof(mirrored)};
+  const VkSpecializationInfo info{1, &entry, sizeof(mirrored), &mirrored};
+  return createComputePipeline(device, shader, layout, &info);
+}
+
 // Debug: whole (cell, layer) runs of the GPU table against evaluatePoint
 // until at least 4096 points are compared.
 void checkPlacement(const Heightfield &field, const GeoChannels *geo,
@@ -90,7 +99,7 @@ void checkPlacement(const Heightfield &field, const GeoChannels *geo,
     const int32_t cellZ = grid.firstZ + static_cast<int32_t>(cell / grid.columns);
     const uint32_t first = offsets[cell * layerCount + l];
     compareRun(field, geo, layers[l], patterns[l], seed, cellX, cellZ, l, instances + first,
-               offsets[cell * layerCount + l + 1] - first, nullptr, stats, true);
+               offsets[cell * layerCount + l + 1] - first, nullptr, stats, PlacementKind::Static);
     const Cell &c = cells[cell];
     bool cellOk = c.firstInstance == offsets[cell * layerCount] &&
                   c.instanceCount == offsets[(cell + 1) * layerCount] - c.firstInstance;
@@ -177,10 +186,11 @@ PlacementTables buildTables(const Heightfield &field, std::span<const PlacementL
 void compareRun(const Heightfield &field, const GeoChannels *geo, const PlacementLayer &layer,
                 const DitherPattern &pattern, uint32_t seed, int32_t cellX, int32_t cellZ,
                 uint32_t layerIndex, const PlacedInstance *run, uint32_t count,
-                const uint32_t *tags, RunStats &stats, bool mirrored) {
+                const uint32_t *tags, RunStats &stats, PlacementKind kind) {
   uint32_t next = 0;
   for (uint32_t p = 0; p < pattern.points.size(); ++p, ++stats.evaluated) {
-    const auto point = evaluatePoint(field, geo, layer, pattern, seed, cellX, cellZ, p, mirrored);
+    const auto point = evaluatePoint(field, geo, layer, pattern, seed, cellX, cellZ, p,
+                                     placementMirrors(kind));
     if (!point) {
       continue;
     }
@@ -320,8 +330,10 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
   };
   VkPipelineLayout placementLayout = makeLayout(sizeof(PlacementConstants));
   VkPipelineLayout scanLayout = makeLayout(sizeof(ScanConstants));
-  VkPipeline countPipeline = createComputePipeline(dev, "placement_count.comp", placementLayout);
-  VkPipeline writePipeline = createComputePipeline(dev, "placement_write.comp", placementLayout);
+  VkPipeline countPipeline =
+      placementPipeline(dev, "placement_count.comp", placementLayout, PlacementKind::Static);
+  VkPipeline writePipeline =
+      placementPipeline(dev, "placement_write.comp", placementLayout, PlacementKind::Static);
   VkPipeline scanPipeline = createComputePipeline(dev, "scan.comp", scanLayout);
 
   // Streamed layers: the same inputs for the per-frame updates, in their own
@@ -362,7 +374,8 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
     next.coords = r.createBuffer(VkDeviceSize{next.recordCount} * sizeof(int32_t) * 2,
                                  kStreamUsage, 0);
     next.layout = makeLayout(sizeof(StreamConstants));
-    next.pipeline = createComputePipeline(dev, "placement_stream.comp", next.layout);
+    next.pipeline =
+        placementPipeline(dev, "placement_stream.comp", next.layout, PlacementKind::Streamed);
     next.held.assign(slots, {INT32_MIN, INT32_MIN});
     next.layerList = streamList;
     next.patterns = std::move(streamTables.patterns);
@@ -510,7 +523,7 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                    0);
     VkPipeline forestPipeline =
-        createComputePipeline(dev, "placement_forest.comp", placementLayout);
+        placementPipeline(dev, "placement_forest.comp", placementLayout, PlacementKind::Static);
     PlacementConstants forestConstants = constants;
     forestConstants.counts = texels.address;
     forestConstants.layerCount = static_cast<uint32_t>(forest - layers.begin());
@@ -901,7 +914,8 @@ void Renderer::Impl::checkStreamUpdate(const FrameData &frame, uint32_t updates)
                       coords[2 * (update.record + k)] == update.cellX &&
                       coords[2 * (update.record + k) + 1] == update.cellZ;
       compareRun(heightfield, geo ? &*geo : nullptr, s.layerList[k], s.patterns[k], s.seed, update.cellX, update.cellZ,
-                 k, ring + start, std::min(c.instanceCount, pointCount), tags + start, stats);
+                 k, ring + start, std::min(c.instanceCount, pointCount), tags + start, stats,
+                 PlacementKind::Streamed);
       if (recordOk) {
         const auto [minY, maxY] = instanceHeights(ring + start, c.instanceCount, s.spheres, true);
         recordOk = std::abs(c.minY - minY) <= 1e-2f && std::abs(c.maxY - maxY) <= 1e-2f;

@@ -74,6 +74,7 @@ struct PipelineDesc {
 
 VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc);
 VkPipeline createComputePipeline(VkDevice device, const char *shader,
-                                 VkPipelineLayout layout);
+                                 VkPipelineLayout layout,
+                                 const VkSpecializationInfo *specialization = nullptr);
 
 } // namespace meridian

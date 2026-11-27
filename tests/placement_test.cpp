@@ -415,28 +415,34 @@ TEST_CASE("the placement grid covers the crop with whole cells") {
   CHECK(grid.rows == 236);
 }
 
-TEST_CASE("the grid's edge cells forest their strip past the crop") {
-  // Static placement (placement.comp, the stored table and the far field's
-  // transient one) evaluates every point mirrored: the grid's edge cells
-  // reach past the crop, and that strip mirrors like the cells beyond.
+TEST_CASE("static placement forests the strip past the crop, streamed placement does not") {
+  // The grid's edge cells reach past the crop: static placement (the
+  // stored table, the far field's transient one) mirrors that strip like
+  // the cells beyond; streamed layers keep every point inside the crop.
   const Heightfield field = planeField(101, 2.0f, 10.0f); // crop is +-100 m
   const PlacementGrid grid = placementGrid(field);        // cells -2..1: +-128 m
   const PlacementLayer layer = makeLayer(openRule());
   const DitherPattern pattern = makeDitherPattern(2, ditherPointCount(layer.footprint));
-  uint32_t strip = 0;
-  for (uint32_t row = 0; row < grid.rows; ++row) {
-    for (uint32_t column = 0; column < grid.columns; ++column) {
-      const int32_t cx = grid.firstX + static_cast<int32_t>(column);
-      const int32_t cz = grid.firstZ + static_cast<int32_t>(row);
-      for (uint32_t p = 0; p < pattern.points.size(); ++p) {
-        const auto point = evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p, true);
-        if (point && (std::abs(point->position.x) > 100.0f || std::abs(point->position.z) > 100.0f)) {
-          ++strip;
+  const auto strip = [&](PlacementKind kind) {
+    uint32_t count = 0;
+    for (uint32_t row = 0; row < grid.rows; ++row) {
+      for (uint32_t column = 0; column < grid.columns; ++column) {
+        const int32_t cx = grid.firstX + static_cast<int32_t>(column);
+        const int32_t cz = grid.firstZ + static_cast<int32_t>(row);
+        for (uint32_t p = 0; p < pattern.points.size(); ++p) {
+          const auto point =
+              evaluatePoint(field, nullptr, layer, pattern, 8, cx, cz, p, placementMirrors(kind));
+          if (point &&
+              (std::abs(point->position.x) > 100.0f || std::abs(point->position.z) > 100.0f)) {
+            ++count;
+          }
         }
       }
     }
-  }
-  CHECK(strip > 0);
+    return count;
+  };
+  CHECK(strip(PlacementKind::Static) > 0);
+  CHECK(strip(PlacementKind::Streamed) == 0);
 }
 
 TEST_CASE("the placement fold's period fits a uint32 sum: crops up to 16 km") {

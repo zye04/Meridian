@@ -169,14 +169,8 @@ float heightAt(float x, float z) {
 uint layerDensity(PlacementLayer layer, uint layerSeed, ivec2 p, uvec2 s, out uint mask);
 
 // Whether points outside the crop mirror into it (evaluatePoint's mirrored):
-// static placement does, so the placement grid's edge cells (which reach
-// past the crop) and the far field's cells beyond the grid grow the same
-// mirrored forest; streamed layers stay inside the crop.
-#ifdef PLACEMENT_STREAM
-const bool kMirrored = false;
-#else
-const bool kMirrored = true;
-#endif
+// set per pipeline from placementMirrors (placement.h).
+layout(constant_id = 0) const bool kMirrored = false;
 
 // sampleP: p, or p folded into the crop where it mirrors (heights and
 // channels read there).

@@ -6221,3 +6221,11 @@ An independent check of 18f280e failed three items; proof frames in
   deterministic: two runs of the same code 1.0000x). Not matched: a
   path boundary between the march's end and the lookup's origin, and
   the next cascade's share in a blend band.
+- The mirror policy has one home: `placementMirrors(PlacementKind)`
+  (placement.h; Static mirrors, Streamed does not). placement.comp's
+  `kMirrored` is a specialization constant (constant_id 0) that every
+  placement pipeline sets from it (`placementPipeline`), and the CPU
+  checks (`compareRun`) take the kind instead of a literal. The edge
+  strip test now evaluates both kinds through it, so it fails if static
+  placement stops mirroring or streamed placement starts (checked by
+  flipping the function each way). Hashes unchanged.

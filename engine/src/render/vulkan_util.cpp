@@ -265,7 +265,8 @@ VkPipeline createGraphicsPipeline(VkDevice device, const PipelineDesc &desc) {
 }
 
 VkPipeline createComputePipeline(VkDevice device, const char *shader,
-                                 VkPipelineLayout layout) {
+                                 VkPipelineLayout layout,
+                                 const VkSpecializationInfo *specialization) {
   VkShaderModule module = loadShader(device, shader);
 
   VkComputePipelineCreateInfo info{};
@@ -274,6 +275,7 @@ VkPipeline createComputePipeline(VkDevice device, const char *shader,
   info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
   info.stage.module = module;
   info.stage.pName = "main";
+  info.stage.pSpecializationInfo = specialization;
   info.layout = layout;
 
   VkPipeline pipeline = VK_NULL_HANDLE;

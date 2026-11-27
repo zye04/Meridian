@@ -383,3 +383,10 @@ Tile table (`python3 -I .superpowers/far/s3/canopy.py cost2/default fix2/<run> a
 a1 0.3836 / 0.2790 -> 0.3833 / 0.2787 vs 0.3808 / 0.2669 (both toward the voxels); h1 0.3050 / 0.1937 -> 0.3049 / 0.1935 vs
 0.3149 / 0.1817 (shaded toward; lit 0.0001 away, below the final frame's noise). Whole frame diff before/after a1 0.2756, h1 0.2149
 (noise 0.26 / 0.20; the after run carries the pinhole fill too).
+
+Mirror policy (item 1 test gap). `./build-release/tests/tests`: `225 passed | 0 failed`. Mutation check: `placementMirrors` returning
+true always fails `CHECK( strip(PlacementKind::Streamed) == 0 )`, false always fails `CHECK( strip(PlacementKind::Static) > 0 )`.
+Debug H1 (`.superpowers/far/cap.sh build/game/game H1 .superpowers/far/fix2/final/debug-h1.png`): `placement hash 0x9f383bc0acab499b`
+(unchanged), `placement check: 5425 points (762 kept) compared with the CPU reference, 0 mismatches (height within 0 m)`,
+`far field hash 0x944195d140d56146, placement grid inside its outer ring+1 cells 0x95b68fb05960ae2d (static levels)` (unchanged),
+`far placement check: 6318 points (3661 kept) in the sample windows compared with the CPU reference, 0 mismatches`.

@@ -1105,7 +1105,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
                     const uint32_t first = counts[entry];
                     compareRun(heightfield, geoChannels, layers[l], placement.patterns[l],
                                placement.seed, cellX, cellZ, l, instances + first,
-                               counts[entry + 1] - first, nullptr, stats, true);
+                               counts[entry + 1] - first, nullptr, stats, PlacementKind::Static);
                   }
                 }
               }
