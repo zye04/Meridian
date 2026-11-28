@@ -1205,8 +1205,12 @@ struct PostConstants {
   VkDeviceAddress histogram = 0;
   VkDeviceAddress exposure = 0;
   float exposureCompensation = 0.0f;
+  // The grade's exposure (Grade::exposureEv), applied in the LUT after the
+  // meter; exposure.comp gives it back to views held at the shade bound.
+  float gradeExposureEv = 0.0f;
   VkDeviceAddress skyIrradiance = 0;
 };
+static_assert(offsetof(PostConstants, gradeExposureEv) == 28);
 static_assert(sizeof(PostConstants) == 40);
 
 // Must match GradeBuffer in grade_lut.comp: Grade with the white balance as

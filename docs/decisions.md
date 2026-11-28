@@ -5923,3 +5923,38 @@ look differs from the one judged; the port proof compares main against the branc
 Port on main (517883d vs the branch, 2560x1440 DLAA, Release, 120 frames): GPU start 24.15
 -> 24.19, o4 (relief) 27.27 -> 27.44, eye height under the canopy 23.14 -> 22.57 ms; VRAM
 unchanged; 0 validation errors.
+
+## Exposure: the shade bound holds on the displayed image (2026-11-28)
+
+Under a closed canopy the meter wants more lift than the shade bound allows ("Exposure:
+shade lift floor", 2026-11-23): at the relief patch's eye-height forest view (`595.5 989.2
+495.3 -0.785 0.0 --sun -0.0714 0.574 -0.816`) the exposure converges to EV100 10.21, the
+bound openEv 13.19 - kMaxShadeLiftEv 3 (open ground 71104 lux), and reads 10.43 after the
+capture's 120 frames (adaptation 1.5/s from EV 15 leaves 5 %). A grade's `exposureEv`
+scales the image in the LUT, after the meter, so the working look's -0.85 EV darkened that
+already-bounded interior by another 0.85 EV, near unreadable to walk in.
+
+Practice: Unreal (4.25+) separates a constant exposure compensation from an exposure
+compensation curve indexed by the metered average scene EV100, so dark scenes can be
+compensated differently from bright ones (dev.epicgames.com "Auto Exposure in Unreal
+Engine"; Epic tech blog "How Epic Games is handling auto exposure in 4.25", 2020). Here the
+curve needs no new constants: the shade bound is the user's photographic rule (open the
+shade up by at most 3 EV), so it should hold on what is displayed. exposure.comp moves the
+bound by the grade's exposure (`PostConstants::gradeExposureEv`): a negative grade EV lowers
+the bound's EV100 by as much, so a view held at the bound is shown as bright as at grade EV
+0, while views the meter puts above the bound (open meadow, aerial) keep the full grade
+exposure. Between the two the compensation fades with the metered level (a max, smoothed by
+the adaptation). At grade EV 0 nothing changes. Rejected: moving the grade EV into the
+meter's compensation (the panel's slider would ease in over a second, and the bound would
+still darken), a looser shade bound (the user chose 3 EV; readable shade beyond it is local
+exposure's job), and faster adaptation.
+
+Measured (Release, 2560x1440 DLAA, 120 frames, working grade; display luma Y' 0-255):
+eye-height forest p50 28.9 on main, 18.4 with the grade before this change, 34.9 after
+(p5 9.9 / 7.4 / 17.2; EV100 10.43 / 10.43 / 9.62); start view and relief o4 unchanged by it
+(mean |diff| 0.49 and 0.28 /255, within the `--trees` run-to-run floor 0.58); with the
+previous grade file it reproduces main (start 0.59, o4 0.32, forest 0.23 /255). Walk from
+the meadow into the forest (8 m/s, 600 frames, every 5th saved): median Y' rises from the
+start's adaptation to a plateau of 80 and falls smoothly to 67 (main 114 to 66), one turn,
+largest 5-frame step 5.6 (main 8.4): no pumping.
+

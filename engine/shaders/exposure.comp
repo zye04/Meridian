@@ -31,7 +31,13 @@ const float kHighlightMax = 2.0;
 // a forest interior back to mid-grey; real canopy shade is 1.5-5% of open
 // light (G7, research/2026-11-23-G7-grey-image.md). The reflectance is a
 // vegetated landscape's: with it the open start view's own meter (EV100
-// 13.56) and this model (13.39) agree.
+// 13.56) and this model (13.39) agree. The bound holds on the displayed
+// image: the grade's exposure (applied in the LUT, after the meter) moves it
+// by as much the other way, so a grade that darkens open views (a negative
+// grade EV) leaves shade held at the bound as bright as without it. As a
+// compensation that depends on the metered level (Unreal's exposure
+// compensation curve): full where the meter sits above the bound, fading
+// to none where the bound holds.
 const float kOpenReflectance = 0.09;
 const float kMaxShadeLiftEv = 3.0;
 
@@ -74,7 +80,7 @@ void main() {
         float openLuminance = kOpenReflectance / 3.14159265 * post.skyIrradiance.openIlluminance;
         float openEv = log2(max(openLuminance, 1e-6) * 100.0 / 12.5) - kMeanToGreyEv;
         target = max(target, highlightLog - log2(1.2 * kHighlightMax));
-        target = max(target, openEv - kMaxShadeLiftEv) - post.exposureCompensation;
+        target = max(target, openEv - kMaxShadeLiftEv + post.gradeExposureEv) - post.exposureCompensation;
         target = clamp(target, kMinEv100, kMaxEv100);
     }
 

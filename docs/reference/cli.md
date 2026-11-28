@@ -254,7 +254,7 @@ Weather: `--weather clear|fair|broken|overcast` (default `fair`),
 SECONDS` (blend from the start preset to overcast over that many game
 seconds; the change enters at the front line 60 km upwind and travels
 with the wind). Capture runs print the exposure (EV100), the sky
-irradiance with clouds and clear (x sun), the open-ground illuminance (lux) that bounds the exposure, and the weather at the camera (coverage,
+irradiance with clouds and clear (x sun), the open-ground illuminance (lux) that bounds the exposure (the shade bound, exposure.comp: at most 3 EV over an open landscape's, on the displayed image, so a grade file's `exposureEv` darkens open views but not shade held at the bound), and the weather at the camera (coverage,
 type, wind speed and the direction it comes from, gustiness, game time).
 `--clouds off` skips the cloud march, composite, cloud shadows and sky
 capture (A/B). Ambient light (diffuse irradiance, the specular sky
@@ -446,7 +446,7 @@ applies at full weight to the probes' ambient, which already traces the
 canopy, so inside the clipmap the crown darkens leaves twice; that is the
 look as chosen. `gi-weighted` (A/B, not default) weights the canopy term
 by the share the probes leave to the fallback (`sh.gi.remaining`), so the
-crown counts once.
+crown counts once; with `--gi off` it equals `on`.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead
