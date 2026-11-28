@@ -764,9 +764,10 @@ struct Options {
   std::optional<std::filesystem::path> gradePath;
   // --terrain FILE: the heightfield (default assets/terrain/napf.height).
   std::optional<std::filesystem::path> terrainPath;
-  // --tree-palette NAME: the Megascans Trees cooked with that leaf palette
-  // (assets/source/megascans/<species>-NAME, tools/unreal/cook_palette.sh).
-  std::string treePalette;
+  // --tree-palette NAME|none: the Megascans Trees cooked with that leaf
+  // palette (assets/source/megascans/<species>-NAME,
+  // tools/unreal/cook_palette.sh); none, the original cooks.
+  std::string treePalette = "light1";
   // --forest-picks all|open|domes: which variants make the forest.
   ForestPicks forestPicks = ForestPicks::All;
   // --lone-tree PATH X Z (test view): one model from assets/ on the ground.
@@ -1068,6 +1069,9 @@ Options parseOptions(int argc, char **argv) {
       options.forestPicks = static_cast<ForestPicks>(it - std::begin(names));
     } else if (arg == "--tree-palette" && i + 1 < argc) {
       options.treePalette = argv[++i];
+      if (options.treePalette == "none") {
+        options.treePalette.clear();
+      }
     } else if (arg == "--score-forest" && i + 1 < argc) {
       options.scoreForestPath = argv[++i];
     } else if (arg == "--trees") {
@@ -1207,7 +1211,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --tree-palette name, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name|none, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "

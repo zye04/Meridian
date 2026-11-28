@@ -6080,3 +6080,38 @@ half that spacing closes the canopy; measured there 126735 trees instead of 2819
 (leaf area index 4.3-4.8). Neither needs the broadleaf pack: they were bundled with its
 placement, now apart. Default stays `all` until the look is judged on main. The trees lane's
 other levers (footprint and scale flags, domes+small, domes+f3) stay behind.
+
+## Default: leaf palette light1; forest picks stay all (2026-11-28)
+
+The user's working look was chosen with palette light1, broadleaf open crowns and dome
+picks, none of which were on main; on main's trees no grade reaches the reference crowns.
+Batch (palette-light1, 2560x1440 DLSS, the grade then default, 120 frames; crown top 5 % of
+o4's near rect with the frame's lod mask, far-light's top5.py; 1.jpg 0.527 / 0.033 / 133):
+
+| forest | trees (layer 1, relief) | GPU o4 / start ms | resident o4 / start MiB | crown top 5 % L C h |
+|---|---|---|---|---|
+| main (original cooks, all) | 281999 | 27.78 / 23.95 | 10612 / 11370 | 0.680 0.049 105 |
+| light1, all | 281999 | 27.92 / 23.75 | 10612 / 11370 | 0.657 0.034 122 |
+| light1, open | 126735 | 23.00 / 21.71 | 9562 / 10107 | 0.627 0.039 125 |
+| light1, domes | 126735 | 25.33 / 22.17 | 8982 / 9497 | 0.625 0.044 126 |
+
+Meadow, sky and far ridge are unchanged by any column. light1's two leaf populations (dome
+picks at L 0.34, the rest chlorophyll1 at 0.31) separate in base colour by 0.03 and not
+once lit. light1 + open reads as separate round green crowns like 1.jpg, is the fastest and
+keeps six forest variants (domes four, at higher triangle budgets), but it costs the walker
+(below), and a default may not make the walk slower (the user's goal is walking around). So
+the default is `--tree-palette light1` alone (crown hue 105 -> 122, chroma 0.049 -> 0.034 =
+1.jpg, cost 0, forest unchanged); `--tree-palette none` is the previous leaf colour and
+`--forest-picks open` stays an option. Caches: the dither pattern cache is keyed by
+layer id and point count (`dither-1-51.bin` for 9 m), so no version bump; the palette cooks'
+cluster caches match main's versions (v9, voxelizer 16).
+
+light1 + open against `--tree-palette none --forest-picks all` (same binary, relief,
+120 frames): s1 GPU 28.26 -> 23.44 ms, h2 26.93 -> 25.49, but the eye-height forest view
+(`595.5 989.2 495.3 -0.785 0.0`) 22.57 -> 27.13 ms (scene early 9.40 -> 11.16, voxel
+bricks 3.02 -> 4.44, voxel trees 3.35 -> 4.49): the open picks' field-grown crowns branch
+low and fill the walker's view, darker and closed. Forward fly ending at o4 (20 m/s, 60
+frames): frame-pair mean |diff| over the far band 1.646 -> 1.461 /255 (p95 2.034 -> 1.888).
+Debug `--trees` start with open: 0 validation errors, placement and stream checks 0
+mismatches, placement hash 0x4351ec976ea4c926. The 9 m dither pattern (51 points) builds in well under a second;
+napf `--trees` Release launch to 4 frames 86.7 s with it rebuilt, 76.6 s warm (run noise).

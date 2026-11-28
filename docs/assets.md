@@ -197,6 +197,14 @@ these; `PivotPainter/*_PP` are the same meshes with wind pivots),
    palette with `picks` retints only those variants and links the rest
    to `<species>-<others>/` (cook that palette first):
    `leaf-palette-light1.json` after `leaf-palette.json` (chlorophyll1).
+   The game loads light1 by default: a fresh checkout gets it from the
+   Unreal exports (`_unreal/<species>`, steps 1-3) and then
+   `tools/unreal/cook_palette.sh tools/unreal/leaf-palette.json` followed
+   by `tools/unreal/cook_palette.sh tools/unreal/leaf-palette-light1.json`
+   (CPU, minutes per variant); `tools/fetch-sample-assets.sh` does not cook
+   palettes. Without them the game prints one `Tree palette light1: ...
+   not cooked` warning and loads the original cooks (the old, yellower
+   leaf colours); `--tree-palette none` does so silently.
 
 What the export holds (verified on Black Alder and European Beech):
 

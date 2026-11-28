@@ -335,12 +335,13 @@ docs/assets.md) are used when present: beech, hornbeam and alder forests and
 lone trees, saplings under the canopy (layer 12), every cooked
 variant; startup prints `Megascans Trees: F forest, L lone, S sapling
 prototypes`. Without them, the Megaplants.
-`--tree-palette NAME` loads those trees from
+`--tree-palette NAME|none` (default light1) loads those trees from
 `assets/source/megascans/<species>-NAME/` instead: the same trees cooked
 with a retinted leaf atlas (`tools/unreal/cook_palette.sh`, docs/assets.md):
 `chlorophyll1` every variant, `light1` the working look's (brighter leaves
 on the dome picks, the rest chlorophyll1). A variant missing there loads
-its original cook, with one warning.
+its original cook, with one warning; `none` loads the original cooks
+(main's leaf colours before 2026-11-28).
 `--forest-picks all|open|domes` (default all): which Megascans variants
 make the forest. `all`: every forest-grown variant at a 6 m footprint
 (poles among broad crowns); `open`: the broad, round-crowned variants
@@ -399,7 +400,7 @@ by `Prototype::tint`), clover: ring ~6.8M slots,
 ~2.2M live; building their dense dither patterns adds ~10 s to Release
 and ~59 s to Debug startup on the first run only: the patterns are cached,
 see CLAUDE.md Gotchas), plus forests, lone trees and saplings with `--trees`
-(~3.1M instances; all of these are causal layers on the `.geo` channels), which loads the rocks (and with `--trees` the
+(~3.4M instances, ~1.9M with `--forest-picks open`; all of these are causal layers on the `.geo` channels), which loads the rocks (and with `--trees` the
 trees) as prototypes: Debug startup
 ~95 s, Release ~18 s. `--terrain FILE` loads another heightfield instead of `assets/terrain/napf.height` (e.g. the relief patch). `--placement off` skips it (Release ~11 s:
 heightfield pyramid, normal map and transcoding the terrain's 4K
@@ -410,7 +411,7 @@ shows what `--reference` traces; the static table and its hash are unchanged. De
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x07e033157372f778 for seed 1 without
-trees, 0x5353fab653ec154d with `--trees`, both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+trees, 0x043a8db5c3cf4a2d with `--trees` (default light1 palette, measured 2026-11-28), both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin, then VMA's blocks on the
