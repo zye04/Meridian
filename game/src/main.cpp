@@ -46,13 +46,19 @@ constexpr float kWalkSpeed = 1.4f;
 constexpr float kWalkSprintSpeed = 5.0f;
 constexpr float kEyeHeight = 1.7f;
 
-// A starting look toward the Chlorophyll Engine frames
-// (assets/reference/chlorophyll): AgX alone is flat, its inset desaturates
-// daylight foliage and the cooked leaf colour leans blue; the sky already
-// matches their chroma, so only the greens get more.
+// A starting look matched to the Chlorophyll Engine frames
+// (assets/reference/chlorophyll, decisions.md "Starting grade from the tone
+// match"): warmer white and a lower exposure deepen the shaded forest, the
+// offset lifts the blacks as theirs are, the greens keep their hue (the light1
+// leaves already sit near the reference) and the blues band takes the sky's
+// blue out of the shade.
 const meridian::Grade kStartingGrade{
+    .temperatureKelvin = 7000.0f,
+    .exposureEv = -0.8f,
+    .offset = {0.010f, 0.010f, 0.010f},
     .contrast = 1.4f,
-    .greens = {.hueShiftDegrees = -10.0f, .saturation = 1.5f}};
+    .greens = {.hueShiftDegrees = 0.0f, .saturation = 1.2f},
+    .blues = {.hueShiftDegrees = 0.0f, .saturation = 0.6f}};
 
 // walkOn: the eye follows the ground at eye height, WASD stays horizontal.
 void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,

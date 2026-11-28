@@ -6184,3 +6184,36 @@ napf `--trees` Release launch to 4 frames 86.7 s with it rebuilt, 76.6 s warm (r
 - **Remaining gap:** the s1 shade (0.5 km) is not haze: 59.9 at chroma
   0.053 with the haze's sun at zero. It is sky ambient on the shaded
   canopy (backlog "Aerial shadows lighter ...: the ambient remainder").
+
+## Starting grade from the tone match (2026-11-28)
+
+The user, beside 1.jpg: "shadows in the entire image of his are blacker while ours is
+blueish; his highlights look more vivid, warmer". Measured with
+`.superpowers/port/tone/measure.py` (lane port; whole-frame display luma Y' percentiles and
+the mean OKLCh of three classes from far-light's region rects: shaded forest, lit crowns =
+top quarter of the near rect, meadow), on palette light1 with the clear haze, 1.jpg against
+o4 and s1, 5.jpg against h2 and the start view, 120 frames:
+
+| | o4 Y' p1 / p5 / p50 / p95 | o4 shaded L C h | o4 lit crowns L C h | start meadow L C h |
+|---|---|---|---|---|
+| 1.jpg (5.jpg for meadow) | 13.6 / 20.8 / 65.4 / 241.1 | 0.256 0.030 241 | 0.439 0.033 133 | 0.480 0.090 119 |
+| previous built-in grade | 10.8 / 18.0 / 80.7 / 239.5 | 0.355 0.055 248 | 0.506 0.041 134 | 0.529 0.105 124 |
+| working look (held) | 7.7 / 12.1 / 53.6 / 222.2 | 0.268 0.031 247 | 0.403 0.043 117 | |
+| this grade (G4) | 13.6 / 18.2 / 59.2 / 223.5 | 0.291 0.027 250 | 0.418 0.032 130 | 0.446 0.098 128 |
+
+- The reference's blacks are lifted (p1 13.6), not crushed: contrast 1.6-1.8 or a CDL power
+  of 1.15 took p1 to 1-3 and the eye-height forest view's p50 to 3-9. "Blacker shadows"
+  is the shaded forest's level (L 0.256 against 0.355), which the lower exposure gives; the
+  offset keeps the black point; the blues band at x0.6 takes most of the blue cast out of
+  the shade (C 0.055 -> 0.027).
+- Crown hue: the working look's 7500 K and greens -10 deg turned the light1 crowns yellow
+  (117 against 133; the reason it was held). 7000 K with the greens unrotated keeps them at
+  130. A 7500 K variant (G5: EV -0.85, offset 0.014, contrast 1.5) scored a little nearer on
+  the percentiles (17.66 against 19.29, o4 + s1 + h2) with crowns at 123; crown hue decided.
+- What a grade cannot reach: the lit crowns' level and warmth (L 0.418 against 0.439; frame
+  p95 223.5 against 241.1) and the shade's last blue and level (0.291, h 250 against 0.256,
+  241): crown light and the interior ambient (backlog), then the match re-runs with the
+  same scripts.
+- With the clear haze (the default with this grade) the eye-height forest view's p50 is
+  29.2 (main under summer 28.9; the previous grade under clear 17.4). The previous grade is
+  `tools/grades/starting-2026-11-28.json`.
