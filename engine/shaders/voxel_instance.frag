@@ -122,8 +122,16 @@ void main() {
         // cells (the model's bricks) in cascade 4, ray-traced shadows the
         // model's triangles: either way the model shades itself.
         vec3 origin = world + rayDirection * (cluster.voxelEdge * scale);
+        // The cascades take the voxel at its centre with no offset: one along
+        // the sun moves the receiver nearer the light by a voxel edge and the
+        // normal offset (~4 m in cascade 3), past its own crown's leaves in
+        // front of it, and lit the leaves inside a sunlit crown (decisions.md
+        // "Voxel sun lookup"); the depth bias holds the acne. The ray-traced
+        // and far-shadow paths keep the offset start.
+        bool centre = scene.voxelShadowOffset == 0u && scene.shadowMode == 0u && !farShadowReceiver(origin);
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
-                                              origin - scene.cameraPosition, rayDirection);
+                                              (centre ? world : origin) - scene.cameraPosition,
+                                              centre ? vec3(0.0) : rayDirection);
         visibility *= float(inInfo.y);
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);

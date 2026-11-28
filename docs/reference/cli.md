@@ -464,6 +464,12 @@ their specular lobe by the normal variation a pixel covers (lighting.glsl
 `specularAaRoughness`, Tokuyoshi-Kaplanyan): triangle leaves by the shading
 normal's screen derivatives, voxels by `kVoxelNeighbourNormalChange` over
 the voxel's size in pixels (voxel_instance.frag).
+`--voxel-shadow-offset off|on` (default off; `on` for A/B, the old lookup):
+leaf voxels look the sun cascades up at their centre with no offset
+(voxel_instance.frag); `on` moves the lookup a voxel edge and the 1.5-texel
+normal offset toward the sun, as before (decisions.md "Voxel sun lookup").
+The ray-traced (`--shadows rt`) and far-shadow paths keep the offset start
+either way.
 `--leaf-light off|on|gi-weighted` (default on; `off` for A/B): leaf triangles and leaf
 voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
 ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of

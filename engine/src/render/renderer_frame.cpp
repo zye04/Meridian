@@ -586,6 +586,10 @@ void Renderer::setFoliageSpecularAa(FoliageSpecularAa mode) {
   impl_->foliageSpecularAa = static_cast<uint32_t>(mode);
 }
 
+void Renderer::setVoxelShadowOffset(VoxelShadowOffset mode) {
+  impl_->voxelShadowOffset = static_cast<uint32_t>(mode);
+}
+
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
@@ -1015,6 +1019,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                        : 0;
   scene.voxelNear = impl_->voxelNear;
   scene.foliageSpecularAa = impl_->foliageSpecularAa;
+  scene.voxelShadowOffset = impl_->voxelShadowOffset;
   scene.leafLight = impl_->leafLight;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |

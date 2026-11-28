@@ -400,6 +400,7 @@ struct Renderer::Impl {
   float voxelNear = 0.0f;
   VoxelCoverage voxelCoverage = VoxelCoverage::AreaPixelPhase;
   uint32_t foliageSpecularAa = 1;
+  uint32_t voxelShadowOffset = 0;
   uint32_t leafLight = 1;
   uint32_t drawnVoxelTrees = 0;
   uint32_t drawnVoxelBricks = 0;
