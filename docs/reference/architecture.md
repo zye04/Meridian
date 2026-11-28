@@ -258,7 +258,7 @@ last frame's pyramid seen from last frame's view, queuing what it hides
 for a retest; fills 4 cluster draw lists: opaque/masked x
 single/double-sided, and lists voxel clusters (instance, cluster) for
 voxel_bricks.comp, one workgroup per voxel cluster after each phase's
-cluster cull, which lists its bricks in the frustum (with the terrain's
+cluster cull (its own pass timer: voxel bricks, voxel bricks late), which lists its bricks in the frustum (with the terrain's
 sun visibility marched once per brick) and, compacted, the voxels that
 draw: coverage by a stable hash of instance, the brick's lattice place and
 edge, the cluster's seed (a voxel cluster's ClusterInfo.firstVertex: the

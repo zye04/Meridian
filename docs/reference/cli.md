@@ -302,7 +302,7 @@ area A px = D x the render's pixels, S% under 1 px` line follows: the quads'
 screen area, depth complexity and sub-pixel share), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late, scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, voxel bricks (voxel_bricks.comp, the main view's phase 0), far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late (phase 1's cull up to the cluster cull), voxel bricks late (its voxel_bricks.comp and the counter readback), scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
 new pass is one `endPass("name")` call in `renderer_frame.cpp`.
 
