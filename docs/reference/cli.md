@@ -340,7 +340,8 @@ prototypes`. Without them, the Megaplants.
 with a retinted leaf atlas (`tools/unreal/cook_palette.sh`, docs/assets.md):
 `chlorophyll1` every variant, `light1` the working look's (brighter leaves
 on the dome picks, the rest chlorophyll1). A variant missing there loads
-its original cook, with one warning; `none` loads the original cooks
+its original cook, with one warning; a named palette with no
+`<species>-NAME/` directory at all is an error; `none` loads the original cooks
 (main's leaf colours before 2026-11-28).
 `--forest-picks all|open|domes` (default all): which Megascans variants
 make the forest. `all`: every forest-grown variant at a 6 m footprint
@@ -348,7 +349,9 @@ make the forest. `all`: every forest-grown variant at a 6 m footprint
 (beech Field_01 + Forest_03, hornbeam Field_01 + Forest_02, alder Field_02
 + Field_01) at 9 m, so crowns meet; `domes`: only the closed dome crowns
 (beech Field_01, hornbeam Field_01, alder Field_02 + Field_01) at 9 m. Lone
-trees and saplings are unchanged.
+trees and saplings are unchanged. A species with none of its picks cooked
+is left out with a warning; with no pick cooked at all the forest falls
+back to the Megaplants, as without the Megascans Trees.
 `--lone-tree PATH X Z` (test view): one model from `assets/` (e.g.
 `source/megascans/europeanhornbeam/SM_EuropeanHornbeam_Field_01/SM_EuropeanHornbeam_Field_01.gltf`)
 on the ground at (X, Z), unrotated at scale 1, 5 cm into the soil; with
@@ -411,7 +414,7 @@ shows what `--reference` traces; the static table and its hash are unchanged. De
 the CPU reference, must be 0 mismatches), `stream check:` (every
 regenerated streamed cell vs the CPU reference, must be 0 mismatches) and
 `placement hash 0x...` of the static table (0x07e033157372f778 for seed 1 without
-trees, 0x043a8db5c3cf4a2d with `--trees` (default light1 palette, measured 2026-11-28), both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
+trees, 0x043a8db5c3cf4a2d with `--trees` (measured 2026-11-28, the same with `--tree-palette none`: the hash covers the instance and cell bytes, which a leaf palette cannot change; it moves with `--forest-picks`; the previously documented 0x5353fab653ec154d was stale, recorded by 2026-11-24, changed by later placement work, exact commit unknown), both with `napf.geo` cooked, and the 30 traced Megascans Trees variants (alder, beech, hornbeam) cooked (docs/assets.md), every asset present). Capture runs print `streamed: L layers,
 window WxW, ring C slots, N live`. Loading
 placement also prints `TLAS:` (records, sizes, build ms, prototype BLAS
 before and after compaction, cell margin, then VMA's blocks on the

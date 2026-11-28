@@ -6086,7 +6086,7 @@ other levers (footprint and scale flags, domes+small, domes+f3) stay behind.
 The user's working look was chosen with palette light1, broadleaf open crowns and dome
 picks, none of which were on main; on main's trees no grade reaches the reference crowns.
 Batch (palette-light1, 2560x1440 DLSS, the grade then default, 120 frames; crown top 5 % of
-o4's near rect with the frame's lod mask, far-light's top5.py; 1.jpg 0.527 / 0.033 / 133):
+o4's near rect with the frame's lod mask, `tools/crown-top5.py` (the light lane's top5.py); 1.jpg 0.527 / 0.033 / 133):
 
 | forest | trees (layer 1, relief) | GPU o4 / start ms | resident o4 / start MiB | crown top 5 % L C h |
 |---|---|---|---|---|

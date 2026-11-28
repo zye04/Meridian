@@ -370,7 +370,12 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       const auto &picks =
           forestPicks == ForestPicks::Domes ? PickedForest::kDomes : PickedForest::kOpen;
       for (size_t s = 0; s < picks.size(); ++s) {
+        const size_t before = forest.size();
         addUnrealTrees(picks[s].species, picks[s].pack, "", kShares[s], forest, picks[s].variants);
+        if (forest.size() == before) {
+          std::printf("Forest picks: no %s pick cooked, the forest goes without it\n",
+                      picks[s].species);
+        }
       }
     }
     addUnrealTrees("blackalder", "BlackAlder", "Field", 0.5f, lone);
@@ -1057,8 +1062,12 @@ Options parseOptions(int argc, char **argv) {
       options.terrainPath = argv[++i];
     } else if (arg == "--lone-tree" && i + 3 < argc) {
       const std::string path = argv[++i];
-      const float x = std::stof(argv[++i]);
-      options.loneTree = Options::LoneTree{path, x, std::stof(argv[++i])};
+      try {
+        const float x = std::stof(argv[++i]);
+        options.loneTree = Options::LoneTree{path, x, std::stof(argv[++i])};
+      } catch (const std::logic_error &) {
+        throw std::runtime_error("--lone-tree takes PATH X Z (X and Z in meters)");
+      }
     } else if (arg == "--forest-picks" && i + 1 < argc) {
       const std::string picks = argv[++i];
       const char *names[] = {"all", "open", "domes"};
@@ -1071,6 +1080,21 @@ Options parseOptions(int argc, char **argv) {
       options.treePalette = argv[++i];
       if (options.treePalette == "none") {
         options.treePalette.clear();
+      } else {
+        // A named palette must exist: only the built-in default falls back
+        // quietly (a checkout without the palette cook).
+        std::string looked;
+        bool found = false;
+        for (const char *species : {"blackalder", "europeanbeech", "europeanhornbeam"}) {
+          const auto dir = std::filesystem::path(MERIDIAN_ASSET_DIR) / "source/megascans" /
+                           (std::string(species) + "-" + options.treePalette);
+          found = found || std::filesystem::is_directory(dir);
+          looked += "\n  " + dir.string();
+        }
+        if (!found) {
+          throw std::runtime_error("--tree-palette " + options.treePalette +
+                                   ": no palette cook, looked for" + looked);
+        }
       }
     } else if (arg == "--score-forest" && i + 1 < argc) {
       options.scoreForestPath = argv[++i];
@@ -1600,12 +1624,14 @@ int main(int argc, char **argv) {
   // One model on the ground, unrotated at scale 1 (a single crown's
   // triangle/voxel A/B; with --placement off nothing else is near it).
   if (options.loneTree) {
-    if (auto model = loadModel(renderer, options.loneTree->path.c_str())) {
-      const float x = options.loneTree->x, z = options.loneTree->z;
-      const float y = terrain.heightAt(x, z) - 0.05f;
-      addModel(renderer, *model, meridian::translation({x, y, z}));
-      std::printf("Lone tree at %.2f %.2f %.2f\n", x, y, z);
+    const auto model = loadModel(renderer, options.loneTree->path.c_str());
+    if (!model) {
+      throw std::runtime_error("--lone-tree: no " + options.loneTree->path + " under assets/");
     }
+    const float x = options.loneTree->x, z = options.loneTree->z;
+    const float y = terrain.heightAt(x, z) - 0.05f;
+    addModel(renderer, *model, meridian::translation({x, y, z}));
+    std::printf("Lone tree at %.2f %.2f %.2f\n", x, y, z);
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
