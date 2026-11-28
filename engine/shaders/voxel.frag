@@ -43,6 +43,9 @@ const float kHitOpticalDepth = 0.69314718;
 // shadow the surface with its own crown.
 const float kVoxelRayStart = 4.0;
 const float kVoxelPerceptualRoughness = 0.8;
+// Sideways sky visibility through the canopy: half a cell (the leaf light's
+// canopy term; the analogue of a voxel instance's own-box sides).
+const float kFarCellSideDepth = 32.0;
 
 void main() {
     SceneBuffer scene = pc.scene;
@@ -122,6 +125,13 @@ void main() {
     }
 
     Shading sh = beginShading(s, relative);
+    // The leaf light's canopy term, as voxel_instance.frag: sky visibility up
+    // through the cell's canopy above the hit and sideways, the hit voxel's
+    // extinction standing for the column.
+    float extinction = voxelExtinction(voxel);
+    float up = exp(-extinction * max(far.top - world.y, 0.0));
+    float canopy = 0.5 * (up + exp(-extinction * kFarCellSideDepth));
+    setLeafLight(sh, s.baseColor + transmitted, canopy, canopy);
     vec3 sunRadiance = vec3(0.0);
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
     bool backLit = backNoL > 0.0 && any(greaterThan(transmitted, vec3(0.0)));

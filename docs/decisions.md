@@ -6019,3 +6019,20 @@ largest 5-frame step 5.6 (main 8.4): no pumping.
   step at the switch. Whole frame +0.11/255 (mean |diff| 0.5755 against a floor of 0.4813). The
   ~0.95 left between the tiers predates this (voxel-look rounds). GPU 28.8-29.7 ms on both sides
   (noise), 0 validation errors.
+
+## Far cells take the leaf light's canopy term (2026-11-28, uncalibrated)
+
+- **Problem:** beyond the GI clipmap, triangle leaves and voxel instances get the leaf light's
+  canopy term (crown visibility, or the model box's 0.5 (up + sides)), but far cells (voxel.frag)
+  got nothing: `s.occlusion = 1`, open sky and a sunlit ground bounce. Lane pt's hill-shaded canopy
+  reads raster ambient / tracer 0.95 at 730 m, 0.99 at 850 m and 1.48 at 1000 m, where far cells
+  probably take over (not yet checked with the lod view).
+- **Choice:** voxel.frag calls `setLeafLight` like the other leaf tiers, so the canopy weight
+  (`leafCanopyWeight`) and the `--leaf-light` switch are shared. Its visibility uses only data the
+  shader already has: `0.5 (exp(-sigma (top - y)) + exp(-sigma kFarCellSideDepth))`, with sigma the
+  hit voxel's extinction, top the cell's canopy top, and the sides over half a cell (32 m). That
+  costs no new memory reads. Rejected for now: an upward march through the far field (a few brick
+  reads per pixel), to be tried only if the proxy reads wrong. With `--leaf-light off` the far cells
+  shade as before.
+- **Status:** built and unit tests passed. No captures yet. `kFarCellSideDepth` is to be calibrated against
+  pt's tracer at 1000 m (target ratio 1.0), with no step at the instance / far-cell switch.
