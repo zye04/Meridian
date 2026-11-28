@@ -135,6 +135,11 @@ void main() {
             float sunVisible = sun.y > 0.0
                 ? farFieldTransmittance(farField, q, sun, 0.0, kGiLeafSunDistance, false)
                 : 0.0;
+            // Throwaway (pt-targets): bit 0 gates the leaf's sun by the terrain shadow.
+            if ((pc.scene.farLightPad & 1u) != 0u) {
+                float terrainSun = terrainShadowVisibility(pc.scene, q);
+                sunVisible *= terrainSun >= 0.0 ? terrainSun : 1.0;
+            }
             float skyVisible =
                 farFieldTransmittance(farField, q, vec3(0.0, 1.0, 0.0), 0.0, kGiTreeDistance, false);
             vec3 albedo = reflected + transmitted;

@@ -31,6 +31,9 @@ layout(push_constant) uniform ReferenceConstants {
     vec3 cameraForward;
     uint width;
     uint height;
+    // Throwaway (pt-targets): bit 0 no sky, bit 1 no sun, bit 2 primary hit only,
+    // bit 3 no haze inscatter (transmittance only, as the raster debug light views).
+    uint split;
 } pc;
 
 vec2 shadingPixel;
@@ -236,7 +239,12 @@ vec3 tracePath(vec3 origin, vec3 direction, uvec2 pixel) {
     for (uint bounce = 0u; bounce < maxBounces; ++bounce) {
         RayHit hit = traceClosest(origin, direction, kRayLength);
         if (!hit.hit) {
-            radiance += throughput * skyAlong(origin, direction);
+            if ((pc.split & 1u) == 0u) {
+                radiance += throughput * skyAlong(origin, direction);
+            }
+            break;
+        }
+        if ((pc.split & 4u) != 0u && bounce >= 1u) {
             break;
         }
         if (bounce == 0u) {
@@ -256,7 +264,7 @@ vec3 tracePath(vec3 origin, vec3 direction, uvec2 pixel) {
         vec3 energyCompensation = 1.0 + l.f0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
         uint r = 1u + bounce * 4u;
 
-        if (sunOn && pc.scene.sunDirection.y > -0.05) {
+        if (sunOn && (pc.split & 2u) == 0u && pc.scene.sunDirection.y > -0.05) {
             vec2 u = random2(pixel, r);
             vec3 L = sunDiskDirection(pc.scene, u.x, u.y);
             float NoL = dot(N, L);
@@ -335,7 +343,8 @@ vec3 tracePath(vec3 origin, vec3 direction, uvec2 pixel) {
     if (pc.mode == kReferenceRadiance) {
         if (primaryHit) {
             float hazeTransmittance;
-            radiance = applyAerialPerspective(radiance, primaryRelative, 1.0, hazeTransmittance);
+            vec3 hazed = applyAerialPerspective(radiance, primaryRelative, 1.0, hazeTransmittance);
+            radiance = (pc.split & 8u) != 0u ? radiance * hazeTransmittance : hazed;
         }
         return radiance * pc.scene.sunIlluminance * pc.scene.exposure.exposure;
     }

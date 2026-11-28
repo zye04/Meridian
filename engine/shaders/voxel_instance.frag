@@ -120,6 +120,13 @@ void main() {
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
                                               origin - scene.cameraPosition, rayDirection);
         visibility *= float(inInfo.y);
+        // Throwaway (pt-targets): bit 2 attenuates the sun by the model's own
+        // cooked optical depth from the voxel toward the sun.
+        if ((scene.farLightPad & 4u) != 0u) {
+            // Bit 3: less the voxel's own half step (the cooked depth's quantum).
+            float own = (scene.farLightPad & 8u) != 0u ? kVoxelAxisDepthStep : 0.0;
+            visibility *= exp(-max(voxelBoxDepth(axisWord, normalize(toLocal * sh.L)) - own, 0.0));
+        }
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);
         }

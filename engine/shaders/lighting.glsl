@@ -590,8 +590,14 @@ void addSunLight(inout Shading sh, float visibility, float surfaceShadow) {
 // the irradiance as roughness grows (until reflections are ray traced).
 void addAmbientLight(inout Shading sh, float occlusion) {
     vec3 skyIrradiance = pc.scene.skyIrradiance.irradiance;
+    float groundSun = 1.0;
+    // Throwaway (pt-targets): bit 1 shades the fallback's sunlit ground by the terrain shadow.
+    if ((pc.scene.farLightPad & 2u) != 0u) {
+        float terrainSun = terrainShadowVisibility(pc.scene, sh.worldPosition);
+        groundSun = terrainSun >= 0.0 ? terrainSun : 1.0;
+    }
     vec3 groundIrradiance =
-        kGroundAlbedo * (sh.sunAtSurface * max(sh.L.y, 0.0) + skyIrradiance);
+        kGroundAlbedo * (sh.sunAtSurface * (max(sh.L.y, 0.0) * groundSun) + skyIrradiance);
     if (pc.scene.giMode != 0u) {
         sh.gi = giSample(sh.worldPosition, sh.N);
     }
@@ -679,10 +685,16 @@ void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunD
     }
     vec3 albedo = reflected + transmitted;
     float recollision = min(1.0 - escape, kCrownFillMaxRecollision);
-    vec3 scattered = min(kCrownFillProjection * (1.0 - exp(-sunDepth)) * albedo /
+    // Throwaway (pt-targets): bit 4 puts the fill near the sunlit surface,
+    // exp(-depth) instead of 1 - exp(-depth).
+    float depthShape = (pc.scene.farLightPad & 16u) != 0u ? exp(-sunDepth) : 1.0 - exp(-sunDepth);
+    vec3 scattered = min(kCrownFillProjection * depthShape * albedo /
                              (1.0 - recollision * albedo),
                          vec3(1.0));
-    sh.diffuseLight += albedo / kPi * sh.sunAtSurface * (beam * scattered);
+    // Throwaway (pt-targets): bits 8-15 scale the fill in percent (0 = 100).
+    uint fillPercent = (pc.scene.farLightPad >> 8u) & 255u;
+    float fillScale = fillPercent == 0u ? 1.0 : float(fillPercent) / 100.0;
+    sh.diffuseLight += albedo / kPi * sh.sunAtSurface * (beam * scattered * fillScale);
 }
 
 // The sun that reaches a crown, for its fill: the visibility on the crown's

@@ -1,4 +1,5 @@
 #include "renderer_impl.h"
+#include <cstdlib>
 
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -1024,6 +1025,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.farLight = impl_->farLight;
   scene.leafLight = impl_->leafLight;
   scene.voxelSunSpecular = impl_->voxelSunSpecular;
+  // Throwaway (pt-targets, not for merge): GI probe bits, gi_probes.comp / lighting.glsl.
+  if (const char *probe = std::getenv("MERIDIAN_GI_PROBE")) {
+    scene.farLightPad = static_cast<uint32_t>(std::atoi(probe));
+  }
   scene.foliageSpecularAa = impl_->foliageSpecularAa;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |
@@ -1852,7 +1857,15 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     vkCmdCopyImageToBuffer(cmd, impl_->output.image, VK_IMAGE_LAYOUT_GENERAL,
                            captureBuffer.buffer, 1, &region);
   }
-  if (capturing && !hdrCapture) {
+  // Throwaway (pt-targets, not for merge): a .pfm capture also saves the
+  // tonemapped frame as <stem>.png, so a path traced run gives both.
+  Buffer pngBuffer;
+  if (hdrCapture) {
+    pngBuffer = impl_->createBuffer(
+        VkDeviceSize{extent.width} * extent.height * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  }
+  if (capturing) {
     transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -1865,7 +1878,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     region.imageExtent = {extent.width, extent.height, 1};
     vkCmdCopyImageToBuffer(cmd, swapchainImage,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           captureBuffer.buffer, 1, &region);
+                           hdrCapture ? pngBuffer.buffer : captureBuffer.buffer, 1, &region);
     transitionImage(cmd, {swapchainImage, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -1952,15 +1965,29 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
     if (hdrCapture) {
       saved = savePfm(*impl_->capturePath, extent,
                       static_cast<const uint16_t *>(captureBuffer.mapped), halfToFloat);
-    } else {
+    }
+    {
+      if (hdrCapture) {
+        check(vmaInvalidateAllocation(impl_->allocator, pngBuffer.allocation, 0, VK_WHOLE_SIZE),
+              "vmaInvalidateAllocation");
+      }
       // The swapchain is BGRA8 sRGB, already display-encoded; PNG wants RGBA.
       basisu::image png(extent.width, extent.height);
-      const auto *bgra = static_cast<const uint8_t *>(captureBuffer.mapped);
+      const auto *bgra =
+          static_cast<const uint8_t *>(hdrCapture ? pngBuffer.mapped : captureBuffer.mapped);
       for (uint32_t i = 0; i < extent.width * extent.height; ++i) {
         png.get_ptr()[i].set(bgra[i * 4 + 2], bgra[i * 4 + 1], bgra[i * 4],
                              255);
       }
-      saved = basisu::save_png(impl_->capturePath->string(), png);
+      std::filesystem::path pngPath = *impl_->capturePath;
+      if (hdrCapture) {
+        pngPath.replace_extension(".png");
+      }
+      bool pngSaved = basisu::save_png(pngPath.string(), png);
+      saved = hdrCapture ? saved && pngSaved : pngSaved;
+    }
+    if (hdrCapture) {
+      impl_->destroyBuffer(pngBuffer);
     }
     if (!saved) {
       std::fprintf(stderr, "Capture failed: %s\n", impl_->capturePath->c_str());

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
 
 namespace meridian {
@@ -122,6 +123,10 @@ void Renderer::Impl::dispatchReference(VkCommandBuffer cmd, const Camera &camera
   constants.tanHalfFovY = std::tan(0.5f * camera.fovY);
   constants.width = extent.width;
   constants.height = extent.height;
+  // Throwaway (pt-targets, not for merge): light split bits, see reference.comp.
+  if (const char *split = std::getenv("MERIDIAN_REFERENCE_SPLIT")) {
+    constants.pad = static_cast<uint32_t>(std::atoi(split));
+  }
 
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, referencePipeline);
   const VkDescriptorSet sets[] = {atmosphereSet, materialSet, referenceSet};
