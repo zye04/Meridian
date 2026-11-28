@@ -769,6 +769,12 @@ struct Options {
   std::string treePalette;
   // --forest-picks all|open|domes: which variants make the forest.
   ForestPicks forestPicks = ForestPicks::All;
+  // --lone-tree PATH X Z (test view): one model from assets/ on the ground.
+  struct LoneTree {
+    std::string path;
+    float x, z;
+  };
+  std::optional<LoneTree> loneTree;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -1048,6 +1054,10 @@ Options parseOptions(int argc, char **argv) {
       options.rayReconstruction = rr == "on";
     } else if (arg == "--terrain" && i + 1 < argc) {
       options.terrainPath = argv[++i];
+    } else if (arg == "--lone-tree" && i + 3 < argc) {
+      const std::string path = argv[++i];
+      const float x = std::stof(argv[++i]);
+      options.loneTree = Options::LoneTree{path, x, std::stof(argv[++i])};
     } else if (arg == "--forest-picks" && i + 1 < argc) {
       const std::string picks = argv[++i];
       const char *names[] = {"all", "open", "domes"};
@@ -1197,7 +1207,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --tree-palette name, --forest-picks all|open|domes, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
@@ -1582,6 +1592,16 @@ int main(int argc, char **argv) {
   }
   if (options.scatter > 0) {
     scatterModels(renderer, terrain, start.position, 150.0f, options.scatter, options.trees);
+  }
+  // One model on the ground, unrotated at scale 1 (a single crown's
+  // triangle/voxel A/B; with --placement off nothing else is near it).
+  if (options.loneTree) {
+    if (auto model = loadModel(renderer, options.loneTree->path.c_str())) {
+      const float x = options.loneTree->x, z = options.loneTree->z;
+      const float y = terrain.heightAt(x, z) - 0.05f;
+      addModel(renderer, *model, meridian::translation({x, y, z}));
+      std::printf("Lone tree at %.2f %.2f %.2f\n", x, y, z);
+    }
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,

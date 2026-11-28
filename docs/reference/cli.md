@@ -348,6 +348,11 @@ make the forest. `all`: every forest-grown variant at a 6 m footprint
 + Field_01) at 9 m, so crowns meet; `domes`: only the closed dome crowns
 (beech Field_01, hornbeam Field_01, alder Field_02 + Field_01) at 9 m. Lone
 trees and saplings are unchanged.
+`--lone-tree PATH X Z` (test view): one model from `assets/` (e.g.
+`source/megascans/europeanhornbeam/SM_EuropeanHornbeam_Field_01/SM_EuropeanHornbeam_Field_01.gltf`)
+on the ground at (X, Z), unrotated at scale 1, 5 cm into the soil; with
+`--placement off` nothing else stands near it (a single crown's
+triangle/voxel switch, `--voxel-lod off` for triangles only).
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast
