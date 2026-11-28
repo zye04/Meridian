@@ -469,7 +469,8 @@ leaf voxels look the sun cascades up at their centre with no offset
 (voxel_instance.frag); `on` moves the lookup a voxel edge and the 1.5-texel
 normal offset toward the sun, as before (decisions.md "Voxel sun lookup").
 The ray-traced (`--shadows rt`) and far-shadow paths keep the offset start
-either way.
+either way, and so does the coarsest cascade (the lookup blends back across
+cascade 3's outer blend band, where the far-cell casters take over).
 `--leaf-light off|on|gi-weighted` (default on; `off` for A/B): leaf triangles and leaf
 voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
 ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of

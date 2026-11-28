@@ -6234,28 +6234,43 @@ leaves around sunlit ones, while ray-traced shadows (`--shadows rt`) brought it
 to 0.93. The lookup now takes the voxel's centre with no offset in raster mode;
 the cascade's depth bias (one texel) holds the acne. The ray-traced and
 far-shadow paths keep the offset start (a ray from the centre would meet the
-voxel's own triangles; the far map has its own bias). `--voxel-shadow-offset on`
+voxel's own triangles; the far map has its own bias), and so does the coarsest
+cascade (below). `--voxel-shadow-offset on`
 is the old lookup.
 
-Measured (2560x1440 Release, 120 frames, tools in `.superpowers/crownlight/`
-of the crown-light lane; raster debug sun / ambient against the tracer's
-sun-direct / rest at 256 spp, same EV, classes from the tracer's own direct
-terms):
-- o4 nearR, main's old forest: sun shade 5.40 -> 3.54, ring 6.56 -> 4.12, tops
-  0.98 -> 0.82 (EV 12.48).
-- light1 palette, open picks: total light shade 2.02 -> 1.49, gaps 1.97 ->
-  1.41, ring 2.57 -> 1.82, tops 0.89 -> 0.73 (EV 12.56).
-- light1 palette, all picks: total shade 1.87 -> 1.39, gaps 1.61 -> 1.24, ring
-  2.37 -> 1.66, tops 0.80 -> 0.68 (EV 12.48). A repeat run matches to 2
-  decimals.
-- The tops drop because the raster ambient is 0.42x the tracer's; the crown
-  fill is to bring it back (backlog).
+Measured (2560x1440 Release, 120 frames, both sides the same warm-up and EV):
+the raster's debug light views (`--debug-view sun`, `ambient`, inverted from
+their c / (1 + Y) display) against the reference path tracer at 256 spp split
+by light term (sun direct, sky direct, the rest), per pixel class of the o4
+near canopy taken from the tracer's own direct terms (sunlit tops; shaded
+crown sides and gaps by sky openness; the 1-4 px ring of shaded leaves around
+sunlit ones). Ratios raster / tracer, "sun" the direct sun alone, "total" sun
+plus ambient:
+- main's old forest (EV 12.48): sun shade 5.40 -> 3.54, ring 6.56 -> 4.12,
+  tops' sun 0.98 -> 0.82.
+- light1 palette, open picks (EV 12.56): tops sun 1.02 -> 0.82, total 0.89 ->
+  0.73; total shade 2.02 -> 1.49, gaps 1.97 -> 1.41, ring 2.57 -> 1.82.
+- light1 palette, all picks (EV 12.48): tops sun 0.89 -> 0.74, total 0.80 ->
+  0.68; total shade 1.87 -> 1.39, gaps 1.61 -> 1.24, ring 2.37 -> 1.66. A
+  repeat run matches to 2 decimals.
+- The tops' sun stays 0.74-0.82 of the tracer's: the fall in their total is
+  the ambient, 0.35-0.42x the tracer's in every class (sky plus indirect sun,
+  which the probes don't resolve inside a crown), not self-shadowing; the
+  crown fill is to bring it back (backlog).
 - At the real triangle/voxel switch of a lone hornbeam (40-60 m, mixed crown,
   57-71 % voxel pixels, cascade 1 at 0.1 m texels) the crown's mean moves
   -3.3 / -4.1 / -5.5 % with no visible step; a 180-frame approach from 65 to
   35 m changes frame to frame by 2.549/255 against 2.550 before (no pop).
 - Low sun (15 degrees) at o4 and start: no new acne (whole frame 0.13 and
   0.38/255). A 60-frame fly at o4: frame-pair change 1.87/255 against 2.06.
+- The coarsest cascade (shadowFarCells) casts the trees as far-cell bricks
+  along the sun, not as the centre quads, so a centre lookup shades itself
+  there (review F1): at the far ridge (1.4-2.7 km) the tops' sun fell 0.55 ->
+  0.44 of the tracer's, the whole region's 0.74 -> 0.55. So the lookup returns
+  to the offset start across cascade 3's outer blend band (smoothstep over
+  0.85-1.0 of its 1280 m radius, the cascades' own blend): at 1.9 km sun
+  0.74 = main's; at 1.1-1.5 km 0.74 (main 0.82); the near canopy keeps the
+  full change.
 - Rejected on the way: attenuating the sun by the voxel's cooked optical depth
   toward the sun (`voxelBoxDepth`, after Reeves and Blau 1985 / Habel 2009):
   the depth barely separates tops from shade (a uniform dimmer at this voxel
