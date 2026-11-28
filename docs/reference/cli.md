@@ -341,6 +341,13 @@ with a retinted leaf atlas (`tools/unreal/cook_palette.sh`, docs/assets.md):
 `chlorophyll1` every variant, `light1` the working look's (brighter leaves
 on the dome picks, the rest chlorophyll1). A variant missing there loads
 its original cook, with one warning.
+`--forest-picks all|open|domes` (default all): which Megascans variants
+make the forest. `all`: every forest-grown variant at a 6 m footprint
+(poles among broad crowns); `open`: the broad, round-crowned variants
+(beech Field_01 + Forest_03, hornbeam Field_01 + Forest_02, alder Field_02
++ Field_01) at 9 m, so crowns meet; `domes`: only the closed dome crowns
+(beech Field_01, hornbeam Field_01, alder Field_02 + Field_01) at 9 m. Lone
+trees and saplings are unchanged.
 Clouds (layer 1.7-4.8 km above sea level, cirrus sheet at 9 km): beside
 the Chlorophyll frames: fair from 1500 m `1119 1500 -431 -1.55 0.05`, cirrus `1119 1356 -431 0
 0.5`, stratocumulus the fair view with `--weather broken`, overcast

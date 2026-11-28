@@ -267,11 +267,39 @@ meridian::DensityRule forestRule() {
   return rule;
 }
 
+// Which variants make the forest (--forest-picks). All: every forest-grown
+// variant at 6 m (poles among broad crowns). Open: the broad, dense,
+// round-crowned variants only (the closed canopy seen from above), spaced so
+// neighbouring crowns touch. Domes: the closed, dome-crowned ones of those
+// (leaf area index 4.3-4.8, no tiered or lobed crowns).
+enum class ForestPicks { All, Open, Domes };
+struct PickedForest {
+  // Crown-weighted mean width of the open picks is ~17 m at scale 1, but the
+  // forest rule's density stays under 1 over most of the forest, so the
+  // dither spacing has to be about half that for the crowns to meet.
+  static constexpr float kFootprint = 9.0f; // m
+  static constexpr float kAllFootprint = 6.0f; // m
+  struct Pick {
+    const char *species, *pack;
+    std::initializer_list<const char *> variants;
+  };
+  static constexpr std::array<Pick, 3> kOpen{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01", "Forest_03"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01", "Forest_02"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
+  }};
+  static constexpr std::array<Pick, 3> kDomes{{
+      {"europeanbeech", "EuropeanBeech", {"Field_01"}},
+      {"europeanhornbeam", "EuropeanHornbeam", {"Field_01"}},
+      {"blackalder", "BlackAlder", {"Field_02", "Field_01"}},
+  }};
+};
+
 // Forests, lone trees on meadow slopes and rocks over the whole terrain,
 // placed on the GPU at load (placement.h). With farField, distant forest
 // cells are drawn as voxels (far field) instead of their trees.
 void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool streamed,
-                  bool geoChannels, const std::string &treePalette) {
+                  bool geoChannels, const std::string &treePalette, ForestPicks forestPicks) {
   using meridian::PlacementLayer;
   using meridian::Rotation;
   constexpr float kDegrees = 180.0f / 3.14159265f;
@@ -288,12 +316,21 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   // (<species>/SM_<pack>_<kind>_NN) takes an equal share of its species'
   // weight.
   bool paletteWarned = false;
+  // `variants`: <kind>_NN suffixes; empty, every cooked one of `kind`.
   const auto addUnrealTrees = [&](const char *species, const char *pack, const char *kind,
-                                  float weight, std::vector<std::pair<uint32_t, float>> &into) {
+                                  float weight, std::vector<std::pair<uint32_t, float>> &into,
+                                  std::initializer_list<const char *> variants = {}) {
     std::vector<uint32_t> ids;
-    for (int variant = 1; variant <= 20; ++variant) {
+    std::vector<std::string> names;
+    for (const char *variant : variants) {
+      names.push_back(std::string("SM_") + pack + "_" + variant);
+    }
+    for (int variant = 1; variants.size() == 0 && variant <= 20; ++variant) {
       char name[96];
       std::snprintf(name, sizeof(name), "SM_%s_%s_%02d", pack, kind, variant);
+      names.push_back(name);
+    }
+    for (const std::string &name : names) {
       const auto pathIn = [&](const std::string &directory) {
         return "source/megascans/" + directory + "/" + name + "/" + name + ".gltf";
       };
@@ -324,9 +361,18 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
     }
   };
   if (trees) {
-    addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", 0.6f, forest);
-    addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", 0.25f, forest);
-    addUnrealTrees("blackalder", "BlackAlder", "Forest", 0.15f, forest);
+    constexpr std::array<float, 3> kShares{0.6f, 0.25f, 0.15f}; // beech, hornbeam, alder
+    if (forestPicks == ForestPicks::All) {
+      addUnrealTrees("europeanbeech", "EuropeanBeech", "Forest", kShares[0], forest);
+      addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Forest", kShares[1], forest);
+      addUnrealTrees("blackalder", "BlackAlder", "Forest", kShares[2], forest);
+    } else {
+      const auto &picks =
+          forestPicks == ForestPicks::Domes ? PickedForest::kDomes : PickedForest::kOpen;
+      for (size_t s = 0; s < picks.size(); ++s) {
+        addUnrealTrees(picks[s].species, picks[s].pack, "", kShares[s], forest, picks[s].variants);
+      }
+    }
     addUnrealTrees("blackalder", "BlackAlder", "Field", 0.5f, lone);
     addUnrealTrees("europeanhornbeam", "EuropeanHornbeam", "Field", 0.3f, lone);
     addUnrealTrees("europeanbeech", "EuropeanBeech", "Field", 0.2f, lone);
@@ -452,7 +498,10 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
   std::vector<PlacementLayer> layers;
   std::optional<PlacementLayer> forestLayer; // a copy: layers grows
   if (!forest.empty()) {
-    layers.push_back({kForestLayerId, forest, 6.0f, forestRule(), 0.8f * treeScale,
+    layers.push_back({kForestLayerId, forest,
+                      forestPicks == ForestPicks::All ? PickedForest::kAllFootprint
+                                                      : PickedForest::kFootprint,
+                      forestRule(), 0.8f * treeScale,
                       1.2f * treeScale, Rotation::Yaw, 0.3f});
     layers.back().farField = farField;
     // Field trees stand on the open pasture the forest leaves.
@@ -718,6 +767,8 @@ struct Options {
   // --tree-palette NAME: the Megascans Trees cooked with that leaf palette
   // (assets/source/megascans/<species>-NAME, tools/unreal/cook_palette.sh).
   std::string treePalette;
+  // --forest-picks all|open|domes: which variants make the forest.
+  ForestPicks forestPicks = ForestPicks::All;
   // --score-forest FILE: score the forest rule against canopy truth, exit.
   std::optional<std::filesystem::path> scoreForestPath;
   bool overlayGrade = false;
@@ -997,6 +1048,14 @@ Options parseOptions(int argc, char **argv) {
       options.rayReconstruction = rr == "on";
     } else if (arg == "--terrain" && i + 1 < argc) {
       options.terrainPath = argv[++i];
+    } else if (arg == "--forest-picks" && i + 1 < argc) {
+      const std::string picks = argv[++i];
+      const char *names[] = {"all", "open", "domes"};
+      const auto it = std::find(std::begin(names), std::end(names), picks);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--forest-picks takes all, open or domes");
+      }
+      options.forestPicks = static_cast<ForestPicks>(it - std::begin(names));
     } else if (arg == "--tree-palette" && i + 1 < argc) {
       options.treePalette = argv[++i];
     } else if (arg == "--score-forest" && i + 1 < argc) {
@@ -1138,7 +1197,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --tree-palette name, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name, --forest-picks all|open|domes, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
@@ -1526,7 +1585,7 @@ int main(int argc, char **argv) {
   }
   if (options.placement) {
     placeScenery(renderer, options.trees, options.farField, options.streamed, geoChannels,
-                 options.treePalette);
+                 options.treePalette, options.forestPicks);
   }
 
   const auto makeWeather = [](const Options &o) {

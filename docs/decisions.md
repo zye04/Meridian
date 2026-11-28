@@ -6067,3 +6067,16 @@ the grade cannot reach 1.jpg's crown hue (top 5 % h 99-106 against 133 in every 
 tried; they sit outside the greens band): the leaf palette can. A variant missing from the
 palette's directory loads the original cook with one warning, so a checkout without the
 palette cook keeps its forest.
+
+## Forest picks on main: open crowns and domes (2026-11-28)
+
+The scene lane (13469bf, `--scenery broadleaf`) and the trees lane (61c3e29, b210568)
+picked the forest's variants: main's forest places every forest-grown variant at 6 m, and
+the small poles read as speckle from above, where the references show separate round
+crowns. `--forest-picks open` is 13469bf's choice (broad, dense, round-crowned variants at
+9 m: the crown-weighted mean width is ~17 m, but the forest rule's density stays under 1, so
+half that spacing closes the canopy; measured there 126735 trees instead of 281999, a1 GPU
+26.4 -> 21.4 ms, resident 10598 -> 9296 MiB); `domes` the trees lane's closed dome crowns
+(leaf area index 4.3-4.8). Neither needs the broadleaf pack: they were bundled with its
+placement, now apart. Default stays `all` until the look is judged on main. The trees lane's
+other levers (footprint and scale flags, domes+small, domes+f3) stay behind.
