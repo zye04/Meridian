@@ -136,9 +136,11 @@ void main() {
             float radius = scene.sunShadows.cascades[kShadowCascades - 2u].radius;
             offset = smoothstep(radius * (1.0 - kCascadeBlendFraction), radius, length(relative));
         }
+        // A select at the ends keeps `on` and the far range bit-exact under any
+        // lowering of mix.
+        vec3 lookup = offset >= 1.0 ? origin : (offset <= 0.0 ? world : mix(world, origin, offset));
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
-                                              mix(world, origin, offset) - scene.cameraPosition,
-                                              rayDirection * offset);
+                                              lookup - scene.cameraPosition, rayDirection * offset);
         visibility *= float(inInfo.y);
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);

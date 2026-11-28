@@ -6253,10 +6253,26 @@ plus ambient:
 - light1 palette, all picks (EV 12.48): tops sun 0.89 -> 0.74, total 0.80 ->
   0.68; total shade 1.87 -> 1.39, gaps 1.61 -> 1.24, ring 2.37 -> 1.66. A
   repeat run matches to 2 decimals.
-- The tops' sun stays 0.74-0.82 of the tracer's: the fall in their total is
-  the ambient, 0.35-0.42x the tracer's in every class (sky plus indirect sun,
-  which the probes don't resolve inside a crown), not self-shadowing; the
-  crown fill is to bring it back (backlog).
+- The cost: the tops' sun falls 0.89 -> 0.74 (open 1.02 -> 0.82): on
+  tracer-sunlit tops the centre lookup now shadows ~20 % more (possibly the
+  cascade's 1.57 m texels and tent penumbra on small sunlit tops rather than
+  self-shadowing). Their total sits under the tracer's mostly through the
+  ambient (0.35-0.42x in every class: sky plus indirect sun, which the probes
+  don't resolve inside a crown; the crown fill is to bring it back, backlog).
+- The normal offset is not all or nothing: its length swept with the voxel-edge
+  push off (o4 near canopy, all picks; voxels' sun / tracer's sun-direct, and
+  the lone hornbeam crown at 50 m, the real switch, against main):
+
+  | normal offset | tops | shade | gaps | ring | lone crown at 50 m |
+  |---|---|---|---|---|---|
+  | 0 (this change) | 0.74 | 3.51 | 2.38 | 4.03 | 0.956 |
+  | 0.5 texel | 0.80 | 3.97 | 2.66 | 4.61 | 0.972 |
+  | 1.0 texel | 0.84 | 4.49 | 2.97 | 5.31 | 0.985 |
+  | 1.5 texels + voxel edge (main) | 0.89 | 5.34 | 3.57 | 6.38 | 1 |
+
+  The trade is linear: no length keeps the shade within 10 % of the gain
+  (<= 3.69) while giving the tops' sun back toward 0.85, so the lookup stays
+  at the centre (no constant) and the tops' loss is the price written above.
 - At the real triangle/voxel switch of a lone hornbeam (40-60 m, mixed crown,
   57-71 % voxel pixels, cascade 1 at 0.1 m texels) the crown's mean moves
   -3.3 / -4.1 / -5.5 % with no visible step; a 180-frame approach from 65 to
