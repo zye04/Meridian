@@ -123,7 +123,16 @@ engine/shaders/            GLSL; *.glsl are includes (see below). Terrain:
                            bricks and voxels, voxel_instance.mesh/.frag
                            draw them; lighting.glsl: the shading
                            mesh.frag, the voxel shaders and reference.comp
-                           share; surface.glsl: material and terrain
+                           share; cluster_vertex.glsl (a cluster vertex's
+                           clip, previous clip, relative position: mesh.mesh
+                           and the resolve), cluster_shading.glsl and
+                           voxel_shading.glsl (a pixel's shading from its
+                           attributes: the forward fragments and the
+                           resolve), scene_outputs.glsl (attachments 0, 1, 3-6);
+                           visibility.frag writes the id,
+                           visibility_resolve.frag shades from it,
+                           visibility.glsl: id layout and barycentrics
+                           (CPU reference visibility.h); surface.glsl: material and terrain
                            surface evaluation (mesh.frag's and ray hits',
                            through SurfaceInput); ray_hit.glsl
                            (traceClosest: TLAS + heightfield hit) and
@@ -490,7 +499,8 @@ the layouts behind them.
   toward the terrain's) and lifts them onto the near detail noise; they
   are not in the TLAS (no
   ray-traced shadows cast, contact shadows only).
-  The visibility buffer holds one uint per instance id (static, then
+  The instance visibility buffer (occlusion culling's, not the
+  `--visibility` id target) holds one uint per instance id (static, then
   ring), then one per grid cell, then one per streamed record. `SceneData` carries the placed table, the `Cell` table
   (64 m cells, row-major from the north-west of `cellGrid`) and the grid. Opaque/masked
   meshes are drawn as clusters of their LOD DAG (cluster, cluster-vertex
