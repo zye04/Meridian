@@ -41,30 +41,38 @@ struct Barycentrics {
 };
 
 // The pixel at framebuffer position `pixel` (y down, centres at + 0.5) in
-// the triangle with clip positions c0, c1, c2, at render size `size`.
+// the triangle with clip positions c0, c1, c2, at render size `size`: where
+// the pixel's ray meets the triangle, k = adj(M) (nx, ny, 1) with M's columns
+// the vertices' (x, y, w) and b = k / sum(k). No division by w, so a vertex
+// behind the camera gives the visible part's weights.
 Barycentrics barycentricsAt(vec4 c0, vec4 c1, vec4 c2, vec2 pixel, vec2 size) {
-    vec3 invW = 1.0 / vec3(c0.w, c1.w, c2.w);
-    vec2 p0 = (c0.xy * invW.x * 0.5 + 0.5) * size;
-    vec2 p1 = (c1.xy * invW.y * 0.5 + 0.5) * size;
-    vec2 p2 = (c2.xy * invW.z * 0.5 + 0.5) * size;
-    float area2 = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
-    float invArea = 1.0 / area2;
-    vec3 ax = vec3(p1.y - p2.y, p2.y - p0.y, p0.y - p1.y) * invArea;
-    vec3 ay = vec3(p2.x - p1.x, p0.x - p2.x, p1.x - p0.x) * invArea;
-    vec3 l = vec3((p1.x - pixel.x) * (p2.y - pixel.y) - (p2.x - pixel.x) * (p1.y - pixel.y),
-                  (p2.x - pixel.x) * (p0.y - pixel.y) - (p0.x - pixel.x) * (p2.y - pixel.y),
-                  (p0.x - pixel.x) * (p1.y - pixel.y) - (p1.x - pixel.x) * (p0.y - pixel.y)) *
-             invArea;
-    vec3 q = l * invW;
+    vec3 x = vec3(c0.x, c1.x, c2.x);
+    vec3 y = vec3(c0.y, c1.y, c2.y);
+    vec3 w = vec3(c0.w, c1.w, c2.w);
+    if (all(greaterThan(w, vec3(0.0)))) {
+        // The rasterizer's vertices: snapped to its 1/256 px grid.
+        vec3 sx = round((x / w * 0.5 + 0.5) * size.x * 256.0) / 256.0;
+        vec3 sy = round((y / w * 0.5 + 0.5) * size.y * 256.0) / 256.0;
+        x = (sx / size.x * 2.0 - 1.0) * w;
+        y = (sy / size.y * 2.0 - 1.0) * w;
+    }
+    // Rows of adj(M): row i is the cross product of the other two columns.
+    vec3 ax = y.yzx * w.zxy - w.yzx * y.zxy;
+    vec3 ay = w.yzx * x.zxy - x.yzx * w.zxy;
+    vec3 a1 = x.yzx * y.zxy - y.yzx * x.zxy;
+    vec2 n = pixel / size * 2.0 - 1.0;
+    vec2 dn = 2.0 / size;
+    vec3 q = ax * n.x + ay * n.y + a1;
     float s = q.x + q.y + q.z;
-    float sx = dot(ax, invW);
-    float sy = dot(ay, invW);
+    float sx = (ax.x + ax.y + ax.z) * dn.x;
+    float sy = (ay.x + ay.y + ay.z) * dn.y;
     float invS = 1.0 / s;
     Barycentrics r;
     r.b = q * invS;
-    r.dbdx = (ax * invW - r.b * sx) * invS;
-    r.dbdy = (ay * invW - r.b * sy) * invS;
-    r.frontFacing = area2 < 0.0;
+    r.dbdx = (ax * dn.x - r.b * sx) * invS;
+    r.dbdy = (ay * dn.y - r.b * sy) * invS;
+    // det(M): its sign is Vulkan's facing (negative NDC area is front).
+    r.frontFacing = x.x * ax.x + y.x * ay.x + w.x * a1.x < 0.0;
     r.outside = max(0.0, -min(r.b.x, min(r.b.y, r.b.z)));
     return r;
 }

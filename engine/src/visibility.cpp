@@ -1,6 +1,7 @@
 #include <meridian/visibility.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace meridian {
 
@@ -37,49 +38,64 @@ UnpackedVisibility unpackVisibility(VisibilityId id) {
 
 Barycentrics barycentricsAt(const float c0[4], const float c1[4], const float c2[4], float pixelX,
                             float pixelY, float width, float height) {
+  // The pixel's ray meets the triangle where sum k_i (x_i, y_i, w_i) is
+  // proportional to (nx, ny, 1), with (x, y, w) the vertices' clip positions
+  // and (nx, ny) the pixel in NDC: k = adj(M) (nx, ny, 1), M's columns the
+  // vertices, b = k / sum(k) (2D homogeneous rasterization, Olano and Greer
+  // 1997). No division by w, so a vertex behind the camera (w <= 0, clipped
+  // by the rasterizer) gives the same weights as the visible part.
   const float *c[3] = {c0, c1, c2};
-  // Framebuffer positions of the vertices and 1 / w.
-  float x[3], y[3], invW[3];
+  float x[3], y[3], w[3];
+  const bool inFront = c0[3] > 0.0f && c1[3] > 0.0f && c2[3] > 0.0f;
   for (int i = 0; i < 3; ++i) {
-    invW[i] = 1.0f / c[i][3];
-    x[i] = (c[i][0] * invW[i] * 0.5f + 0.5f) * width;
-    y[i] = (c[i][1] * invW[i] * 0.5f + 0.5f) * height;
+    w[i] = c[i][3];
+    x[i] = c[i][0];
+    y[i] = c[i][1];
+    if (inFront) {
+      // The rasterizer's vertices: snapped to its 1/256 px grid.
+      const float sx = std::round((x[i] / w[i] * 0.5f + 0.5f) * width * 256.0f) / 256.0f;
+      const float sy = std::round((y[i] / w[i] * 0.5f + 0.5f) * height * 256.0f) / 256.0f;
+      x[i] = (sx / width * 2.0f - 1.0f) * w[i];
+      y[i] = (sy / height * 2.0f - 1.0f) * w[i];
+    }
   }
-  // Screen-linear weights l_i = (e_i(P)) / area2, with e_i the edge
-  // function of the edge opposite vertex i; l_i = ax_i * px + ay_i * py + k_i.
-  const float area2 = (x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0]);
-  const float invArea = 1.0f / area2;
-  float l[3], ax[3], ay[3];
+  // Rows of adj(M): row i is the cross product of the other two columns.
+  float ax[3], ay[3], a1[3];
   for (int i = 0; i < 3; ++i) {
     const int j = (i + 1) % 3;
     const int k = (i + 2) % 3;
-    ax[i] = (y[j] - y[k]) * invArea;
-    ay[i] = (x[k] - x[j]) * invArea;
-    l[i] = ((x[j] - pixelX) * (y[k] - pixelY) - (x[k] - pixelX) * (y[j] - pixelY)) * invArea;
+    ax[i] = y[j] * w[k] - w[j] * y[k];
+    ay[i] = w[j] * x[k] - x[j] * w[k];
+    a1[i] = x[j] * y[k] - y[j] * x[k];
   }
-  // Perspective correction: b_i = l_i / w_i / sum(l_j / w_j).
-  float s = 0.0f, sx = 0.0f, sy = 0.0f;
+  const float nx = pixelX / width * 2.0f - 1.0f;
+  const float ny = pixelY / height * 2.0f - 1.0f;
+  const float dnx = 2.0f / width;
+  const float dny = 2.0f / height;
   float q[3];
   for (int i = 0; i < 3; ++i) {
-    q[i] = l[i] * invW[i];
-    s += q[i];
-    sx += ax[i] * invW[i];
-    sy += ay[i] * invW[i];
+    q[i] = ax[i] * nx + ay[i] * ny + a1[i];
   }
+  const float s = q[0] + q[1] + q[2];
+  const float sx = (ax[0] + ax[1] + ax[2]) * dnx;
+  const float sy = (ay[0] + ay[1] + ay[2]) * dny;
   const float invS = 1.0f / s;
   float b[3], dbdx[3], dbdy[3];
   for (int i = 0; i < 3; ++i) {
     b[i] = q[i] * invS;
-    dbdx[i] = (ax[i] * invW[i] - b[i] * sx) * invS;
-    dbdy[i] = (ay[i] * invW[i] - b[i] * sy) * invS;
+    dbdx[i] = (ax[i] * dnx - b[i] * sx) * invS;
+    dbdy[i] = (ay[i] * dny - b[i] * sy) * invS;
   }
   Barycentrics r;
   r.b = {b[0], b[1], b[2]};
   r.dbdx = {dbdx[0], dbdx[1], dbdx[2]};
   r.dbdy = {dbdy[0], dbdy[1], dbdy[2]};
-  // Vulkan: a = -1/2 sum(x_i y_(i+1) - x_(i+1) y_i), front when positive
-  // under VK_FRONT_FACE_COUNTER_CLOCKWISE; -area2 / 2 is the same sum.
-  r.frontFacing = area2 < 0.0f;
+  // det(M) = w0 w1 w2 x the NDC signed area, and Vulkan's facing for
+  // VK_FRONT_FACE_COUNTER_CLOCKWISE (a = -1/2 sum(x_i y_(i+1) - x_(i+1) y_i)
+  // positive, y down) is a negative NDC area. With a vertex behind the
+  // camera, det's sign is the visible part's orientation.
+  const float det = x[0] * ax[0] + y[0] * ay[0] + w[0] * a1[0];
+  r.frontFacing = det < 0.0f;
   r.outside = std::max(0.0f, -std::min({b[0], b[1], b[2]}));
   return r;
 }

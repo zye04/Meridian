@@ -127,3 +127,73 @@ TEST_CASE("visibility: outsideMeasuresDistance") {
   // One pixel left of the vertical edge x = 10.
   CHECK(barycentricsAt(c[0], c[1], c[2], 9.0f, 30.0f, 100.0f, 80.0f).outside > 0.0f);
 }
+
+namespace {
+
+// A camera at the origin looking down -z: clip = (f x, f y, 0.1, -z), render
+// 100 x 80, f = 1.5 (the test needs only x, y and w).
+void project(const float v[3], float out[4]) {
+  out[0] = 1.5f * v[0];
+  out[1] = 1.5f * v[1];
+  out[2] = 0.1f;
+  out[3] = -v[2];
+}
+
+// The weights at the pixel the 3D point sum beta_i v_i lands on.
+Barycentrics atPoint(const float v[3][3], const float beta[3]) {
+  float c[3][4];
+  float p[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  for (int i = 0; i < 3; ++i) {
+    project(v[i], c[i]);
+    for (int k = 0; k < 4; ++k) {
+      p[k] += beta[i] * c[i][k];
+    }
+  }
+  const float px = (p[0] / p[3] * 0.5f + 0.5f) * 100.0f;
+  const float py = (p[1] / p[3] * 0.5f + 0.5f) * 80.0f;
+  return barycentricsAt(c[0], c[1], c[2], px, py, 100.0f, 80.0f);
+}
+
+} // namespace
+
+TEST_CASE("visibility: interiorIsPerspectiveCorrect") {
+  // A triangle receding in depth: screen-linear weights would be wrong here.
+  const float v[3][3] = {{-1.0f, -0.6f, -1.5f}, {1.2f, -0.4f, -6.0f}, {0.1f, 0.9f, -3.0f}};
+  const float betas[3][3] = {{0.2f, 0.3f, 0.5f}, {0.6f, 0.3f, 0.1f}, {0.1f, 0.8f, 0.1f}};
+  for (const auto &beta : betas) {
+    const Barycentrics r = atPoint(v, beta);
+    for (int j = 0; j < 3; ++j) {
+      // The vertices snap to 1/256 px: a few 1e-4 on a triangle tens of px wide.
+      CHECK(component(r.b, j) == doctest::Approx(beta[j]).epsilon(2e-3).scale(1.0f));
+    }
+    CHECK(r.outside == 0.0f);
+  }
+}
+
+TEST_CASE("visibility: vertexBehindOrAtCameraGivesVisiblePartsWeights") {
+  // Vertex 0 behind the camera (w = -0.5) or in its plane (w = 0, where a
+  // division by w gives NaN): the rasterizer clips the triangle at the near
+  // plane and draws the part in front.
+  for (const float z0 : {0.5f, 0.0f}) {
+    const float v[3][3] = {{-0.3f, -0.2f, z0}, {1.0f, -0.5f, -4.0f}, {-0.5f, 0.8f, -3.0f}};
+    const float beta[3] = {0.1f, 0.45f, 0.45f};
+    const Barycentrics r = atPoint(v, beta);
+    for (int j = 0; j < 3; ++j) {
+      CHECK(component(r.b, j) == doctest::Approx(beta[j]).epsilon(1e-4).scale(1.0f));
+    }
+    CHECK(r.outside == 0.0f);
+    // Derivatives still match a finite difference.
+    float c[3][4];
+    for (int i = 0; i < 3; ++i) {
+      project(v[i], c[i]);
+    }
+    const float px = 50.0f, py = 40.0f, h = 1.0f / 64.0f;
+    const Barycentrics base = barycentricsAt(c[0], c[1], c[2], px, py, 100.0f, 80.0f);
+    const Barycentrics xp = barycentricsAt(c[0], c[1], c[2], px + h, py, 100.0f, 80.0f);
+    const Barycentrics xm = barycentricsAt(c[0], c[1], c[2], px - h, py, 100.0f, 80.0f);
+    for (int j = 0; j < 3; ++j) {
+      const float fx = (component(xp.b, j) - component(xm.b, j)) / (2.0f * h);
+      CHECK(component(base.dbdx, j) == doctest::Approx(fx).epsilon(1e-2).scale(1e-3));
+    }
+  }
+}
