@@ -333,7 +333,11 @@ signals (`readCounters`; `drainStatistics` reads the frames still in
 flight at the end of a capture run): last-frame statistics, and the run's
 most drops and per-list need, main view and cascades) ->
 late scene pass (load; late lists (masked depth, opaque, masked shaded), the late voxel clusters, then blended instances CPU-sorted back
-to front, mesh.vert) -> clouds (clouds_march.comp at quarter
+to front, mesh.vert). With `--visibility on` the cluster lists write only depth and the id
+(attachment 7, visibility.frag), masked lists in one draw, and the late pass ends before the
+blended instances: resolve (visibility_resolve.frag, fullscreen, no depth: shades every
+cluster-triangle pixel once into attachments 0, 1, 3-6; per-view clamp counters) -> blended
+(its own rendering on the same depth, after a depth barrier) -> clouds (clouds_march.comp at quarter
 resolution, half inside the layer or within 250 m of it, each texel's ray
 offset within the texel's central half per frame (R2 sequence): luminance with
 haze + transmittance, mean cloud depth d, stored -1 - d where scene
@@ -408,7 +412,10 @@ the layouts behind them.
   R8, 3 diffuse albedo RGBA8 (`diffuseColor`), 4 specular albedo RGBA8
   (the DFG pre-integrated `mix(dfg.x, dfg.y, f0)`), 5 normal RGBA16F (world
   `N`, facing the viewer on double-sided surfaces) with perceptual roughness
-  in alpha; 6 sun light RGBA16F (contact shadows); 7 debug id RGBA32UI
+  in alpha; 6 sun light RGBA16F (contact shadows); 7 with `--visibility on`
+  the visibility id RG32UI (visibility.h: cluster triangle = instance,
+  triangle, cluster, terrain sun code, kind; voxel = list index, phase,
+  kind; written by the visibility pipelines, read by the resolve), else the debug id RGBA32UI
   (debug_id.glsl: kind << 24 | instance, cluster or far entry, distance,
   material), only while a debug view or the report is on: then the scene
   pipelines are the debug set (`createScenePipelines(true)`, the DEBUG_ID
