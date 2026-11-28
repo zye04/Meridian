@@ -1,4 +1,4 @@
-# Resume here (entry point; updated 2026-11-27 night)
+# Resume here (entry point; updated 2026-11-28)
 
 Read this file first, ask the open questions below, and update the file
 before ending the session. It holds current truth only: open questions,
@@ -22,6 +22,9 @@ checkout under `.superpowers/fable-review/img/` (git-ignored).
    Free one-tree premise test, buy a pack, or leave? Re-ask after the
    path-traced targets lane. Tools must be script-driven (SpeedTree was
    rejected because the agent could not drive its GUI).
+3. Voxel coverage look call: hash against area-pixel-phase (about 2x draw
+   cost difference at the overview). Whole frames: reference | raster |
+   path traced, and main | port-b-look. Asked when the sheets exist.
 
 Decided today (2026-11-27): working look by eye is EV -0.85, offset 0.006,
 palette light1, white balance 7500 K (`../meridian-light/.superpowers/light/grades/wb7500.json`);
@@ -31,59 +34,72 @@ Unreal comparison.
 
 ## The lighting target
 
-Our own `--reference` path tracer, on our trees at the same camera, gives
-the reference's kind of image: dark, crisp crowns over dark gaps. At the
-same exposure the path tracer's crowns are about 3x darker with 2-3x the
-brightness-normalised pixel contrast (backlog "Raster over-lights crown
-interiors"). The raster over-lights crown interiors and gaps, so the
-look gap is lighting and needs engine work. The path tracer is the
-same-scene target for lighting. Open: what it does with haze and far
-trees, noise at 16 spp (1.8 %), the exposure-matched comparison.
+Our own `--reference` path tracer, on our trees at the same camera, is the
+same-scene reference for lighting: dark, crisp crowns over dark gaps. The
+earlier claim that its crowns are about 3x darker than the raster was an
+exposure mismatch (raster at 120 frames, EV 12.59; tracer frozen at 30
+frames, EV 13.66; 2.1x). At equal EV, linear, raster / tracer is 1.10 on
+the near canopy at o4, and the tracer does apply haze. There is no
+"raster over-lights 3x" finding and no big lighting-fix lane. What is
+left is candidates until measured (lane `pt`, branch `pt-targets`):
+
+- The reference canopy may simply sit darker: exposure and grade (1.jpg's
+  canopy level beside the raster at both EVs).
+- GI in hill shadow: `gi_probes.comp:135-141` foliage bounce has no
+  terrain shadow test, and `gi.glsl:198` falls back to unoccluded ambient
+  beyond ~736 m (the "blue-grey slabs in hill shadow", so far blamed on
+  haze only). Two regions plus one throwaway probe each.
+- Voxel draw cost at the overview (backlog row).
+- Small bug candidates, unverified: aerial perspective half-slice clamp
+  (`lighting.glsl:473-478`), `leafPhase` transmission constant, transmitted
+  sun missing from `outSunLight` in `mesh.frag` / `voxel.frag` (present in
+  `voxel_instance.frag`).
+
+Capture rule for any raster / tracer pair: both sides use the same
+`--frames` warm-up, and the report quotes both `EV` lines.
 
 User's criterion: forms read as solid at every distance ("structure, not
 busy"); measure with `tools/band-contrast.sh` plus a squint pair. Ours
 is soft at pixel size (o4 2 / 6 px 5.5 / 7.3 against 10.1 / 11.2) and
 equal at crown size.
 
-## Branches (2026-11-27 night; all pushed unless noted)
+## Branches (2026-11-28; all pushed unless noted)
 
 | Branch | Worktree | State |
 |---|---|---|
-| `main` a43f627 | `../meridian-main` | the visibility buffer spec is the only merge of the day. The main checkout stays on `g1` |
-| `crown-fill` 505eb84 | `../meridian-fill` | port done, NOT merged. Review: merge after fixes F1-F4 (backlog row); on costs +2.6 ms (approved 1.4-2.0). Held until compared with the path tracer: it adds light inside crowns. Report `.superpowers/fill/REPORT.md` |
-| `visibility-buffer` a10ba99 | `../meridian-vb` | stage 1 and stage 2 partial behind `--visibility`. Frame ms off -> on: edge 28.78 -> 22.35, start 23.90 -> 19.99, meadow 15.37 -> 12.57, overview 27.86 -> 26.86, s1 24.49 -> 24.01; look within floor + 0.3; +30 MiB. Owed before T9: motion gates on (`.superpowers/vb/t8/gates-rest.sh`, ~1.5 h), a Debug capture with the resolve, then the midpoint review. Report `.superpowers/vb/REPORT.md` |
+| `main` 517883d | `../meridian-main` | docs-1127 merged. The main checkout stays on `g1` |
+| `crown-fill` 505eb84 | `../meridian-fill` | port done, NOT merged. Review: merge after fixes F1-F4 (backlog row); on costs +2.6 ms (approved 1.4-2.0). Held; the reason (raster over-lights crowns) is weaker after the exposure correction. Report `.superpowers/fill/REPORT.md` |
+| `visibility-buffer` fd331ea | `../meridian-vb` | stage 1 and stage 2 partial behind `--visibility`; the gates batch is paused (SIGSTOPped) until the GPU is released after pt's o4 batch. Frame ms off -> on: edge 28.78 -> 22.35, start 23.90 -> 19.99, meadow 15.37 -> 12.57, overview 27.86 -> 26.86, s1 24.49 -> 24.01; look within floor + 0.3; +30 MiB. Owed before T9: motion gates on (`.superpowers/vb/t8/gates-rest.sh`, ~1.5 h), a Debug capture with the resolve, then the midpoint review. Report `.superpowers/vb/REPORT.md` |
 | `far-light` cab5d52 | `../meridian-light` | closed. Far-field rays: no effect; tone closes the black level; softness is not the upscaler; leaf light B kept (port: commit 5d03ce6 only, notes in `REPORT-r5.md`; unchecked with GI off). Reports `.superpowers/light/REPORT-r3.md`, `-r4.md`, `-r5.md`, `LEDGER.md` |
 | `trees-dense` 5f9872a | `../meridian-trees` | closed. 2x leaves closes a lone crown, not the forest's read; found the voxel hidden cut (backlog). Report `.superpowers/trees/dense/REPORT.md` |
-| `pt-targets`, `port-b-look` | `../meridian-light`, a port worktree | started 2026-11-27 night (path-traced targets; leaf light B and the working look to main); state not recorded here, read their `.superpowers/` reports |
+| `pt-targets` | `../meridian-light` | lane `pt`: o4 tops / sides / gaps split, B x fill, reference level, band contrast at equal EV, hill-shaded slope regions + GI probes; then s1 / h2 / lone tree / walking view. Waits on a second interim, then `.superpowers/pt/REPORT.md` |
+| `port-b-look` | `../meridian-port` | lane `port`: leaf light B (default on) plus the working look as the default grade, onto main (rebase onto 517883d); the default-grade commit is held until review. Report `.superpowers/port/REPORT.md`; review by the `pt` window; merge after a clean review |
+| `voxel-bricks` | `../meridian-bricks` | from main: voxel timer split + per-voxel reorder, CPU only. Bricks proof batch after the GPU release; stop at T9 for the midpoint review |
 | `far-tier` 1deda3b | `../meridian-far` | far tile tier per `specs/2026-11-26-far-tile-tier-design.md` (on that branch); waits for the user's verdict and the visibility buffer; residuals are backlog rows on the branch; no merge |
 | `scene-broadleaf`, `crown-light`, `voxel-crown-9`, `fix-light-temporal`, `canopy-backlit`, `vb-stage0`, `trees-domes` | see Workspace | done or parked; detail in `.superpowers/fable-review/handover-2026-11-27-midday.md` |
 
 Run-to-run floor with placement on: 0.2-0.6/255; only `--placement off`
 is exact. Lane report shape: see CLAUDE.md.
 
-## Ordered next steps (updated 2026-11-27 night)
+## Ordered next steps (updated 2026-11-28)
 
-1. Leaf light B and the working look to main (port lane), a ground
-   walking view in every look sheet.
-2. Path-traced targets beside it (one session, must end in one named fix):
-   `--reference` at 64+ spp at o4, s1, h2 and the lone tree,
-   exposure-matched; whole frames reference | raster | path traced;
-   `tools/reference-compare.py` per region and per light term; what the
-   tracer does with haze and far trees. Command: `REPORT-r5.md`.
-3. Build the lighting fix item 2 names (likely per-pixel occlusion on the
-   visibility buffer's resolve). Then re-judge crown fill and the trees'
-   form under correct light.
-4. Visibility buffer behind it: owed gates, midpoint review, merge stages
-   1-2 (flag off by default), then stage 3 (voxels, where the aerial views
-   gain). GPU runs queue on one lock: one GPU-heavy lane at a time
-   while the look lanes run.
-5. Crown fill fixes F1-F4 only if item 3 keeps it. Shadowed haze lane
-   (`prompts/haze-lane.md`, main checkout) after item 2 reports on haze.
-   Voxel hidden-cut fix after the buffer's voxel stage.
-6. Trees: the user's pending choice (open question 2).
-7. Later (unchanged): bark material lane; far wood triangle cost; AO
-   respecified on the resolve; forest floor; far tile tier verdict; wind on
-   trees and grass; frame pacing, HDR output, final grade; water; sound.
+1. `pt` second interim, then the rule; release the GPU to `vb`.
+2. `port` report, then review (`pt` window, read-only, diff + criteria from
+   `prompts/port-lane.md`), then merge to main and push.
+3. `vb`: gates, then the bricks proof, then the midpoint review. Merge
+   `voxel-bricks` if exact; merge visibility buffer stages 1-2 (flag off)
+   after review.
+4. If `pt` confirms the GI lead: a fix lane (terrain shadow in the probe
+   bounce; occluded fallback), research and a decisions.md entry first.
+5. Per-brick occlusion build, after the timer split shows its share.
+6. For the user by eye, whole frames: main | port-b-look sheets;
+   reference | raster | path traced sheets; hash against area-pixel-phase;
+   neutral greens; the trees question.
+7. Later (unchanged): crown fill F1-F4 only if the above keeps it; shadowed
+   haze lane; voxel hidden-cut fix after the buffer's voxel stage; bark
+   material lane; far wood triangle cost; AO respecified on the resolve;
+   forest floor; far tile tier verdict; wind on trees and grass; frame
+   pacing, HDR output, final grade; water; sound.
 
 Ceremony by size: structural changes (visibility buffer, far tile tier,
 wind) get a spec and a plan; everything else gets a backlog row, the
@@ -120,7 +136,7 @@ noticeable in gameplay; the switch cannot be pointed at on foot or in
 flight. Known gaps are backlog rows (crown coverage at the overview, hidden
 cut, thin structure).
 
-## State of main (a43f627)
+## State of main (517883d)
 
 Native 1440p; DLSS Super Resolution DLAA default (own stable TAA =
 fallback, Ray Reconstruction an A/B); raster cascaded sun shadows default;
