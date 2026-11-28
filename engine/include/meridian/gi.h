@@ -44,6 +44,9 @@ Vec3 shIrradiance(const ShL1 &sh, Vec3 normal);
 // Myneni 1988): the area scattering phase function over pi G (G = 1/2), so
 // it integrates over the sphere to reflectance + transmittance. cosBeta is
 // between the light's travel direction and the scattered direction.
+// The phase per unit reflectance and per unit transmittance (it is linear in
+// both); gi.glsl's leafPhaseWeights.
+std::array<float, 2> leafPhaseWeights(float cosBeta);
 float leafPhase(float cosBeta, float reflectance, float transmittance);
 
 } // namespace meridian
