@@ -6243,8 +6243,9 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA
   prototypes of the relief scene: **0.712 / 0.704 / 0.702**, so here it does not depend on direction (the
   literature has Omega rise toward 1 at large zenith angles, Kucharik et al. 1999: within one crown's bake the
   slant ray crosses no more clumps than the vertical one). That is why one value, the vertical one, serves every
-  GI ray. The same fit on the coarser vertical boxes gives L1 (8 m) 0.56 and L2 (16 m) 0.49. These are recorded
-  for other consumers of the far field, not used here. GI rays march L0 to 256 m (`kFarRayLevelEnd0`) and L1 from
+  GI ray. The same fit on the coarser vertical boxes gives L1 (8 m) 0.56 and L2 (16 m) 0.49. These two were measured
+  offline (a throwaway print in the bake, vertical columns only), not by `farClumpingIndex`; they are recorded
+  for other consumers of the far field and not used here. GI rays march L0 to 256 m (`kFarRayLevelEnd0`) and L1 from
   256 to 300 m (`kGiTreeDistance`); that last stretch takes L0's value, because the march returns one
   transmittance per ray and 44 m at the end of a 300 m ray rarely holds the canopy that matters. Sub-metre
   clumping is not in a 1 m grid, so the true value is lower still. The tracer only confirms the value. Cost:
