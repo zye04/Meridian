@@ -590,6 +590,8 @@ void Renderer::setVoxelShadowOffset(VoxelShadowOffset mode) {
   impl_->voxelShadowOffset = static_cast<uint32_t>(mode);
 }
 
+void Renderer::setCrownFill(CrownFill mode) { impl_->crownFill = static_cast<uint32_t>(mode); }
+
 void Renderer::Impl::setAaSettings(const AaSettings &settings) {
   if (!(settings.renderScale > 0.0f && settings.renderScale <= 1.0f)) {
     throw std::invalid_argument("setAntiAliasing: renderScale must be in (0, 1]");
@@ -1020,6 +1022,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.voxelNear = impl_->voxelNear;
   scene.foliageSpecularAa = impl_->foliageSpecularAa;
   scene.voxelShadowOffset = impl_->voxelShadowOffset;
+  scene.crownFill = impl_->crownFill;
+
   scene.leafLight = impl_->leafLight;
   const uint32_t voxelPhases = std::min(phases, kMaxVoxelCoveragePhases);
   scene.voxelCoverage = static_cast<uint32_t>(impl_->voxelCoverage) |

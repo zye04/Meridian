@@ -617,7 +617,9 @@ struct SceneData {
   uint32_t leafLight = 0;
   // Renderer::setVoxelShadowOffset.
   uint32_t voxelShadowOffset = 0;
-  uint32_t voxelShadowOffsetPad[3] = {};
+  // Renderer::setCrownFill.
+  uint32_t crownFill = 0;
+  uint32_t crownFillPad[2] = {};
 };
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
@@ -645,6 +647,7 @@ static_assert(offsetof(SceneData, voxelCoverage) == 2724);
 static_assert(offsetof(SceneData, foliageSpecularAa) == 2728);
 static_assert(offsetof(SceneData, leafLight) == 2732);
 static_assert(offsetof(SceneData, voxelShadowOffset) == 2736);
+static_assert(offsetof(SceneData, crownFill) == 2740);
 static_assert(sizeof(SceneData) == 2752);
 
 // Must match MeshInfo in common.glsl.

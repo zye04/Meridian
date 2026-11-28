@@ -471,6 +471,13 @@ normal offset toward the sun, as before (decisions.md "Voxel sun lookup").
 The ray-traced (`--shadows rt`) and far-shadow paths keep the offset start
 either way, and so does the coarsest cascade (the lookup blends back across
 cascade 3's outer blend band, where the far-cell casters take over).
+`--crown-fill off|on` (default on; `off` for A/B): sun light scattered
+between a crown's leaves, added to leaf triangles and leaf voxels alike as a
+diffuse fill that falls off with the crown's optical depth toward the sun
+(lighting.glsl `addCrownFill`: strongest next to the sunlit surface, the
+leaf's albedo recolliding with the chance it doesn't escape, times the sun
+that reaches the leaf itself, bounded by its reflected share of the sun;
+`kCrownFillStrength` from the path tracer, decisions.md "Crown fill").
 `--leaf-light off|on|gi-weighted` (default on; `off` for A/B): leaf triangles and leaf
 voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
 ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of

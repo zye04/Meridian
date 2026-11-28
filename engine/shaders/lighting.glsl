@@ -512,6 +512,35 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
     sh.diffuseLight += transmitted / kPi * sh.sunAtSurface * (backNoL * visibility);
 }
 
+// Crown fill (Renderer::setCrownFill): sun light scattered between a
+// crown's leaves, which the GI probes (2-32 m columns, 4 m far-field voxels:
+// a crown's size) do not resolve. Leaves next to the crown's sunlit surface
+// see it most: the light they and their neighbours scatter falls off with
+// the crown's optical depth toward the sun as the beam does (exp(-depth); the
+// path tracer's indirect sun at o4 sits on the crown tops, 0.0103 against
+// 0.0014 on the shaded sides and 0.0008 in the gaps, decisions.md "Crown
+// fill"). Leaves scatter albedo (reflected + transmitted) and recollide
+// inside the crown with the chance it doesn't escape (spectral invariant,
+// as the probes' leaf hits in gi_probes.comp). `beam` is the sun that
+// reaches the leaf itself (its own visibility, no second lookup), so a
+// crown in another's or a hill's shadow gets none. Bounded by the leaf's
+// reflected share of the sun (what direct sun gives its sunward face).
+const float kCrownFillMaxRecollision = 0.95;
+// Calibrated against the path tracer at o4 (decisions.md "Crown fill"): the
+// crown tops' ambient 0.35 -> 0.92 of the tracer's, shade 0.62 -> 0.75, gaps
+// 0.72 -> 0.80.
+const float kCrownFillStrength = 2.0;
+void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunDepth, float escape,
+                  float beam) {
+    if (pc.scene.crownFill == 0u || sh.L.y <= 0.0 || beam <= 0.0) {
+        return;
+    }
+    vec3 albedo = reflected + transmitted;
+    float recollision = min(1.0 - escape, kCrownFillMaxRecollision);
+    vec3 scattered = kCrownFillStrength * exp(-sunDepth) * albedo * albedo / (1.0 - recollision * albedo);
+    sh.diffuseLight += min(scattered, reflected) / kPi * sh.sunAtSurface * beam;
+}
+
 // After addAmbientLight: a thin surface's two sides read the same probes, so
 // its sample serves the back direction too.
 void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) {

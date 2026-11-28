@@ -115,6 +115,7 @@ void main() {
         s.occlusion = 1.0;
     }
     vec3 sunRadiance = vec3(0.0);
+    float fillBeam = 0.0;
     float backNoL = clamp(-dot(s.normal, sh.L), 0.0, 1.0);
     vec3 rayDirection = sampleSunDirection(scene, gl_FragCoord.xy);
     if (rayDirection.y > -sin(scene.sunAngularRadius)) {
@@ -141,7 +142,8 @@ void main() {
         vec3 lookup = offset >= 1.0 ? origin : (offset <= 0.0 ? world : mix(world, origin, offset));
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
                                               lookup - scene.cameraPosition, rayDirection * offset);
-        visibility *= float(inInfo.y);
+        visibility *= float(inInfo.y & 1u);
+        fillBeam = visibility;
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);
         }
@@ -176,6 +178,12 @@ void main() {
         sh.diffuseLight = diffuseBeforeAmbient +
                           (sh.diffuseLight - diffuseBeforeAmbient) *
                               mix(vec3(1.0), multiBounceOcclusion(occlusion, sh.diffuseColor), sh.gi.remaining);
+    }
+    // Crown fill: depth toward the sun (-1 without fill) and sky visibility,
+    // packed in info.y above the terrain sun bit (voxel_instance.mesh).
+    vec2 crown = unpackHalf2x16(inInfo.y & ~1u);
+    if (crown.x >= 0.0) {
+        addCrownFill(sh, albedo, transmitted, crown.x, crown.y, fillBeam);
     }
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,

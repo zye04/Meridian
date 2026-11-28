@@ -6292,3 +6292,69 @@ plus ambient:
   the depth barely separates tops from shade (a uniform dimmer at this voxel
   size); cascade 3 at 4096 (tops 0.62, shade 1.08, but the shadow pass's
   maximum in motion rises 13.8 -> 23.6 ms).
+
+## Crown fill: sun scattered next to a crown's sunlit surface (2026-11-28)
+
+The raster's ambient on tree crowns is 0.35-0.43x the path tracer's sky plus
+indirect light at o4 (near canopy, every pixel class), lowest on the sunlit
+crown tops: the GI probes (2-32 m columns, 4 m far-field voxels) are a crown's
+size and cannot hold the light leaves scatter to their neighbours. The tracer
+puts that indirect sun on the tops (0.0103 against 0.0014 on the shaded sides
+and 0.0008 in the gaps, sun-only minus sun-direct, 256 spp), so the fill falls
+off with the crown's optical depth toward the sun as the beam does,
+exp(-depth), not 1 - exp(-depth) as the held crown-fill branch had it (that
+shape put most fill deep inside: at 100 % it took the gaps' ambient to 4.85x
+the tracer's).
+
+`addCrownFill` (lighting.glsl): strength x exp(-depth) x albedo x albedo /
+(1 - p albedo) of the sun, albedo = reflected + transmitted, p the
+recollision chance 1 - escape (the crown's sky visibility; spectral invariant,
+as the probes' leaf hits), times the sun that reaches the leaf itself (its own
+visibility: no second lookup), capped per channel at the leaf's reflected
+share, i.e. never more than direct sun gives its sunward face. Depth and
+escape come from the crown ellipsoid (`crownSunDepth`, `crownVisibility`,
+common.glsl): per vertex for triangle leaves (mesh.mesh, packed into location
+12's y, -1 without fill), once per voxel for leaf voxels (voxel_instance.mesh,
+packed as half2 into the flat info's spare bits).
+
+Calibration (o4 near canopy, light1, all picks, 2560x1440, 120 frames, EV
+12.48 both sides; raster debug ambient against the tracer's sky + indirect,
+classes from the tracer's own direct terms), with the voxel sun lookup:
+
+| `kCrownFillStrength` | tops | shade sides | gaps | ring | whole |
+|---|---|---|---|---|---|
+| off | 0.35 | 0.62 | 0.72 | 0.64 | 0.43 |
+| 0.5 | 0.49 | 0.65 | 0.74 | 0.69 | 0.55 |
+| 1.0 | 0.64 | 0.68 | 0.76 | 0.73 | 0.67 |
+| 2.0 (chosen) | 0.92 | 0.75 | 0.80 | 0.83 | 0.92 |
+
+Totals (sun + ambient) against the tracer, main -> voxel lookup -> both: tops
+0.80 -> 0.68 -> 0.77, shade 1.88 -> 1.39 -> 1.48, gaps 1.62 -> 1.24 -> 1.30,
+ring 2.37 -> 1.66 -> 1.79. The tops stay under because their direct sun is
+0.74 (decisions.md "Voxel sun lookup").
+
+The held branch's review findings: F1 (off costs) - no second sun lookup
+any more, and the voxel quads export nothing new (o4: voxel trees 9.11 ms off
+against 10.06 on main's binary, run noise; on +0.6 ms); F2 (voxel gate per
+fragment) - depth and escape once per voxel in the mesh shader; F3 (cap) -
+capped at the reflected share, the bound the comment states; F4 (gate
+self-shadowing in coarse cascades) - gone with the gate; F5 (view-side escape
+on voxels) - escape by the lobe axis before the camera flip; F6 (trace below
+the horizon) - nothing traced; F7 (output budget) - no new output slot; F8
+(hard rt edge) - the fill follows the leaf's own visibility, as the direct sun
+does.
+
+Checks (same build, 2560x1440 Release, 120 frames): at the lone hornbeam's
+real triangle/voxel switch (40 / 50 / 60 m) the fill lifts the crown's mean
+by +13 / +12 / +13 % (fill off -> on), the voxels more than the triangles
+(at 40 m triangles 19.9 -> 21.6, +9 %; voxels 26.7 -> 30.6, +15 %), and
+the whole change against main (crown 24.8 -> 26.8 at 40 m) stays in the
+voxel/triangle relation main already has (voxels 1.40x the triangles' pixel
+mean on main, 1.42x with both; different parts of the crown). The forest walk (walk360) has no sunlit crowns
+in view: unchanged (total 0.82 of the tracer either way). Low sun (15 degrees):
+o4 0.12/255, start 0.78/255 against main, no speckle. A 60-frame fly at o4:
+frame-pair change 2.37/255 against main's 2.52, no crawl or pop. Near canopy
+at o4, display Y' p50 / p95 (working grade): main 39.5 / 80.3, both 37.4 /
+79.7, 1.jpg 44.1 / 93.4; band contrast at 2 px: main 6.39, both 6.42, the
+tracer 9.57, 1.jpg 10.06. Debug `--trees` at o4: 0 validation errors, the
+placement, far-field, far-shadow and stream checks 0 mismatches.

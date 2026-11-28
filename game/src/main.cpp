@@ -837,6 +837,7 @@ struct Options {
   meridian::Renderer::FoliageSpecularAa foliageSpecularAa = meridian::Renderer::FoliageSpecularAa::On;
   meridian::Renderer::LeafLight leafLight = meridian::Renderer::LeafLight::On;
   meridian::Renderer::VoxelShadowOffset voxelShadowOffset = meridian::Renderer::VoxelShadowOffset::Off;
+  meridian::Renderer::CrownFill crownFill = meridian::Renderer::CrownFill::On;
   bool occlusion = true;
   bool shadowRefresh = false;
   // Raster cascades; rt (one TLAS ray per pixel) is an A/B.
@@ -1195,6 +1196,14 @@ Options parseOptions(int argc, char **argv) {
       }
       options.foliageSpecularAa =
           static_cast<meridian::Renderer::FoliageSpecularAa>(it - std::begin(names));
+    } else if (arg == "--crown-fill" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      const char *names[] = {"off", "on"};
+      const auto it = std::find(std::begin(names), std::end(names), mode);
+      if (it == std::end(names)) {
+        throw std::runtime_error("--crown-fill takes off or on");
+      }
+      options.crownFill = static_cast<meridian::Renderer::CrownFill>(it - std::begin(names));
     } else if (arg == "--voxel-shadow-offset" && i + 1 < argc) {
       const std::string mode = argv[++i];
       const char *names[] = {"off", "on"};
@@ -1264,7 +1273,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --tree-palette name|none, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
-                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --voxel-shadow-offset off|on, --leaf-light off|on|gi-weighted, "
+                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --voxel-shadow-offset off|on, --crown-fill off|on, --leaf-light off|on|gi-weighted, "
                                "--haze clear|clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
@@ -1537,6 +1546,7 @@ int main(int argc, char **argv) {
   renderer.setVoxelCoverage(options.voxelCoverage);
   renderer.setFoliageSpecularAa(options.foliageSpecularAa);
   renderer.setVoxelShadowOffset(options.voxelShadowOffset);
+  renderer.setCrownFill(options.crownFill);
   renderer.setLeafLight(options.leafLight);
   renderer.setLodErrorPixels(options.lodError);
   renderer.setCloudsEnabled(options.clouds);

@@ -435,6 +435,11 @@ public:
   // the A/B).
   enum class VoxelShadowOffset : uint32_t { Off, On };
   void setVoxelShadowOffset(VoxelShadowOffset mode);
+  // Crown fill (on by default, off for A/B): sun light scattered between a
+  // crown's leaves, strongest next to the sunlit surface (lighting.glsl
+  // addCrownFill); triangle leaves and leaf voxels alike.
+  enum class CrownFill : uint32_t { Off, On };
+  void setCrownFill(CrownFill mode);
   // Leaf light (on by default, off for A/B): leaves keep the sun highlight
   // and the ambient specular on the face seen as adaxial only (measured
   // leaves: the abaxial face is diffuse), and where the crown hides the sky

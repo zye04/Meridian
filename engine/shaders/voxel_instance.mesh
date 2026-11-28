@@ -21,7 +21,11 @@ layout(local_size_x = 64) in;
 layout(triangles, max_vertices = 256, max_primitives = 128) out;
 
 // Flat: the voxel centre relative to the camera (flat world), its packed
-// voxel and (instance, terrain sun, axis word, cluster).
+// voxel and (instance, terrain sun | crown, axis word, cluster): y's bit 0 is
+// the terrain sun; the rest, with crown fill on a leaf voxel, holds
+// packHalf2x16(the crown's optical depth toward the sun, its sky visibility
+// by the voxel's lobe axis), computed once per voxel, depth -1 without fill
+// (no extra output, so the fill costs the voxels nothing when off).
 layout(location = 0) flat out vec3 outRelative[];
 layout(location = 1) flat out uvec4 outVoxel[];
 layout(location = 2) flat out uvec4 outInfo[];
@@ -74,7 +78,16 @@ void main() {
         vec2 u = vec2(place & 0xFFFFu, place >> 16) * (2.0 / 65535.0) - 1.0;
         center.xy += u * (fullHalf - halfSize);
     }
-    uvec4 info = uvec4(clusterEntry.x, entry.x >> 31, pools.axis.words[voxel], clusterEntry.y);
+    vec2 crown = vec2(-1.0, 1.0);
+    if (scene.crownFill != 0u && !cascade) {
+        MeshInfo mesh = scene.meshes.meshes[cluster.mesh];
+        if (mesh.halfExtentY >= kCrownMinHalfHeight && isLeafMesh(scene, mesh)) {
+            vec3 meshSun = normalize(transpose(mat3(instance.transform)) * scene.sunDirection);
+            crown = vec2(crownSunDepth(mesh, local, meshSun), crownVisibility(mesh, local, voxelLobeAxis(packed)));
+        }
+    }
+    uvec4 info = uvec4(clusterEntry.x, (packHalf2x16(crown) & ~1u) | (entry.x >> 31), pools.axis.words[voxel],
+                       clusterEntry.y);
     for (uint corner = 0u; corner < 4u; ++corner) {
         uint vertex = slot * 4u + corner;
         vec2 offset = vec2(corner & 1u, corner >> 1) * 2.0 - 1.0;
