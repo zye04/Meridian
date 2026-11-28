@@ -105,8 +105,9 @@ void main() {
     }
 
     Shading sh = beginShading(s, relative);
-    if (isLeafMesh(scene, scene.meshes.meshes[cluster.mesh])) {
-        float leafCrownR = exp(-voxelBoxDepth(axisWord, normalize(toLocal * reflect(-sh.V, sh.N))));
+    if (scene.leafLight != 0u && isLeafMesh(scene, scene.meshes.meshes[cluster.mesh])) {
+        float leafCrownR = mix(1.0, exp(-voxelBoxDepth(axisWord, normalize(toLocal * reflect(-sh.V, sh.N)))),
+                               scene.microShadowStrength);
         setLeafLight(sh, albedo + transmitted, occlusion, leafCrownR);
     }
     // The leaf light's canopy ambient holds the crown itself, GI on or off.

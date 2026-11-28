@@ -202,7 +202,9 @@ void main() {
         }
         transmitted = transmissionColor * (material.diffuseTransmission * (1.0 - s.metallic));
         sh.diffuseColor *= 1.0 - material.diffuseTransmission;
-        setLeafLight(sh, sh.diffuseColor + transmitted, inCrownVisibility, inCrownVisibility);
+        // As the voxels' model occlusion: scaled by the micro shadow strength.
+        float crown = mix(1.0, inCrownVisibility, pc.scene.microShadowStrength);
+        setLeafLight(sh, sh.diffuseColor + transmitted, crown, crown);
     }
 #endif
 
