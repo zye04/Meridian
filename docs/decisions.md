@@ -6115,3 +6115,66 @@ frames): frame-pair mean |diff| over the far band 1.646 -> 1.461 /255 (p95 2.034
 Debug `--trees` start with open: 0 validation errors, placement and stream checks 0
 mismatches, placement hash 0x4351ec976ea4c926. The 9 m dither pattern (51 points) builds in well under a second;
 napf `--trees` Release launch to 4 frames 86.7 s with it rebuilt, 76.6 s warm (run noise).
+
+## Haze profile against the aerial reference (2026-11-28)
+
+- **Problem:** beside the Chlorophyll aerial 1.jpg, our hill-shaded forest
+  reads blue-grey where the reference's is near black (o4 shaded slope
+  display median 50.9 under the working grade, 77.3 under main's, against
+  33.5).
+- **Premise checked first** (o4 / s1, one launch): the aerial perspective
+  LUT's direct-sun term forced to x1 / x0.5 / x0 takes the o4 shade
+  77 -> 66 -> 45 (default grade): the slab is single-scattered sunlight in
+  the first 0.5-2 km of haze. Our shaded slope is 0.93 km away, the far
+  ridge 2.1 km (heightfield ray cast), so 1.jpg's far / shade ratio of 4.0
+  (its ridge is several km out) is guidance only.
+- **Shadowed inscatter, measured and not kept:** current practice shadows
+  the air per froxel with the shadow maps (Wronski 2014, Hillaire 2015
+  froxel volumetric fog; Hillaire 2020's aerial perspective volume is
+  unshadowed, and Unreal's Sky Atmosphere leaves shadowed air to its
+  separate volumetric fog; epipolar sampling, Yusov 2013, for long shafts).
+  Built as sun visibility per sample in our LUT's integral (terrain
+  shadow-height map x cloud shadow, >= 1 sample / 50 m, the LUT read down
+  to its first 31 m froxel instead of the 2 km one). It moves the shade
+  only 3-5 display values (o4 50.9 -> 48.0, s1 64.3 -> 59.5) because the
+  view ray crosses 1-1.5 km of sunlit air above the valley before the
+  shadowed air at the slope, and it darkens the sunlit o4 far ridge
+  (113.7 -> 95.7) whose ray crosses shadowed air. Recorded on branch
+  `shadowed-haze` (adf4e22); backlog "Shadowed inscatter".
+- **Chosen:** a `clear` preset: `summer`'s boundary layer
+  (same floor, top, fade, scale height, background, g 0.7) with layer AOD
+  0.01 instead of 0.03, ~0.02 over the floor in all. `summer` stays as it
+  was. The default stays summer until the forest interior's ambient
+  lands (below: clear reveals the interior under-lit, ambient 0.66 of the
+  path tracer on the shaded floor per lane pt; the summer in-scatter was
+  standing in for it); then the default flips to clear with one re-proof
+  at the walk. This sits below Ingold 2001's Swiss range (the
+  "Haze as a boundary layer" entry chose its low end as a typical clean
+  day): it is a look decision inside the physical model, the clear air
+  after a front that the reference aerials show, not a new typical day.
+- **Measured** on main's light1 forest (relief patch, `--trees`, 2560x1440
+  DLAA; working grade wb7500 unless said; display Y' p50 and OKLCh of the
+  p75 band; summer -> clear; floor: two clear runs of o4 equal to 0.1):
+  o4 hill-shaded slope 49.9 -> 36.3 (1.jpg 33.5), C 0.028 -> 0.032, h 244
+  -> 245 (1.jpg 0.030, 239); o4 sunlit slope 62.7 -> 49.6, hue 185 -> 181
+  (1.jpg 151): its brightness was veil too (accepted: "nothing lit gets
+  darker" is about surface light); o4 far ridge (2.1 km) 113.0 -> 90.3;
+  s1 shade 65.8 -> 60.0; h2 mid forest 64.4 -> 54.8, hue 168 -> 151
+  (5.jpg 135); sky p50 217.0 -> 219.6. Exposure meters 0.03-0.44 EV
+  brighter (EV100 o4 12.48 -> 12.37, s1 10.71 -> 10.27). Cloud views
+  move < 2/255 (wide 115.4 -> 115.3 mean, sunset 124.7 -> 124.8); at a
+  10 degree sun o4 and the start view lose their haze glow (whole-frame
+  mean 74.8 -> 65.5 and 81.3 -> 76.2), sky unchanged within 2/255. GPU
+  passes unchanged (atmosphere 0.02 ms both, frame within noise).
+- **Forest interior (walk360, `595.5 989.2 495.3 -0.785 0.0`):** whole
+  frame Y' p5 / p50 / p95 8.1 / 27.0 / 56.0 -> 4.4 / 17.4 / 43.2 under
+  main's grade (wb7500: 15.0 / 33.1 / 60.0 -> 10.4 / 24.1 / 48.2), EV100
+  10.43 -> 10.41: the summer haze's in-scatter was lifting the interior,
+  and the exposure's shade bound already holds there. Interior light is
+  a separate remedy (backlog).
+- **Rejected:** a stronger forward lobe (Mie g 0.7 -> 0.8): alone -2 on
+  the o4 shade, with the AOD cut a further -0.8; the shade is 55 degrees
+  off the sun, where HG phase changes little.
+- **Remaining gap:** the s1 shade (0.5 km) is not haze: 59.9 at chroma
+  0.053 with the haze's sun at zero. It is sky ambient on the shaded
+  canopy (backlog "Aerial shadows lighter ...: the ambient remainder").

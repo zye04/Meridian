@@ -663,12 +663,11 @@ meridian::Atmosphere summerHaze(float opticalDepth, float scaleHeight) {
 // Summer haze as a boundary layer over the valley floor: near well mixed
 // below a sharp-ish top, plus a thin free-troposphere background above it,
 // so views from above the layer look through little haze while long paths
-// in the valleys stay hazy.
-meridian::Atmosphere summerLayerHaze(float floorKm) {
+// in the valleys stay hazy. layerAod: AOD(550) from the floor to the top.
+meridian::Atmosphere summerLayerHaze(float floorKm, float layerAod) {
   constexpr float kLayerDepthKm = 1.2f;      // top above the valley floor
   constexpr float kLayerFadeKm = 0.25f;      // smoothstep width around the top
   constexpr float kScaleHeightKm = 2.0f;     // inside the layer
-  constexpr float kLayerAod = 0.03f;         // AOD(550), floor to top
   constexpr float kBackgroundAod = 0.01f;    // AOD(550) above the top
   constexpr float kBackgroundHeightKm = 2.0f;
   const float top = floorKm + kLayerDepthKm;
@@ -683,8 +682,8 @@ meridian::Atmosphere summerLayerHaze(float floorKm) {
     const float t = std::clamp((h - (top - 0.5f * kLayerFadeKm)) / kLayerFadeKm, 0.0f, 1.0f);
     shape += std::exp(-h / kScaleHeightKm) * (1.0f - t * t * (3.0f - 2.0f * t)) * dh;
   }
-  const float extinction = kLayerAod / shape;
-  meridian::Atmosphere atmosphere = summerHaze(kLayerAod, kScaleHeightKm);
+  const float extinction = layerAod / shape;
+  meridian::Atmosphere atmosphere = summerHaze(layerAod, kScaleHeightKm);
   atmosphere.mieExtinction = meridian::Vec3{0.740f, 1.0f, 1.281f} * extinction;
   atmosphere.mieScattering = atmosphere.mieExtinction * 0.925f;
   atmosphere.mieLayerTop = top;
@@ -694,7 +693,7 @@ meridian::Atmosphere summerLayerHaze(float floorKm) {
                                                std::exp(-top / kBackgroundHeightKm));
   std::printf("Haze layer: floor %.2f km, top %.2f km, sea-level extinction %.3f/km (550 nm), "
               "AOD %.2f + %.2f above, background %.3f of the layer\n",
-              floorKm, top, extinction, kLayerAod, kBackgroundAod, atmosphere.mieBackground);
+              floorKm, top, extinction, layerAod, kBackgroundAod, atmosphere.mieBackground);
   return atmosphere;
 }
 
@@ -713,10 +712,19 @@ float valleyFloorKm(const meridian::Heightfield &terrain) {
   return (terrain.minHeight + terrain.heightScale * static_cast<float>(bin)) * 0.001f;
 }
 
+// Layer AODs: summer = a clean summer day after a front, the low end of
+// Ingold 2001's Swiss range (the default); clear = a third of it, the clear
+// air of the reference aerials (decisions.md "Haze profile against the
+// aerial reference").
+constexpr float kSummerLayerAod = 0.03f;
+constexpr float kClearLayerAod = 0.01f;
+
 meridian::Atmosphere atmosphereFor(Haze haze, float valleyFloorKm) {
   switch (haze) {
   case Haze::Summer:
-    return summerLayerHaze(valleyFloorKm);
+    return summerLayerHaze(valleyFloorKm, kSummerLayerAod);
+  case Haze::Clear:
+    return summerLayerHaze(valleyFloorKm, kClearLayerAod);
   case Haze::SummerHazy:
     return summerHaze(0.2f, 1.5f);
   case Haze::Clean:
@@ -987,8 +995,10 @@ Options parseOptions(int argc, char **argv) {
         options.haze = Haze::Summer;
       } else if (haze == "summer-hazy") {
         options.haze = Haze::SummerHazy;
+      } else if (haze == "clear") {
+        options.haze = Haze::Clear;
       } else {
-        throw std::runtime_error("--haze takes clean, summer or summer-hazy");
+        throw std::runtime_error("--haze takes clear, clean, summer or summer-hazy");
       }
     } else if (arg == "--fov") {
       const float fov = number(i);
@@ -1239,7 +1249,7 @@ Options parseOptions(int argc, char **argv) {
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
-                               "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
+                               "--haze clear|clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "
                                "--dlss-preset E|F|J|K|L|M, --rr on|off, "

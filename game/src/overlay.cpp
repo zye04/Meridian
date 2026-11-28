@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <numbers>
 #include <sstream>
 
@@ -16,7 +17,7 @@ using meridian::Vec3;
 namespace {
 
 constexpr float kDegrees = std::numbers::pi_v<float> / 180.0f;
-constexpr const char *kHazeNames[] = {"clean", "summer", "summer-hazy"};
+constexpr const char *kHazeNames[] = {"clean", "summer", "summer-hazy", "clear"};
 
 } // namespace
 
@@ -103,7 +104,7 @@ Look lookFromJson(std::string_view json, const Look &base) {
   e.cutoutMipBias = meridian::jsonNumber(json, "effectCutoutMipBias").value_or(b.cutoutMipBias);
   e.stableTaa = flag("effectStableTaa", b.stableTaa);
   if (auto haze = meridian::jsonString(json, "haze")) {
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < static_cast<int>(std::size(kHazeNames)); ++i) {
       if (*haze == kHazeNames[i]) {
         look.haze = static_cast<Haze>(i);
       }
@@ -183,7 +184,7 @@ GradePanel::Changes GradePanel::draw() {
          changes.lighting);
   slider("sun elevation (deg)", look_.sunElevationDegrees, -10.0f, 90.0f, changes.lighting);
   int haze = static_cast<int>(look_.haze);
-  if (ImGui::Combo("haze", &haze, "clean\0summer\0summer-hazy\0")) {
+  if (ImGui::Combo("haze", &haze, "clean\0summer\0summer-hazy\0clear\0")) {
     look_.haze = static_cast<Haze>(haze);
     changes.lighting = true;
   }

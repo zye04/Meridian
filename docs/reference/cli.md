@@ -221,11 +221,15 @@ of view" slider (50..110) saves, loads and resets with the Look. Captures
 taken before this change used ~101 degrees horizontal (fixed fovY 1.2 rad), so
 old views and gate images are not comparable.
 
-`--haze clean|summer|summer-hazy` picks the aerosol (default summer:
+`--haze clear|clean|summer|summer-hazy` picks the aerosol (default summer:
 a clean summer day's boundary layer, AOD 0.03 from the valley floor (5th
-percentile of the terrain) to 1.2 km above it with a smooth top, plus
-a free-troposphere background (H 2 km) with 0.01 above the top, ~0.05
-in all over the floor; startup prints `Haze layer:`; summer-hazy:
+percentile of the terrain) to 1.2 km above it with a smooth top, plus a
+free-troposphere background (H 2 km) with 0.01 above the top, ~0.05 in all
+over the floor; clear: the same layer with a third of its aerosol, AOD 0.01
+in the layer plus 0.01 above, ~0.02 over the floor, clear air after a front
+as the reference aerials show (to become the default once the forest
+interior's ambient lands, backlog); both print `Haze layer:` at startup;
+summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 

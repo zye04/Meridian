@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-enum class Haze { Clean, Summer, SummerHazy };
+enum class Haze { Clean, Summer, SummerHazy, Clear };
 
 // Everything the grading panel edits: the colour grade, the sun (azimuth
 // clockwise from north, which is -z; elevation above the horizon), the
