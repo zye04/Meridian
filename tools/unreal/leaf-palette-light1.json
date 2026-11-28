@@ -1,0 +1,7 @@
+{
+  "name": "light1",
+  "strength": 1.0,
+  "leaf": {"L": 0.340, "C": 0.042, "h": 137.4},
+  "picks": ["SM_EuropeanBeech_Field_01", "SM_EuropeanHornbeam_Field_01", "SM_BlackAlder_Field_01", "SM_BlackAlder_Field_02"],
+  "others": "chlorophyll1"
+}

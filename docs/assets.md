@@ -186,6 +186,17 @@ these; `PivotPainter/*_PP` are the same meshes with wind pivots),
    weights in decisions.md); a new species needs a line there. Hornbeam:
    `--folder /Game/EuropeanHornbeam/Geometry/SimpleWind --species
    europeanhornbeam`.
+4. Leaf palette (optional, beside the originals, which stay untouched):
+   `tools/unreal/cook_palette.sh tools/unreal/leaf-palette.json` retints
+   each species' leaf atlas toward the palette's OKLCh target
+   (`retint_leaves.py`: the atlas's mean moves, its variation stays; the
+   leaf transmission colour is the base colour times a factor, so it
+   follows) and cooks every variant present in `<species>/` into
+   `<species>-<palette name>/` with the same budgets, sharing
+   `.ktx2-cache`. The game loads them with `--tree-palette <name>`. A
+   palette with `picks` retints only those variants and links the rest
+   to `<species>-<others>/` (cook that palette first):
+   `leaf-palette-light1.json` after `leaf-palette.json` (chlorophyll1).
 
 What the export holds (verified on Black Alder and European Beech):
 
