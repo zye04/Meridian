@@ -100,17 +100,17 @@ struct TerrainLayer {
   // Multiplies the base color: matches the layer's mean color to its
   // neighbours' without touching its detail or contrast.
   float albedoScale[3] = {1.0f, 1.0f, 1.0f};
-  // How much of this ground a sward (TerrainMaterial::sward) covers, 0..1.
-  float sward = 0.0f;
 };
 
-// A sward of plant clumps over the ground layers whose `sward` is above 0,
-// shaded where the plants themselves are no longer drawn: the clumps' tops
-// take more of the sun and sky than the gaps between them, which lie
-// `depth` deeper under the blades (surface.glsl applySward). It moves light
-// around and keeps the layer's mean, so a layer colour matched to the
-// plants stays matched. Off while depth is 0.
+// A sward of plant clumps over the ground where its placement layer grows
+// (TerrainMaterial::swardLayerId), shaded where the plants themselves are no
+// longer drawn: the ground takes the sward's colour in proportion to the
+// layer's density and its thinning with distance, lit as a canopy whose
+// clump tops take more of the sun and sky than the gaps between them,
+// `depth` deeper under the blades (surface.glsl applySward). The clumps
+// move light around and keep the mean. Off while depth is 0.
 struct Sward {
+  Vec3 color{0.0f, 0.0f, 0.0f}; // linear albedo the sward shows from afar
   float clumpSize = 0.0f; // m, the clumps' width
   float depth = 0.0f;     // m, the clumps' height above the gaps
   // Light lost per meter down through the blades (Beer-Lambert): leaf
@@ -125,6 +125,10 @@ struct Sward {
   // sward takes over the ground's look in the same proportion, so the ground
   // between near blades isn't shaded as a sward a second time.
   float fullDistance = 0.0f;
+  // Clumps per m^2 at the layer's full density (1 / footprint^2): with the
+  // clump width this gives the ground the sward covers, 1 - exp(-density x
+  // clumps x clump area) (clumps placed at random overlap, Poisson).
+  float clumpsPerArea = 0.0f;
 };
 
 // The ground turns to rock as the terrain normal's y falls from
@@ -159,6 +163,8 @@ struct TerrainMaterial {
   // The placement layer (PlacementLayer::id) whose density the forest path
   // and floor follow, so floor and trees agree; 0 = no forest floor.
   uint32_t forestLayerId = 0;
+  // The placement layer (PlacementLayer::id) that forms the sward; 0 = none.
+  uint32_t swardLayerId = 0;
   // Meters above sea level; snow fades in over the 40 m above it.
   float snowLine = 4000.0f;
   Sward sward;

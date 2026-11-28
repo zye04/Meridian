@@ -108,7 +108,6 @@ struct TerrainTexel {
     vec2 occlusionRoughness;
     float microOcclusion;
     float height;
-    float sward; // TerrainLayer::sward
 };
 
 TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
@@ -118,7 +117,6 @@ TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
     r.occlusionRoughness = mix(a.occlusionRoughness, b.occlusionRoughness, t);
     r.microOcclusion = mix(a.microOcclusion, b.microOcclusion, t);
     r.height = mix(a.height, b.height, t);
-    r.sward = mix(a.sward, b.sward, t);
     return r;
 }
 
@@ -296,7 +294,6 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     texel.microOcclusion = terrainMicroOcclusion(layer, texel.occlusionRoughness.x);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
-    texel.sward = layer.sward;
     return texel;
 }
 
@@ -368,7 +365,6 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, float scaleMul, vec3 normal, ve
     texel.baseColor = vec3(0.0);
     texel.occlusionRoughness = vec2(0.0);
     texel.height = 0.0;
-    texel.sward = 0.0;
     vec3 tangentNormals[3] = vec3[3](vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
     for (int axis = 0; axis < 3; ++axis) {
         if (blend[axis] == 0.0) {
@@ -490,6 +486,19 @@ float forestDensity(Terrain terrain) {
     }
     vec2 uv = (surfaceIn.worldPosition.xz / terrain.spacing + 0.5 * size) / size;
     return textureLod(textures[terrain.forestTexture], uv, 0.0).r;
+}
+
+// The sward's placement layer's density at this pixel, 0..1 (the same bake
+// as forestDensity, 8-bit); 0 without one or outside the crop.
+float swardDensity(Terrain terrain) {
+    vec2 size = vec2(terrain.width, terrain.height);
+    vec2 halfSize = 0.5 * (size - 1.0) * terrain.spacing;
+    if (terrain.swardEnabled == 0u ||
+        any(greaterThan(abs(surfaceIn.worldPosition.xz), halfSize))) {
+        return 0.0;
+    }
+    vec2 uv = (surfaceIn.worldPosition.xz / terrain.spacing + 0.5 * size) / size;
+    return textureLod(textures[terrain.swardTexture], uv, 0.0).r;
 }
 
 // Laplacian of the ground height (1/m) over ~24 m, from the normal map's
@@ -832,6 +841,17 @@ Surface terrainSurface(vec3 normal) {
         }
     }
 
+    // Where the sward grows, the ground shows it as its plants thin out:
+    // past their draw range whatever layer lies under them is hidden.
+    float full = pc.scene.terrain.swardFullDistance / max(length(surfaceIn.relativePosition), 1e-3);
+    float sward = pc.scene.terrain.swardDepth > 0.0
+                      ? (1.0 - exp(-swardDensity(terrain) * terrain.swardCoverScale)) *
+                            (1.0 - min(full * full, 1.0))
+                      : 0.0;
+    ground.baseColor = mix(ground.baseColor,
+                           vec3(terrain.swardColor[0], terrain.swardColor[1], terrain.swardColor[2]),
+                           sward);
+
     // Large-scale brightness and hue variation (~400 m and ~160 m), so no
     // stretch of one layer looks uniform.
     float macro = 0.6 * groundNoise(p, 0.1, 24u) + 0.4 * groundNoise(p, 0.25, 25u);
@@ -849,9 +869,8 @@ Surface terrainSurface(vec3 normal) {
     s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
     s.normal = normalize(mix(s.normal, normal, snow));
     s.sunShadow = mix(sunShadow, 1.0, snow);
-    float full = pc.scene.terrain.swardFullDistance / max(length(surfaceIn.relativePosition), 1e-3);
-    float sward = ground.sward * (1.0 - snow) * (1.0 - min(full * full, 1.0));
-    if (sward > 0.0 && terrain.swardDepth > 0.0) {
+    sward *= 1.0 - snow;
+    if (sward > 0.0) {
         applySward(s, sward, normal, p);
     }
     s.alpha = 1.0;

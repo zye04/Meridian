@@ -6322,3 +6322,37 @@ keep rule, so ground between near blades isn't shaded twice):
   mat's thinning blade tips, unchanged, against the darker ground.
 
 `--far-sward off` (launch) or `--effects sward=0` (per view) turns it off.
+
+## The far ground shows what grows on it (2026-11-28)
+
+With the sward darkening the grass role toward the blades, the other
+ground roles stood out from the air: mud (flat hollows), soil (convex
+patches) and clover (damp hollows) read as beige and pale blotches at o4
+and walk120. Up close none of them is ever seen: the grass mat's rule
+(slope up to 35 degrees, outside the forest) has no role rule, so it
+covers them, and they only show past its 120 m draw range, where nothing
+covers them any more.
+
+Choice: the sward's extent is its placement layer's own density
+(`TerrainMaterial::swardLayerId`), baked per geo texel at setPlacement
+exactly as the forest floor's (placement.comp `PLACEMENT_FOREST`, a
+`PLACEMENT_BYTES` variant packing 8-bit; the layer may be streamed, so the
+bake takes that layer table). The ground it covers is the clumps'
+coverage, 1 - exp(-density x clumps per m^2 x clump area) (randomly
+placed clumps overlap, Poisson; 50 per m^2 of 0.27 m^2 at full density,
+so even the half density of the mat's slope fade covers the ground: used
+directly, the density left a 20-30 degree meadow half bare). Where it
+grows, the ground's albedo takes the sward's colour (`Sward::color`, the
+blade-derived colour) in proportion to that cover times the mat's
+thinning, 1 - (fullDistance / d)^2, and the sward's light applies with
+the same weight. Near, the textured layers
+still show between the blades; far, every role under the mat reads as the
+meadow it is, and mud and soil remain where the mat doesn't grow (steep
+ground below rock, forest edges). The per-layer sward cover the previous
+entry used is gone: one mechanism. Without the mat (`--streamed off`,
+`--placement off`, `--far-sward off`) nothing is baked and the ground is
+as before. VRAM: R8 at geo resolution, +4 MB on the relief patch
+(2000 x 2000), +14 MB on the Napf (3750 x 3750). Rejected: mud by the
+wetness channel and soil by the slope band only (narrower: it fixes two
+roles one by one, clover stays, and it reads a channel the mat itself
+doesn't).

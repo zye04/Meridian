@@ -290,6 +290,7 @@ void Renderer::setTerrain(const Heightfield &field) {
   impl_->geo.reset();
   impl_->destroyBuffer(impl_->geoBuffer);
   terrain.forestEnabled = 0;
+  terrain.swardEnabled = 0;
   if (!field.samples.empty()) {
     impl_->shadowCasterTop =
         field.minHeight +

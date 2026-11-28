@@ -1522,6 +1522,7 @@ Renderer::~Renderer() {
   impl_->destroyImage(impl_->dfgLut);
   impl_->destroyImage(impl_->terrainHeightImage);
   impl_->destroyImage(impl_->forestFloorImage);
+  impl_->destroyImage(impl_->swardImage);
   impl_->destroyImage(impl_->terrainNormalImage);
   vkDestroySampler(dev, impl_->terrainSampler, nullptr);
   impl_->destroyBuffer(impl_->materialBuffer);

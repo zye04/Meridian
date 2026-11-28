@@ -508,58 +508,58 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
           .count();
 
-  // The forest floor (TerrainMaterial::forestLayerId): that static layer's
-  // density at every geo texel (4-sample blocks without channels), in the
-  // same integer math as the trees.
-  r.terrain.forestEnabled = 0;
-  const auto forest = std::find_if(layers.begin(), layers.end(), [&](const PlacementLayer &l) {
-    return r.forestLayerId != 0 && l.id == r.forestLayerId;
-  });
-  if (forest != layers.end()) {
+  // The forest floor (TerrainMaterial::forestLayerId) and the sward
+  // (TerrainMaterial::swardLayerId): that layer's density at every geo texel
+  // (4-sample blocks without channels), in the same integer math as its
+  // instances, into a texture the terrain samples. The forest is static;
+  // the sward may be streamed (its own layer table).
+  const auto bakeDensity = [&](VkDeviceAddress layerTable, uint32_t index, bool bytes,
+                               Image &image, uint32_t &texture) {
     const uint32_t width = r.geo ? r.geo->width : (field.width + 3) / 4;
     const uint32_t height = r.geo ? r.geo->height : (field.height + 3) / 4;
-    const uint32_t pairs = (width + 1) / 2;
-    Buffer texels = r.createBuffer(VkDeviceSize{pairs} * height * sizeof(uint32_t),
+    const uint32_t perWord = bytes ? 4 : 2;
+    const uint32_t columns = (width + perWord - 1) / perWord;
+    Buffer texels = r.createBuffer(VkDeviceSize{columns} * height * sizeof(uint32_t),
                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                    0);
-    VkPipeline forestPipeline =
-        createComputePipeline(dev, "placement_forest.comp", placementLayout);
-    PlacementConstants forestConstants = constants;
-    forestConstants.counts = texels.address;
-    forestConstants.layerCount = static_cast<uint32_t>(forest - layers.begin());
-    forestConstants.gridColumns = pairs;
-    if (r.terrain.forestTexture == 0) {
+    VkPipeline pipeline = createComputePipeline(
+        dev, bytes ? "placement_density8.comp" : "placement_forest.comp", placementLayout);
+    PlacementConstants bake = constants;
+    bake.layers = layerTable;
+    bake.counts = texels.address;
+    bake.layerCount = index;
+    bake.gridColumns = columns;
+    if (texture == 0) {
       if (r.textures.size() + 1 > kMaxTextures) {
         throw std::runtime_error("texture table is full");
       }
-      r.terrain.forestTexture = static_cast<uint32_t>(r.textures.size());
+      texture = static_cast<uint32_t>(r.textures.size());
       r.textures.resize(r.textures.size() + 1);
     }
-    r.destroyImage(r.forestFloorImage);
-    r.forestFloorImage = r.createImage(VK_FORMAT_R16_UNORM, {width, height, 1},
-                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                       VK_IMAGE_ASPECT_COLOR_BIT);
+    r.destroyImage(image);
+    image = r.createImage(bytes ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16_UNORM, {width, height, 1},
+                          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                          VK_IMAGE_ASPECT_COLOR_BIT);
     r.submitNow([&](VkCommandBuffer cmd) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, forestPipeline);
-      vkCmdPushConstants(cmd, placementLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         sizeof(forestConstants), &forestConstants);
-      vkCmdDispatch(cmd, (pairs + 7) / 8, (height + 7) / 8, 1);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+      vkCmdPushConstants(cmd, placementLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(bake),
+                         &bake);
+      vkCmdDispatch(cmd, (columns + 7) / 8, (height + 7) / 8, 1);
       memoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
                     VK_ACCESS_2_TRANSFER_READ_BIT);
-      transitionImage(cmd, {r.forestFloorImage.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_COPY_BIT,
-                            VK_ACCESS_2_TRANSFER_WRITE_BIT});
+      transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT});
       VkBufferImageCopy region{};
-      region.bufferRowLength = pairs * 2;
+      region.bufferRowLength = columns * perWord;
       region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
       region.imageExtent = {width, height, 1};
-      vkCmdCopyBufferToImage(cmd, texels.buffer, r.forestFloorImage.image,
+      vkCmdCopyBufferToImage(cmd, texels.buffer, image.image,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-      transitionImage(cmd, {r.forestFloorImage.image, VK_IMAGE_ASPECT_COLOR_BIT,
+      transitionImage(cmd, {image.image, VK_IMAGE_ASPECT_COLOR_BIT,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
                             VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -567,10 +567,31 @@ void Renderer::setPlacement(std::span<const Prototype> prototypes,
                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT});
     });
-    vkDestroyPipeline(dev, forestPipeline, nullptr);
+    vkDestroyPipeline(dev, pipeline, nullptr);
     r.destroyBuffer(texels);
-    r.writeTexture(r.terrain.forestTexture, r.forestFloorImage.view, r.linearSampler);
+    r.writeTexture(texture, image.view, r.linearSampler);
+  };
+  const auto findLayer = [](std::span<const PlacementLayer> list, uint32_t id) {
+    const auto found = std::find_if(list.begin(), list.end(),
+                                    [&](const PlacementLayer &l) { return id != 0 && l.id == id; });
+    return found == list.end() ? -1 : static_cast<int>(found - list.begin());
+  };
+  r.terrain.forestEnabled = 0;
+  if (const int forest = findLayer(layers, r.forestLayerId); forest >= 0) {
+    bakeDensity(layerBuffer.address, static_cast<uint32_t>(forest), false, r.forestFloorImage,
+                r.terrain.forestTexture);
     r.terrain.forestEnabled = 1;
+  }
+  r.terrain.swardEnabled = 0;
+  if (const int sward = findLayer(layers, r.swardLayerId); sward >= 0) {
+    bakeDensity(layerBuffer.address, static_cast<uint32_t>(sward), true, r.swardImage,
+                r.terrain.swardTexture);
+    r.terrain.swardEnabled = 1;
+  } else if (const int streamed = findLayer(r.stream.layerList, r.swardLayerId);
+             streamed >= 0 && !streamList.empty()) {
+    bakeDensity(r.stream.layers.address, static_cast<uint32_t>(streamed), true, r.swardImage,
+                r.terrain.swardTexture);
+    r.terrain.swardEnabled = 1;
   }
 
   releaseTemporaries(r.stream.active());

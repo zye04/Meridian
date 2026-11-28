@@ -338,7 +338,6 @@ struct TerrainLayer {
     float offset[3];
     float occlusionStrength;
     float albedoScale[3];
-    float sward;
 };
 
 layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
@@ -387,7 +386,10 @@ struct Terrain {
     // forest layer's density per geo texel (bindless, linear clamp).
     uint forestTexture;
     uint forestEnabled;
-    uint forestPad[2];
+    // The sward (surface.glsl swardDensity), when swardEnabled: its
+    // placement layer's density per geo texel (bindless, linear clamp).
+    uint swardTexture;
+    uint swardEnabled;
     // Multiplies the detail relief (terrain_detail.glsl); 0 = off.
     float detailScale;
     // TerrainMaterial::sward (surface.glsl applySward); depth 0 = off.
@@ -396,6 +398,8 @@ struct Terrain {
     float swardExtinction;
     float swardTransmission;
     float swardFullDistance;
+    float swardColor[3];
+    float swardCoverScale;
 };
 
 // Must match GpuWind in C++; functions in wind.glsl. The 10 m wind (direction

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <numbers>
 #include <stdexcept>
 
 namespace meridian {
@@ -455,6 +456,15 @@ void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
   if (material.forestLayerId == 0) {
     terrain.forestEnabled = 0;
   }
+  impl_->swardLayerId = material.swardLayerId;
+  if (material.swardLayerId == 0) {
+    terrain.swardEnabled = 0;
+  }
+  terrain.swardColor[0] = material.sward.color.x;
+  terrain.swardColor[1] = material.sward.color.y;
+  terrain.swardColor[2] = material.sward.color.z;
+  terrain.swardCoverScale = material.sward.clumpsPerArea * 0.25f * std::numbers::pi_v<float> *
+                            material.sward.clumpSize * material.sward.clumpSize;
   terrain.snowLine = material.snowLine;
   terrain.swardClumpSize = material.sward.clumpSize;
   terrain.swardDepth = material.sward.depth;

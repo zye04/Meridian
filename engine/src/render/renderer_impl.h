@@ -314,6 +314,10 @@ struct Renderer::Impl {
   // (terrain.forestTexture).
   uint32_t forestLayerId = 0;
   Image forestFloorImage;
+  // The sward (TerrainMaterial::swardLayerId): the same bake, 8-bit, into
+  // swardImage (terrain.swardTexture).
+  uint32_t swardLayerId = 0;
+  Image swardImage;
   // Placement (renderer_placement.cpp): the placed table (24-bit ids from
   // kPlacedBase) and one Cell per grid cell; empty until setPlacement.
   Buffer placedInstances;

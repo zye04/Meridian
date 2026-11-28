@@ -241,7 +241,9 @@ the trees back (hidden by default). Capture runs print validation errors,
   skips channel layers. The forest floor follows the forest layer
   (`TerrainMaterial::forestLayerId`): setPlacement bakes its density per
   geo texel (placement.comp `PLACEMENT_FOREST`), surface.glsl
-  `forestDensity` reads it.
+  `forestDensity` reads it. The far sward follows the grass mat the same
+  way (`TerrainMaterial::swardLayerId`, a streamed layer, baked 8-bit:
+  `swardDensity`).
 - Dither patterns are cached in `assets/placement-cache/dither-<layer
   id>-<points>.bin` (`cachedDitherPattern`, placement.h; the game passes
   the directory to `setPlacement`): header = magic, format version, seed,

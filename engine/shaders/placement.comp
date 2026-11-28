@@ -14,9 +14,10 @@
 //     the run's fixed range of the ring, their dither thresholds, and the
 //     run's cell record with its coordinates;
 //   PLACEMENT_FOREST: at load, one layer's density at the centre sample of
-//     every geo texel (the forest floor, surface.glsl), two texels per
-//     thread packed as 16-bit into counts; layerCount holds the layer's
-//     index, gridColumns the texture's width in texel pairs.
+//     every geo texel (the forest floor and the sward, surface.glsl), two
+//     texels per thread packed as 16-bit into counts (with
+//     PLACEMENT_BYTES four, as 8-bit); layerCount holds the layer's
+//     index, gridColumns the texture's width in packed groups.
 // Keep/reject mirrors evaluatePoint (placement.cpp) in integer math; the
 // order comes from the offsets, never from atomics, so the table is
 // deterministic.
@@ -229,10 +230,20 @@ void main() {
     }
     PlacementLayer layer = pc.layers.layers[pc.layerCount];
     uint layerSeed = placementLayerSeed(layer.id, pc.seed);
+#ifdef PLACEMENT_BYTES
+    uint packed = 0u;
+    for (uint i = 0u; i < 4u; ++i) {
+        uint x = 4u * pair.x + i;
+        uint density = x < width ? forestTexel(layer, layerSeed, uvec2(x, pair.y)) : 0u;
+        packed |= (density >> 8u) << (8u * i);
+    }
+    pc.counts.counts[pair.y * pc.gridColumns + pair.x] = packed;
+#else
     uint a = forestTexel(layer, layerSeed, uvec2(2u * pair.x, pair.y));
     uint b = 2u * pair.x + 1u < width ? forestTexel(layer, layerSeed, uvec2(2u * pair.x + 1u, pair.y))
                                       : 0u;
     pc.counts.counts[pair.y * pc.gridColumns + pair.x] = a | b << 16u;
+#endif
 }
 #else
 

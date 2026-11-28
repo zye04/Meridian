@@ -286,6 +286,8 @@ constexpr float kGrassMatScale[2] = {1.0f, 1.5f};
 constexpr float kGrassMatTransmission = 0.06f;
 // Drawn at full density to this distance (m), thinning beyond.
 constexpr float kGrassMatFullDensity = 30.0f;
+constexpr uint32_t kGrassMatLayerId = 8;
+constexpr float kGrassMatFootprint = 0.1414f; // m between clumps at full density
 // Leaf area index of a closed temperate meadow (one-sided leaf area per
 // ground area; measured 2-5, e.g. Asner et al. 2003, "Global synthesis of
 // leaf area index observations", grasslands mean 2.5 +- 1.4).
@@ -295,8 +297,9 @@ meridian::Sward grassMatSward() {
   const float scale = 0.5f * (kGrassMatScale[0] + kGrassMatScale[1]);
   const float depth = kGrassMatClumpHeight * scale;
   // Randomly oriented leaves cast half their area (G = 0.5).
-  return {kGrassMatClumpWidth * scale, depth, 0.5f * kMeadowLeafAreaIndex / depth,
-          kGrassMatTransmission, kGrassMatFullDensity};
+  return {grassMatColor(), kGrassMatClumpWidth * scale, depth,
+          0.5f * kMeadowLeafAreaIndex / depth, kGrassMatTransmission, kGrassMatFullDensity,
+          1.0f / (kGrassMatFootprint * kGrassMatFootprint)};
 }
 
 constexpr uint32_t kPlacementSeed = 1;
@@ -626,7 +629,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
         Patch{5, hawkbit, 0.3f, 28.0f, 1.0f / 15.0f, 0.50f, 1.0f, 2.0f, 2.8f, 120.0f, 30.0f, {sunny, {}}, true},
         Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f, 0.0f, {sunny, dry}, true},
         Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f, {moist, {}}, true},
-        Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, kGrassMatScale[0], kGrassMatScale[1], 120.0f, kGrassMatFullDensity, {}, true},
+        Patch{kGrassMatLayerId, grassMat, kGrassMatFootprint, 35.0f, 0.0f, 0.0f, 0.2f, kGrassMatScale[0], kGrassMatScale[1], 120.0f, kGrassMatFullDensity, {}, true},
         Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f, {}, true}}) {
     if (!patch.variants.empty() && (streamed || patch.streamFullDensity == 0.0f)) {
       PlacementLayer layer{patch.id, patch.variants, patch.footprint,
@@ -1650,8 +1653,9 @@ int main(int argc, char **argv) {
        {{"rock_cliff_tg1mcgbl", 2.0f, 0.0891f}, {"layered_rock_vl0fdhdo", 3.0f, 0.1495f}}},
   };
   meridian::TerrainMaterial material;
-  if (options.farSward) {
+  if (options.farSward && options.streamed) {
     material.sward = grassMatSward();
+    material.swardLayerId = kGrassMatLayerId;
   }
   if (options.trees) {
     material.forestLayerId = kForestLayerId;
@@ -1663,10 +1667,6 @@ int main(int argc, char **argv) {
                                 : std::nullopt;
       layersLoaded = layer.has_value();
       if (layer) {
-        // The grass mat grows on the grass and clover roles' ground.
-        if (role.role == TerrainRole::Grass || role.role == TerrainRole::Clover) {
-          layer->sward = 1.0f;
-        }
         material.layers[static_cast<size_t>(role.role)].push_back(*layer);
       }
     }
