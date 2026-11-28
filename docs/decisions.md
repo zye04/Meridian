@@ -6217,3 +6217,59 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA
 - With the clear haze (the default with this grade) the eye-height forest view's p50 is
   29.2 (main under summer 28.9; the previous grade under clear 17.4). The previous look is
   `--haze summer --grade tools/grades/starting-2026-11-28.json`.
+
+## GI canopy clumping (2026-11-28)
+
+- **Problem:** under the canopy the raster's ambient fell short of the path tracer. At the forest walk
+  pose (relief, `--camera 595.5 989.2 495.3 -0.785 0.0 --sun -0.0714 0.574 -0.816`, clear haze,
+  `EV100 10.40` on both sides, tracer 1024 spp), raster / tracer was: sun 1.09, ambient 0.79 whole
+  frame. The tracer's light split (sky only, sun only, primary hit only) shows that the ambient there
+  is 90% sky (sky direct 0.0156, sky indirect 0.0015, sun bounce 0.0019). The raster with all sun
+  bounce zeroed, against the tracer's sky: 0.74 whole, 0.79 on the floor in shade, 0.71 on trunks and
+  understorey, 0.63 on sunlit patches. Its bounce was already 1.24. So too little sky reaches the
+  probes.
+- **Cause:** the GI's paths through the canopy (probe rays, a foliage hit's sky and sun, the ground
+  cache's sun) march the far field, a uniform medium per 4 m voxel. The mean transmittance of clumped
+  leaves exceeds the transmittance of their mean optical depth (Jensen). Canopy radiative transfer
+  carries this as the clumping index Omega: gap fraction exp(-Omega G L / cos theta), Omega < 1 for
+  clumped foliage (Nilson 1971, "A theoretical analysis of the frequency of gaps in plant stands",
+  Agricultural Meteorology 8; Chen & Black 1992; mapped globally from MODIS by He, Chen, Pisek, Schaaf
+  & Strahler 2012, Remote Sensing of Environment 119, 118-130).
+- **Omega is derived from our data, not fitted.** For every prototype's 1 m far-field bake
+  (`farBakeGridFromVoxels`), per level box and vertical rays, the fine columns' mean exp(-tau) is
+  compared with exp(-mean tau). Omega solves sum exp(-Omega tau_box) = sum mean_fine exp(-tau)
+  (the 21 tree prototypes of the relief scene): **L0 (4 m) 0.71, L1 (8 m) 0.56, L2 (16 m) 0.49**. The GI's
+  rays stay within 300 m and march L0 up to 256 m (`kFarRayLevelEnd0`), so they use 0.71. Sub-metre
+  clumping is not in a 1 m grid, so the true value is lower still. The tracer only confirms the value.
+- **Chosen:** `giClumped` (gi.glsl) raises each far-field transmittance on a GI path to Omega
+  (exp(-Omega tau)): the probe ray, the foliage hit's sky and sun, the ground cache's sun. That is one
+  value for sky and bounce alike, the same medium on every path. `--effects gi-clumping=1` gives the
+  old uniform medium. Not changed, and possible users of the same correction: far shadows and far-cell
+  sun (`farFieldTransmittance` in the surfaces' sun path, at L0-L2: 0.71 / 0.56 / 0.49 by level), the
+  leaf light's canopy term, lane pt's crown fill (calibrated against today's probes; it stands partly
+  in for this sky).
+- **Measured** (Release, `Render 2560x1440`, raster / tracer ambient by class, walk pose; sky and bounce
+  split with the throwaway switches):
+
+  | class | before | Omega 0.71 (chosen) | sky only (variant) |
+  |---|---|---|---|
+  | whole | 0.79 (sky 0.74, bounce 1.24) | 1.02 (0.95, 1.69) | 0.96 (0.94, 1.09) |
+  | floor in shade | 0.87 (0.79, 1.77) | 1.09 (0.98, 2.34) | 1.03 (0.98, 1.59) |
+  | trunks + understorey | 0.73 (0.71, 0.85) | 1.01 (0.97, 1.22) | 0.93 (0.95, 0.76) |
+  | sunlit patches | 0.63 (0.63, 0.70) | 0.82 (0.79, 1.12) | 0.77 (0.79, 0.46) |
+
+  The variant applied Omega only to sky paths (probe rays that escape, the foliage hit's sky). It
+  brings bounce nearer 1 on average, but unevenly (floor 1.59, sunlit 0.46), and it treats one medium
+  as two. It was rejected: the bounce excess predates this change (1.24, 1.77 on the floor) and is its
+  own error. Sunlit patches stay at 0.82: probe columns (2 m, trilinear) smear the gaps that let the sun
+  through (backlog). Relief o4 nearR (`-1090.3 1254.6 1245.4 0.2 -0.24 --sun 0.020 0.643 -0.766`),
+  ambient raster / tracer: tops 0.32 -> 0.35, shade 0.56 -> 0.67, gaps 0.63 -> 0.82, every class toward 1.
+  The totals rise (shade 2.01 -> 2.08, gaps 1.71 -> 1.83) only because the sun term there is about 2x
+  (the cascade smear). Hill-shaded o4n (`-1000.9 1254.6 804.4`, same view and sun), terrain-shaded
+  pixels: ambient 0.92 -> 0.97, total 1.01 -> 1.06. GI probes ms within run noise (walk 1.75 -> 1.60,
+  o4 1.38 -> 1.42).
+- **What the user sees** (default look of main ee101c1, clear haze and starting grade G4, walk pose, display luma Y' 0-255 p5 / p50 / p95):
+  15.9 / 29.0 / 51.2 -> 18.2 / 33.9 / 59.7. Whole frame mean |diff|: walk 4.29, start 0.28, relief o4 0.44 /255; the last
+  two are within the `--trees` run-to-run floor of ~0.5. Moving through the forest (napf edge, 8 m/s, 600 frames; relief walk,
+  8 m/s, 300 frames): the frame median follows the same smooth curve with and without the clumping (largest 20-frame step 4.8 /
+  4.9), with no GI lag or pumping.

@@ -767,6 +767,7 @@ meridian::Effects parseEffects(const std::string &text) {
     else if (name == "bloom") e.bloom = value != 0.0f;
     else if (name == "cloud-outline") e.cloudOutline = value;
     else if (name == "cutout-bias") e.cutoutMipBias = value;
+    else if (name == "gi-clumping") e.giCanopyClumping = value;
     else if (name == "taa-stable") e.stableTaa = value != 0.0f;
     else throw std::runtime_error("--effects: unknown effect " + name);
   }

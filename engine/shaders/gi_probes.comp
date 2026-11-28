@@ -125,6 +125,7 @@ void main() {
             farField, origin, direction, 0.0,
             hit >= 0.0 ? min(hit, kGiTreeDistance) : kGiTreeDistance, reflected, transmitted,
             meanDistance);
+        transmittance = giClumped(transmittance);
         vec3 leaf = vec3(0.0);
         if (transmittance < 0.99) {
             // Light the foliage where the ray meets it: the sun and sky that
@@ -133,10 +134,10 @@ void main() {
             // invariant, recollision probability from the escape upward).
             vec3 q = origin + meanDistance * direction;
             float sunVisible = sun.y > 0.0
-                ? farFieldTransmittance(farField, q, sun, 0.0, kGiLeafSunDistance, false)
+                ? giClumped(farFieldTransmittance(farField, q, sun, 0.0, kGiLeafSunDistance, false))
                 : 0.0;
-            float skyVisible =
-                farFieldTransmittance(farField, q, vec3(0.0, 1.0, 0.0), 0.0, kGiTreeDistance, false);
+            float skyVisible = giClumped(
+                farFieldTransmittance(farField, q, vec3(0.0, 1.0, 0.0), 0.0, kGiTreeDistance, false));
             vec3 albedo = reflected + transmitted;
             vec3 single = sunAtProbe * sunVisible * leafPhase(dot(sun, direction), reflected, transmitted) +
                           albedo / (2.0 * kPi) * skyVisible * skyIrradiance;

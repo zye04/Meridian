@@ -622,7 +622,8 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint streamRecordCount;
     // Effects: extra mip bias of the alpha cut-out test (mesh.frag DEPTH_ONLY).
     float cutoutMipBias;
-    uint pad5;
+    // Effects: the GI probes' canopy clumping index (gi_probes.comp).
+    float giCanopyClumping;
     StreamLayerBuffer streamLayers;
     StreamThresholdBuffer streamThresholds;
     StreamCoordBuffer streamCoords;

@@ -29,6 +29,14 @@ const float kGiTreeDistance = 300.0;
 // has cleared the canopy (the full kGiTreeDistance cost +0.4 ms for no
 // measured gain against the reference).
 const float kGiLeafSunDistance = 64.0;
+
+// The far field's canopy is a uniform medium per voxel, which hides the gaps
+// between clumped leaves: mean exp(-tau) over a voxel exceeds exp(-mean
+// tau). The GI's paths through it take the clumping index (Nilson 1971):
+// transmittance exp(-Omega tau), set by --effects gi-clumping (1 = none).
+float giClumped(float transmittance) {
+    return pow(max(transmittance, 0.0), pc.scene.giCanopyClumping);
+}
 // Neutral ground albedo where the ground cache has none yet (a typical
 // vegetated ground's luminance, no hue: the hue comes from the cache).
 const vec3 kGiGroundAlbedo = vec3(0.079);
@@ -275,7 +283,7 @@ float giGroundSunVisibility(vec3 p, vec3 n) {
     float visibility = cloudShadow(p);
     if (pc.scene.farFieldEnabled != 0u) {
         FarFieldBuffer farField = pc.scene.farField;
-        visibility *= farFieldTransmittance(farField, p, sun, 0.0, kGiTreeDistance, false);
+        visibility *= giClumped(farFieldTransmittance(farField, p, sun, 0.0, kGiTreeDistance, false));
     }
     return visibility;
 }

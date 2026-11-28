@@ -522,7 +522,8 @@ struct SceneData {
   uint32_t ringCount = 0;
   uint32_t streamRecordCount = 0;
   float cutoutMipBias = 0.0f;
-  uint32_t pad5 = 0;
+  // Effects: the GI probes' canopy clumping index (gi_probes.comp).
+  float giCanopyClumping = 1.0f;
   VkDeviceAddress streamLayers = 0;
   VkDeviceAddress streamThresholds = 0;
   VkDeviceAddress streamCoords = 0;
