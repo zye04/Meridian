@@ -6143,12 +6143,18 @@ napf `--trees` Release launch to 4 frames 86.7 s with it rebuilt, 76.6 s warm (r
   `shadowed-haze` (adf4e22); backlog "Shadowed inscatter".
 - **Chosen:** a `clear` preset: `summer`'s boundary layer
   (same floor, top, fade, scale height, background, g 0.7) with layer AOD
-  0.01 instead of 0.03, ~0.02 over the floor in all. `summer` stays as it
-  was. The default stays summer until the forest interior's ambient
-  lands (below: clear reveals the interior under-lit, ambient 0.66 of the
-  path tracer on the shaded floor per lane pt; the summer in-scatter was
-  standing in for it); then the default flips to clear with one re-proof
-  at the walk. This sits below Ingold 2001's Swiss range (the
+  0.01 instead of 0.03 (`Haze layer: ... AOD 0.01 + 0.01 above`). `summer` stays as it
+  was (`--haze summer`). Clear is the default together with the
+  2026-11-28 starting grade (entry "Starting grade from the tone match"):
+  clear removes the summer in-scatter that had been standing in for the
+  forest interior's missing ambient (the raster's ambient is 0.66 of the
+  path tracer on the shaded floor, lane pt; the fix is lane spare-02's
+  interior ambient), and with the new grade the walk's display level is
+  kept (walk360 p50 28.9 on main under summer, 29.2 with clear and the
+  grade). Scripts that omit `--haze`
+  (motion-gates.sh, motion-clarity.sh, cloud-compare.sh, g1-evidence.sh)
+  measure under clear from this change on: their summer baselines are not
+  comparable. This sits below Ingold 2001's Swiss range (the
   "Haze as a boundary layer" entry chose its low end as a typical clean
   day): it is a look decision inside the physical model, the clear air
   after a front that the reference aerials show, not a new typical day.

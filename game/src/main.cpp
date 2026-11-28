@@ -713,7 +713,7 @@ float valleyFloorKm(const meridian::Heightfield &terrain) {
 }
 
 // Layer AODs: summer = a clean summer day after a front, the low end of
-// Ingold 2001's Swiss range (the default); clear = a third of it, the clear
+// Ingold 2001's Swiss range; clear (the default) = a third of it, the clear
 // air of the reference aerials (decisions.md "Haze profile against the
 // aerial reference").
 constexpr float kSummerLayerAod = 0.03f;
@@ -1662,7 +1662,7 @@ int main(int argc, char **argv) {
   // The sun, haze and look of the run, or of a --capture-views view.
   const auto setLook = [&](const Options &o) {
     lighting = {};
-    lighting.atmosphere = atmosphereFor(o.haze.value_or(Haze::Summer), floorKm);
+    lighting.atmosphere = atmosphereFor(o.haze.value_or(Haze::Clear), floorKm);
     if (o.sunDirection) {
       lighting.sunDirection = *o.sunDirection;
     }
@@ -1672,7 +1672,7 @@ int main(int argc, char **argv) {
     // CLI and defaults are the built-in look; the grade file (interactive
     // runs and --grade) overrides it except for an explicit --sun, --haze or
     // --bloom.
-    Look builtIn = lookWithSun(lighting.sunDirection, o.haze.value_or(Haze::Summer));
+    Look builtIn = lookWithSun(lighting.sunDirection, o.haze.value_or(Haze::Clear));
     builtIn.grade = kStartingGrade;
     builtIn.fovDegrees = o.fovDegrees.value_or(builtIn.fovDegrees);
     builtIn.bloom = o.bloom.value_or(meridian::Bloom{});
