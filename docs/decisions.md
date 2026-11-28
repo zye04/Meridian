@@ -6003,8 +6003,10 @@ largest 5-frame step 5.6 (main 8.4): no pumping.
   (40-60 m), so on backlit crowns contact shadows took more off the voxels than off the
   triangles they replace.
 - **Choice:** voxel_instance.frag writes the reflected sun only: the aligned front sun plus
-  the reflected half of `leafPhase` (`leafPhase(c, rho, 0)`). The phase is linear in rho and
-  tau, so the two halves add up to the old term, and the shaded colour is unchanged. Rejected:
+  the reflected half of the leaf phase (`leafPhaseWeights`, gi.glsl: one evaluation, per unit rho
+  and tau). The phase is linear in rho and tau, so the two halves add up to the old term, and the
+  shaded colour is equal up to float rounding (the sum is split and its order changed), not bit
+  identical. Rejected:
   putting transmitted sun into the attachment on every tier. That would darken backlit
   triangle leaves near the camera, a look change on the tier that is closest to the reference,
   just to agree with the voxels.

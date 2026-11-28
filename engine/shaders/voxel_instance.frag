@@ -129,14 +129,14 @@ void main() {
             addSunLight(sh, visibility * aligned, 1.0);
         }
         // Light travels -L, scattered toward the camera travels -V.
-        float cosBeta = -dot(sh.L, sh.V);
+        vec2 phase = leafPhaseWeights(-dot(sh.L, sh.V));
         vec3 scatteredSun = sh.sunAtSurface * (visibility * (1.0 - aligned));
-        sh.diffuseLight += scatteredSun * leafPhase(cosBeta, albedo, vec3(0.0));
+        sh.diffuseLight += scatteredSun * albedo * phase.x;
         // Contact shadows remove only the reflected sun, as on triangle leaves
         // (mesh.frag), so the tiers agree at the voxel switch.
         sunRadiance = sh.diffuseLight + sh.specularLight;
         addTransmittedSun(sh, transmitted, backNoL, visibility * aligned);
-        sh.diffuseLight += scatteredSun * leafPhase(cosBeta, vec3(0.0), transmitted);
+        sh.diffuseLight += scatteredSun * transmitted * phase.y;
     }
 #ifdef DEBUG_ID
     vec3 debugSunDiffuse = sh.diffuseLight;

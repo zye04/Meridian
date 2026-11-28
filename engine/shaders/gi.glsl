@@ -198,14 +198,19 @@ vec3 giIrradiance(GiSample s, vec3 n, vec3 fallback) {
            s.remaining * fallback;
 }
 
-// Bi-Lambertian spherical-leaf phase over pi G; leafPhase in gi.h is the CPU
-// reference.
-vec3 leafPhase(float cosBeta, vec3 reflectance, vec3 transmittance) {
+// Bi-Lambertian spherical-leaf phase over pi G per unit reflectance (x) and
+// transmittance (y); the phase is linear in both.
+vec2 leafPhaseWeights(float cosBeta) {
     float c = clamp(cosBeta, -1.0, 1.0);
     float b = acos(c);
-    vec3 gamma = (reflectance + transmittance) / (3.0 * kPi) * (sin(b) - b * c) +
-                 transmittance / 3.0 * c;
-    return gamma / (0.5 * kPi);
+    float reflected = (sin(b) - b * c) / (3.0 * kPi);
+    return vec2(reflected, reflected + c / 3.0) / (0.5 * kPi);
+}
+
+// leafPhase in gi.h is the CPU reference.
+vec3 leafPhase(float cosBeta, vec3 reflectance, vec3 transmittance) {
+    vec2 w = leafPhaseWeights(cosBeta);
+    return reflectance * w.x + transmittance * w.y;
 }
 
 // The ground cache's radiance at `xz` (w: how much of it the cache holds,
