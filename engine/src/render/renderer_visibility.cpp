@@ -76,12 +76,14 @@ void Renderer::Impl::createVisibilityResolve() {
   const VkFormat formats[] = {kHdrFormat,    kMotionFormat,          kTransparencyMaskFormat,
                               kAlbedoFormat, kAlbedoFormat,          kNormalRoughnessFormat,
                               kSunLightFormat};
+  // Attachments 0-6 except 2, which only the blended surfaces write.
+  constexpr uint32_t kResolvedTargets = 0x7Bu;
   resolvePipeline = createGraphicsPipeline(dev, {.vertexShader = "fullscreen.vert",
                                                  .fragmentShader = "visibility_resolve.frag",
                                                  .layout = resolveLayout,
                                                  .colorFormats = formats,
                                                  .depthTest = false,
-                                                 .colorWriteMaskBits = 0x7Bu});
+                                                 .colorWriteMaskBits = kResolvedTargets});
 }
 
 void Renderer::Impl::destroyVisibilityResolve() {
@@ -110,6 +112,17 @@ Renderer::VisibilityResolveStats Renderer::visibilityResolveStats() const {
         "vmaInvalidateAllocation");
   const auto *counts = static_cast<const uint32_t *>(impl_->resolveStats.mapped);
   return {counts[0], counts[1]};
+}
+
+void Renderer::resetVisibilityResolveStats() {
+  if (impl_->resolveStats.buffer == VK_NULL_HANDLE) {
+    return;
+  }
+  // Frames in flight still add to the counters.
+  check(vkDeviceWaitIdle(impl_->device.device), "vkDeviceWaitIdle");
+  std::memset(impl_->resolveStats.mapped, 0, 2 * sizeof(uint32_t));
+  check(vmaFlushAllocation(impl_->allocator, impl_->resolveStats.allocation, 0, VK_WHOLE_SIZE),
+        "vmaFlushAllocation");
 }
 
 } // namespace meridian

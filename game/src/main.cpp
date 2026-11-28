@@ -1828,6 +1828,7 @@ int main(int argc, char **argv) {
     filterPick.reset();
     renderer.setDebugFilter({});
     viewStart = totalFrames;
+    renderer.resetVisibilityResolveStats();
     std::printf("View %zu/%zu: %s\n", viewIndex + 1, views.size(), view.name.c_str());
     std::fflush(stdout);
   };

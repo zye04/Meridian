@@ -321,9 +321,11 @@ area A px = D x the render's pixels, S% under 1 px` line follows: the quads'
 screen area, depth complexity and sub-pixel share), `bvh nodes N` (cluster group BVH nodes the
 traversal visited), `placed N`
 (placed instances), and `GPU passes:`
-with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, voxel bricks (voxel_bricks.comp, the main view's phase 0), far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late (phase 1's cull up to the cluster cull), voxel bricks late (its voxel_bricks.comp and the counter readback), scene late, voxel trees late, blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
+with GPU ms per pass (upload + tlas, terrain shadow (the shadow-height map, 0 unless the sun turned or the camera moved 1 km), sun shadows, terrain select, stream (only with a streamed layer), cull cells, cull early, traverse, cull clusters, voxel bricks (voxel_bricks.comp, the main view's phase 0), far shadow (the map slice, 0 unless the sun moved), atmosphere, weather, gi probes + gi ground (unless `--gi off`), scene early, voxel trees, far field, pyramid, cull late (phase 1's cull up to the cluster cull), voxel bricks late (its voxel_bricks.comp and the counter readback), scene late, voxel trees late, resolve (only with `--visibility on`), blended, clouds, gi albedo (unless `--gi off`), contact shadows, aa (the upscaler), bloom, exposure,
 tonemap, overlay when a panel is open; they sum to the total). A
-new pass is one `endPass("name")` call in `renderer_frame.cpp`.
+new pass is one `endPass("name")` call in `renderer_frame.cpp`. Since 4f316ce "cull clusters" and
+"cull late" no longer include the voxel bricks: to compare with figures from before it, sum each
+pair (cull clusters + voxel bricks, cull late + voxel bricks late).
 
 ## Views, trees, scatter, placement layers, far field, GI and shadow modes
 
@@ -452,7 +454,9 @@ draw depth and a visibility id (scene attachment 7, RG32UI, +28 MiB at
 1440p) instead of shading; the masked lists are drawn once, with the alpha
 test (no depth pre-pass, no depth-EQUAL pass); terrain, the far field and
 voxel quads stay forward and write id 0. A launch flag (it recreates the
-targets); debug views use the forward debug set as before.
+targets); debug views use the forward debug set as before. Capture runs print
+`resolve: N pixels, M clamped > 1e-3` per view (counters reset when a view starts, sampled every
+16th frame): pixels whose barycentrics needed clamping, the resolve against the rasterizer.
 `--voxel-lod on|off|near` (default on): the voxel levels of tree models' cluster
 DAGs (spec `2026-11-24-dag-voxel-foliage-design.md`; models with a foliage
 mesh over 4 m tall) replace their triangles where the LOD cut picks them,

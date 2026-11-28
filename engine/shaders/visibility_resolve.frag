@@ -44,6 +44,7 @@ layout(location = 5) out vec4 outNormalRoughness;
 layout(location = 6) out vec4 outSunLight;
 
 const float kClampTolerance = 1e-3;
+const uint kStatsEveryFrames = 16u;
 
 void main() {
     uvec2 id = texelFetch(visibilityIds, ivec2(gl_FragCoord.xy), 0).xy;
@@ -60,7 +61,7 @@ void main() {
 
     Barycentrics r = barycentricsAt(v0.clip, v1.clip, v2.clip, gl_FragCoord.xy,
                                     vec2(textureSize(visibilityIds, 0)));
-    if ((scene.frameIndex & 15u) == 0u) {
+    if (scene.frameIndex % kStatsEveryFrames == 0u) {
         atomicAdd(stats.resolvedPixels, 1u);
         if (r.outside > kClampTolerance) {
             atomicAdd(stats.clampedPixels, 1u);

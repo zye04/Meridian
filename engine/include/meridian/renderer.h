@@ -424,14 +424,17 @@ public:
   // fullscreen resolve. Recreates the targets and scene pipelines when it
   // changes, which resets temporal history: call before the first frame.
   void setVisibilityBuffer(bool on);
-  // The resolve's pixels on every 16th frame since the targets were made,
-  // and how many needed their barycentrics clamped by more than 1e-3 (the
-  // rasterizer and the resolve disagreeing on a triangle). Zero when off.
+  // The resolve's pixels on every 16th frame since the targets were made or
+  // the last reset, and how many needed their barycentrics clamped by more
+  // than 1e-3 (the rasterizer and the resolve disagreeing on a triangle).
+  // Zero when off. 32-bit: a 2560x1440 view wraps after ~18k frames.
   struct VisibilityResolveStats {
     uint32_t resolvedPixels = 0;
     uint32_t clampedPixels = 0;
   };
   VisibilityResolveStats visibilityResolveStats() const;
+  // Zeroes the counters (waits for the device): a capture view's own figures.
+  void resetVisibilityResolveStats();
   // With voxel LOD on, the main view keeps the triangles of instances whose
   // origin is within this many meters of the camera (0, the default: voxels
   // wherever the LOD cut picks them); the cascades keep their voxel casters.
