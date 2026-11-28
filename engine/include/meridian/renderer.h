@@ -430,6 +430,11 @@ public:
   // sparkle.
   enum class FoliageSpecularAa : uint32_t { Off, On };
   void setFoliageSpecularAa(FoliageSpecularAa mode);
+  // Leaf voxels look the sun cascades up at their centre (Off, the default)
+  // or, as before, a voxel edge and the normal offset toward the sun (On,
+  // the A/B).
+  enum class VoxelShadowOffset : uint32_t { Off, On };
+  void setVoxelShadowOffset(VoxelShadowOffset mode);
   // Leaf light (on by default, off for A/B): leaves keep the sun highlight
   // and the ambient specular on the face seen as adaxial only (measured
   // leaves: the abaxial face is diffuse), and where the crown hides the sky

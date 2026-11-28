@@ -191,10 +191,14 @@ float cascadeVisibility(vec3 relative, vec3 normal) {
 // and beyond kFarShadowDistance from nothing but the far field: the other
 // casters (rocks, saplings) aren't drawn that far, and without a ray-traced
 // mode there is no TLAS.
+bool farShadowReceiver(vec3 origin) {
+    return pc.scene.voxelFarShadows != 0u &&
+           distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
+}
+
 float traceSunVisibility(vec3 origin, vec3 marchOrigin, vec3 direction, float start,
                          bool marchTerrain, vec3 relative, vec3 normal) {
-    bool far = pc.scene.voxelFarShadows != 0u &&
-               distance(origin, pc.scene.cameraPosition) > kFarShadowDistance;
+    bool far = farShadowReceiver(origin);
     float objects = 1.0;
     if (pc.scene.shadowMode == 0u) {
         if (!far) {

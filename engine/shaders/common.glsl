@@ -704,6 +704,11 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     uint foliageSpecularAa;
     // Renderer::setLeafLight (lighting.glsl setLeafLight).
     uint leafLight;
+    // Renderer::setVoxelShadowOffset (voxel_instance.frag).
+    uint voxelShadowOffset;
+    uint voxelShadowOffsetPad0;
+    uint voxelShadowOffsetPad1;
+    uint voxelShadowOffsetPad2;
 };
 
 bool isLeafMesh(SceneBuffer scene, MeshInfo mesh) {
