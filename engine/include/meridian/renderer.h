@@ -435,7 +435,11 @@ public:
   // leaves: the abaxial face is diffuse), and where the crown hides the sky
   // a leaf sees its neighbouring leaves (single scattering of the ambient)
   // instead of the crown occluding it; triangle leaves and leaf voxels alike.
-  enum class LeafLight : uint32_t { Off, On };
+  // With GI on, On applies that canopy term at full weight on top of the
+  // probes (which already trace the canopy): the look as chosen.
+  // GiWeighted (A/B) weights it by the share the probes leave to the
+  // fallback, so the crown counts once.
+  enum class LeafLight : uint32_t { Off, On, GiWeighted };
   void setLeafLight(LeafLight mode);
 
   // The colour grade, baked with the display transform into a 3D LUT on the

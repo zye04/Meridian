@@ -434,14 +434,19 @@ their specular lobe by the normal variation a pixel covers (lighting.glsl
 `specularAaRoughness`, Tokuyoshi-Kaplanyan): triangle leaves by the shading
 normal's screen derivatives, voxels by `kVoxelNeighbourNormalChange` over
 the voxel's size in pixels (voxel_instance.frag).
-`--leaf-light off|on` (default on; `off` for A/B): leaf triangles and leaf
+`--leaf-light off|on|gi-weighted` (default on; `off` for A/B): leaf triangles and leaf
 voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
 ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of
 the normal toward the viewer (measured tree leaves: the abaxial face is
 diffuse); where the crown hides the sky (triangles: the crown sky
 visibility; voxels: the model's depth up and sideways, and along R) the leaf
-sees its neighbours, omega x the ambient (one scattering), in place of the
-crown occlusion, with GI on or off.
+sees its neighbours, omega x the ambient (one scattering), both scaled by the
+micro shadow strength. GI off: this replaces the crown occlusion. GI on: it
+applies at full weight to the probes' ambient, which already traces the
+canopy, so inside the clipmap the crown darkens leaves twice; that is the
+look as chosen. `gi-weighted` (A/B, not default) weights the canopy term
+by the share the probes leave to the fallback (`sh.gi.remaining`), so the
+crown counts once.
 `--far-shadows tlas|voxel` (default voxel): sun shadow rays from receivers
 beyond `kFarShadowDistance` (4 km, lighting.glsl) skip the far-field trees
 in the TLAS and read the far shadow map of the bricks instead

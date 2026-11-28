@@ -1059,10 +1059,10 @@ Options parseOptions(int argc, char **argv) {
           static_cast<meridian::Renderer::FoliageSpecularAa>(it - std::begin(names));
     } else if (arg == "--leaf-light" && i + 1 < argc) {
       const std::string mode = argv[++i];
-      const char *names[] = {"off", "on"};
+      const char *names[] = {"off", "on", "gi-weighted"};
       const auto it = std::find(std::begin(names), std::end(names), mode);
       if (it == std::end(names)) {
-        throw std::runtime_error("--leaf-light takes off or on");
+        throw std::runtime_error("--leaf-light takes off, on or gi-weighted");
       }
       options.leafLight = static_cast<meridian::Renderer::LeafLight>(it - std::begin(names));
     } else if (arg == "--frames") {
@@ -1117,7 +1117,7 @@ Options parseOptions(int argc, char **argv) {
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
-                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on, "
+                               "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
                                "--dlss-mode dlaa|quality|balanced|performance, "

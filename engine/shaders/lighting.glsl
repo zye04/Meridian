@@ -413,6 +413,7 @@ Shading beginShading(Surface s, vec3 relativePosition) {
 // normal toward the viewer: a leaf seen from above shows its adaxial face,
 // from below its abaxial one.
 const float kLeafAdaxialUp = 0.5;
+const uint kLeafLightGiWeighted = 2u;
 
 float leafAdaxialShare(vec3 N) {
     return clamp(0.5 + kLeafAdaxialUp * N.y, 0.0, 1.0);
@@ -432,6 +433,14 @@ void setLeafLight(inout Shading sh, vec3 albedo, float visibility, float visibil
     sh.leafVisibility = clamp(visibility, 0.0, 1.0);
     sh.leafVisibilityR = clamp(visibilityR, 0.0, 1.0);
     sh.leafAlbedo = albedo;
+}
+
+// The canopy term's weight: 1, the crown at full weight (as chosen, GI on or
+// off), or with GiWeighted only on the share the GI probes leave to the
+// fallback, since inside the clipmap the probes already trace the canopy.
+// Needs sh.gi (addAmbientLight samples it first).
+float leafCanopyWeight(Shading sh) {
+    return pc.scene.leafLight == kLeafLightGiWeighted && pc.scene.giMode != 0u ? sh.gi.remaining : 1.0;
 }
 
 // `surfaceShadow`: the surface's own sun occlusion on top of the ray's
@@ -480,8 +489,9 @@ void addAmbientLight(inout Shading sh, float occlusion) {
     if (sh.leafVisibility >= 0.0) {
         // Lit by the ambient that reaches this point (the probes' or the sky's).
         vec3 open = diffuseIrradiance;
-        diffuseIrradiance = mix(sh.leafAlbedo * open, open, sh.leafVisibility);
-        skyRadiance = mix(sh.leafAlbedo * open / kPi, skyRadiance, sh.leafVisibilityR);
+        float weight = leafCanopyWeight(sh);
+        diffuseIrradiance = mix(open, mix(sh.leafAlbedo * open, open, sh.leafVisibility), weight);
+        skyRadiance = mix(skyRadiance, mix(sh.leafAlbedo * open / kPi, skyRadiance, sh.leafVisibilityR), weight);
     }
     vec3 specularReflectance = mix(sh.dfg.xxx, sh.dfg.yyy, sh.f0) * sh.energyCompensation;
     float specularOcclusion = specularAmbientOcclusion(sh.NoV, occlusion, sh.a);
@@ -509,7 +519,9 @@ void addTransmittedAmbient(inout Shading sh, vec3 transmitted, float occlusion) 
         backIrradiance = giIrradiance(sh.gi, -sh.N, backIrradiance);
     }
     if (sh.leafVisibility >= 0.0) {
-        backIrradiance = mix(sh.leafAlbedo * backIrradiance, backIrradiance, sh.leafVisibility);
+        backIrradiance = mix(backIrradiance,
+                             mix(sh.leafAlbedo * backIrradiance, backIrradiance, sh.leafVisibility),
+                             leafCanopyWeight(sh));
     }
     sh.diffuseLight += transmitted / kPi * backIrradiance *
                        multiBounceOcclusion(occlusion, sh.diffuseColor);

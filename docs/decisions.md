@@ -5895,11 +5895,20 @@ was found (Ghost of Tsushima, Horizon, SpeedTree docs).
   1 - V sees neighbours, omega x the ambient reaching the point (omega = reflected +
   transmitted albedo, one scattering). V is the crown sky visibility for triangles, the
   model's visibility 0.5 (up + sides) for voxels, exp(-depth along R) for the reflection.
-  This term holds the crown, so the crown occlusion it replaces is skipped for leaves:
-  crownOcclusion() for triangles (GI off; with GI on it is 1 anyway) and, for voxels, the
-  model occlusion (GI off) and the crownR / multi-bounce adjustments (GI on). The prototype
-  (branch far-light 5d03ce6, mode b) kept the GI-off crown occlusion on top, which applied
-  the crown twice; the port fixes that.
+  GI off: this term replaces the crown occlusion (crownOcclusion() for triangles, the model
+  occlusion for voxels); the prototype (branch far-light 5d03ce6, mode b) kept that occlusion
+  on top, which applied the crown twice, and the port fixes it. GI on: the term applies at
+  full weight after giIrradiance and the probes' skyOcclusion, and replaces the voxels'
+  crownR / multi-bounce adjustments; the probes already trace the canopy inside the
+  clipmap, so there the crown darkens leaves twice (main applied no crown term to
+  triangles with GI on, and to voxels only on `gi.remaining`). Kept as is: it is how B
+  looked when the user chose it (GI on). `--leaf-light gi-weighted` (A/B) weights the
+  canopy term by `sh.gi.remaining`, the crown counted once; backlog row "Leaf light
+  canopy term counts the crown twice with GI on".
+- Triangles and voxels take their crown terms scaled by the micro shadow strength (as the
+  voxels' model occlusion), so `--micro-shadows off` leaves no seam at the switch. The
+  reflection term still differs: triangles use the isotropic crown visibility, voxels
+  exp(-depth along R).
 - Recollision (omega / (1 - p omega), the prototype's b2) and the partial modes a, a2 are
   dropped: b2's mean |diff| from off stayed within 0.02 /255 of b's at every view.
 
@@ -5911,3 +5920,6 @@ frame-to-frame |dL| 0.0371 -> 0.0346; triangle/voxel seam at equal distance (lon
 hornbeam) voxel/triangle Y near 0.735 -> 0.823 vs 0.670 -> 0.791, i.e. B narrows the
 switch; GPU o4 30.69 -> 30.87, h2 32.86 -> 33.02 ms. Main has no crown fill, so the port's
 look differs from the one judged; the port proof compares main against the branch.
+Port on main (517883d vs the branch, 2560x1440 DLAA, Release, 120 frames): GPU start 24.15
+-> 24.19, o4 (relief) 27.27 -> 27.44, eye height under the canopy 23.14 -> 22.57 ms; VRAM
+unchanged; 0 validation errors.
