@@ -61,7 +61,7 @@ Smaller notes, not blocking:
 
 ## Review Focus
 
-1. **Edge pixels of sub-pixel triangles:** a pixel whose centre the rasterizer gave to triangle T must get barycentrics inside T, within 1e-3, from the resolve's recomputed positions. The rasterizer and the resolve can disagree by FMA contraction. Covered by Task 4 (`precise`, the clamp counter) and gated in Task 8: clamped share below 1e-4 of resolved pixels.
+1. **Edge pixels of sub-pixel triangles:** a pixel whose centre the rasterizer gave to triangle T must get barycentrics inside T, within 1e-3, from the resolve's recomputed positions. The rasterizer and the resolve can disagree by FMA contraction. Covered by Task 4 (`precise`, the clamp counter) and gated in Task 8. Bar restated 2026-11-28 after the midpoint review (F5): the rasterizer snaps vertices to 1/256 px, so the resolve snaps too, and the counter is per view. Measured after the snap: start 2.9e-5, edge 5.5e-5, overview 3.2e-4, s1 3.8e-4 (10x under the unsnapped figures). Bar: below 1e-4 at the ground views; the aerial views, whose cluster pixels are mostly sub-pixel triangles, below 5e-4. A clamped pixel takes its nearest edge's attributes.
 2. **Double-sided leaves seen from the back:** facing must match the rasterizer's (`VK_FRONT_FACE_COUNTER_CLOCKWISE`, negative-determinant transforms included). Covered by the Task 4 unit test `facingMatchesWindingUnderMirror`, and in Task 8 by the normal guide compared off vs on at the forest edge.
 3. **A pixel covered early by a cluster, then late by terrain:** cannot happen; terrain draws only early. **A pixel covered by a cluster early, then won by the far field:** must read id 0. Covered by the far field's id-0 write (Task 5) and checked in Task 8 at the overview (far cells present), with a whole-frame diff.
 4. **Streamed plants mid-fade (`instance.fade < 1`):** the resolve must reach the same `loadInstance` answer and blend toward `terrainNormal()` with explicit gradients. The meadow view in the Task 8 look gate covers this, together with a `--camera-velocity` motion clip through the streamed ring (motion-gates).
@@ -282,7 +282,7 @@ All runs are Release at 2560x1440, `--trees`, `--visibility off` vs `on`, on the
 - [ ] **Step 4: Sparkle.** `tools/white-dots.py` on s1 and edge, off vs on. Expected: on ≤ off + 0.5 per 1e4 px (normal-map specular AA dropped in the resolve, spec risk).
 - [ ] **Step 5: Cost.** The `GPU passes:` lines off vs on at the six views, two runs each (spread first). Expected: no view loses more than 0.3 ms. The edge gains at least 6.1 ms and the overview at least 4.0 ms, the latter only after Task 10 (its saving is voxels), so stage 2 reports the overview without gating it.
 - [ ] **Step 6: Counters and VRAM.** Every run: `0 dropped`; the cascade need lines unchanged off vs on; `Loaded: resident` +28 MiB.
-- [ ] **Step 7: Clamp counter.** `resolve: ... clamped` share below 1e-4 at every view.
+- [ ] **Step 7: Clamp counter.** `resolve: ... clamped` share per view below 1e-4 at the ground views, below 5e-4 at overview and s1 (bar restated 2026-11-28, see correction 1).
 - [ ] **Step 8: Debug.** One short Debug capture `--visibility on`, 0 validation errors; `--debug-view lod` with `--visibility on` works.
 - [ ] **Step 9: Commit** the ledger.
 

@@ -43,7 +43,8 @@ struct Barycentrics {
 // The pixel at framebuffer position `pixel` (y down, centres at + 0.5) in
 // the triangle with clip positions c0, c1, c2, at render size `size`: where
 // the pixel's ray meets the triangle, k = adj(M) (nx, ny, 1) with M's columns
-// the vertices' (x, y, w) and b = k / sum(k). No division by w, so a vertex
+// the vertices' (x, y, w) and b = k / sum(k) (2D homogeneous rasterization,
+// Olano and Greer 1997). No division by w, so a vertex
 // behind the camera gives the visible part's weights.
 Barycentrics barycentricsAt(vec4 c0, vec4 c1, vec4 c2, vec2 pixel, vec2 size) {
     vec3 x = vec3(c0.x, c1.x, c2.x);
@@ -56,23 +57,29 @@ Barycentrics barycentricsAt(vec4 c0, vec4 c1, vec4 c2, vec2 pixel, vec2 size) {
         x = (sx / size.x * 2.0 - 1.0) * w;
         y = (sy / size.y * 2.0 - 1.0) * w;
     }
-    // Rows of adj(M): row i is the cross product of the other two columns.
-    vec3 ax = y.yzx * w.zxy - w.yzx * y.zxy;
-    vec3 ay = w.yzx * x.zxy - x.yzx * w.zxy;
-    vec3 a1 = x.yzx * y.zxy - y.yzx * x.zxy;
+    // k_i = det(c_j, c_k, p) with p = (nx, ny, 1) = det(a_j, a_k, p) with
+    // a = c - w p: the vertices relative to the pixel's ray, whose third
+    // component is 0, so k_i = a_j x a_k (2D). Small, pixel-relative values:
+    // no cancellation between large clip coordinates.
     vec2 n = pixel / size * 2.0 - 1.0;
     vec2 dn = 2.0 / size;
-    vec3 q = ax * n.x + ay * n.y + a1;
+    vec3 rx = x - w * n.x;
+    vec3 ry = y - w * n.y;
+    vec3 q = rx.yzx * ry.zxy - ry.yzx * rx.zxy;
+    // dk_i / dnx and dk_i / dny.
+    vec3 qx = w.zxy * ry.yzx - w.yzx * ry.zxy;
+    vec3 qy = w.yzx * rx.zxy - w.zxy * rx.yzx;
     float s = q.x + q.y + q.z;
-    float sx = (ax.x + ax.y + ax.z) * dn.x;
-    float sy = (ay.x + ay.y + ay.z) * dn.y;
+    float sx = (qx.x + qx.y + qx.z) * dn.x;
+    float sy = (qy.x + qy.y + qy.z) * dn.y;
     float invS = 1.0 / s;
     Barycentrics r;
     r.b = q * invS;
-    r.dbdx = (ax * dn.x - r.b * sx) * invS;
-    r.dbdy = (ay * dn.y - r.b * sy) * invS;
-    // det(M): its sign is Vulkan's facing (negative NDC area is front).
-    r.frontFacing = x.x * ax.x + y.x * ay.x + w.x * a1.x < 0.0;
+    r.dbdx = (qx * dn.x - r.b * sx) * invS;
+    r.dbdy = (qy * dn.y - r.b * sy) * invS;
+    // det(M) = sum(w_i k_i) = the point's w x sum(k), so at a visible point
+    // sum(k) has det's sign: Vulkan's facing (negative NDC area is front).
+    r.frontFacing = s < 0.0;
     r.outside = max(0.0, -min(r.b.x, min(r.b.y, r.b.z)));
     return r;
 }
