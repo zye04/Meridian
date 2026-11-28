@@ -570,7 +570,8 @@ void Renderer::setEffects(const Effects &effects) {
   impl_->effects.microShadowStrength = std::clamp(effects.microShadowStrength, 0.0f, 1.0f);
   impl_->effects.contactLength = std::clamp(effects.contactLength, 0.0f, 3.0f);
   impl_->effects.cutoutMipBias = std::clamp(effects.cutoutMipBias, -2.0f, 2.0f);
-  impl_->effects.giCanopyClumping = std::clamp(effects.giCanopyClumping, 0.3f, 1.0f);
+  impl_->effects.giCanopyClumping =
+      effects.giCanopyClumping > 0.0f ? std::clamp(effects.giCanopyClumping, 0.3f, 1.0f) : 0.0f;
   impl_->effects.cloudOutline = std::clamp(effects.cloudOutline, 0.0f, 3.0f);
 }
 
@@ -974,7 +975,8 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.microShadowStrength = effects.microShadows ? effects.microShadowStrength : 0.0f;
   scene.contactLengthScale = effects.contactLength;
   scene.cutoutMipBias = effects.cutoutMipBias;
-  scene.giCanopyClumping = effects.giCanopyClumping;
+  scene.giCanopyClumping =
+      effects.giCanopyClumping > 0.0f ? effects.giCanopyClumping : impl_->farClumping[0];
   scene.drawLists = impl_->drawLists.address;
   scene.placedInstances = impl_->placedInstances.address;
   scene.cells = impl_->cells.address;

@@ -201,9 +201,10 @@ struct Effects {
   bool bloom = true;                // off skips the pass
   float cloudOutline = 0.0f;        // cloud silhouette and lobe sharpening, 0 = off, 0..3
   float cutoutMipBias = 1.0f;       // extra mip bias of the alpha cut-out test, -2..2
-  // Clumping index on the GI's paths through the far-field canopy, 0.3..1 (1 = the
-  // uniform medium): 0.71 is our trees' own, the 1 m bake against its 4 m voxels.
-  float giCanopyClumping = 0.71f;
+  // Clumping index on the GI's paths through the far-field canopy: 0 = measured
+  // from the loaded trees' far-field bakes (farClumpingIndex), else 0.3..1
+  // (1 = the uniform medium).
+  float giCanopyClumping = 0.0f;
   bool stableTaa = true; // TAA: Catmull-Rom history, 3x3 reconstruction, no motion sharpen; off = sharper, less stable
 };
 

@@ -35,7 +35,8 @@ const float kGiLeafSunDistance = 64.0;
 // tau). The GI's paths through it take the clumping index (Nilson 1971):
 // transmittance exp(-Omega tau), set by --effects gi-clumping (1 = none).
 float giClumped(float transmittance) {
-    return pow(max(transmittance, 0.0), pc.scene.giCanopyClumping);
+    float omega = pc.scene.giCanopyClumping;
+    return omega >= 1.0 ? transmittance : pow(max(transmittance, 0.0), omega);
 }
 // Neutral ground albedo where the ground cache has none yet (a typical
 // vegetated ground's luminance, no hue: the hue comes from the cache).

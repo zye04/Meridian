@@ -368,6 +368,9 @@ struct Renderer::Impl {
   Buffer farFieldInfo;
   // The far cells the cell cull appends each frame (one uint per cell).
   Buffer farCellList;
+  // The far field's clumping index at kFarClumpingZeniths (farClumpingIndex),
+  // from the loaded prototypes' bakes; 1 without a far field.
+  std::array<float, 3> farClumping = {1.0f, 1.0f, 1.0f};
   // The far shadow map (renderer_farshadow.cpp): two maps of 16-bit depths,
   // the built one (index farShadowBuilt) and the one under rebuild, each
   // with the grid it was built for; farShadowState is farShadowStep's.

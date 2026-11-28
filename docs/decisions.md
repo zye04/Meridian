@@ -6235,19 +6235,27 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA
   clumped foliage (Nilson 1971, "A theoretical analysis of the frequency of gaps in plant stands",
   Agricultural Meteorology 8; Chen & Black 1992; mapped globally from MODIS by He, Chen, Pisek, Schaaf
   & Strahler 2012, Remote Sensing of Environment 119, 118-130).
-- **Omega is derived from our data, not fitted.** For every prototype's 1 m far-field bake
-  (`farBakeGridFromVoxels`), per level box and vertical rays, the fine columns' mean exp(-tau) is
-  compared with exp(-mean tau). Omega solves sum exp(-Omega tau_box) = sum mean_fine exp(-tau)
-  (the 21 tree prototypes of the relief scene): **L0 (4 m) 0.71, L1 (8 m) 0.56, L2 (16 m) 0.49**. The GI's
-  rays stay within 300 m and march L0 up to 256 m (`kFarRayLevelEnd0`), so they use 0.71. Sub-metre
-  clumping is not in a 1 m grid, so the true value is lower still. The tracer only confirms the value.
+- **Omega is measured from the loaded trees at far-field build, not fitted** (`farClumpingIndex`, farfield.cpp,
+  called by `buildFarField` over every prototype's 1 m bake). Rays cross each bake one per metre, and their 1 m
+  voxels' transmittance is set against that of the same ray through the 4 m boxes the L0 filter makes (box mean
+  extinction). Omega solves sum exp(-Omega tau_box) = sum exp(-tau_fine) over all rays. The value is measured at
+  zenith 0 (vertical), 45 and 75 degrees (8 azimuths each); startup prints the three figures. For the 21 tree
+  prototypes of the relief scene: **0.712 / 0.704 / 0.702**, so here it does not depend on direction (the
+  literature has Omega rise toward 1 at large zenith angles, Kucharik et al. 1999: within one crown's bake the
+  slant ray crosses no more clumps than the vertical one). That is why one value, the vertical one, serves every
+  GI ray. The same fit on the coarser vertical boxes gives L1 (8 m) 0.56 and L2 (16 m) 0.49. These are recorded
+  for other consumers of the far field, not used here. GI rays march L0 to 256 m (`kFarRayLevelEnd0`) and L1 from
+  256 to 300 m (`kGiTreeDistance`); that last stretch takes L0's value, because the march returns one
+  transmittance per ray and 44 m at the end of a 300 m ray rarely holds the canopy that matters. Sub-metre
+  clumping is not in a 1 m grid, so the true value is lower still. The tracer only confirms the value. Cost:
+  templates 10 -> 174 ms at startup (three directions). `--effects gi-clumping=X` overrides (0.3..1); 1 skips
+  the correction and is main exactly.
 - **Chosen:** `giClumped` (gi.glsl) raises each far-field transmittance on a GI path to Omega
-  (exp(-Omega tau)): the probe ray, the foliage hit's sky and sun, the ground cache's sun. That is one
-  value for sky and bounce alike, the same medium on every path. `--effects gi-clumping=1` gives the
-  old uniform medium. Not changed, and possible users of the same correction: far shadows and far-cell
-  sun (`farFieldTransmittance` in the surfaces' sun path, at L0-L2: 0.71 / 0.56 / 0.49 by level), the
-  leaf light's canopy term, lane pt's crown fill (calibrated against today's probes; it stands partly
-  in for this sky).
+  (exp(-Omega tau)): the probe ray, the foliage hit's sky and sun, the ground cache's sun. That is one value for
+  sky and bounce alike, once per path segment (a probe -> leaf -> sun path takes it on each segment, each a
+  separate crossing). Not changed, and possible users of the same correction: far shadows and far-cell sun
+  (`farFieldTransmittance` in the surfaces' sun path, at L0-L2), the leaf light's canopy term, lane pt's crown
+  fill (calibrated against the probes before this; it stands partly in for this sky).
 - **Measured** (Release, `Render 2560x1440`, raster / tracer ambient by class, walk pose; sky and bounce
   split with the throwaway switches):
 
@@ -6270,6 +6278,9 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA
   o4 1.38 -> 1.42).
 - **What the user sees** (default look of main ee101c1, clear haze and starting grade G4, walk pose, display luma Y' 0-255 p5 / p50 / p95):
   15.9 / 29.0 / 51.2 -> 18.2 / 33.9 / 59.7. Whole frame mean |diff|: walk 4.29, start 0.28, relief o4 0.44 /255; the last
-  two are within the `--trees` run-to-run floor of ~0.5. Moving through the forest (napf edge, 8 m/s, 600 frames; relief walk,
-  8 m/s, 300 frames): the frame median follows the same smooth curve with and without the clumping (largest 20-frame step 4.8 /
-  4.9), with no GI lag or pumping.
+  two are within the `--trees` run-to-run floor of ~0.5. Meadow into forest (lane port's walk:
+  relief, end `623.8 987.6 523.6`, 8 m/s, 600 frames, every 5th saved), median display Y': main 5 -> 79 -> 55,
+  largest 5-frame step 4.78, one turn; branch 6 -> 80 -> 60, 4.79, one turn: no GI lag, no pumping.
+- **Low sun** (elevation 15 deg, same azimuths; the tracer's direct sun is 0 at both poses, so this is all
+  ambient): walk 0.75 -> 0.96 and o4 nearR 0.61 -> 0.67 of the tracer (walk scaled by the exposure difference,
+  raster EV100 6.61 / 6.86 against the tracer's 6.98). Long rays are not over-corrected.

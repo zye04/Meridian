@@ -238,6 +238,7 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
   std::vector<FarTemplates> templates(prototypes.size());
   std::vector<FarSlotColor> colors;
   std::vector<float> transmissionFactors;
+  std::vector<FarBakeGrid> bakes;
   const auto bakeStart = Clock::now();
   for (uint32_t p = 0; p < prototypes.size(); ++p) {
     if (!far[p]) {
@@ -273,12 +274,18 @@ void Renderer::Impl::buildFarField(std::span<const Prototype> prototypes,
     }
     FarTemplates &t = templates[p];
     t = filterFarTemplate(grid);
+    bakes.push_back(grid);
     std::printf("Far field template: prototype %u, %ux%ux%u m; %zu/%zu/%zu template voxels "
                 "L0/L1/L2\n",
                 p, grid.size[0], grid.size[1], grid.size[2], t[0].voxels.size(),
                 t[1].voxels.size(), t[2].voxels.size());
   }
+  for (size_t i = 0; i < kFarClumpingZeniths.size(); ++i) {
+    farClumping[i] = farClumpingIndex(bakes, kFarVoxelSize[0], kFarClumpingZeniths[i]);
+  }
   const double bakeMs = msSince(bakeStart);
+  std::printf("Far field clumping index (L0 boxes, %zu prototypes): %.3f / %.3f / %.3f at zenith 0 / 45 / 75 deg\n",
+              bakes.size(), farClumping[0], farClumping[1], farClumping[2]);
   const auto paletteSize = static_cast<uint32_t>(colors.size());
 
   const auto makeLayout = [&](uint32_t bytes, bool materials) {

@@ -177,6 +177,76 @@ FarBakeGrid farBakeGridFromVoxels(std::span<const VoxelGrid> slots, uint8_t pale
   return grid;
 }
 
+float farClumpingIndex(std::span<const FarBakeGrid> grids, float boxSize, float zenith) {
+  constexpr float kRaySpacing = 1.0f;
+  constexpr float kStep = 0.5f;
+  const auto f = static_cast<uint32_t>(std::lround(boxSize / kFarTemplateVoxel));
+  const int azimuths = zenith > 0.0f ? 8 : 1;
+  std::vector<double> boxTau;
+  double fineTransmittance = 0.0;
+  for (const FarBakeGrid &grid : grids) {
+    const uint32_t n[3] = {grid.size[0], grid.size[1], grid.size[2]};
+    const uint32_t m[3] = {(n[0] + f - 1) / f, (n[1] + f - 1) / f, (n[2] + f - 1) / f};
+    std::vector<float> box(size_t{m[0]} * m[1] * m[2], 0.0f);
+    for (uint32_t z = 0; z < n[2]; ++z) {
+      for (uint32_t y = 0; y < n[1]; ++y) {
+        for (uint32_t x = 0; x < n[0]; ++x) {
+          box[x / f + m[0] * (y / f + size_t{m[1]} * (z / f))] +=
+              grid.extinction[x + n[0] * (y + size_t{n[1]} * z)] / float(f * f * f);
+        }
+      }
+    }
+    const auto sample = [](const std::vector<float> &a, const uint32_t *size, Vec3 p, float cell) {
+      const float c[3] = {std::floor(p.x / cell), std::floor(p.y / cell), std::floor(p.z / cell)};
+      for (int i = 0; i < 3; ++i) {
+        if (c[i] < 0.0f || c[i] >= float(size[i])) {
+          return 0.0f;
+        }
+      }
+      const auto i = [&](int k) { return static_cast<size_t>(c[k]); };
+      return a[i(0) + size[0] * (i(1) + size_t{size[1]} * i(2))];
+    };
+    const Vec3 extent{float(n[0]), float(n[1]), float(n[2])};
+    const Vec3 centre = extent * (0.5f * kFarTemplateVoxel);
+    const float radius = 0.5f * length(extent) * kFarTemplateVoxel;
+    for (int a = 0; a < azimuths; ++a) {
+      const float phi = 2.0f * 3.14159265f * float(a) / float(azimuths);
+      const Vec3 d{std::sin(zenith) * std::cos(phi), -std::cos(zenith), std::sin(zenith) * std::sin(phi)};
+      const Vec3 u = normalize(cross(d, std::abs(d.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f}));
+      const Vec3 v = cross(d, u);
+      for (float s = -radius; s <= radius; s += kRaySpacing) {
+        for (float t = -radius; t <= radius; t += kRaySpacing) {
+          const Vec3 start = centre + u * s + v * t - d * radius;
+          double fine = 0.0, coarse = 0.0;
+          for (float l = 0.5f * kStep; l < 2.0f * radius; l += kStep) {
+            const Vec3 p = start + d * l;
+            fine += sample(grid.extinction, n, p, kFarTemplateVoxel) * kStep;
+            coarse += sample(box, m, p, boxSize) * kStep;
+          }
+          if (coarse > 0.0) {
+            boxTau.push_back(coarse);
+            fineTransmittance += std::exp(-fine);
+          }
+        }
+      }
+    }
+  }
+  if (boxTau.empty()) {
+    return 1.0f;
+  }
+  // sum exp(-Omega tau) falls as Omega rises: bisect.
+  double lo = 0.0, hi = 2.0;
+  for (int i = 0; i < 40; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    double sum = 0.0;
+    for (double tau : boxTau) {
+      sum += std::exp(-mid * tau);
+    }
+    (sum > fineTransmittance ? lo : hi) = mid;
+  }
+  return static_cast<float>(0.5 * (lo + hi));
+}
+
 FarTemplates filterFarTemplate(const FarBakeGrid &grid) {
   FarTemplates templates;
   for (uint32_t level = 0; level < kFarLevels; ++level) {

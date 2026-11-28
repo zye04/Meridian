@@ -128,6 +128,16 @@ struct FarBakeGrid {
 // most extinction.
 FarTemplates filterFarTemplate(const FarBakeGrid &grid);
 
+// The clumping index of the far field's uniform-medium boxes (Nilson 1971):
+// the Omega for which a box's transmittance exp(-Omega tau) matches, summed
+// over rays through the bakes, the transmittance of their 1 m voxels. Rays
+// run at `zenith` radians from vertical (eight azimuths unless vertical), one
+// per metre across each grid, through boxes `boxSize` m on the grid's
+// lattice (the level filter's). 1 where no ray meets foliage.
+float farClumpingIndex(std::span<const FarBakeGrid> grids, float boxSize, float zenith);
+// The zenith angles (radians) the renderer measures it at: 0, 45 and 75 degrees.
+inline constexpr std::array<float, 3> kFarClumpingZeniths = {0.0f, 0.785398f, 1.308997f};
+
 // Per palette slot: coverage-weighted sums of its voxels' reflected and
 // transmitted colours (VoxelPayload::albedo, ::transmission) and the
 // coverage, which the palette entry divides by.

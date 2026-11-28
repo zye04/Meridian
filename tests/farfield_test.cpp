@@ -659,3 +659,31 @@ TEST_CASE("The shadow map rebuild never stalls and follows the sun") {
   CHECK(step.count == 0);
   CHECK_FALSE(step.state.building);
 }
+
+TEST_CASE("farClumpingIndex: a uniform medium has none, alternating columns a lot") {
+  FarBakeGrid uniform = bakeGrid({0.0f, 0.0f, 0.0f}, 8, 8, 8);
+  std::fill(uniform.extinction.begin(), uniform.extinction.end(), 0.5f);
+  for (const float zenith : kFarClumpingZeniths) {
+    CHECK(farClumpingIndex(std::span(&uniform, 1), 4.0f, zenith) ==
+          doctest::Approx(1.0f).epsilon(0.05));
+  }
+  // Vertical 1 m columns, dense and empty in a checkerboard: a vertical ray
+  // sees 8 m at 1 per m or nothing, its 4 m box half that on every ray, so
+  // exp(-4 Omega) = (1 + exp(-8)) / 2.
+  FarBakeGrid columns = bakeGrid({0.0f, 0.0f, 0.0f}, 8, 8, 8);
+  for (uint32_t z = 0; z < 8; ++z) {
+    for (uint32_t y = 0; y < 8; ++y) {
+      for (uint32_t x = 0; x < 8; ++x) {
+        columns.extinction[x + 8 * (y + size_t{8} * z)] = (x + z) % 2 == 0 ? 1.0f : 0.0f;
+      }
+    }
+  }
+  const float expected = -std::log(0.5f * (1.0f + std::exp(-8.0f))) / 4.0f;
+  CHECK(farClumpingIndex(std::span(&columns, 1), 4.0f, 0.0f) ==
+        doctest::Approx(expected).epsilon(0.05));
+  // A slant ray crosses both kinds of column, so the gaps average out.
+  CHECK(farClumpingIndex(std::span(&columns, 1), 4.0f, kFarClumpingZeniths[2]) > 0.5f);
+  // Nothing to see: no clumping.
+  const FarBakeGrid empty = bakeGrid({0.0f, 0.0f, 0.0f}, 4, 4, 4);
+  CHECK(farClumpingIndex(std::span(&empty, 1), 4.0f, 0.0f) == 1.0f);
+}
