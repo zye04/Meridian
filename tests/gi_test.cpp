@@ -103,4 +103,28 @@ TEST_CASE("leafPhase forward is transmission, backward is reflection") {
   CHECK(leafPhase(1.0f, 0.0f, 0.2f) > 0.0f);
   CHECK(leafPhase(1.0f, 0.2f, 0.0f) == doctest::Approx(0.0f));
   CHECK(leafPhase(-1.0f, 0.2f, 0.0f) > leafPhase(-1.0f, 0.0f, 0.2f));
+  // Light transmitted through a leaf leaves on the far side: never straight back.
+  CHECK(leafPhase(-1.0f, 0.0f, 0.2f) == doctest::Approx(0.0f));
+}
+
+// The phase is the mean over uniform leaf normals of |mu'| |mu| times rho
+// (outgoing on the incident side) or tau (far side), scaled by 2 / pi so it
+// integrates to rho + tau.
+TEST_CASE("leafPhase matches the integral over spherical leaf normals") {
+  const std::vector<Vec3> normals = fibonacciDirections(200000);
+  const Vec3 in{0.0f, 0.0f, 1.0f};
+  const std::array<std::array<float, 2>, 3> leaves{{{0.0f, 0.2f}, {0.2f, 0.0f}, {0.1f, 0.15f}}};
+  for (const auto &[r, t] : leaves) {
+    for (const float b : {0.0f, 0.6f, 1.2f, 1.9f, 2.6f, kPi}) {
+      const Vec3 out{std::sin(b), 0.0f, std::cos(b)};
+      double sum = 0.0;
+      for (const Vec3 &n : normals) {
+        const float mi = n.x * in.x + n.y * in.y + n.z * in.z;
+        const float mo = n.x * out.x + n.y * out.y + n.z * out.z;
+        sum += std::abs(mi * mo) * (mi * mo > 0.0f ? t : r);
+      }
+      const double expected = 2.0 / kPi * sum / static_cast<double>(normals.size());
+      CHECK(leafPhase(std::cos(b), r, t) == doctest::Approx(expected).epsilon(1e-3).scale(0.2));
+    }
+  }
 }

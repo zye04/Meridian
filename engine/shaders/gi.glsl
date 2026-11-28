@@ -204,7 +204,7 @@ vec3 leafPhase(float cosBeta, vec3 reflectance, vec3 transmittance) {
     float c = clamp(cosBeta, -1.0, 1.0);
     float b = acos(c);
     vec3 gamma = (reflectance + transmittance) / (3.0 * kPi) * (sin(b) - b * c) +
-                 transmittance / kPi * c;
+                 transmittance / 3.0 * c;
     return gamma / (0.5 * kPi);
 }
 

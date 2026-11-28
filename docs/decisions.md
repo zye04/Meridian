@@ -5958,3 +5958,36 @@ the meadow into the forest (8 m/s, 600 frames, every 5th saved): median Y' rises
 start's adaptation to a plateau of 80 and falls smoothly to 67 (main 114 to 66), one turn,
 largest 5-frame step 5.6 (main 8.4): no pumping.
 
+## Leaf phase: transmission's cos term is tau / 3 (2026-11-28)
+
+- **Bug:** `leafPhase` (gi.glsl, gi.cpp) had the cos term as `tau / pi cos b`. The
+  area scattering phase of bi-Lambertian leaves with a spherical leaf-angle
+  distribution (Shultis & Myneni 1988) is
+  `Gamma(b) = omega / (3 pi) (sin b - b cos b) + (tau / 3) cos b`, with b the
+  scattering angle (0 forward) and omega = rho + tau. We still divide by pi G with G = 1/2.
+- **Derivation:** `Gamma ∝ mean over normals n of |mu'| |mu| (rho if mu mu' < 0, tau if
+  mu mu' > 0)`, where mu' = n.in and mu = n.out. Straight back (out = -in), mu mu' < 0 for every
+  n, so pure transmission scatters nothing back. Mirroring out swaps the two sides,
+  so `Gamma_tau(b) = Gamma_rho(pi - b)`. Putting `Gamma_rho = rho / (3 pi) (sin b - b cos b)`
+  into that gives the cos coefficient tau / 3. The cos term integrates to zero over the
+  sphere, so the normalisation (integral rho + tau) holds either way. That is why the old
+  test passed. The pure-rho half was already right ("backscatter 2 rho / 3 pi" in
+  the voxel-look round 3 entry).
+- **Effect:** with rho = tau, the sun single-scatter of foliage was 4.5% too dark looking
+  toward the sun and 4.5% too bright looking away. Side views did not change. Pure transmission
+  sent 0.0096 tau back. The term is used for the GI probes' foliage hits (`gi_probes.comp`) and the
+  (1 - aligned) share of voxel crowns (`voxel_instance.frag`).
+- **Measured** (Release, `Render 2560x1440, display 2560x1440`, DLSS, `--trees`): at the start view
+  `1119 1355.9 -431 -1.55 -0.1`, main vs main mean |diff| is 0.5838/255 and main vs fix 0.5841/255.
+  At the backlit edge `600 1205.6 -400 -1.55 0.02 --sun -0.9 0.4 0.15` the same pair is 0.5353 vs 0.5359.
+  Linear luminance there: voxel pixels x0.9994, triangle pixels x1.0015. That is a correctness fix with no
+  visible change at these views, so there is no flag for the old constant. `gi probes` 1.56 / 1.46 ms (main)
+  against 1.56 / 1.48 ms, unchanged.
+- **Tests:** pure-tau backscatter is 0, and `leafPhase` matches a 200k-normal Fibonacci
+  quadrature of the integral above (2 / pi x the mean) for rho only, tau only and mixed leaves at six
+  angles. Both fail on the old constant.
+- Source: Shultis, J. K. and Myneni, R. B. (1988), "Radiative transfer in vegetation
+  canopies with anisotropic scattering", JQSRT 39(2), 115-129. Found by an outside code read
+  (2026-11-28) and verified by Monte Carlo
+  (`.superpowers/fable-review/reviewers/bug-candidates-verify-2026-11-28.md` in the main
+  checkout).

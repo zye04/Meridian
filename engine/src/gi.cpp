@@ -75,7 +75,7 @@ float leafPhase(float cosBeta, float reflectance, float transmittance) {
   const float c = std::clamp(cosBeta, -1.0f, 1.0f);
   const float b = std::acos(c);
   const float gamma = (reflectance + transmittance) / (3.0f * pi) * (std::sin(b) - b * c) +
-                      transmittance / pi * c;
+                      transmittance / 3.0f * c;
   return gamma / (0.5f * pi);
 }
 
