@@ -1114,8 +1114,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->traverseClusters(cmd, frame, 0);
   endPass("traverse");
   impl_->cullClusters(cmd, frame, 0);
-  impl_->expandVoxelBricks(cmd, frame, 0);
   endPass("cull clusters");
+  impl_->expandVoxelBricks(cmd, frame, 0);
+  endPass("voxel bricks");
   impl_->recordFarShadow(cmd);
   endPass("far shadow");
 
@@ -1406,9 +1407,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   impl_->cullInstances(cmd, frame, 1);
   impl_->traverseClusters(cmd, frame, 1);
   impl_->cullClusters(cmd, frame, 1);
+  endPass("cull late");
   impl_->expandVoxelBricks(cmd, frame, 1);
   impl_->readBackCounters(cmd, frame, impl_->drawCounters, 0);
-  endPass("cull late");
+  endPass("voxel bricks late");
 
   transitionImage(cmd, {impl_->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
