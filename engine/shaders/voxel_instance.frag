@@ -126,12 +126,19 @@ void main() {
         // the sun moves the receiver nearer the light by a voxel edge and the
         // normal offset (~4 m in cascade 3), past its own crown's leaves in
         // front of it, and lit the leaves inside a sunlit crown (decisions.md
-        // "Voxel sun lookup"); the depth bias holds the acne. The ray-traced
-        // and far-shadow paths keep the offset start.
-        bool centre = scene.voxelShadowOffset == 0u && scene.shadowMode == 0u && !farShadowReceiver(origin);
+        // "Voxel sun lookup"); the depth bias holds the acne. The coarsest
+        // cascade casts the trees as far-cell bricks, which shade a centre
+        // lookup themselves: across cascade 3's outer blend band the lookup
+        // returns to the offset start, which the ray-traced and far-shadow
+        // paths keep too.
+        float offset = 1.0;
+        if (scene.voxelShadowOffset == 0u && scene.shadowMode == 0u && !farShadowReceiver(origin)) {
+            float radius = scene.sunShadows.cascades[kShadowCascades - 2u].radius;
+            offset = smoothstep(radius * (1.0 - kCascadeBlendFraction), radius, length(relative));
+        }
         float visibility = traceSunVisibility(origin, origin, rayDirection, 0.0, false,
-                                              (centre ? world : origin) - scene.cameraPosition,
-                                              centre ? vec3(0.0) : rayDirection);
+                                              mix(world, origin, offset) - scene.cameraPosition,
+                                              rayDirection * offset);
         visibility *= float(inInfo.y);
         if (sh.NoL > 0.0) {
             addSunLight(sh, visibility * aligned, 1.0);
