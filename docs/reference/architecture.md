@@ -349,7 +349,8 @@ cloud motion where opacity > 0.5 and raises the transparency mask to the
 cloud coverage) -> contact shadows (contact_shadows.comp: with the
 complete depth, a 16-step march toward the sun over 0.25-1.5 m; where it
 hits the depth buffer, the pixel's exposed sun radiance (scene attachment
-6, written by mesh.frag: the sun branch after haze, pre-exposed; 0 for sky
+6, written by mesh.frag, voxel.frag and voxel_instance.frag: the reflected
+sun after haze, pre-exposed, leaf transmission excluded on every tier; 0 for sky
 and blended surfaces) is subtracted from the HDR colour, so ambient stays;
 faded out between 40 and 60 m; after the clouds, which stand in front of
 a surface that near only inside the layer) -> upscaler (`Upscaler::evaluate` with an

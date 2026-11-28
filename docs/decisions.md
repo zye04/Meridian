@@ -5977,7 +5977,9 @@ largest 5-frame step 5.6 (main 8.4): no pumping.
   toward the sun and 4.5% too bright looking away. Side views did not change. Pure transmission
   sent 0.0096 tau back. The term is used for the GI probes' foliage hits (`gi_probes.comp`) and the
   (1 - aligned) share of voxel crowns (`voxel_instance.frag`).
-- **Measured** (Release, `Render 2560x1440, display 2560x1440`, DLSS, `--trees`): at the start view
+- **Measured** (Release, `Render 2560x1440, display 2560x1440`, DLSS, `--trees`, on main c5a8d2e;
+  on 4f316ce with leaf light, with the contact change below, the start view is the same, 0.5943 against
+  a floor of 0.5891): at the start view
   `1119 1355.9 -431 -1.55 -0.1`, main vs main mean |diff| is 0.5838/255 and main vs fix 0.5841/255.
   At the backlit edge `600 1205.6 -400 -1.55 0.02 --sun -0.9 0.4 0.15` the same pair is 0.5353 vs 0.5359.
   Linear luminance there: voxel pixels x0.9994, triangle pixels x1.0015. That is a correctness fix with no
@@ -5991,3 +5993,27 @@ largest 5-frame step 5.6 (main 8.4): no pumping.
   (2026-11-28) and verified by Monte Carlo
   (`.superpowers/fable-review/reviewers/bug-candidates-verify-2026-11-28.md` in the main
   checkout).
+
+## Contact shadows remove the reflected sun only, on every tier (2026-11-28)
+
+- **Problem:** the contact pass subtracts the sun radiance each surface writes to scene
+  attachment 6. mesh.frag (triangles) and voxel.frag (far cells) write only the reflected sun,
+  but voxel_instance.frag also wrote the transmitted sun and the leaf-phase sun of its unaligned
+  leaves. Crowns switch to voxels at 45-55 m (projected size), inside the contact fade
+  (40-60 m), so on backlit crowns contact shadows took more off the voxels than off the
+  triangles they replace.
+- **Choice:** voxel_instance.frag writes the reflected sun only: the aligned front sun plus
+  the reflected half of `leafPhase` (`leafPhase(c, rho, 0)`). The phase is linear in rho and
+  tau, so the two halves add up to the old term, and the shaded colour is unchanged. Rejected:
+  putting transmitted sun into the attachment on every tier. That would darken backlit
+  triangle leaves near the camera, a look change on the tier that is closest to the reference,
+  just to agree with the voxels.
+- **Measured** (Release, `Render 2560x1440, display 2560x1440`, DLSS, on main 4f316ce with leaf
+  light on; backlit edge `600 1205.6 -400 -1.55 0.02 --trees --sun -0.9 0.4 0.15`). Pixels are voxels by
+  default and triangles with `--voxel-near 150` (`--debug-view lod`), and the contact pass changes them by
+  more than 1%. Linear luminance taken off by contact shadows (default vs `--effects contact=0`):
+  voxels 8.10% -> 5.12%, triangles 4.64% -> 5.08% (unchanged code; run noise). Voxel/triangle ratio
+  with contact on 0.927 -> 0.952, the same as without (0.961 / 0.952), so contact shadows no longer
+  step at the switch. Whole frame +0.11/255 (mean |diff| 0.5755 against a floor of 0.4813). The
+  ~0.95 left between the tiers predates this (voxel-look rounds). GPU 28.8-29.7 ms on both sides
+  (noise), 0 validation errors.
