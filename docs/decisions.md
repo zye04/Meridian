@@ -6217,3 +6217,40 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA
 - With the clear haze (the default with this grade) the eye-height forest view's p50 is
   29.2 (main under summer 28.9; the previous grade under clear 17.4). The previous look is
   `--haze summer --grade tools/grades/starting-2026-11-28.json`.
+
+
+## Far ground matched to the blades (2026-11-28)
+
+Past the grass mat's draw range (full density to 30 m, gone at 120 m) the
+meadow is the terrain's grass role. On main it rendered brighter and
+yellower than its own blades in the same frame (start view: blades OKLCh
+L 0.524 h 125, terrain at 200 m L 0.636 h 113; at the aerial o4 h 109
+against 1.jpg's 146). The grass role's target colour was a hand-set triple,
+re-matched on 2026-11-20 by same-pixel radiance at one view after the
+blades' tint. Two of its assumptions no longer hold:
+
+- It carried the blades' colour only implicitly. Its R/G (0.64) is redder
+  than the tinted blades' (0.56), so the hue drifted toward yellow.
+- It matched total radiance at one view, sheen included. The bare grass
+  role is a glossy plane (ARM roughness 0.60); with the sun ahead its GGX
+  sheen at grazing view is a large share of what the terrain sends (debug
+  `specular` at h2 and o4), while the blades, whose normals spread over
+  the hemisphere, send almost none. A radiance match at one view can't
+  hold at another. The blades have since gained the leaf light (diffuse
+  transmission, 2026-11-23), which moved them again.
+
+Choice: the target is derived, not set: `kGrassMatShade` x
+`kGrassTint` x `kGrassMatAlbedo`, the last being the mat scans' mean
+base colour as `meridian-cook --stats` reports it. `kGrassMatShade` is
+per channel, (0.066, 0.086, 0.069): the blades shade each other, and the
+light that leaves the mat has scattered between green blades, so it is
+darker and greener than the blades' albedo. It is measured in the same
+frame, the thing the eye compares: walk120 (`765.2 1009.5 665.1 -0.785
+0`, relief terrain), sunlit blades at ~15 m against the sward at ~150 m,
+the sun ahead, behind and to the side, `--haze clean`, with the next two
+entries in place (the sward's sheen gone, its extent from the mat).
+Linear grass target (0.037, 0.058, 0.0104) became (0.0140, 0.0325,
+0.0044). Result with the default haze: sward minus blades OKLCh L
+-0.07 / -0.06 / -0.02 (ahead / behind / side), hue 114-116 against
+118-124; main's ground there +0.21 / -0.04 / +0.11, hue 100-108.
+`tools/handover.py` in the lane's `.superpowers/ground/` repeats it.

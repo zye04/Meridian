@@ -108,6 +108,26 @@ void updateFlyCamera(meridian::Camera &camera, const meridian::Window &window,
   }
 }
 
+// The grass mat's base colour: the alpha-weighted mean linear RGB of its two
+// scans as the renderer transcodes them (`meridian-cook --stats` on
+// T_vlkhcbxia_4K_B-O.ktx2: 0.2127 0.2426 0.0762, T_qmBr2_4K_B-O.ktx2:
+// 0.1571 0.1552 0.0571; averaged), and the tint it is placed with.
+constexpr meridian::Vec3 kGrassMatAlbedo = {0.1849f, 0.1989f, 0.0667f};
+constexpr meridian::Vec3 kGrassTint = {1.15f, 1.9f, 0.95f};
+// The sward's colour over the tinted blades' albedo, per channel: the
+// blades shade each other, so the mat is darker than its albedo, and the
+// light that reaches the eye has scattered between green blades, so it is
+// greener. Measured in-frame, blades at 15 m against the sward at 150 m with
+// three sun directions and no haze (decisions.md, "Far ground matched to
+// the blades").
+constexpr meridian::Vec3 kGrassMatShade = {0.066f, 0.086f, 0.069f};
+
+meridian::Vec3 grassMatColor() {
+  return {kGrassMatShade.x * kGrassTint.x * kGrassMatAlbedo.x,
+          kGrassMatShade.y * kGrassTint.y * kGrassMatAlbedo.y,
+          kGrassMatShade.z * kGrassTint.z * kGrassMatAlbedo.z};
+}
+
 // Loads one cooked ground texture set from assets/terrain/<id>/, its base
 // color scaled from its mean (albedo.txt, linear RGB) 85% of the way to
 // `target`, so neighbouring layers match and a hint of each one's own tint
@@ -496,8 +516,8 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
       prototypes[prototype].tint = factor;
     }
   };
-  tint(grassMat, {1.15f, 1.9f, 0.95f});
-  tint(grassTufts, {1.15f, 1.9f, 0.95f});
+  tint(grassMat, kGrassTint);
+  tint(grassTufts, kGrassTint);
   tint(hawkbit, {1.1f, 1.0f, 0.6f});
 
   // Causal layers: each reads the ground's geo channels (geo_channels.h)
@@ -1575,10 +1595,10 @@ int main(int argc, char **argv) {
     std::vector<Variant> variants;
   };
   const Role roles[] = {
-      // Matched to the streamed grass mat's mean as rendered, so the mat
-      // thins into a terrain of the same brightness (decisions.md).
+      // The grass mat's colour, so the mat thins into ground of the same
+      // brightness and hue.
       {TerrainRole::Grass,
-       {0.037f, 0.058f, 0.0104f},
+       grassMatColor(),
        {{"uncut_grass_oilpt20", 2.0f, 0.0177f},
         {"wild_grass_pjwgw0", 1.0f, 0.0219f},
         {"lawn_grass_sbykrmp0", 0.41f, 0.0107f}}},
