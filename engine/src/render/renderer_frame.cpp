@@ -1502,6 +1502,10 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                   VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    // The blended rendering loads and tests the depth the late rendering wrote.
+    memoryBarrier(cmd, kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, kDepthStages,
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     VkRenderingInfo blendedRendering = sceneRendering;
     blendedRendering.colorAttachmentCount = 7;
     beginScene(blendedRendering);
