@@ -338,6 +338,7 @@ struct TerrainLayer {
     float offset[3];
     float occlusionStrength;
     float albedoScale[3];
+    float sward;
 };
 
 layout(buffer_reference, std430) readonly buffer HeightPyramidBuffer {
@@ -389,7 +390,12 @@ struct Terrain {
     uint forestPad[2];
     // Multiplies the detail relief (terrain_detail.glsl); 0 = off.
     float detailScale;
-    uint padding;
+    // TerrainMaterial::sward (surface.glsl applySward); depth 0 = off.
+    float swardClumpSize;
+    float swardDepth;
+    float swardExtinction;
+    float swardTransmission;
+    float swardFullDistance;
 };
 
 // Must match GpuWind in C++; functions in wind.glsl. The 10 m wind (direction

@@ -182,6 +182,10 @@ void main() {
     }
 #endif
     Shading sh = beginShading(s, inRelativePosition);
+#ifdef TERRAIN
+    sh.leafSunSpecular = terrainSpecular;
+    sh.leafAmbientSpecular = terrainSpecular;
+#endif
     vec2 debugStretch = vec2(0.0);
 #if defined(DEBUG_ID) && !defined(TERRAIN)
     vec2 debugUvDx = dFdx(inUv);

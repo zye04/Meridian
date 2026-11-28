@@ -285,8 +285,11 @@ show one game minute of drift.
 
 `--lod-error PX` sets the LOD threshold (default 1 pixel; 0 = full
 detail, for A/B); `--bloom INTENSITY SCATTER` sets the glare (default
-0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=1,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
-sets the live effect toggles (defaults = normal rendering; for A/B); `--no-occlusion` draws everything in the frustum
+0.015 0.7; `--bloom 0 0` = off, for A/B); `--effects pom=0,pom-depth=3,pom-shadow=0,terrain-detail=1,sward=0,micro=0,micro-strength=.5,contact=0,contact-length=2,bloom=0,cloud-outline=1,cutout-bias=0,taa-stable=0`
+sets the live effect toggles (defaults = normal rendering; for A/B); `--far-sward on|off`
+(default on) sets the terrain's sward past the grass mat (`TerrainMaterial::sward`:
+canopy light, clumps and no plane sheen where the grass mat grows; `sward=0` in
+`--effects` turns it off per view); `--no-occlusion` draws everything in the frustum
 (occlusion culling A/B). Capture runs print drawn instances, clusters,
 triangles and entries dropped by full cull lists (nonzero = missing
 geometry or shadow; the most in any frame of the run, main view plus the

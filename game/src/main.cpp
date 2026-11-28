@@ -276,6 +276,29 @@ std::vector<uint32_t> addPrototypes(meridian::Renderer &renderer,
   return added;
 }
 
+// The grass mat's clumps: the mean glTF bounds of the 11 prototypes of
+// wild_grass_vlkhcbxia and grass_clumps_qmbr2 (equal weight), placed at
+// kGrassMatScale. The terrain's sward continues them past their draw range.
+constexpr float kGrassMatClumpWidth = 0.47f;
+constexpr float kGrassMatClumpHeight = 0.20f;
+constexpr float kGrassMatScale[2] = {1.0f, 1.5f};
+// Their KHR_materials_diffuse_transmission factors (0.050, 0.071), averaged.
+constexpr float kGrassMatTransmission = 0.06f;
+// Drawn at full density to this distance (m), thinning beyond.
+constexpr float kGrassMatFullDensity = 30.0f;
+// Leaf area index of a closed temperate meadow (one-sided leaf area per
+// ground area; measured 2-5, e.g. Asner et al. 2003, "Global synthesis of
+// leaf area index observations", grasslands mean 2.5 +- 1.4).
+constexpr float kMeadowLeafAreaIndex = 2.5f;
+
+meridian::Sward grassMatSward() {
+  const float scale = 0.5f * (kGrassMatScale[0] + kGrassMatScale[1]);
+  const float depth = kGrassMatClumpHeight * scale;
+  // Randomly oriented leaves cast half their area (G = 0.5).
+  return {kGrassMatClumpWidth * scale, depth, 0.5f * kMeadowLeafAreaIndex / depth,
+          kGrassMatTransmission, kGrassMatFullDensity};
+}
+
 constexpr uint32_t kPlacementSeed = 1;
 constexpr uint32_t kForestLayerId = 1;
 
@@ -603,7 +626,7 @@ void placeScenery(meridian::Renderer &renderer, bool trees, bool farField, bool 
         Patch{5, hawkbit, 0.3f, 28.0f, 1.0f / 15.0f, 0.50f, 1.0f, 2.0f, 2.8f, 120.0f, 30.0f, {sunny, {}}, true},
         Patch{6, goldenrod, 5.0f, 25.0f, 1.0f / 43.0f, 0.70f, 0.5f, 0.8f, 1.2f, 200.0f, 0.0f, {sunny, dry}, true},
         Patch{7, clover, 1.0f, 25.0f, 1.0f / 23.0f, 0.72f, 0.5f, 0.8f, 1.2f, 40.0f, 12.0f, {moist, {}}, true},
-        Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, 1.0f, 1.5f, 120.0f, 30.0f, {}, true},
+        Patch{8, grassMat, 0.1414f, 35.0f, 0.0f, 0.0f, 0.2f, kGrassMatScale[0], kGrassMatScale[1], 120.0f, kGrassMatFullDensity, {}, true},
         Patch{11, grassTufts, 0.5f, 35.0f, 1.0f / 15.0f, 0.52f, 0.8f, 0.45f, 0.7f, 100.0f, 25.0f, {}, true}}) {
     if (!patch.variants.empty() && (streamed || patch.streamFullDensity == 0.0f)) {
       PlacementLayer layer{patch.id, patch.variants, patch.footprint,
@@ -760,7 +783,7 @@ meridian::Atmosphere atmosphereFor(Haze haze, float valleyFloorKm) {
 }
 
 // "pom=0,micro=0,contact=0": comma-separated name=value over the defaults.
-// Names: pom, pom-depth, pom-shadow, terrain-detail, micro, micro-strength, contact,
+// Names: pom, pom-depth, pom-shadow, terrain-detail, sward, micro, micro-strength, contact,
 // contact-length, bloom (on/off are 0/1).
 meridian::Effects parseEffects(const std::string &text) {
   meridian::Effects e;
@@ -780,6 +803,7 @@ meridian::Effects parseEffects(const std::string &text) {
     else if (name == "pom-depth") e.parallaxDepth = value;
     else if (name == "pom-shadow") e.parallaxSelfShadow = value != 0.0f;
     else if (name == "terrain-detail") e.terrainDetail = value != 0.0f;
+    else if (name == "sward") e.sward = value != 0.0f;
     else if (name == "micro") e.microShadows = value != 0.0f;
     else if (name == "micro-strength") e.microShadowStrength = value;
     else if (name == "contact") e.contactShadows = value != 0.0f;
@@ -839,6 +863,8 @@ struct Options {
   // The streamed meadow layers (grass mat, tufts, hawkbit, clover); not in the
   // TLAS, so --reference views compare without them.
   bool streamed = true;
+  // The terrain's sward past the grass mat (TerrainMaterial::sward).
+  bool farSward = true;
   // --reference: path traced samples per pixel after the --frames warm-up.
   uint32_t referenceSamples = 0;
   meridian::ReferenceMode referenceMode = meridian::ReferenceMode::Radiance;
@@ -1161,6 +1187,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--reference-mode takes radiance, albedo, white, leaf or sun");
       }
       options.referenceMode = found->second;
+    } else if (arg == "--far-sward") {
+      const std::string value = text(i);
+      if (value != "on" && value != "off") {
+        throw std::runtime_error("--far-sward takes on or off");
+      }
+      options.farSward = value == "on";
     } else if (arg == "--streamed") {
       const std::string value = text(i);
       if (value != "on" && value != "off") {
@@ -1271,7 +1303,7 @@ Options parseOptions(int argc, char **argv) {
                                " (use --camera x y z yaw pitch, --sun x y z, "
                                "--camera-velocity x y z, "
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
-                               "--scatter n, --placement off, --tree-palette name|none, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --reference spp, "
+                               "--scatter n, --placement off, --tree-palette name|none, --forest-picks all|open|domes, --lone-tree path x z, --streamed on|off, --far-sward on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
                                 "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
@@ -1618,6 +1650,9 @@ int main(int argc, char **argv) {
        {{"rock_cliff_tg1mcgbl", 2.0f, 0.0891f}, {"layered_rock_vl0fdhdo", 3.0f, 0.1495f}}},
   };
   meridian::TerrainMaterial material;
+  if (options.farSward) {
+    material.sward = grassMatSward();
+  }
   if (options.trees) {
     material.forestLayerId = kForestLayerId;
   }
@@ -1628,6 +1663,10 @@ int main(int argc, char **argv) {
                                 : std::nullopt;
       layersLoaded = layer.has_value();
       if (layer) {
+        // The grass mat grows on the grass and clover roles' ground.
+        if (role.role == TerrainRole::Grass || role.role == TerrainRole::Clover) {
+          layer->sward = 1.0f;
+        }
         material.layers[static_cast<size_t>(role.role)].push_back(*layer);
       }
     }

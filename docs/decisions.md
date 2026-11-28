@@ -6254,3 +6254,71 @@ Linear grass target (0.037, 0.058, 0.0104) became (0.0140, 0.0325,
 -0.07 / -0.06 / -0.02 (ahead / behind / side), hue 114-116 against
 118-124; main's ground there +0.21 / -0.04 / +0.11, hue 100-108.
 `tools/handover.py` in the lane's `.superpowers/ground/` repeats it.
+
+## Far sward: clump light and canopy BRDF on the ground past the blades (2026-11-28)
+
+Past the grass mat's draw range the ground was a lit plane: 15-20x flatter
+than the reference meadow at 2, 6 and 18 px of detail (start view at 200 m
+0.33 / 0.41 / 0.32 vs 5.jpg at 120 m 7.1 / 5.6 / 5.3), the same colour
+from every direction, and glossy (the grass scans' ARM roughness 0.60).
+Backlog row "Distant grass as voxels, and terrain grass shading further
+out" (Chlorophyll baseline F23: the engine fakes the grass shading on the
+terrain beyond its grass).
+
+Practice: past ~100-150 m games swap grass for the terrain and match its
+colour (Ghost of Tsushima, Wohllaib GDC 2021; UE landscape grass sampling a
+runtime virtual texture of the landscape colour), and blend grass normals
+toward the terrain's while lowering gloss with distance so far grass
+doesn't alias (GDL 2025 talk notes). None of them describe the far ground's
+own light. Remote sensing does: a meadow is a turbid medium of leaves, and
+its reflectance depends on the view and sun (Ross 1981, "The radiation
+regime and architecture of plant stands"; Shultis and Myneni 1988,
+bi-Lambertian leaf phase functions).
+
+Choice: `TerrainMaterial::sward`, on the ground layers whose `sward` cover
+is above 0 (the game: grass and clover, where the mat grows), past where
+the mat thins (weight 1 - (fullDistance / d)^2, the streamed layer's own
+keep rule, so ground between near blades isn't shaded twice):
+
+- **Canopy BRDF:** single scattering of a semi-infinite canopy of randomly
+  oriented bi-Lambertian leaves, c p(b) / (mu_s + mu_v) times Lambert's
+  radiance; p is the area phase function (8 / 3pi)((1 - t) S(b) +
+  t S(pi - b)), S(x) = sin x - x cos x, b the scattering angle, t the
+  blades' own diffuse transmission factor (0.06); c = 0.859 + 0.84 t
+  makes its hemispherical reflectance Lambert's under an overhead sun (1.11
+  at a 30 degree sun). Looking toward the sun it is ~0.3x Lambert (the
+  blades' shaded sides), with the sun behind ~2.8x.
+- **Clump light:** c in 0..1 from two octaves of value noise at the mat's
+  clump width (0.59 m: the prototypes' mean glTF width 0.47 m x mean scale
+  1.25) marks how near the visible surface is to a clump top. The gaps lie
+  (1 - c) x depth (0.25 m) down, and the sun and sky reach them through
+  the blades, exp(-k depth (1 - c) / mu) with k = 0.5 LAI / depth (leaf
+  area index 2.5, Asner et al. 2003; sky slant by the diffusivity 1.66).
+  Each is divided by its mean, the log-normal closed form
+  exp(-a/2 + a^2 Var(c)/2) (within 1% of the simulated mean for a <= 6:
+  `.superpowers/ground/tools/sward-stats.py` in the lane worktree), so the
+  clumps only move light. Below ~2 pixels per clump c fades to its mean
+  0.5 and its variance with it, so the faded mean is the resolved one and
+  no noise is read under a pixel. A bent normal from the clump height was
+  measured instead and dropped: at the blades' proportions it changes
+  Lambert by 2% and casts almost no shadow.
+- **No plane sheen:** what a pixel sees is blades, whose reflection, gloss
+  included, is the leaf scattering the canopy term holds. The flat
+  layer's F0 0.04 Fresnel at grazing views is grey and independent of
+  the albedo; once the ground took the sward's dark green it was most of
+  what the far meadow sent (hue 113 with it, 120-124 without). The
+  terrain's specular is scaled by 1 - cover (`terrainSpecular`, the leaf
+  path's specular multipliers in mesh.frag).
+- **Sky through the blades:** the sky's mean transmittance into the gaps
+  stays (the sun's loss is already in the canopy term), as the blades'
+  own occlusion holds it up close; its whole-field mean, so it is the
+  same at any footprint.
+- **Fade for stability:** the clumps are at full contrast from 10 pixels
+  per clump and gone by 4. Static camera, 60 frames apart by 2 (jitter
+  only) at walk120, mean |frame pair difference| in the sward band at
+  150 m: main 0.81 /255, the sward with a 4-to-1.7 pixel fade 1.19, this
+  fade 1.10, clumps off 1.09 (trees outside the meadow 1.47 main, 1.56
+  branch). So the clump pattern adds no crawl; the remaining +0.3 is the
+  mat's thinning blade tips, unchanged, against the darker ground.
+
+`--far-sward off` (launch) or `--effects sward=0` (per view) turns it off.

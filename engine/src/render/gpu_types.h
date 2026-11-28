@@ -210,8 +210,9 @@ struct GpuTerrainLayer {
   float offset[3] = {};
   float occlusionStrength = 1.0f;
   float albedoScale[3] = {1.0f, 1.0f, 1.0f};
+  float sward = 0.0f;
 };
-static_assert(sizeof(GpuTerrainLayer) == 52);
+static_assert(sizeof(GpuTerrainLayer) == 56);
 
 // Terrain texture coordinates (mesh.frag) are the camera-relative position
 // plus the camera position wrapped by a period, so they stay small and
@@ -296,14 +297,19 @@ struct GpuTerrain {
   uint32_t forestEnabled = 0;
   uint32_t forestPad[2] = {};
   float detailScale = 1.0f; // terrain_detail.glsl: 0 turns the detail relief off
-  uint32_t padding = 0; // keeps the next SceneData member 16-byte aligned
+  // TerrainMaterial::sward; depth 0 = off.
+  float swardClumpSize = 0.0f;
+  float swardDepth = 0.0f;
+  float swardExtinction = 0.0f;
+  float swardTransmission = 0.0f;
+  float swardFullDistance = 0.0f; // ends the struct on a 16-byte boundary for SceneData
 };
-static_assert(sizeof(GpuTerrain) == 1040);
+static_assert(sizeof(GpuTerrain) == 1120);
 
 inline GpuTerrainLayer toGpu(const TerrainLayer &layer) {
   return {layer.baseColor.index, layer.normal.index, layer.arm.index,
           layer.height.index, layer.tileSize, layer.heightScale, {}, layer.occlusionStrength,
-          {layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]}};
+          {layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]}, layer.sward};
 }
 
 // Gusts (wind.glsl): the phase advances this many noise cells per game second
@@ -619,29 +625,29 @@ struct SceneData {
 // The struct members at their std430 offsets in common.glsl (spirv-dis).
 static_assert(offsetof(SceneData, atmosphere) == 432);
 static_assert(offsetof(SceneData, terrain) == 560);
-static_assert(offsetof(SceneData, wind) == 1912);
-static_assert(offsetof(SceneData, previousWind) == 1960);
-static_assert(offsetof(SceneData, weather) == 2008);
-static_assert(offsetof(SceneData, clouds) == 2048);
-static_assert(offsetof(SceneData, farField) == 2208);
-static_assert(offsetof(SceneData, gi) == 2232);
-static_assert(offsetof(SceneData, farShadowTexels) == 2240);
-static_assert(offsetof(SceneData, farShadowMode) == 2312);
-static_assert(offsetof(SceneData, shadowView) == 2320);
-static_assert(offsetof(SceneData, sunShadows) == 2336);
-static_assert(offsetof(SceneData, voxelPools) == 2624);
-static_assert(offsetof(SceneData, terrainShadowTexels) == 2656);
+static_assert(offsetof(SceneData, wind) == 1992);
+static_assert(offsetof(SceneData, previousWind) == 2040);
+static_assert(offsetof(SceneData, weather) == 2088);
+static_assert(offsetof(SceneData, clouds) == 2128);
+static_assert(offsetof(SceneData, farField) == 2288);
+static_assert(offsetof(SceneData, gi) == 2312);
+static_assert(offsetof(SceneData, farShadowTexels) == 2320);
+static_assert(offsetof(SceneData, farShadowMode) == 2392);
+static_assert(offsetof(SceneData, shadowView) == 2400);
+static_assert(offsetof(SceneData, sunShadows) == 2416);
+static_assert(offsetof(SceneData, voxelPools) == 2704);
+static_assert(offsetof(SceneData, terrainShadowTexels) == 2736);
 // vec2 in GLSL (8-aligned), float[2] here: these hold only while the
 // 8-byte address before them keeps them on 8-byte boundaries.
-static_assert(offsetof(SceneData, terrainShadowOrigin) == 2664);
-static_assert(offsetof(SceneData, terrainShadowAlong) == 2672);
-static_assert(offsetof(SceneData, terrainShadowAcross) == 2680);
-static_assert(offsetof(SceneData, debugLight) == 2712);
-static_assert(offsetof(SceneData, voxelNear) == 2720);
-static_assert(offsetof(SceneData, voxelCoverage) == 2724);
-static_assert(offsetof(SceneData, foliageSpecularAa) == 2728);
-static_assert(offsetof(SceneData, leafLight) == 2732);
-static_assert(sizeof(SceneData) == 2736);
+static_assert(offsetof(SceneData, terrainShadowOrigin) == 2744);
+static_assert(offsetof(SceneData, terrainShadowAlong) == 2752);
+static_assert(offsetof(SceneData, terrainShadowAcross) == 2760);
+static_assert(offsetof(SceneData, debugLight) == 2792);
+static_assert(offsetof(SceneData, voxelNear) == 2800);
+static_assert(offsetof(SceneData, voxelCoverage) == 2804);
+static_assert(offsetof(SceneData, foliageSpecularAa) == 2808);
+static_assert(offsetof(SceneData, leafLight) == 2812);
+static_assert(sizeof(SceneData) == 2816);
 
 // Must match MeshInfo in common.glsl.
 struct MeshInfo {

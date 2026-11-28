@@ -970,6 +970,9 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.parallaxDepthScale = effects.parallax ? effects.parallaxDepth : 0.0f;
   scene.parallaxSelfShadow = effects.parallaxSelfShadow ? 1.0f : 0.0f;
   scene.terrain.detailScale = effects.terrainDetail ? 1.0f : 0.0f;
+  if (!effects.sward) {
+    scene.terrain.swardDepth = 0.0f;
+  }
   scene.microShadowStrength = effects.microShadows ? effects.microShadowStrength : 0.0f;
   scene.contactLengthScale = effects.contactLength;
   scene.cutoutMipBias = effects.cutoutMipBias;

@@ -100,6 +100,31 @@ struct TerrainLayer {
   // Multiplies the base color: matches the layer's mean color to its
   // neighbours' without touching its detail or contrast.
   float albedoScale[3] = {1.0f, 1.0f, 1.0f};
+  // How much of this ground a sward (TerrainMaterial::sward) covers, 0..1.
+  float sward = 0.0f;
+};
+
+// A sward of plant clumps over the ground layers whose `sward` is above 0,
+// shaded where the plants themselves are no longer drawn: the clumps' tops
+// take more of the sun and sky than the gaps between them, which lie
+// `depth` deeper under the blades (surface.glsl applySward). It moves light
+// around and keeps the layer's mean, so a layer colour matched to the
+// plants stays matched. Off while depth is 0.
+struct Sward {
+  float clumpSize = 0.0f; // m, the clumps' width
+  float depth = 0.0f;     // m, the clumps' height above the gaps
+  // Light lost per meter down through the blades (Beer-Lambert): leaf
+  // area index x 0.5 (randomly oriented leaves) / depth.
+  float extinction = 0.0f;
+  // The fraction of the light a blade scatters that it lets through
+  // (KHR_materials_diffuse_transmission's factor), for the sward's phase
+  // function.
+  float transmission = 0.0f;
+  // Meters out to which the plants are drawn at full density, thinning as
+  // (fullDistance / d)^2 beyond (PlacementLayer::streamFullDensity): the
+  // sward takes over the ground's look in the same proportion, so the ground
+  // between near blades isn't shaded as a sward a second time.
+  float fullDistance = 0.0f;
 };
 
 // The ground turns to rock as the terrain normal's y falls from
@@ -136,6 +161,7 @@ struct TerrainMaterial {
   uint32_t forestLayerId = 0;
   // Meters above sea level; snow fades in over the 40 m above it.
   float snowLine = 4000.0f;
+  Sward sward;
 };
 
 // A planet's atmosphere, in kilometers and per-kilometer coefficients.
@@ -194,6 +220,7 @@ struct Effects {
   float parallaxDepth = 1.0f;     // multiplier on each layer's physical depth, 0..4
   bool parallaxSelfShadow = true; // the sun's shadow inside the parallax relief
   bool terrainDetail = false;     // procedural relief on the two finest terrain levels (A/B)
+  bool sward = true;              // the terrain's sward (TerrainMaterial::sward)
   bool microShadows = true;
   float microShadowStrength = 1.0f; // 0..1
   bool contactShadows = true;       // off skips the pass

@@ -456,6 +456,11 @@ void Renderer::setTerrainMaterial(const TerrainMaterial &material) {
     terrain.forestEnabled = 0;
   }
   terrain.snowLine = material.snowLine;
+  terrain.swardClumpSize = material.sward.clumpSize;
+  terrain.swardDepth = material.sward.depth;
+  terrain.swardExtinction = material.sward.extinction;
+  terrain.swardTransmission = material.sward.transmission;
+  terrain.swardFullDistance = material.sward.fullDistance;
   terrain.enabled = 1;
 }
 

@@ -108,6 +108,7 @@ struct TerrainTexel {
     vec2 occlusionRoughness;
     float microOcclusion;
     float height;
+    float sward; // TerrainLayer::sward
 };
 
 TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
@@ -117,6 +118,7 @@ TerrainTexel mixTexels(TerrainTexel a, TerrainTexel b, float t) {
     r.occlusionRoughness = mix(a.occlusionRoughness, b.occlusionRoughness, t);
     r.microOcclusion = mix(a.microOcclusion, b.microOcclusion, t);
     r.height = mix(a.height, b.height, t);
+    r.sward = mix(a.sward, b.sward, t);
     return r;
 }
 
@@ -294,6 +296,7 @@ TerrainTexel samplePlanar(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy)
     texel.microOcclusion = terrainMicroOcclusion(layer, texel.occlusionRoughness.x);
     texel.occlusionRoughness.x = mix(1.0, texel.occlusionRoughness.x, layer.occlusionStrength);
     texel.baseColor *= vec3(layer.albedoScale[0], layer.albedoScale[1], layer.albedoScale[2]);
+    texel.sward = layer.sward;
     return texel;
 }
 
@@ -365,6 +368,7 @@ TerrainTexel sampleTriplanar(TerrainLayer layer, float scaleMul, vec3 normal, ve
     texel.baseColor = vec3(0.0);
     texel.occlusionRoughness = vec2(0.0);
     texel.height = 0.0;
+    texel.sward = 0.0;
     vec3 tangentNormals[3] = vec3[3](vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0));
     for (int axis = 0; axis < 3; ++axis) {
         if (blend[axis] == 0.0) {
@@ -650,6 +654,87 @@ vec3 parallaxHit(TerrainLayer layer, vec3 normal, vec3 dpdx, vec3 dpdy, float de
     return hit;
 }
 
+// The sward over the ground (TerrainMaterial::sward; decisions.md "Far
+// sward"). Seen from afar it is a turbid medium of blades, not a Lambert
+// surface: single scattering of a semi-infinite canopy of randomly oriented
+// bi-Lambertian leaves (Ross 1981; Shultis and Myneni 1988) sends
+// c p(b) / (mu_s + mu_v) times Lambert's radiance, p the leaves' area phase
+// function (sphere average 1; b the scattering angle, pi = straight back to
+// the sun), c making its hemispherical reflectance Lambert's under an
+// overhead sun (sward-stats.py: c = 0.859 + 0.84 x transmission within
+// 0.2%). Looking toward the sun shows the blades' shaded sides (~0.3x),
+// with the sun behind the brightly lit ones (~2.8x).
+float swardPhase(float b, float transmission) {
+    float back = sin(b) - b * cos(b);
+    float forward = sin(b) + (kPi - b) * cos(b); // the same at pi - b
+    return 8.0 / (3.0 * kPi) * mix(back, forward, transmission);
+}
+
+float swardCanopy(vec3 normal) {
+    vec3 L = pc.scene.sunDirection;
+    vec3 V = normalize(-surfaceIn.relativePosition);
+    float muS = max(dot(normal, L), 0.05);
+    float muV = max(dot(normal, V), 0.05);
+    float b = acos(clamp(-dot(L, V), -1.0, 1.0));
+    float transmission = pc.scene.terrain.swardTransmission;
+    return (0.859 + 0.84 * transmission) * swardPhase(b, transmission) / (muS + muV);
+}
+
+// c in 0..1 says how near the surface seen at the pixel is to a
+// clump's top, from two octaves of clump-sized value noise (the second on
+// the lattice turned 45 degrees, as rotatedFbm). The gaps lie (1 - c) x
+// depth down, and the sun and sky reach them through the blades above
+// (Beer-Lambert; the sky's slant path by the diffusivity factor 1.66 of
+// radiative transfer). Each term is divided by its mean over the field, so
+// the sward moves light from the gaps to the tops and the ground's mean
+// colour (matched to the plants by the game) holds at every distance. Under
+// 10 pixels per clump c fades to its mean, gone by 4 (the finer octave by
+// ~3), and its variance with it: the pattern is gone well before the
+// jitter can make it crawl, and the mean stays the resolved one.
+// kSwardFieldVariance is c's variance and its mean 0.5 (value noise of
+// uniform hashes): .superpowers/ground/tools/sward-stats.py, which also
+// checks the log-normal mean below to under 1% for a <= 6.
+const float kSwardFieldVariance = 0.02395;
+const float kSkyDiffusivity = 1.66;
+
+// exp(-a (1 - c)) over c of variance `variance` around 0.5, and its mean.
+vec2 swardTransmittance(float a, float c, float variance) {
+    return vec2(exp(-a * (1.0 - c)), exp(-0.5 * a + 0.5 * a * a * variance));
+}
+
+// The sward's share of the specular the terrain keeps (mesh.frag): what a
+// pixel sees is blades, whose reflection, gloss included, is the leaf
+// scattering the canopy term holds; a flat layer's Fresnel sheen at grazing
+// views is light they don't send.
+float terrainSpecular = 1.0;
+
+void applySward(inout Surface s, float cover, vec3 normal, vec2 p) {
+    terrainSpecular = 1.0 - cover;
+    s.sunShadow *= mix(1.0, swardCanopy(normal), cover);
+    // The sky reaches the blades seen through the ones above them: unlike
+    // the sun's, whose loss the canopy term already holds, the sky's mean
+    // loss stays, as the blades' own occlusion holds it up close. Its mean
+    // over the whole field, so it is the same at any footprint.
+    float depth = pc.scene.terrain.swardExtinction * pc.scene.terrain.swardDepth;
+    float skyMean = swardTransmittance(depth * kSkyDiffusivity, 0.5, kSwardFieldVariance).y;
+    s.occlusion *= mix(1.0, skyMean, cover);
+    float footprint = max(length(surfaceIn.dpdx), length(surfaceIn.dpdy));
+    float resolved = 1.0 - smoothstep(0.1, 0.25, footprint / pc.scene.terrain.swardClumpSize);
+    if (resolved <= 0.0) {
+        return;
+    }
+    float scale = round(kNoiseCell / pc.scene.terrain.swardClumpSize);
+    vec2 r = vec2(p.x + p.y, p.y - p.x);
+    float c = 0.6 * groundNoise(p, scale, 60u) + 0.4 * groundNoise(r, scale, 61u);
+    c = mix(0.5, c, resolved);
+    float variance = kSwardFieldVariance * resolved * resolved;
+    float NoL = max(dot(normal, pc.scene.sunDirection), 0.1);
+    vec2 sun = swardTransmittance(depth / NoL, c, variance);
+    vec2 sky = swardTransmittance(depth * kSkyDiffusivity, c, variance);
+    s.sunShadow *= mix(1.0, sun.x / sun.y, cover);
+    s.occlusion *= mix(1.0, sky.x / sky.y, cover);
+}
+
 // Each role's weight from the ground's shape, the forest layer and noise,
 // stacked bottom to top in TerrainRole order (grass at the bottom, rock on
 // top) with height blends; ~5 m edge noise makes the borders irregular. A
@@ -764,6 +849,11 @@ Surface terrainSurface(vec3 normal) {
     s.perceptualRoughness = mix(s.perceptualRoughness, 0.5, snow);
     s.normal = normalize(mix(s.normal, normal, snow));
     s.sunShadow = mix(sunShadow, 1.0, snow);
+    float full = pc.scene.terrain.swardFullDistance / max(length(surfaceIn.relativePosition), 1e-3);
+    float sward = ground.sward * (1.0 - snow) * (1.0 - min(full * full, 1.0));
+    if (sward > 0.0 && terrain.swardDepth > 0.0) {
+        applySward(s, sward, normal, p);
+    }
     s.alpha = 1.0;
     s.metallic = 0.0;
     s.emissive = vec3(0.0);
