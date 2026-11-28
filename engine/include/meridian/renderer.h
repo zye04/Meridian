@@ -408,6 +408,10 @@ public:
   // (for A/B comparisons). Needs a far field (setPlacement).
   void setVoxelFarShadows(bool enabled);
 
+  // Whether the haze in front of surfaces (the aerial perspective) counts
+  // the terrain's and clouds' shadow on the air; off lights all of it.
+  void setHazeShadow(bool enabled);
+
   // Global illumination (docs/superpowers/specs/2026-11-20-gi-design.md):
   // Off by default; Probes lights ambient from the terrain-following probe
   // clipmap traced against the heightfield and the far field.

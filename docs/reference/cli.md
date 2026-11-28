@@ -229,6 +229,13 @@ in all over the floor; startup prints `Haze layer:`; summer-hazy:
 haze through the ~2 km boundary layer, ~45 km visibility on the Napf ridges, grey sky;
 clean = Bruneton's very clean defaults, for A/B).
 
+`--haze-shadow off|on` (branch `shadowed-haze` only, a recorded
+experiment: default on there; a view option) counts the terrain's and
+clouds' shadow on the air in the aerial perspective LUT and reads the
+LUT down to its first froxel (31 m) instead of the 2 km one. Measured
+3-5 display values off the shaded slopes at o4/s1 and a darker far ridge
+(decisions.md "Haze profile against the aerial reference").
+
 `--aa dlss|taa` picks the anti-aliasing: DLSS (default; DLAA at
 native 1440p unless `--dlss-mode` says otherwise; falls back to TAA with
 the log line `DLSS unavailable: <reason>; using TAA` when NGX reports no

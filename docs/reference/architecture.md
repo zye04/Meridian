@@ -268,7 +268,7 @@ of the model toward the camera exceeds 3.5; a masked cluster of radius <= 1 m al
 terrain toward the sun once and packs the result into its entry's top 8
 bits, which mesh.frag uses instead of its per-fragment march) -> atmosphere LUTs
 (transmittance + multi-scattering only when the Atmosphere changes;
-sky-view, aerial perspective every frame) -> weather (weather_map.comp:
+sky-view every frame) -> weather (weather_map.comp:
 512^2 over 60 km around the camera, texel-snapped; then the cloud shadow
 map, cloud_shadow.comp: a Beer shadow map, 1024^2 over 30 km across the
 sun, orthographic along it, texel-snapped in its frame on a grid that
@@ -282,7 +282,10 @@ from the camera into a 64^2 octahedral map (cloud luminance + haze,
 transmittance; one texel of every 2x2 block per frame, all when the
 history resets); then sky_irradiance.comp: the sky-view LUT with the capture's
 clouds over it integrated into the scene's ambient irradiance, and the
-LUT alone into the clear-sky irradiance that lights the clouds) -> gi probes
+LUT alone into the clear-sky irradiance that lights the clouds) -> aerial
+perspective (aerial_perspective_lut.comp, every frame, after the weather so
+`--haze-shadow on` reads this frame's cloud shadow map: per sample along
+each froxel's ray the terrain shadow-height map times the cloud shadow) -> gi probes
 (unless `--gi off`: gi_probes.comp, one 64-ray workgroup per probe
 that is stale, never traced or in this frame's share (hashed over columns and
 slices: 1/8 of the finest level, 1/16 of the next, 1/32 of the coarser); L1 SH

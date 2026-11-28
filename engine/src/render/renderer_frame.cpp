@@ -578,6 +578,7 @@ void Renderer::setOcclusionCulling(bool enabled) {
 }
 
 void Renderer::setVoxelFarShadows(bool enabled) { impl_->voxelFarShadows = enabled; }
+void Renderer::setHazeShadow(bool enabled) { impl_->hazeShadow = enabled; }
 void Renderer::setVoxelLod(VoxelLod mode) { impl_->voxelLod = mode; }
 void Renderer::setVoxelNear(float meters) { impl_->voxelNear = meters; }
 void Renderer::setVoxelCoverage(VoxelCoverage rule) { impl_->voxelCoverage = rule; }
@@ -994,6 +995,7 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   scene.farField = impl_->farFieldInfo.address;
   scene.farCellList = impl_->farCellList.address;
   scene.voxelFarShadows = scene.farFieldEnabled != 0 && impl_->voxelFarShadows ? 1 : 0;
+  scene.hazeShadowMode = impl_->hazeShadow ? 1 : 0;
   if (impl_->giMode != GiMode::Off && impl_->giBuffer.buffer == VK_NULL_HANDLE) {
     impl_->createGi();
   }
@@ -1171,9 +1173,6 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                     impl_->skyViewLutPipeline);
   vkCmdDispatch(cmd, (192 + 7) / 8, (108 + 7) / 8, 1);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    impl_->aerialPerspectiveLutPipeline);
-  vkCmdDispatch(cmd, 32 / 8, 32 / 8, 32);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   endPass("atmosphere");
 
@@ -1194,6 +1193,14 @@ void Renderer::draw(const Camera &camera, const Lighting &lighting,
   vkCmdDispatch(cmd, 1, 1, 1);
   vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
   endPass("weather");
+
+  // After the weather: the haze's shadow reads this frame's cloud shadow map
+  // and weather map (sets and push constants still bound).
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    impl_->aerialPerspectiveLutPipeline);
+  vkCmdDispatch(cmd, 32 / 8, 32 / 8, 32);
+  vkCmdPipelineBarrier2(cmd, &atmosphereDependency);
+  endPass("aerial perspective");
 
   // --- GI probes, then the ground cache (the sky capture and irradiance
   // above are their sky).

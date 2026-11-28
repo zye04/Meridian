@@ -21,6 +21,8 @@ const float kMultiScatteringLutSize = 32.0;
 const vec2 kSkyViewLutSize = vec2(192.0, 108.0);
 const float kAerialPerspectiveSlices = 32.0;
 const float kAerialPerspectiveKmPerSlice = 4.0;
+// The slice of the first froxel's centre (the LUT's slices are quadratic).
+const float kAerialPerspectiveFirstSlice = 0.5 * 0.5 / kAerialPerspectiveSlices;
 
 layout(set = 0, binding = 0) uniform sampler2D transmittanceLut;
 layout(set = 0, binding = 1) uniform sampler2D multiScatteringLut;
@@ -316,6 +318,9 @@ ScatteringResult integrateScatteredLuminance(
                                   ? multipleScattering(p, sunZenithCos)
                                   : vec3(0.0);
 
+#ifdef SUN_VISIBILITY
+        earthShadow *= SUN_VISIBILITY(p);
+#endif
         vec3 S = earthShadow * sunTransmittance * phaseTimesScattering +
                  multiScattered * medium.scattering;
 

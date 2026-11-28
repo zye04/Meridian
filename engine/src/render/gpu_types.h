@@ -560,7 +560,7 @@ struct SceneData {
   float farShadowTexel = 0.0f, farShadowDepth = 0.0f;
   uint32_t farShadowWidth = 0, farShadowHeight = 0;
   uint32_t farShadowMode = 0;
-  uint32_t pad7 = 0;
+  uint32_t hazeShadowMode = 0;
   // Raster sun shadows: 1 in a cascade's own copy (orthographic view: no
   // curvature, no occlusion culling), the copy's pixels per meter (0 =
   // perspective), the sun shadow mode (0 raster, 1 rt) and the cascades.

@@ -729,6 +729,7 @@ struct Options {
   // Distant forest cells as voxels; off draws every tree (for A/B).
   bool farField = true;
   bool voxelFarShadows = true;
+  bool hazeShadow = true;
   bool gi = true;
   // Trees past the mid switch as prototype voxels; off keeps their clusters (A/B).
   meridian::VoxelLod voxelLod = meridian::VoxelLod::On;
@@ -1020,6 +1021,12 @@ Options parseOptions(int argc, char **argv) {
         throw std::runtime_error("--far-shadows takes tlas or voxel");
       }
       options.voxelFarShadows = mode == "voxel";
+    } else if (arg == "--haze-shadow" && i + 1 < argc) {
+      const std::string mode = argv[++i];
+      if (mode != "off" && mode != "on") {
+        throw std::runtime_error("--haze-shadow takes off or on");
+      }
+      options.hazeShadow = mode == "on";
     } else if (arg == "--gi" && i + 1 < argc) {
       const std::string mode = argv[++i];
       if (mode != "off" && mode != "probes") {
@@ -1116,7 +1123,7 @@ Options parseOptions(int argc, char **argv) {
                                "--camera-angular-velocity yaw pitch, --camera-yaw-rate rad/s, "
                                "--scatter n, --placement off, --streamed on|off, --reference spp, "
                                "--reference-mode radiance|albedo|white|leaf|sun, --trees, --no-occlusion, "
-                                "--far-field off, --far-shadows tlas|voxel, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
+                                "--far-field off, --far-shadows tlas|voxel, --haze-shadow off|on, --gi off|probes, --voxel-lod on|off|near, --voxel-near m, "
                                "--voxel-coverage hash|area-pixel-phase, --foliage-specular-aa off|on, --leaf-light off|on|gi-weighted, "
                                "--haze clean|summer|summer-hazy, --grade file.json, --overlay grade|perf, --benchmark seconds file.csv, --route file.route, "
                                "--lod-error px, --render-scale s, --aa dlss|taa, "
@@ -1187,7 +1194,8 @@ Options parseOptions(int argc, char **argv) {
 constexpr std::string_view kViewOptions[] = {
     "--camera",     "--sun",           "--grade",      "--haze",         "--fov",
     "--bloom",      "--effects",       "--game-time",  "--freeze-time",  "--time-scale",
-    "--weather",    "--weather-front", "--debug-view", "--debug-filter", "--frames"};
+    "--weather",    "--weather-front", "--debug-view", "--debug-filter", "--frames",
+    "--haze-shadow"};
 
 struct CaptureView {
   std::string name;
@@ -1524,6 +1532,7 @@ int main(int argc, char **argv) {
     }
     renderer.setBloom(o.bloom.value_or(meridian::Bloom{}));
     renderer.setEffects(o.effects.value_or(meridian::Effects{}));
+    renderer.setHazeShadow(o.hazeShadow);
     renderer.setGrade(kStartingGrade);
     // CLI and defaults are the built-in look; the grade file (interactive
     // runs and --grade) overrides it except for an explicit --sun, --haze or

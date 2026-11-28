@@ -181,6 +181,7 @@ struct Renderer::Impl {
   // The highest world y that casts into a cascade (setTerrain).
   double shadowCasterTop = 2500.0;
   bool voxelFarShadows = true;
+  bool hazeShadow = true;
   GiMode giMode = GiMode::Off;
   // The GI probe table (gi.glsl), created on the first frame with GI on.
   Buffer giBuffer;

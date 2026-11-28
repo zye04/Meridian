@@ -659,7 +659,9 @@ layout(buffer_reference, std430) readonly buffer SceneBuffer {
     float farShadowTexel, farShadowDepth;
     uint farShadowWidth, farShadowHeight;
     uint farShadowMode;
-    uint pad7;
+    // 1: the aerial perspective LUT counts the terrain's and clouds' shadow
+    // on the air (aerial_perspective_lut.comp).
+    uint hazeShadowMode;
     // Raster sun shadows (SceneData in gpu_types.h).
     uint shadowView;
     float orthoPixelsPerMeter;

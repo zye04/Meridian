@@ -1,7 +1,14 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+// The scattering integral's sun visibility (defined below, after the
+// terrain and cloud code it reads).
+float hazeSunVisibility(vec3 p);
+#define SUN_VISIBILITY hazeSunVisibility
 #include "atmosphere.glsl"
+#include "weather.glsl"
+#include "clouds.glsl"
+#include "terrain.glsl"
 
 // Aerial perspective: in-scattered light and transmittance between the camera
 // and points along each view ray, in a 32^3 camera-aligned volume. Slices are
@@ -9,6 +16,27 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 7, rgba32f) uniform writeonly image3D aerialPerspectiveOut;
+
+// With the haze's shadow on, at least one sample per this many km, so a
+// shadow's edge on the air falls within a step of where it is (the
+// default count spaces the samples up to ~0.4 km apart inside the terrain
+// shadow map's 8 km), at most kHazeShadowMaxSamples per froxel.
+const float kHazeShadowStepKm = 0.05;
+const float kHazeShadowMaxSamples = 128.0;
+
+vec3 hazeCamera;
+
+// The sun's visibility at an atmosphere point p of the view ray: the
+// terrain's shadow-height map where it serves, times the clouds' shadow.
+// The world is flat (shadows), p's ray straight from the camera.
+float hazeSunVisibility(vec3 p) {
+    if (pc.scene.hazeShadowMode == 0u) {
+        return 1.0;
+    }
+    vec3 world = pc.scene.cameraPosition + (p - hazeCamera) * 1000.0;
+    float terrain = terrainShadowVisibility(pc.scene, world);
+    return (terrain < 0.0 ? 1.0 : terrain) * cloudShadow(world);
+}
 
 void main() {
     ivec3 voxel = ivec3(gl_GlobalInvocationID);
@@ -20,6 +48,7 @@ void main() {
     vec3 direction = normalize(nearPoint.xyz / nearPoint.w);
 
     vec3 camera = atmospherePosition(pc.scene.cameraPosition);
+    hazeCamera = camera;
     float slice = (float(voxel.z) + 0.5) / kAerialPerspectiveSlices;
     slice = slice * slice * kAerialPerspectiveSlices;
     float tMax = slice * kAerialPerspectiveKmPerSlice;
@@ -49,6 +78,9 @@ void main() {
     }
 
     float sampleCount = max(1.0, float(voxel.z + 1) * 2.0);
+    if (pc.scene.hazeShadowMode != 0u) {
+        sampleCount = clamp(ceil(tMax / kHazeShadowStepKm), sampleCount, kHazeShadowMaxSamples);
+    }
     ScatteringResult result = integrateScatteredLuminance(
         position, direction, pc.scene.sunDirection, sampleCount, false, true, true,
         false, tMax);

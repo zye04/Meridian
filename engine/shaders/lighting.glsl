@@ -534,11 +534,16 @@ vec3 applyAerialPerspective(vec3 luminance, vec3 relativePosition, float coverag
                             out float transmittance) {
     float distanceKm = length(displayedPosition(pc.scene, relativePosition).xyz) * 0.001;
     float slice = distanceKm / kAerialPerspectiveKmPerSlice;
+    // Nearer than the first slice read, the haze fades in linearly instead of
+    // jumping. Unshadowed haze grows about linearly over the first 2 km, so
+    // it reads there at half a slice (2 km); shadowed haze doesn't (a slope
+    // 500 m away would take the 2 km froxel's shadow), so it reads down to
+    // the first froxel.
+    float first = pc.scene.hazeShadowMode != 0u ? kAerialPerspectiveFirstSlice : 0.5;
     float weight = 1.0;
-    if (slice < 0.5) {
-        // Fade in over the first half slice instead of jumping.
-        weight = clamp(slice * 2.0, 0.0, 1.0);
-        slice = 0.5;
+    if (slice < first) {
+        weight = clamp(slice / first, 0.0, 1.0);
+        slice = first;
     }
     float w = sqrt(slice / kAerialPerspectiveSlices);
     vec4 haze = textureLod(aerialPerspectiveLut,

@@ -27,7 +27,7 @@ const std::map<std::string_view, int> kDroppedOptions = {
 // kViewOptions), with their value counts: they go on the view line.
 const std::map<std::string_view, int> kViewOptions = {
     {"--haze", 1},       {"--fov", 1},     {"--bloom", 2},         {"--effects", 1},
-    {"--time-scale", 1}, {"--weather", 1}, {"--weather-front", 1}};
+    {"--time-scale", 1}, {"--weather", 1}, {"--weather-front", 1}, {"--haze-shadow", 1}};
 
 std::string quoted(const std::string &text) {
   if (text.find_first_of(" \t'\"\\$`*?") == std::string::npos && !text.empty()) {
