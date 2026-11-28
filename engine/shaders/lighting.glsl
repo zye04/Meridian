@@ -512,6 +512,7 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
     sh.diffuseLight += transmitted / kPi * sh.sunAtSurface * (backNoL * visibility);
 }
 
+#ifdef CROWN_FILL
 // Crown fill (Renderer::setCrownFill): sun light scattered between a
 // crown's leaves, which the GI probes (2-32 m columns, 4 m far-field voxels:
 // a crown's size) do not resolve. Leaves next to the crown's sunlit surface
@@ -530,6 +531,25 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
 // to the tracer's whole missing ambient (sky + indirect), ~1.7x what the
 // neighbours' single-scattered sun can deliver: the fill also stands in for
 // missing sky light, shaped and gated as sun (decisions.md "Crown fill").
+// Leaf voxels only, and only where the cascades are too coarse for leaves:
+// near crowns are triangles with real shadows (0.1 m texels at the
+// triangle/voxel switch), and a fill on every triangle pipeline cost 1.1 ms
+// at eye height even switched off. The weight follows the cascades' filter
+// footprint at the receiver (the normal offset and the tent's half width, at
+// the texel of the cascade a receiver that far sits in, its geometric middle
+// so it is continuous across cascade boundaries): 0 while the footprint is
+// under a leaf cluster (~68 m, past the hornbeam's 40-60 m switch band, so
+// no tier difference at the switch), 1 once it passes a crown's parts
+// (~270 m).
+const float kCrownFillLeafCluster = 0.5;  // m
+const float kCrownFillCrownPart = 2.0;    // m
+float crownFillWeight(vec3 relative) {
+    SunShadowCascade cascade = pc.scene.sunShadows.cascades[0];
+    float footprint = (kShadowNormalOffset + 1.5) * 2.0 * cascade.texel / cascade.radius * length(relative);
+    return clamp(log2(footprint / kCrownFillLeafCluster) / log2(kCrownFillCrownPart / kCrownFillLeafCluster),
+                 0.0, 1.0);
+}
+
 const float kCrownFillMaxRecollision = 0.95;
 // Calibrated against the path tracer at o4 (decisions.md "Crown fill"): the
 // crown tops' ambient 0.35 -> 0.92 of the tracer's, shade 0.62 -> 0.75, gaps
@@ -545,6 +565,7 @@ void addCrownFill(inout Shading sh, vec3 reflected, vec3 transmitted, float sunD
     vec3 scattered = kCrownFillStrength * exp(-sunDepth) * albedo * albedo / (1.0 - recollision * albedo);
     sh.diffuseLight += min(scattered, reflected) / kPi * sh.sunAtSurface * beam;
 }
+#endif
 
 // After addAmbientLight: a thin surface's two sides read the same probes, so
 // its sample serves the back direction too.

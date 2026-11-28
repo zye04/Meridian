@@ -40,9 +40,7 @@ layout(location = 9) flat in vec3 inTint;
 // terrain it turns into as this goes to 0.
 layout(location = 10) flat in float inStreamFade;
 // Sky visibility inside a tree crown (mesh.mesh), 1 elsewhere.
-// y: with crown fill, the leaf crown's optical depth toward the sun; -1 where
-// there is no fill (fill off, not a tree's leaves).
-layout(location = 12) in vec2 inCrown;
+layout(location = 12) in float inCrownVisibility;
 #endif
 #ifdef ALPHA_MASK
 // The cluster's terrain sun visibility (cluster_cull.comp), or -1 where the
@@ -160,7 +158,7 @@ void main() {
     surfaceIn.tint = inTint;
     surfaceIn.height = inHeight;
     surfaceIn.streamFade = inStreamFade;
-    surfaceIn.crownVisibility = inCrown.x;
+    surfaceIn.crownVisibility = inCrownVisibility;
 #endif
 #ifdef TERRAIN
     vec3 normal = terrainNormal();
@@ -205,7 +203,7 @@ void main() {
         transmitted = transmissionColor * (material.diffuseTransmission * (1.0 - s.metallic));
         sh.diffuseColor *= 1.0 - material.diffuseTransmission;
         // As the voxels' model occlusion: scaled by the micro shadow strength.
-        float crown = mix(1.0, inCrown.x, pc.scene.microShadowStrength);
+        float crown = mix(1.0, inCrownVisibility, pc.scene.microShadowStrength);
         setLeafLight(sh, sh.diffuseColor + transmitted, crown, crown);
     }
 #endif
@@ -230,14 +228,11 @@ void main() {
     // turns off its back faces' transmission; let them take the sun.
     bool facesSun = dot(geometricNormal, sh.L) > 0.0 || inStreamFade < 1.0;
 #endif
-    // The sun that reaches the leaf, for the crown fill.
-    float fillBeam = 0.0;
     if (sh.NoL > 0.0 && facesSun) {
 #ifdef TERRAIN
         float visibility = sunVisibility(worldPosition, normal);
 #else
         float visibility = sunVisibility(worldPosition, geometricNormal);
-        fillBeam = visibility;
 #endif
 #ifdef TERRAIN
         float plantSun = 1.0;
@@ -260,11 +255,11 @@ void main() {
         float NgoL = dot(geometricNormal, sh.L);
         float NoL = dot(sh.N, sh.L);
         if (NgoL < 0.0 && (NoL < 0.0 || inStreamFade >= 1.0)) {
-            fillBeam = sunVisibility(worldPosition, -geometricNormal);
-            addTransmittedSun(sh, transmitted, min(abs(NoL), 1.0), fillBeam);
+            addTransmittedSun(sh, transmitted, min(abs(NoL), 1.0),
+                              sunVisibility(worldPosition, -geometricNormal));
         } else if (NoL <= 0.0) {
-            fillBeam = sunVisibility(worldPosition, geometricNormal);
-            addTransmittedSun(sh, sh.diffuseColor, min(-NoL, 1.0), fillBeam);
+            addTransmittedSun(sh, sh.diffuseColor, min(-NoL, 1.0),
+                              sunVisibility(worldPosition, geometricNormal));
         }
     }
 #endif
@@ -283,9 +278,6 @@ void main() {
 #ifndef TERRAIN
     if (leaf) {
         addTransmittedAmbient(sh, transmitted, s.occlusion);
-        if (inCrown.y >= 0.0) {
-            addCrownFill(sh, sh.diffuseColor, transmitted, inCrown.y, inCrown.x, fillBeam);
-        }
     }
 #endif
 

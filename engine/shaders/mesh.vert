@@ -13,7 +13,7 @@ layout(location = 7) flat out float outLodError;
 layout(location = 8) out float outHeight;
 layout(location = 9) flat out vec3 outTint;
 layout(location = 10) flat out float outStreamFade;
-layout(location = 12) out vec2 outCrown;
+layout(location = 12) out float outCrownVisibility;
 
 void main() {
     // Blended draws set firstInstance to the instance's index; the indexed
@@ -35,7 +35,7 @@ void main() {
     outMaterialIndex = mesh.materialIndex;
     outLodError = 0.0;
     outHeight = 1.0;
-    outCrown = vec2(1.0, -1.0);
+    outCrownVisibility = 1.0;
     outTint = vec3(1.0);
     outStreamFade = instance.fade;
     // Static geometry for now: only the camera moves between frames.

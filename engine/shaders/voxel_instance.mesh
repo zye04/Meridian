@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "voxel_lod.glsl"
+#include "crown.glsl"
 #define DEBUG_ID_CONSTANTS_ONLY
 #include "debug_id.glsl"
 #undef DEBUG_ID_CONSTANTS_ONLY

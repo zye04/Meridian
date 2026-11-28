@@ -184,14 +184,13 @@ transmittance of a uniform leaf medium filling the ellipsoid inside the
 leaf mesh's bounding box, `MeshInfo` half extents, along three rays up and
 outward), ambient only, same strength scale, and only with GI off (the
 probes trace the canopy themselves; both would occlude it twice); a placed
-tree's bark uses its leaf mesh's crown. Location 12 is a vec2: its y is,
-with crown fill and on a tree's leaf mesh, the crown's optical depth toward
-the sun through the same ellipsoid (`crownSunDepth`, common.glsl), -1
-otherwise (mesh.vert sends 1, -1). Leaf voxels get the same two per voxel
-from voxel_instance.mesh (packed as half2 into the flat info's y above its
-terrain-sun bit, so the voxel quads export nothing more: depth toward the sun
-at the voxel centre, crown visibility by the voxel's lobe axis), for the
-crown fill (lighting.glsl `addCrownFill`).
+tree's bark uses its leaf mesh's crown. Leaf voxels get the same crown
+(crown.glsl, a copy of mesh.mesh's so the triangle pipelines stay unchanged)
+for the crown fill, once per voxel from voxel_instance.mesh: the depth toward
+the sun at the voxel centre and the sky visibility by the voxel's lobe axis,
+packed as half2 into the flat info's y above its terrain-sun bit, so the
+voxel quads export nothing more (lighting.glsl `addCrownFill`, compiled only
+into voxel_instance.frag).
 A leaf's sunlit side is its geometric normal's (mesh.frag, reference.comp:
 pbrt's rule): where the shading normal disagrees, the Lambert lobe on that
 side (front diffuse or transmission) takes |N.L|, GGX only where both face

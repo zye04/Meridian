@@ -6313,9 +6313,23 @@ as the probes' leaf hits), times the sun that reaches the leaf itself (its own
 visibility: no second lookup), capped per channel at the leaf's reflected
 share, i.e. never more than direct sun gives its sunward face. Depth and
 escape come from the crown ellipsoid (`crownSunDepth`, `crownVisibility`,
-common.glsl): per vertex for triangle leaves (mesh.mesh, packed into location
-12's y, -1 without fill), once per voxel for leaf voxels (voxel_instance.mesh,
-packed as half2 into the flat info's spare bits).
+crown.glsl), once per voxel for leaf voxels (voxel_instance.mesh, packed as
+half2 into the flat info's spare bits).
+
+Voxels only, by distance (second review round): the first version also lit
+triangle leaves, carrying the depth in mesh.mesh's location 12 (float ->
+vec2) and the fill in mesh.frag; switched off it still cost the triangle
+pipelines 1.09 ms of scene early at eye height (start: 8.16 / 8.17 ms main,
+9.25 / 9.25 fill off), and a default may not make the walk slower. The leak
+the fill pairs with is where the cascades are coarse, i.e. on voxel crowns:
+near crowns are triangles under 0.1 m texels with real shadows. So triangle
+shaders are main's (their SPIR-V byte-identical to main's), and the voxel
+fill is weighted by the cascades' filter footprint at the voxel
+(`crownFillWeight`, the same continuous footprint as the crown-sun
+experiment: normal offset + tent half width at the texel of the cascade's
+geometric middle): 0 while it is under a leaf cluster (0.5 m, ~68 m), 1 past
+a crown's parts (2 m, ~270 m). The hornbeam's triangle/voxel switch band is
+40-60 m, so both tiers get no fill at the switch.
 
 Calibration (o4 near canopy, light1, all picks, 2560x1440, 120 frames, EV
 12.48 both sides; raster debug ambient against the tracer's sky + indirect,
@@ -6334,8 +6348,8 @@ ring 2.37 -> 1.66 -> 1.79. The tops stay under because their direct sun is
 0.74 (decisions.md "Voxel sun lookup").
 
 The held branch's review findings: F1 (off costs) - no second sun lookup
-any more, and the voxel quads export nothing new (o4: voxel trees 9.11 ms off
-against 10.06 on main's binary, run noise; on +0.6 ms); F2 (voxel gate per
+any more, the voxel quads export nothing new, and the triangle shaders are
+main's (voxels only, below); F2 (voxel gate per
 fragment) - depth and escape once per voxel in the mesh shader; F3 (cap) -
 half answered: the fill alone is capped at the reflected share, but a lit
 leaf gets direct sun plus fill (below); F4 (gate
@@ -6360,17 +6374,22 @@ as sun. In cloud or hill shadow it goes with the sun, and the crown falls
 back to the 0.35x ambient there, where real sky light would stay. Fitted at
 one view, sun and weather (o4, light1, all picks).
 
-Checks (same build, 2560x1440 Release, 120 frames): at the lone hornbeam's
-real triangle/voxel switch (40 / 50 / 60 m) the fill lifts the crown's mean
-by +13 / +12 / +13 % (fill off -> on), the voxels more than the triangles
-(at 40 m triangles 19.9 -> 21.6, +9 %; voxels 26.7 -> 30.6, +15 %), and
-the whole change against main (crown 24.8 -> 26.8 at 40 m) stays in the
-voxel/triangle relation main already has (voxels 1.40x the triangles' pixel
-mean on main, 1.42x with both; different parts of the crown). The forest walk (walk360) has no sunlit crowns
-in view: unchanged (total 0.82 of the tracer either way). Low sun (15 degrees):
-o4 0.12/255, start 0.78/255 against main, no speckle. A 60-frame fly at o4:
-frame-pair change 2.37/255 against main's 2.52, no crawl or pop. Near canopy
-at o4, display Y' p50 / p95 (working grade): main 39.5 / 80.3, both 37.4 /
-79.7, 1.jpg 44.1 / 93.4; band contrast at 2 px: main 6.39, both 6.42, the
-tracer 9.57, 1.jpg 10.06. Debug `--trees` at o4: 0 validation errors, the
-placement, far-field, far-shadow and stream checks 0 mismatches.
+Checks of the voxel-only fill (2560x1440 Release, 120 frames, both sides the
+same EV): scene early at start 8.19 / 8.16 ms main, 8.17 / 8.15 fill on,
+8.16 / 8.16 fill off (voxel trees there 4.23 / 4.17 -> 4.42 / 4.50 on); at
+o4 scene early 4.76 both, voxel trees 9.12 off -> 9.88 on. The lone
+hornbeam at the switch (40 / 50 / 60 m) equals the lookup-only branch (tree
+pixel mean ratio 1.000 / 1.000 / 1.0003); farther out on a clear line of
+sight the fill comes in with distance (+0.0 / +0.2 / +0.3 / +1.0 % at 60 /
+100 / 150 / 250 m), and an approach from 300 to 60 m at 40 m/s keeps the
+crown's luminance against main at 1.000-1.001 every frame (frame-pair change
+3.006 against main's 3.012 /255: no band, no pop). o4's class table is the
+pair's to two decimals. Near canopy at o4 under the default look (clear
+haze, starting grade): display p95 main 83.4, with both 89.4 (1.jpg 93.4),
+p50 39.9 / 39.7; 2 px band 6.86 / 6.91 (tracer 9.57, 1.jpg 10.06). The
+forest walk (walk360) has no sunlit crowns in view: unchanged. Earlier
+checks of the triangle-and-voxel version: low sun (15 degrees) o4 0.12/255
+and start 0.78/255 against main, no speckle; a 60-frame fly at o4
+frame-pair 2.37 against main's 2.52 /255; Debug `--trees` at o4 0 validation
+errors and the placement, far-field, far-shadow and stream checks 0
+mismatches.

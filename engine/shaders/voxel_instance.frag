@@ -11,6 +11,7 @@ layout(early_fragment_tests) in;
 #include "atmosphere.glsl"
 #include "material.glsl"
 #include "terrain.glsl"
+#define CROWN_FILL
 #include "lighting.glsl"
 #include "voxel_lod.glsl"
 #include "debug_id.glsl"
@@ -183,7 +184,7 @@ void main() {
     // packed in info.y above the terrain sun bit (voxel_instance.mesh).
     vec2 crown = unpackHalf2x16(inInfo.y & ~1u);
     if (crown.x >= 0.0) {
-        addCrownFill(sh, albedo, transmitted, crown.x, crown.y, fillBeam);
+        addCrownFill(sh, albedo, transmitted, crown.x, crown.y, fillBeam * crownFillWeight(relative));
     }
     float hazeTransmittance;
     vec3 luminance = applyAerialPerspective(sh.diffuseLight + sh.specularLight, relative, 1.0,
