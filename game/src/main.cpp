@@ -844,7 +844,7 @@ struct Options {
   // Horizontal field of view; unset = the grade file's, else 70.
   std::optional<float> fovDegrees;
   std::optional<meridian::Effects> effects;
-  // Clean: Bruneton's very clean defaults (for A/B). Unset: summer.
+  // Clean: Bruneton's very clean defaults (for A/B). Unset: clear.
   std::optional<Haze> haze;
   // Largest simplification error on screen in pixels (0: full detail).
   float lodError = 1.0f;

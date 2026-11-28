@@ -19,14 +19,15 @@ changes apply at once. Save writes the grade file,
 `$XDG_CONFIG_HOME/meridian/grade.json` (default
 `~/.config/meridian/grade.json`, shared by every checkout; flat JSON, field
 names as in `grade.h` plus `sunAzimuthDegrees`, `sunElevationDegrees`,
-`haze`, `fovDegrees`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing = defaults), which **interactive runs load at
+`haze`, `fovDegrees`, `bloomIntensity`, `bloomScatter`, `effect*` keys; missing keys keep the built-in grade and look), which **interactive runs load at
 startup** (explicit `--sun`, `--haze` and `--bloom` still win); capture runs ignore it so gates stay deterministic.
 `--grade FILE` loads a grade file in any run (A/B captures of a tuned
 look). The built-in grade (`kStartingGrade`, main.cpp; decisions.md
 "Starting grade from the tone match") is 7000 K, EV -0.8, offset 0.010,
 contrast 1.4, greens 0 deg x1.2, blues x0.6;
-`--grade tools/grades/starting-2026-11-28.json` gives the previous one
-(6504 K, EV 0, no offset, greens -10 deg x1.5) for A/B; `--overlay grade|perf` opens a panel at startup (it is in captures;
+the previous look is `--haze summer --grade tools/grades/starting-2026-11-28.json`
+(both flags: the grade file carries no haze; 6504 K, EV 0, no offset,
+greens -10 deg x1.5) for A/B; `--overlay grade|perf` opens a panel at startup (it is in captures;
 repeat the flag for both).
 `F3` toggles the performance overlay (passive, top right, the cursor stays
 captured): FPS, frame / CPU / GPU ms, per-pass GPU ms, a 5 s frame-time

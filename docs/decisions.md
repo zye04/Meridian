@@ -6189,10 +6189,10 @@ napf `--trees` Release launch to 4 frames 86.7 s with it rebuilt, 76.6 s warm (r
 
 The user, beside 1.jpg: "shadows in the entire image of his are blacker while ours is
 blueish; his highlights look more vivid, warmer". Measured with
-`.superpowers/port/tone/measure.py` (lane port; whole-frame display luma Y' percentiles and
+`tools/tone-match.py` (lane port; whole-frame display luma Y' percentiles and
 the mean OKLCh of three classes from far-light's region rects: shaded forest, lit crowns =
 top quarter of the near rect, meadow), on palette light1 with the clear haze, 1.jpg against
-o4 and s1, 5.jpg against h2 and the start view, 120 frames:
+o4 and s1, 5.jpg against h2 and the start view, 120 frames, 2560x1440, DLSS DLAA:
 
 | | o4 Y' p1 / p5 / p50 / p95 | o4 shaded L C h | o4 lit crowns L C h | start meadow L C h |
 |---|---|---|---|---|
@@ -6215,5 +6215,5 @@ o4 and s1, 5.jpg against h2 and the start view, 120 frames:
   241): crown light and the interior ambient (backlog), then the match re-runs with the
   same scripts.
 - With the clear haze (the default with this grade) the eye-height forest view's p50 is
-  29.2 (main under summer 28.9; the previous grade under clear 17.4). The previous grade is
-  `tools/grades/starting-2026-11-28.json`.
+  29.2 (main under summer 28.9; the previous grade under clear 17.4). The previous look is
+  `--haze summer --grade tools/grades/starting-2026-11-28.json`.
