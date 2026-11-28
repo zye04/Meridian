@@ -32,9 +32,11 @@ const float kHighlightMax = 2.0;
 // light (G7, research/2026-11-23-G7-grey-image.md). The reflectance is a
 // vegetated landscape's: with it the open start view's own meter (EV100
 // 13.56) and this model (13.39) agree. The bound holds on the displayed
-// image: the grade's exposure (applied in the LUT, after the meter) moves it
-// by as much the other way, so a grade that darkens open views (a negative
-// grade EV) leaves shade held at the bound as bright as without it. As a
+// image: the grade's exposure (applied in the LUT, after the meter) is added
+// to the bound's EV100, so a negative grade EV lowers it (the meter may open
+// up as much as the grade darkens) and shade held at the bound stays as
+// bright on screen as without it; a positive grade EV raises it, so the
+// grade cannot lift shade past the bound either. As a
 // compensation that depends on the metered level (Unreal's exposure
 // compensation curve): full where the meter sits above the bound, fading
 // to none where the bound holds.

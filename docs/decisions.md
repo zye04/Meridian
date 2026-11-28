@@ -5944,7 +5944,12 @@ bound by the grade's exposure (`PostConstants::gradeExposureEv`): a negative gra
 the bound's EV100 by as much, so a view held at the bound is shown as bright as at grade EV
 0, while views the meter puts above the bound (open meadow, aerial) keep the full grade
 exposure. Between the two the compensation fades with the metered level (a max, smoothed by
-the adaptation). At grade EV 0 nothing changes. Rejected: moving the grade EV into the
+the adaptation). At grade EV 0 nothing changes. A positive grade EV raises the bound, so it
+cannot lift shade past the 3 EV rule on screen, and views just above the bound lose part of
+its brightening. Captures and fixed grade files see the result at once; in the G panel, a
+grade EV change on a view held at the bound shows at once in the LUT and then eases back
+over ~1-2 s as the exposure adapts to the moved bound (open views respond at once and
+stay). Rejected: moving the grade EV into the
 meter's compensation (the panel's slider would ease in over a second, and the bound would
 still darken), a looser shade bound (the user chose 3 EV; readable shade beyond it is local
 exposure's job), and faster adaptation.
