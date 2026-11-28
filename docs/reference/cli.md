@@ -476,8 +476,12 @@ between a crown's leaves, added to leaf triangles and leaf voxels alike as a
 diffuse fill that falls off with the crown's optical depth toward the sun
 (lighting.glsl `addCrownFill`: strongest next to the sunlit surface, the
 leaf's albedo recolliding with the chance it doesn't escape, times the sun
-that reaches the leaf itself, bounded by its reflected share of the sun;
-`kCrownFillStrength` from the path tracer, decisions.md "Crown fill").
+that reaches the leaf itself; the fill alone is capped at the leaf's
+reflected share of the sun, so a sunlit leaf gets up to ~2x its direct
+reflection in green; `kCrownFillStrength` 2.0 was fitted to the path
+tracer's whole missing ambient and so also stands in for missing sky light,
+which vanishes with the sun in cloud or hill shadow; decisions.md "Crown
+fill").
 `--leaf-light off|on|gi-weighted` (default on; `off` for A/B): leaf triangles and leaf
 voxels alike (lighting.glsl `setLeafLight`) keep the sun highlight and the
 ambient specular on the face seen as adaxial only, share 0.5 + 0.5 N.y of

@@ -523,8 +523,13 @@ void addTransmittedSun(inout Shading sh, vec3 transmitted, float backNoL, float 
 // inside the crown with the chance it doesn't escape (spectral invariant,
 // as the probes' leaf hits in gi_probes.comp). `beam` is the sun that
 // reaches the leaf itself (its own visibility, no second lookup), so a
-// crown in another's or a hill's shadow gets none. Bounded by the leaf's
-// reflected share of the sun (what direct sun gives its sunward face).
+// crown in another's or a hill's shadow gets none. The fill alone is capped
+// at the leaf's reflected share of the sun (what direct sun gives its
+// sunward face); a sunlit leaf gets direct sun plus fill, up to ~2x its
+// direct reflection in green near the surface. kCrownFillStrength was fitted
+// to the tracer's whole missing ambient (sky + indirect), ~1.7x what the
+// neighbours' single-scattered sun can deliver: the fill also stands in for
+// missing sky light, shaped and gated as sun (decisions.md "Crown fill").
 const float kCrownFillMaxRecollision = 0.95;
 // Calibrated against the path tracer at o4 (decisions.md "Crown fill"): the
 // crown tops' ambient 0.35 -> 0.92 of the tracer's, shade 0.62 -> 0.75, gaps

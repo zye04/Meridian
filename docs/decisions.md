@@ -6337,12 +6337,28 @@ The held branch's review findings: F1 (off costs) - no second sun lookup
 any more, and the voxel quads export nothing new (o4: voxel trees 9.11 ms off
 against 10.06 on main's binary, run noise; on +0.6 ms); F2 (voxel gate per
 fragment) - depth and escape once per voxel in the mesh shader; F3 (cap) -
-capped at the reflected share, the bound the comment states; F4 (gate
+half answered: the fill alone is capped at the reflected share, but a lit
+leaf gets direct sun plus fill (below); F4 (gate
 self-shadowing in coarse cascades) - gone with the gate; F5 (view-side escape
 on voxels) - escape by the lobe axis before the camera flip; F6 (trace below
 the horizon) - nothing traced; F7 (output budget) - no new output slot; F8
 (hard rt edge) - the fill follows the leaf's own visibility, as the direct sun
 does.
+
+What the strength means (crown-fill-2 review): the fill per channel is
+min(2 e^-d w^2 / (1 - p w), R) / pi x E x beam, w = R + T. In green (w ~
+0.6, R ~ 0.29) the uncapped term is 0.95 e^-d at p = 0.4 and 1.67 e^-d at p
+= 0.95, so it sits at the cap wherever d < ~1.2-1.8, the crown's sunward
+half: there a sun-visible leaf gets R/pi x E on top of its direct R/pi x E x
+NoL, up to 2x its direct reflection. Red and blue (w ~ 0.1) stay far under
+the cap, so the fill is green-weighted. The neighbours' single-scattered sun
+near the surface is bounded by about w x E; the fill at the cap gives E in
+green, ~1.7x that bound. It is not bounded by scattered sun alone: it was
+fitted to the tracer's whole missing ambient (sky + indirect, the tops'
+0.35 -> 0.92), so it also stands in for missing sky light, shaped and gated
+as sun. In cloud or hill shadow it goes with the sun, and the crown falls
+back to the 0.35x ambient there, where real sky light would stay. Fitted at
+one view, sun and weather (o4, light1, all picks).
 
 Checks (same build, 2560x1440 Release, 120 frames): at the lone hornbeam's
 real triangle/voxel switch (40 / 50 / 60 m) the fill lifts the crown's mean
